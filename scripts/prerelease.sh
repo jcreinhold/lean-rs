@@ -257,17 +257,38 @@ TOOLCHAIN_FILES=(
 )
 
 declare -a BACKED_UP=()
+FIXTURE_ROOTS=(
+	"$REPO_ROOT/fixtures/lean"
+	"$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims"
+	"$REPO_ROOT/fixtures/interop-shims"
+)
+declare -a FIXTURE_MODES=()
 
 # Invoked via `trap restore_toolchains EXIT`; the trap dispatch hides
 # the call from shellcheck.
 # shellcheck disable=SC2329
 restore_toolchains() {
-	local path
-	for path in "${BACKED_UP[@]}"; do
-		if [[ -f "${path}.bak" ]]; then
-			mv "${path}.bak" "$path"
+	local status=$? cleanup_failed=0 i path
+	# Each restore is conditional so errexit cannot abandon the remaining paths.
+	for ((i = 0; i < ${#FIXTURE_MODES[@]}; i++)); do
+		if ! chmod "${FIXTURE_MODES[$i]}" "${FIXTURE_ROOTS[$i]}"; then
+			log_err "Could not restore fixture mode: ${FIXTURE_ROOTS[$i]}"
+			cleanup_failed=1
 		fi
 	done
+	for ((i = 0; i < ${#BACKED_UP[@]}; i++)); do
+		path="${BACKED_UP[$i]}"
+		if [[ -f "${path}.bak" ]]; then
+			if ! mv "${path}.bak" "$path"; then
+				log_err "Could not restore Lean pin: $path"
+				cleanup_failed=1
+			fi
+		fi
+	done
+	if [[ "$status" == 0 && "$cleanup_failed" != 0 ]]; then
+		status=1
+	fi
+	exit "$status"
 }
 trap restore_toolchains EXIT
 
@@ -398,6 +419,16 @@ check_head_consistency() {
 
 run_gate "Toolchain head consistency" check_head_consistency
 
+# Only this explicit job-owned test mode bypasses fixture readers. Run no
+# competing build/clean process against these roots until this script exits.
+if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
+	for dir in "${FIXTURE_ROOTS[@]}"; do
+		mode=$(python3 -c 'import os,sys; print(format(os.stat(sys.argv[1]).st_mode & 0o7777, "o"))' "$dir")
+		FIXTURE_MODES+=("$mode")
+		chmod 700 "$dir"
+	done
+fi
+
 log_step "Building Lake packages"
 for dir in \
 	"$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims" \
@@ -408,6 +439,20 @@ for dir in \
 	log_step "lake build ($(basename "$dir"))"
 	(cd "$dir" && lake build)
 done
+
+if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
+	# Capture only checked KEY=VALUE data in memory; never eval shell output.
+	fixture_selection=$(python3 "$REPO_ROOT/scripts/select_test_fixtures.py")
+	while IFS='=' read -r key value; do
+		case "$key" in
+		LEAN_RS_TEST_SCALAR_PRIVATE_JOB | LEAN_RS_TEST_SCALAR_FIXTURE | LEAN_RS_PROFILE_FIXTURE_SHA256 | LEAN_RS_TEST_CALLBACK_PRIVATE_JOB | LEAN_RS_TEST_CALLBACK_INTEROP | LEAN_RS_INTEROP_IMAGE_SHA256 | LEAN_RS_TEST_CALLBACK_CONSUMER | LEAN_RS_CALLBACK_CONSUMER_SHA256)
+			export "$key=$value"
+			;;
+		*) log_err "unexpected fixture selection key: $key"; exit 1 ;;
+		esac
+	done <<< "$fixture_selection"
+	unset fixture_selection
+fi
 
 # The shipped-crate template (templates/shipped-lean-crate) is built lazily by
 # the worker loader-regression tests (cargo build -> build.rs -> lake), so the

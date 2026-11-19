@@ -108,6 +108,7 @@ jobs:
 
       - name: Build Lake packages
         run: |
+          chmod 700 fixtures/lean fixtures/interop-shims crates/lean-rs/shims/lean-rs-interop-shims
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
           (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake build)
           (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
@@ -121,6 +122,10 @@ jobs:
             lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
             echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
           fi
+
+      - name: Select job-owned scalar and callback fixtures
+        if: matrix.lean_version == '4.36.0'
+        run: python3 scripts/select_test_fixtures.py >> "$GITHUB_ENV"
 
       - name: Install Rust nightly for ABI fuzz smoke
         if: matrix.os == 'ubuntu-latest'

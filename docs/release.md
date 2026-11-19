@@ -31,6 +31,16 @@ verification job tests only the head.
 The repository must have a scoped crates.io publish token in the `CARGO_REGISTRY_TOKEN` Actions secret. Local publishing
 uses the same credential through `cargo login`. Keep credential setup outside release commits.
 
+## Local fixture setup
+
+Run `scripts/prerelease.sh` from the checkout to build the existing Lake packages and run the local gates.
+For Lean 4.36, it uses the same `scripts/select_test_fixtures.py` checks as normal CI and release verification.
+The selector binds the scalar and callback images to their canonical paths, file identities and hashes.
+Selections stay in memory locally; the script restores temporary fixture directory modes on exit.
+Keep this checkout and its installed toolchain unchanged until the script finishes: do not run a competing
+build or clean. This is trusted job ownership, not protection against arbitrary same-user writes.
+The opt-in covers only ordinary scalar/callback tests; shared-reader and custody tests keep their real guards.
+
 ## Interop checks
 
 For changes to callback, progress, or worker streaming contracts, run these targeted checks in addition to the workspace
