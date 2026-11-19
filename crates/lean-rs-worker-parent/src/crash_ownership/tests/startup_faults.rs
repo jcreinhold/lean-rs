@@ -23,6 +23,18 @@ impl Drop for ResetHook {
     }
 }
 
+pub(super) fn on_first_ack_write(action: impl FnOnce(usize) + 'static) -> impl Drop {
+    let mut action = Some(action);
+    WRITE_HOOK.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |count| {
+            if let Some(action) = action.take() {
+                action(count);
+            }
+        }));
+    });
+    ResetHook
+}
+
 #[test]
 #[ignore = "fresh opt-in transport qualification; exact command review required"]
 fn partial_ack_fails_after_positive_wire_write() {

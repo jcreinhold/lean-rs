@@ -7,12 +7,13 @@ use std::process::Stdio;
 const BROKER: &str = "LEAN_STARTUP_TRACE_BROKER_ROOT";
 const ROOT: &str = "LEAN_STARTUP_TRACE_ROOT";
 const EXIT: i32 = 91;
-const CUTS: [(&str, &str); 6] = [
+const CUTS: [(&str, &str); 7] = [
     ("reserved", "preparing"),
     ("dispatch", "dispatching"),
     ("spawned", "dispatching"),
     ("bootstrap", "bootstrap"),
     ("running", "running"),
+    ("partial-ack", "running"),
     ("acknowledged", "running"),
 ];
 const LEAN: &str = r#"
@@ -129,6 +130,18 @@ fn broker() {
     }
     worker.attach_lifetime(lease).unwrap();
     if prefix == 5 {
+        let path = root.clone();
+        let record = record.clone();
+        let socket = socket.clone();
+        let scope = scope.clone();
+        let _hook = startup_faults::on_first_ack_write(move |written| {
+            assert_eq!(written, 1);
+            fs::write(path.join("partial-wire"), written.to_string()).unwrap();
+            report_cut(&path, record, socket, scope);
+        });
+        worker.acknowledge_lifetime().unwrap();
+    }
+    if prefix == 6 {
         worker.acknowledge_lifetime().unwrap();
         wait_for(|| {
             fs::read(root.join("lean-started"))
@@ -230,6 +243,9 @@ fn run_prefix(root: &Path, prefix: usize, expected_phase: &str) {
     }
     let started = root.join("lean-started");
     if prefix == 5 {
+        assert_eq!(fs::read(root.join("partial-wire")).unwrap(), b"1");
+    }
+    if prefix == 6 {
         assert_eq!(fs::read(&started).unwrap(), b"checked\n");
         assert!(matches!(exclusive.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
     } else {
@@ -288,7 +304,7 @@ fn run_prefix(root: &Path, prefix: usize, expected_phase: &str) {
         fs::write(root.join("writer-admitted"), b"independent same-inode EX").unwrap();
     }
     std::thread::sleep(Duration::from_millis(40));
-    assert_eq!(started.exists(), prefix == 5);
+    assert_eq!(started.exists(), prefix == 6);
     for marker in ["lean-late-write", "lean-expired", "worker-rescue", "guardian-rescue"] {
         assert!(!root.join(marker).exists(), "unexpected marker {marker}");
     }
