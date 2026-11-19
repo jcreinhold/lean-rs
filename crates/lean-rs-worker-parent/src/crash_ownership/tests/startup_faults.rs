@@ -30,7 +30,7 @@ fn partial_ack_fails_after_positive_wire_write() {
     let (stream, mut peer) = UnixStream::pair().unwrap();
     peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let observed = Arc::new(Mutex::new(Vec::new()));
-    let output = observed.clone();
+    let output = Arc::clone(&observed);
     let writer = stream.try_clone().unwrap();
     let evidence_root = root.clone();
     let mut first = true;
@@ -110,6 +110,7 @@ fn partial_ack_fails_after_positive_wire_write() {
 const FAULT_ROOT: &str = "LEAN_STARTUP_FAULT_ROOT";
 // Rescue only: a fired watchdog invalidates qualification. Each process exits
 // itself; it never signals a stored PID or an unrelated process.
+#[expect(clippy::exit, reason = "bounded test rescue exits only its own fixture process")]
 pub(super) fn fixture_watchdog(role: &'static str) {
     let Some(root) = std::env::var_os(FAULT_ROOT).map(PathBuf::from) else {
         return;
@@ -144,7 +145,7 @@ pub(super) fn collide_bootstrap_publication() {
     }
     let record = PathBuf::from(std::env::var_os("LEAN_STARTUP_FAULT_RECORD").unwrap());
     let value: serde_json::Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
-    assert_eq!(value["phase"], "dispatching");
+    assert_eq!(value.get("phase"), Some(&serde_json::json!("dispatching")));
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -156,15 +157,13 @@ pub(super) fn pause_drained_guardian(result: io::Result<()>) -> io::Result<()> {
         return result;
     }
     let root = PathBuf::from(std::env::var_os(FAULT_ROOT).unwrap());
-    fs::write(
-        root.join("guardian-result.json"),
-        serde_json::to_vec(&serde_json::json!({
-            "ok": result.is_ok(), "error": result.as_ref().err().map(ToString::to_string),
-            "kind": result.as_ref().err().map(|error| format!("{:?}", error.kind()))
-        }))
-        .unwrap(),
-    )?;
-    fs::write(root.join("guardian-drained"), b"real guardian drain returned").unwrap();
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "ok": result.is_ok(), "error": result.as_ref().err().map(ToString::to_string),
+        "kind": result.as_ref().err().map(|error| format!("{:?}", error.kind()))
+    }))
+    .map_err(io::Error::other)?;
+    fs::write(root.join("guardian-result.json"), bytes)?;
+    fs::write(root.join("guardian-drained"), b"real guardian drain returned")?;
     // This module's self-watchdog is the bounded rescue.
     while !root.join("guardian-release").exists() {
         std::thread::sleep(Duration::from_millis(5));
@@ -190,28 +189,35 @@ struct FinalCensus {
 impl Drop for FinalCensus {
     fn drop(&mut self) {
         let _release = fs::write(self.root.join("guardian-release"), b"finalize owned fixture");
-        let until = Instant::now() + Duration::from_secs(14);
+        let Some(until) = Instant::now().checked_add(Duration::from_secs(14)) else {
+            return;
+        };
         let mut sample = serde_json::json!({"closed": false, "reason": "no authenticated record"});
         while Instant::now() < until {
-            if let Ok(bytes) = fs::read(&self.record) {
-                if let Ok(owner) = serde_json::from_slice::<LeanWorkerOwnedGeneration>(&bytes) {
-                    if let Some(guardian) = owner.guardian {
-                        let group = lean_toolchain::process_group::group_present(owner.process.process_group);
-                        let live = guardian.is_live();
-                        let closed = matches!(group, Ok(false)) && matches!(live, Ok(false));
-                        sample = serde_json::json!({"closed":closed, "worker":owner.process,
-                            "guardian":guardian, "group_present":format!("{group:?}"),
-                            "guardian_live":format!("{live:?}"), "unwinding":std::thread::panicking()});
-                        if closed {
-                            break;
-                        }
-                    }
+            if let Ok(bytes) = fs::read(&self.record)
+                && let Ok(owner) = serde_json::from_slice::<LeanWorkerOwnedGeneration>(&bytes)
+                && let Some(guardian) = owner.guardian
+            {
+                let group = lean_toolchain::process_group::group_present(owner.process.process_group);
+                let live = guardian.is_live();
+                let closed = matches!(group, Ok(false)) && matches!(live, Ok(false));
+                sample = serde_json::json!({"closed":closed, "worker":owner.process,
+                    "guardian":guardian, "group_present":format!("{group:?}"),
+                    "guardian_live":format!("{live:?}"), "unwinding":std::thread::panicking()});
+                if closed {
+                    break;
                 }
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        sample["rescue"] =
-            serde_json::json!(self.root.join("worker-rescue").exists() || self.root.join("guardian-rescue").exists());
+        if let Some(sample) = sample.as_object_mut() {
+            sample.insert(
+                "rescue".into(),
+                serde_json::json!(
+                    self.root.join("worker-rescue").exists() || self.root.join("guardian-rescue").exists()
+                ),
+            );
+        }
         if let Ok(bytes) = serde_json::to_vec_pretty(&sample) {
             let _saved = fs::write(self.root.join("final-census.json"), bytes);
         }
@@ -238,8 +244,9 @@ fn actual_after_spawn_retains_custody_until_guardian_exit() {
         .env_remove("LEAN_STARTUP_QUALIFICATION_ROOT")
         .env_remove("LEAN_NATIVE_GUARDIAN_FAILURE_ROOT");
     let error = scope.spawn(&mut command, Duration::from_secs(3)).unwrap_err();
+    assert!(matches!(error, LeanWorkerNativeSpawnError::AfterSpawn { .. }));
     let LeanWorkerNativeSpawnError::AfterSpawn { source, mut pending } = error else {
-        panic!("expected real post-spawn publication failure: {error}");
+        return;
     };
     assert_eq!(source.kind(), io::ErrorKind::AlreadyExists);
     wait_for(|| {
@@ -249,17 +256,22 @@ fn actual_after_spawn_retains_custody_until_guardian_exit() {
     });
     let guardian_result: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join("guardian-result.json")).unwrap()).unwrap();
-    assert_eq!(guardian_result["error"], "guardian channel closed before ACK");
-    assert_eq!(guardian_result["kind"], "InvalidData");
+    assert_eq!(
+        guardian_result.get("error"),
+        Some(&serde_json::json!("guardian channel closed before ACK"))
+    );
+    assert_eq!(guardian_result.get("kind"), Some(&serde_json::json!("InvalidData")));
     let closed: LeanWorkerOwnedGeneration = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
     assert_eq!(closed.phase, "bootstrap_closed");
     assert_eq!(closed.generation_id, nonce);
     let guardian = closed.guardian.as_ref().unwrap();
     {
         let authenticated = pending.custody.0.lock().unwrap();
-        let authenticated = authenticated.as_ref().unwrap();
-        assert_eq!(closed.process, authenticated.owner);
-        assert_eq!(closed.guardian, authenticated.guardian);
+        let owner = authenticated.as_ref().unwrap().owner.clone();
+        let authenticated_guardian = authenticated.as_ref().unwrap().guardian.clone();
+        drop(authenticated);
+        assert_eq!(closed.process, owner);
+        assert_eq!(closed.guardian, authenticated_guardian);
     }
     assert!(guardian.is_live().unwrap());
     assert!(!lean_toolchain::process_group::group_present(closed.process.process_group).unwrap());

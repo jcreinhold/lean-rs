@@ -8,6 +8,13 @@ use super::{
 use crate::process::{LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild};
 use std::{fs, io, path::PathBuf, process::Command, time::Duration};
 
+fn assert_send_sync<T: Send + Sync>() {}
+
+#[test]
+fn native_pending_cleanup_remains_send_sync() {
+    assert_send_sync::<LeanWorkerNativePendingCleanup>();
+}
+
 #[test]
 fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
     let (scope, mut worker) = StoppingScope::start_and_kill();
@@ -55,16 +62,30 @@ fn native_pending_cleanup_retains_exact_closure() {
         source: io::Error::new(io::ErrorKind::TimedOut, "injected startup error"),
         pending: LeanWorkerNativePendingCleanup::new(worker, scope.custody.clone()),
     };
-    let LeanWorkerNativeSpawnError::AfterSpawn { source, mut pending } = error else {
-        unreachable!()
+    assert!(matches!(
+        error,
+        LeanWorkerNativeSpawnError::AfterSpawn { ref source, .. }
+            if source.kind() == io::ErrorKind::TimedOut
+    ));
+    let LeanWorkerNativeSpawnError::AfterSpawn { mut pending, .. } = error else {
+        return;
     };
-    assert_eq!(source.kind(), io::ErrorKind::TimedOut);
     assert!(pending.cleanup_pending());
     wait_for(|| pending.try_wait().unwrap().is_some());
     assert!(pending.custody_closed().unwrap());
     assert!(!pending.cleanup_pending());
     assert_eq!(scope.tracker.active_processes(), 0);
     drop(pending);
+    scope.assert_closed(ExitReceipt::Observed);
+}
+
+#[test]
+fn dropping_native_pending_cleanup_delegates_exact_closure() {
+    let (scope, worker) = StoppingScope::start_and_kill();
+    let pending = LeanWorkerNativePendingCleanup::new(worker, scope.custody.clone());
+    assert!(pending.cleanup_pending());
+    drop(pending);
+    wait_for(|| scope.tracker.active_processes() == 0);
     scope.assert_closed(ExitReceipt::Observed);
 }
 
@@ -78,10 +99,11 @@ fn native_spawn_error_before_target_preserves_source() {
             Duration::from_secs(1),
         )
         .unwrap_err();
-    match error {
-        LeanWorkerNativeSpawnError::BeforeSpawn(source) => assert_eq!(source.kind(), io::ErrorKind::NotFound),
-        other => panic!("unexpected outcome: {other}"),
-    }
+    assert!(matches!(error, LeanWorkerNativeSpawnError::BeforeSpawn(_)));
+    let LeanWorkerNativeSpawnError::BeforeSpawn(source) = error else {
+        return;
+    };
+    assert_eq!(source.kind(), io::ErrorKind::NotFound);
     fs::remove_dir_all(root).unwrap();
 }
 

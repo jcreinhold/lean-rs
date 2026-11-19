@@ -164,7 +164,7 @@ impl std::error::Error for LeanWorkerNativeSpawnError {
 /// authenticated identity remains fenced; direct exit alone is not closure.
 #[derive(Debug)]
 pub struct LeanWorkerNativePendingCleanup {
-    child: crate::process::OwnedChild,
+    child: Box<crate::process::OwnedChild>,
     custody: BootstrapCustody,
 }
 impl LeanWorkerNativePendingCleanup {
@@ -178,7 +178,10 @@ impl LeanWorkerNativePendingCleanup {
     }
     fn new(mut child: crate::process::OwnedChild, custody: BootstrapCustody) -> Self {
         let _stop = child.kill(); // Preserve the original startup error.
-        Self { child, custody }
+        Self {
+            child: Box::new(child),
+            custody,
+        }
     }
     /// Observe exact group and guardian closure independently of wait status.
     /// # Errors
@@ -830,9 +833,10 @@ mod tests {
         let mut guardian = worker.clone();
         guardian.pid = 1235;
         guardian.process_group = 1235;
-        value["phase"] = serde_json::json!("bootstrap");
-        value["process"] = serde_json::to_value(worker).unwrap();
-        value["guardian"] = serde_json::to_value(guardian).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.insert("phase".into(), serde_json::json!("bootstrap"));
+        object.insert("process".into(), serde_json::to_value(worker).unwrap());
+        object.insert("guardian".into(), serde_json::to_value(guardian).unwrap());
         std::fs::write(lifetime.directory.join("owner.write"), b"collision").unwrap();
         let error =
             native_guardian::publish_startup_owner(&record, &value, "dispatching", Duration::from_secs(1)).unwrap_err();
@@ -868,7 +872,7 @@ mod tests {
         let custody = lifetime.custody.clone();
         drop(lifetime);
         let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
-        assert_eq!(value["phase"], "dispatching");
+        assert_eq!(value.get("phase"), Some(&serde_json::json!("dispatching")));
         assert!(!custody.closed().unwrap());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -884,7 +888,7 @@ mod tests {
         lifetime.no_spawn().unwrap();
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(lifetime.directory.join("owner.json")).unwrap()).unwrap();
-        assert_eq!(value["phase"], "preparing_closed");
+        assert_eq!(value.get("phase"), Some(&serde_json::json!("preparing_closed")));
         drop(lifetime);
         std::fs::remove_dir_all(root).unwrap();
     }
