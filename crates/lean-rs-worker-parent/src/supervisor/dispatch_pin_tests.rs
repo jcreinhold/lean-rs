@@ -794,3 +794,91 @@ fn cleanup_failure_remains_visible_and_keeps_binding_sealed() {
     refused(&retry);
     assert!(stopped.is_ok(), "{stopped:?}");
 }
+
+// Reader identity is local metadata assigned by the parent, outside the wire frame.
+#[derive(Clone, Copy)]
+enum EarlierTag {
+    Generation(WorkerGeneration),
+    Request(WorkerRequestId),
+}
+
+thread_local! {
+    static NEXT_TERMINAL_TAG: Cell<Option<EarlierTag>> = const { Cell::new(None) };
+}
+
+pub(super) fn tag_fixture_terminal(mut event: RequestReaderEvent) -> RequestReaderEvent {
+    if let RequestReaderEvent::Terminal {
+        generation, request_id, ..
+    } = &mut event
+    {
+        match NEXT_TERMINAL_TAG.take() {
+            Some(EarlierTag::Generation(old)) => *generation = old,
+            Some(EarlierTag::Request(old)) => *request_id = Some(old),
+            None => {}
+        }
+    }
+    event
+}
+
+#[test]
+fn stale_terminal_cannot_complete_or_redispatch_the_current_command() {
+    for previous_generation in [false, true] {
+        let fixture = Fixture::new();
+        let mut worker = fixture.worker();
+        worker.health().expect("establish prior completed request");
+        let prior = worker.last_request.clone().expect("prior request identity");
+        let (tag, expected_error) = if previous_generation {
+            worker.restart().expect("establish successor generation");
+            assert_ne!(prior.generation, worker.generation);
+            (
+                EarlierTag::Generation(prior.generation),
+                format!(
+                    "from generation {}, current generation is {}",
+                    prior.generation.0, worker.generation.0
+                ),
+            )
+        } else {
+            (
+                EarlierTag::Request(prior.id),
+                format!(
+                    "from request {}, current request is {}",
+                    prior.id.0, worker.next_request_id.0
+                ),
+            )
+        };
+        let current_pid = pid(&worker);
+        NEXT_TERMINAL_TAG.set(Some(tag));
+        let result = command(&mut worker);
+        let unused_tag = NEXT_TERMINAL_TAG.take();
+        let pending = worker.cleanup_pending();
+        let next = command(&mut worker);
+        let stopped = reap(worker);
+        let events = fixture.events();
+        eprintln!("{expected_error}; current pid {current_pid}; ledger {events:?}; cleanup {stopped:?}");
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.pid == current_pid && event.op == "terminate"),
+            "{events:?}"
+        );
+        assert!(unused_tag.is_none(), "reader must deliver a terminal frame");
+        assert!(
+            matches!(result, Err(LeanWorkerError::Protocol { ref message })
+            if message == &format!("worker sent stale worker_json_command frame {expected_error}")),
+            "{result:?}"
+        );
+        assert!(pending, "stale reader must fence the live owner");
+        refused(&next);
+        assert!(
+            matches!(stopped, Ok(ref report) if report.outcome == LeanWorkerShutdownOutcome::KillOnly),
+            "{stopped:?}; {events:?}"
+        );
+        let calls: Vec<_> = events.iter().filter(|event| event.op == "json_command").collect();
+        assert_eq!(calls.len(), 1, "all generations: {events:?}");
+        assert_eq!(calls[0].pid, current_pid);
+        assert_eq!(
+            events.iter().filter(|event| event.op == "spawn").count(),
+            if previous_generation { 2 } else { 1 }
+        );
+    }
+}

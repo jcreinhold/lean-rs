@@ -4582,22 +4582,34 @@ impl LeanWorker {
                     }
                 },
             };
-            if event.generation() != self.generation {
-                let actual_generation = event.generation();
-                self.finish_in_flight();
-                drop(reader);
-                return Err(stale_worker_output_error(operation, self.generation, actual_generation));
-            }
-            if let Some(actual_request_id) = event.request_id()
-                && self.state.current_request_id() != Some(actual_request_id)
+            #[cfg(all(test, unix))]
+            let event = dispatch_pin_tests::tag_fixture_terminal(event);
+            let stale = if event.generation() != self.generation {
+                Some(stale_worker_output_error(
+                    operation,
+                    self.generation,
+                    event.generation(),
+                ))
+            } else if let Some(actual) = event.request_id()
+                && self.state.current_request_id() != Some(actual)
             {
-                self.finish_in_flight();
-                drop(reader);
-                return Err(stale_worker_request_output_error(
+                Some(stale_worker_request_output_error(
                     operation,
                     self.state.current_request_id(),
-                    actual_request_id,
-                ));
+                    actual,
+                ))
+            } else {
+                None
+            };
+            if let Some(error) = stale {
+                // This reader cannot provide a trusted terminal response, even for shutdown.
+                // Fence dispatch now; the owner reports the independent stop result at shutdown.
+                self.state = WorkerSupervisorState::Killing {
+                    generation: self.generation,
+                };
+                drop(receiver);
+                drop(reader);
+                return Err(error);
             }
             request_backpressure_waits = request_backpressure_waits.saturating_add(event.backpressure_waits());
             self.stats.backpressure_waits = self.stats.backpressure_waits.saturating_add(event.backpressure_waits());
@@ -4943,6 +4955,9 @@ impl LeanWorker {
             LeanWorkerStatus::Running => {}
         }
 
+        if matches!(self.state, WorkerSupervisorState::Killing { .. }) && self.stdout.is_none() {
+            return self.kill_and_report(started, graceful_timeout, LeanWorkerShutdownOutcome::KillOnly);
+        }
         self.state = if intent == ShutdownIntent::Graceful {
             WorkerSupervisorState::Stopping {
                 generation: self.generation,
