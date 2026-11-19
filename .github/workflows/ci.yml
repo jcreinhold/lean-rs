@@ -146,6 +146,8 @@ jobs:
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
           (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake build)
           (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
+          # This fresh CI checkout belongs to this job until its tests exit.
+          chmod 700 fixtures/lean
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -156,6 +158,53 @@ jobs:
             lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
             echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
           fi
+
+      - name: Select job-owned scalar fixture
+        if: matrix.lean_version == '4.36.0'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import stat
+          import sys
+
+          root = (Path(os.environ["GITHUB_WORKSPACE"]) / "fixtures/lean").resolve(strict=True)
+          metadata = root.stat()
+          if metadata.st_uid != os.getuid() or metadata.st_mode & 0o7777 != 0o700:
+              raise SystemExit("scalar fixture must be private to this CI job")
+          suffix = "dylib" if sys.platform == "darwin" else "so"
+          image = root / ".lake/build/lib" / f"liblean__rs__fixture_LeanRsFixture.{suffix}"
+          if image.resolve(strict=True) != image:
+              raise SystemExit("scalar fixture image must not be aliased")
+          selected = image.stat()
+          if not stat.S_ISREG(selected.st_mode) or selected.st_size > 1024**3:
+              raise SystemExit("scalar fixture must be a regular file of at most 1 GiB")
+          with image.open("rb") as source:
+              before = os.fstat(source.fileno())
+              if not stat.S_ISREG(before.st_mode) or (before.st_dev, before.st_ino) != (selected.st_dev, selected.st_ino):
+                  raise SystemExit("scalar fixture identity changed before reading")
+              digest = hashlib.sha256()
+              remaining = before.st_size
+              while chunk := source.read(65536):
+                  remaining -= len(chunk)
+                  if remaining < 0:
+                      raise SystemExit("scalar fixture grew while selecting")
+                  digest.update(chunk)
+              after = os.fstat(source.fileno())
+          identity = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+          if identity(before) != identity(after) or identity(after) != identity(image.stat()):
+              raise SystemExit("scalar fixture changed while selecting")
+          # Compile-time selection and runtime marker both belong to this job.
+          # This is exclusive job ownership, not managed-reader or hostile-writer protection.
+          with open(os.environ["GITHUB_ENV"], "a") as environment:
+              environment.write("LEAN_RS_TEST_SCALAR_PRIVATE_JOB=1\n")
+              environment.write("LEAN_RS_TEST_SCALAR_FIXTURE=" + json.dumps(
+                  [str(root), before.st_dev, before.st_ino]) + "\n")
+              environment.write("LEAN_RS_PROFILE_FIXTURE_SHA256=" + digest.hexdigest() + "\n")
+          PY
 
       - name: cargo fmt --check
         run: cargo fmt --check
