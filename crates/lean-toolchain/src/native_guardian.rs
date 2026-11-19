@@ -510,11 +510,10 @@ impl Guardian {
         }
         let worker = NativeProcessIdentity::capture(self.worker)?.ok_or_else(|| invalid("bootstrap worker absent"))?;
         let guardian = NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("guardian absent"))?;
-        if worker.pid != worker.session
-            || worker.pid != worker.process_group
-            || guardian.session != worker.pid
-            || guardian.process_group != guardian.pid
-        {
+        let worker_owns_session = worker.pid == worker.session && worker.pid == worker.process_group;
+        let guardian_shares_worker_session = guardian.session == worker.pid;
+        let guardian_owns_group = guardian.process_group == guardian.pid;
+        if !worker_owns_session || !guardian_shares_worker_session || !guardian_owns_group {
             return Err(invalid("bootstrap identity scope differs"));
         }
         self.record = Some(record);

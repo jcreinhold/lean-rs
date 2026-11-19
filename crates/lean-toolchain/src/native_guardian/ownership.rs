@@ -327,7 +327,7 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
         match file.try_lock() {
             Ok(()) => return Ok(file),
             Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
-                thread::sleep(Duration::from_millis(5))
+                thread::sleep(Duration::from_millis(5));
             }
             Err(std::fs::TryLockError::WouldBlock) => return Err(expired()),
             Err(std::fs::TryLockError::Error(e)) => return Err(e),
