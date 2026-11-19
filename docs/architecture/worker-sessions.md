@@ -152,9 +152,10 @@ Multithreaded embedders may instead use the helper proxy, without receiving a lo
 files also admit a genuinely cold root without creating `.lake`; an existing `.lake` must remain an unaliased directory
 in that root.
 
-The worker binary has two runtime-free preparation entries. `--lean-rs-ready-host-artifacts` takes shared helper custody
+The worker binary has two runtime-free preparation entries. `--lean-rs-ready-host-artifacts [IPC_ROOT]` takes shared helper custody
 and checks existing host/interop build keys and the exact manifests without materializing, building, loading or
-publishing anything; a miss exits 75. `--lean-rs-prepare-host-artifacts` uses only the configured writer helper and
+publishing anything; an explicit root selects the reviewed private transient IPC directory, while omission preserves
+the existing placement. A miss exits 75. `--lean-rs-prepare-host-artifacts` uses only the configured writer helper and
 emits one bounded storage descriptor before any `LeanRuntime::init`, native lifeline or guardian bootstrap. The parent
 passes that exact descriptor to a guarded native generation. The descriptor is planned storage metadata, never a
 loaded-runtime receipt.

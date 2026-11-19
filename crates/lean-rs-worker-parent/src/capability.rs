@@ -136,7 +136,7 @@ impl LeanWorkerCapabilityBuilder {
     /// Manifest-backed descriptors are the canonical packaged-app path. The
     /// builder reads package, module, and primary dylib facts from the
     /// manifest, then infers the capability Lake project root from the
-    /// standard `.lake/build/lib/<dylib>` layout. Session imports default to
+    /// default or keyed Lake build directory. Session imports default to
     /// that inferred project unless [`Self::import_workspace_root`] sets a
     /// separate target workspace. Direct dylib descriptors remain supported as
     /// a compatibility path when callers also provide package and module names.
@@ -145,8 +145,8 @@ impl LeanWorkerCapabilityBuilder {
     ///
     /// Returns `LeanWorkerError` if manifest data cannot be parsed, the
     /// fallback dylib path cannot be resolved, the compatibility descriptor is
-    /// missing package/module names, or the dylib is not under a standard Lake
-    /// build directory.
+    /// missing package/module names, or the dylib is not under
+    /// `.lake/build/lib` or `.lake/lean-rs-generated/<key>/lib`.
     pub fn from_built_capability(
         spec: &LeanBuiltCapability,
         imports: impl IntoIterator<Item = impl Into<String>>,
@@ -2436,25 +2436,28 @@ fn with_exe_suffix(mut executable_name: String) -> String {
 }
 
 fn infer_lake_project_root_from_dylib(dylib_path: &Path) -> Result<PathBuf, LeanWorkerError> {
-    let lib_dir = dylib_path.parent();
-    let build_dir = lib_dir.and_then(Path::parent);
-    let lake_dir = build_dir.and_then(Path::parent);
-    let project_root = lake_dir.and_then(Path::parent);
-    match (lib_dir, build_dir, lake_dir, project_root) {
-        (Some(lib), Some(build), Some(lake), Some(root))
-            if lib.file_name().is_some_and(|name| name == "lib")
-                && build.file_name().is_some_and(|name| name == "build")
-                && lake.file_name().is_some_and(|name| name == ".lake") =>
-        {
-            Ok(root.to_path_buf())
-        }
-        _ => Err(LeanWorkerError::Setup {
+    let mut parents = dylib_path.ancestors().skip(1);
+    let project_root = (|| {
+        (parents.next()?.file_name()? == "lib").then_some(())?;
+        let build = parents.next()?;
+        let parent = parents.next()?;
+        let lake = if build.file_name()? == "build" && parent.file_name()? == ".lake" {
+            parent
+        } else if parent.file_name()? == "lean-rs-generated" {
+            parents.next()?
+        } else {
+            return None;
+        };
+        (lake.file_name()? == ".lake").then(|| lake.parent()).flatten()
+    })();
+    project_root
+        .map(Path::to_path_buf)
+        .ok_or_else(|| LeanWorkerError::Setup {
             message: format!(
-                "built capability dylib '{}' is not under a standard .lake/build/lib directory",
+                "built capability dylib '{}' is not under .lake/build/lib or .lake/lean-rs-generated/<key>/lib",
                 dylib_path.display()
             ),
-        }),
-    }
+        })
 }
 
 fn normalize_import_workspace_root(path: PathBuf) -> PathBuf {
@@ -2521,12 +2524,12 @@ fn dedup_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
 mod tests {
     use super::{
         LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits,
-        apply_runtime_limits,
+        apply_runtime_limits, infer_lake_project_root_from_dylib,
     };
     use crate::supervisor::LeanWorkerConfig;
     use lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile;
     use lean_toolchain::LeanBuiltCapability;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn workspace_root() -> PathBuf {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2634,6 +2637,27 @@ mod tests {
                 .import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat)
                 .session_key(),
         );
+    }
+
+    #[test]
+    fn built_capability_infers_project_root_from_default_or_keyed_output() {
+        let root = Path::new("parent/project");
+        for path in [
+            ".lake/build/lib/libapp.dylib",
+            ".lake/lean-rs-generated/lean-4.36.0/lib/libapp.dylib",
+        ] {
+            assert_eq!(
+                infer_lake_project_root_from_dylib(&root.join(path)).expect("Lake output"),
+                root,
+            );
+        }
+        for path in [
+            "unrelated/lean-rs-generated/lean-4.36.0/lib/libapp.dylib",
+            ".lake/lean-rs-generated/lib/libapp.dylib",
+            ".lake/lean-rs-generated/outer/inner/lib/libapp.dylib",
+        ] {
+            assert!(infer_lake_project_root_from_dylib(&root.join(path)).is_err());
+        }
     }
 
     #[test]

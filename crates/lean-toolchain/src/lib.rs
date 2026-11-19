@@ -51,7 +51,7 @@ mod writer_lock;
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
     build_lake_target_quiet, build_private_lake_target_quiet, capability_env_var, capability_manifest_env_var,
-    emit_lean_link_directives, emit_lean_link_directives_checked,
+    emit_lean_link_directives, emit_lean_link_directives_checked, generated_output_key_for_sysroot,
 };
 pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;

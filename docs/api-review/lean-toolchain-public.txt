@@ -820,6 +820,7 @@ pub fn lean_toolchain::CargoLeanCapability::build_quiet_with_writer(self, &mut l
 pub fn lean_toolchain::CargoLeanCapability::dependency(self, lean_toolchain::LeanLibraryDependency) -> Self
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::export_signature(self, lean_toolchain::LeanExportSignature) -> Self
+pub fn lean_toolchain::CargoLeanCapability::generated_output_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::lean_num_threads(self, u32) -> Self
 pub fn lean_toolchain::CargoLeanCapability::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::manifest_env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -1313,6 +1314,7 @@ pub fn lean_toolchain::discover_lake_modules(lean_toolchain::LeanModuleDiscovery
 pub fn lean_toolchain::discover_toolchain(&lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::emit_lean_link_directives()
 pub fn lean_toolchain::emit_lean_link_directives_checked() -> core::result::Result<(), lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::generated_output_key_for_sysroot(&std::path::Path) -> core::result::Result<core::option::Option<&'static str>, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::lean_options_json(&alloc::collections::btree::map::BTreeMap<alloc::string::String, lean_toolchain::LeanOptionValue>) -> alloc::string::String
 pub fn lean_toolchain::materialize_source_package(&lean_toolchain::SourcePackageMaterializationRequest) -> core::result::Result<lean_toolchain::MaterializedSourcePackage, lean_toolchain::SourcePackageError>
 pub fn lean_toolchain::olean_candidate(&[std::path::PathBuf], &str, impl core::ops::function::FnMut(&std::path::Path) -> std::io::error::Result<std::fs::Metadata>) -> core::result::Result<core::option::Option<std::path::PathBuf>, lean_toolchain::LeanModuleDiscoveryDiagnostic>

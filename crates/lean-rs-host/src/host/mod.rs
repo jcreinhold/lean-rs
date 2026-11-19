@@ -73,9 +73,13 @@ pub use self::bracketed::{
     LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult, LeanBracketedRejectedOperation,
 };
 pub use self::cancellation::LeanCancellationToken;
-#[cfg(unix)]
-pub use self::capabilities::ready_host_artifacts;
+#[doc(hidden)]
+pub use self::capabilities::prepare_host_artifacts_for_generated_output;
 pub use self::capabilities::{LeanCapabilities, LeanPreparedHostArtifacts, prepare_host_artifacts};
+#[cfg(unix)]
+pub use self::capabilities::{
+    ready_host_artifacts, ready_host_artifacts_for_generated_output_with_ipc_root, ready_host_artifacts_with_ipc_root,
+};
 pub use self::declaration_search::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,

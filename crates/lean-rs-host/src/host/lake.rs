@@ -35,6 +35,42 @@ const BUNDLED_INTEROP_SHIMS_DIR: &str = "lean-rs-interop-shims";
 
 static BUNDLED_SHIM_BUILD_LOCK: Mutex<()> = Mutex::new(());
 
+pub(crate) struct ShimOutputSelection {
+    sysroot: PathBuf,
+    generated_output_key: Option<&'static str>,
+}
+
+impl ShimOutputSelection {
+    pub(crate) fn resolve(requested_key: Option<&str>) -> LeanResult<Self> {
+        let sysroot = if let Some(root) = std::env::var_os("LEAN_SYSROOT") {
+            PathBuf::from(root)
+        } else {
+            Path::new(lean_toolchain::LEAN_HEADER_PATH)
+                .ancestors()
+                .nth(3)
+                .ok_or_else(|| artifact_error(std::io::Error::other("build-selected Lean header has no sysroot")))?
+                .to_owned()
+        };
+        let sysroot = fs::canonicalize(&sysroot).map_err(artifact_error)?;
+        let generated_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)
+            .map_err(|error| artifact_error(std::io::Error::other(error)))?;
+        if requested_key.is_some() && requested_key != generated_output_key {
+            return Err(artifact_error(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "requested generated-output key differs from the exact Lean sysroot",
+            )));
+        }
+        Ok(Self {
+            sysroot,
+            generated_output_key,
+        })
+    }
+
+    pub(crate) fn key(&self) -> Option<&str> {
+        self.generated_output_key
+    }
+}
+
 /// A validated Lake project root.
 ///
 /// Owned by [`crate::host::LeanHost`]; never escapes the `host` module.
@@ -115,18 +151,14 @@ impl LakeProject {
     /// Search path the Lean side passes to `Lean.initSearchPath` so
     /// `Lean.importModules` can locate the `.olean` files Lake built for
     /// this project.
-    pub(crate) fn olean_search_path(&self) -> PathBuf {
-        project_olean_search_path(&self.root)
-    }
-
     /// Search paths the Lean side passes to `Lean.initSearchPath` so
     /// `Lean.importModules` can locate the `.olean` files Lake built for
     /// this project and every package recorded in `lake-manifest.json`.
     ///
     /// Missing or malformed manifest data degrades to the project-local
     /// entry, matching the layout used by dependency-free Lake projects.
-    pub(crate) fn olean_search_paths(&self) -> Vec<PathBuf> {
-        let mut paths = vec![self.olean_search_path()];
+    pub(crate) fn olean_search_paths_for_output(&self, generated_output_key: Option<&str>) -> Vec<PathBuf> {
+        let mut paths = vec![project_olean_search_path_for_output(&self.root, generated_output_key)];
         let manifest_path = self.root.join("lake-manifest.json");
         let Ok(manifest_bytes) = fs::read(manifest_path) else {
             return paths;
@@ -144,7 +176,10 @@ impl LakeProject {
 
         for package in packages {
             if let Some(package_root) = manifest_package_root(&self.root, packages_dir, package) {
-                paths.push(project_olean_search_path(&package_root));
+                paths.push(project_olean_search_path_for_output(
+                    &package_root,
+                    generated_output_key,
+                ));
             }
         }
         paths
@@ -162,7 +197,10 @@ impl LakeProject {
 
     /// Build the bundled host-shim target and emit a manifest carrying
     /// trusted export signatures.
-    pub(crate) fn shim_capability(export_signatures: Vec<LeanExportSignature>) -> LeanResult<BuiltLeanCapability> {
+    pub(crate) fn shim_capability(
+        export_signatures: Vec<LeanExportSignature>,
+        selection: &ShimOutputSelection,
+    ) -> LeanResult<BuiltLeanCapability> {
         // Both independently runnable packages need their own validity keys.
         // The host target can rebuild the path dependency, so its writer graph
         // also includes the interop domain rather than nesting another writer.
@@ -171,17 +209,19 @@ impl LakeProject {
             lean_toolchain::shared_writer::PrivateLakeBootstrap::new(Path::new(env!("CARGO_MANIFEST_DIR")), &root)
                 .map_err(artifact_error)?;
         drop(
-            interop_capability_builder(&root)
+            interop_capability_builder(&root, selection)
                 .private_bootstrap(bootstrap)
                 .build_quiet()
                 .map_err(|error| artifact_error(std::io::Error::other(error)))?,
         );
-        build_bundled_capability(&bundled_host_shims_root(), SHIM_LIB_NAME, export_signatures)
+        build_bundled_capability(&bundled_host_shims_root(), SHIM_LIB_NAME, export_signatures, selection)
     }
 }
 
-fn project_olean_search_path(project_root: &Path) -> PathBuf {
-    project_root.join(".lake").join("build").join("lib").join("lean")
+fn project_olean_search_path_for_output(project_root: &Path, generated_output_key: Option<&str>) -> PathBuf {
+    let lake = project_root.join(".lake");
+    let build = generated_output_key.map_or_else(|| lake.join("build"), |key| lake.join("lean-rs-generated").join(key));
+    build.join("lib").join("lean")
 }
 
 fn manifest_package_root(project_root: &Path, packages_dir: &str, package: &Value) -> Option<PathBuf> {
@@ -233,6 +273,7 @@ fn build_bundled_capability(
     project_root: &Path,
     target_name: &str,
     export_signatures: Vec<LeanExportSignature>,
+    selection: &ShimOutputSelection,
 ) -> LeanResult<BuiltLeanCapability> {
     let _guard = BUNDLED_SHIM_BUILD_LOCK.lock().map_err(|_| {
         lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
@@ -240,7 +281,8 @@ fn build_bundled_capability(
     let bootstrap =
         lean_toolchain::shared_writer::PrivateLakeBootstrap::new(Path::new(env!("CARGO_MANIFEST_DIR")), project_root)
             .map_err(|error| lean_rs::__host_internals::host_module_init(error.to_string()))?;
-    let builder = bundled_capability_builder(project_root, target_name, export_signatures).private_bootstrap(bootstrap);
+    let builder = bundled_capability_builder(project_root, target_name, export_signatures, selection)
+        .private_bootstrap(bootstrap);
     builder.build_quiet().map_err(|diagnostic| {
         lean_rs::__host_internals::host_module_init(format!(
             "could not build bundled lean-rs shim target `{target_name}` under {}: {diagnostic}",
@@ -253,6 +295,7 @@ fn bundled_capability_builder(
     project_root: &Path,
     target_name: &str,
     export_signatures: Vec<LeanExportSignature>,
+    selection: &ShimOutputSelection,
 ) -> lean_toolchain::CargoLeanCapability {
     let mut builder = lean_toolchain::CargoLeanCapability::new(project_root, target_name)
         .package(SHIM_PACKAGE_NAME)
@@ -260,28 +303,27 @@ fn bundled_capability_builder(
     for signature in export_signatures {
         builder = builder.export_signature(signature);
     }
-    shim_sysroot(builder)
-}
-
-fn interop_capability_builder(root: &Path) -> lean_toolchain::CargoLeanCapability {
-    shim_sysroot(
-        lean_toolchain::CargoLeanCapability::new(root, INTEROP_LIB_NAME)
-            .package("lean_rs_interop_shims")
-            .module(INTEROP_LIB_NAME),
-    )
-}
-
-fn shim_sysroot(builder: lean_toolchain::CargoLeanCapability) -> lean_toolchain::CargoLeanCapability {
-    // Per-toolchain prep workers always receive this explicit sysroot. It must
-    // participate in both build and ready keys: changing only a manifest's
-    // fingerprint could otherwise relabel an artifact built by another Lean.
-    match std::env::var_os("LEAN_SYSROOT") {
-        Some(root) => builder.lean_sysroot(PathBuf::from(root)),
-        None => builder,
+    if let Some(key) = selection.key() {
+        builder = builder.generated_output_key(key);
     }
+    builder.lean_sysroot(&selection.sysroot)
 }
 
-pub(crate) fn prepared_artifacts(built: &BuiltLeanCapability) -> LeanResult<super::LeanPreparedHostArtifacts> {
+fn interop_capability_builder(root: &Path, selection: &ShimOutputSelection) -> lean_toolchain::CargoLeanCapability {
+    let mut builder = lean_toolchain::CargoLeanCapability::new(root, INTEROP_LIB_NAME)
+        .package("lean_rs_interop_shims")
+        .module(INTEROP_LIB_NAME)
+        .lean_sysroot(&selection.sysroot);
+    if let Some(key) = selection.key() {
+        builder = builder.generated_output_key(key);
+    }
+    builder
+}
+
+pub(crate) fn prepared_artifacts(
+    built: &BuiltLeanCapability,
+    generated_output_key: Option<&str>,
+) -> LeanResult<super::LeanPreparedHostArtifacts> {
     use std::io::Read as _;
     let manifest_path = built.manifest_path().canonicalize().map_err(artifact_error)?;
     let mut bytes = Vec::new();
@@ -298,7 +340,11 @@ pub(crate) fn prepared_artifacts(built: &BuiltLeanCapability) -> LeanResult<supe
     .map_err(artifact_error)?;
     let paths = [bundled_interop_shims_root(), bundled_host_shims_root()]
         .into_iter()
-        .map(|root| project_olean_search_path(&root).canonicalize().map_err(artifact_error))
+        .map(|root| {
+            project_olean_search_path_for_output(&root, generated_output_key)
+                .canonicalize()
+                .map_err(artifact_error)
+        })
         .collect::<LeanResult<Vec<_>>>()?;
     super::LeanPreparedHostArtifacts::from_snapshot(manifest_path, manifest_json, roots, paths)
 }
@@ -306,6 +352,8 @@ pub(crate) fn prepared_artifacts(built: &BuiltLeanCapability) -> LeanResult<supe
 #[cfg(unix)]
 pub(crate) fn ready_artifacts(
     signatures: Vec<LeanExportSignature>,
+    ipc_root: Option<&Path>,
+    selection: &ShimOutputSelection,
 ) -> LeanResult<Option<super::LeanPreparedHostArtifacts>> {
     use std::time::{Duration, Instant};
     let host_root = bundled_host_shims_root();
@@ -322,26 +370,36 @@ pub(crate) fn ready_artifacts(
     // The complete pre-body admission owns one original budget. Contention
     // releases every partial proxy, confirms those pure helpers stopped, then
     // waits without retaining any SH lock. Hard/uncertain failures do not retry.
-    let mut readers = lean_toolchain::shared_reader::SharedReadProxy::acquire_union(
-        Path::new(&helper),
-        &roots,
-        Duration::from_secs(30).saturating_sub(started.elapsed()),
-        &|| false,
-    )
+    let remaining = Duration::from_secs(30).saturating_sub(started.elapsed());
+    let mut readers = match ipc_root {
+        Some(ipc_root) => lean_toolchain::shared_reader::SharedReadProxy::acquire_union_with_ipc_root(
+            Path::new(&helper),
+            &roots,
+            remaining,
+            &|| false,
+            ipc_root,
+        ),
+        None => lean_toolchain::shared_reader::SharedReadProxy::acquire_union(
+            Path::new(&helper),
+            &roots,
+            remaining,
+            &|| false,
+        ),
+    }
     .map_err(artifact_error)?;
     validate_ready_artifact_domains(&workspaces, &roots)?;
-    if interop_capability_builder(&interop_root)
+    if interop_capability_builder(&interop_root, selection)
         .probe_ready()
         .map_err(|error| artifact_error(std::io::Error::other(error)))?
         .is_none()
     {
         return Ok(None);
     }
-    let builder = bundled_capability_builder(&host_root, SHIM_LIB_NAME, signatures);
+    let builder = bundled_capability_builder(&host_root, SHIM_LIB_NAME, signatures, selection);
     let result = builder
         .probe_ready()
         .map_err(|error| artifact_error(std::io::Error::other(error)))?
-        .map(|built| prepared_artifacts(&built))
+        .map(|built| prepared_artifacts(&built, selection.key()))
         .transpose()?;
     for reader in &mut readers {
         reader.validate().map_err(artifact_error)?;
@@ -455,7 +513,10 @@ mod tests {
     fn olean_search_paths_degrades_without_manifest() {
         let project = TempProject::new("no-manifest");
 
-        assert_eq!(project.project().olean_search_paths(), vec![project.own_olean_path()]);
+        assert_eq!(
+            project.project().olean_search_paths_for_output(None),
+            vec![project.own_olean_path()]
+        );
     }
 
     #[test]
@@ -463,7 +524,10 @@ mod tests {
         let project = TempProject::new("empty-manifest");
         project.write_manifest(r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[]}"#);
 
-        assert_eq!(project.project().olean_search_paths(), vec![project.own_olean_path()]);
+        assert_eq!(
+            project.project().olean_search_paths_for_output(None),
+            vec![project.own_olean_path()]
+        );
     }
 
     #[test]
@@ -483,7 +547,7 @@ mod tests {
         );
 
         assert_eq!(
-            project.project().olean_search_paths(),
+            project.project().olean_search_paths_for_output(None),
             vec![
                 project.own_olean_path(),
                 project
@@ -506,6 +570,29 @@ mod tests {
     }
 
     #[test]
+    fn generated_output_selection_applies_to_project_and_manifest_dependencies() {
+        let project = TempProject::new("generated-packages");
+        let dependency = TempProject::new("generated-dependency");
+        project.write_manifest(
+            &serde_json::json!({"version":"1.3.0","packages":[{
+                "name":"dependency","type":"path","dir":dependency.canonical_root()
+            }]})
+            .to_string(),
+        );
+        let suffix = |root: PathBuf| {
+            root.join(".lake")
+                .join("lean-rs-generated")
+                .join("lean-4.36.0")
+                .join("lib")
+                .join("lean")
+        };
+        assert_eq!(
+            project.project().olean_search_paths_for_output(Some("lean-4.36.0")),
+            vec![suffix(project.canonical_root()), suffix(dependency.canonical_root())]
+        );
+    }
+
+    #[test]
     fn olean_search_paths_nests_git_subdir_packages() {
         let project = TempProject::new("git-subdir");
         project.write_manifest(
@@ -521,7 +608,7 @@ mod tests {
 
         let olean_suffix = |base: PathBuf| base.join(".lake").join("build").join("lib").join("lean");
         assert_eq!(
-            project.project().olean_search_paths(),
+            project.project().olean_search_paths_for_output(None),
             vec![
                 project.own_olean_path(),
                 olean_suffix(
@@ -549,6 +636,9 @@ mod tests {
         let project = TempProject::new("malformed-manifest");
         project.write_manifest("{not json");
 
-        assert_eq!(project.project().olean_search_paths(), vec![project.own_olean_path()]);
+        assert_eq!(
+            project.project().olean_search_paths_for_output(None),
+            vec![project.own_olean_path()]
+        );
     }
 }

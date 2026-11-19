@@ -42,6 +42,45 @@ use crate::fingerprint::ToolchainFingerprint;
 use crate::lakefile_toml::parse_lakefile_toml;
 use crate::loader::{LeanExportSignature, LeanLibraryDependency};
 
+/// Generated-output slot selected by one exact supported Lean sysroot.
+///
+/// Official Lean 4.36.0 uses a versioned output slot. Earlier supported
+/// releases keep their legacy paths. Selection checks both the parsed exact
+/// version and the installed header digest; it does not run Lean or Lake.
+///
+/// # Errors
+/// Returns discovery, header-read or unsupported-toolchain diagnostics.
+pub fn generated_output_key_for_sysroot(sysroot: &Path) -> Result<Option<&'static str>, LinkDiagnostics> {
+    let info = discover_toolchain(&DiscoverOptions {
+        explicit_sysroot: Some(sysroot.to_owned()),
+        allow_lean_sysroot_env: false,
+        allow_path_lookup: false,
+        allow_elan: false,
+        allow_lake_env: false,
+        toolchain_file: None,
+    })?;
+    let bytes = fs::read(&info.header_path).map_err(|_| LinkDiagnostics::MissingHeader {
+        path: info.header_path.clone(),
+    })?;
+    let digest = Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let Some(entry) = lean_rs_abi::supported_by_digest(&digest) else {
+        return Err(LinkDiagnostics::UnsupportedToolchain {
+            active: info.version,
+            supported_window: supported_window(),
+        });
+    };
+    if !entry.versions.contains(&info.version.as_str()) {
+        return Err(LinkDiagnostics::UnsupportedToolchain {
+            active: info.version,
+            supported_window: supported_window(),
+        });
+    }
+    Ok((info.version == "4.36.0").then_some("lean-4.36.0"))
+}
+
 /// Current JSON schema version for `CargoLeanCapability` artifact manifests.
 pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
@@ -227,6 +266,7 @@ pub struct CargoLeanCapability {
     manifest_env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
     lean_num_threads: Option<u32>,
+    generated_output_key: Option<String>,
     private_bootstrap: Option<crate::shared_writer::PrivateLakeBootstrap>,
     writer_executable: Option<PathBuf>,
     export_signatures: Vec<LeanExportSignature>,
@@ -246,6 +286,7 @@ impl CargoLeanCapability {
             manifest_env_var: None,
             lean_sysroot: None,
             lean_num_threads: None,
+            generated_output_key: None,
             private_bootstrap: None,
             writer_executable: None,
             export_signatures: Vec::new(),
@@ -336,6 +377,19 @@ impl CargoLeanCapability {
         self
     }
 
+    /// Select a distinct derived directory for generated Lake outputs.
+    ///
+    /// The key is one short ASCII path component. It cannot select an arbitrary
+    /// path. Omitting it preserves Lake's existing `.lake/build` and SDK cache
+    /// locations. This selects and validates the SDK's named dylib, cache and
+    /// manifest paths; the Lake package must deterministically select the same
+    /// build directory from its exact supported Lean version.
+    #[must_use]
+    pub fn generated_output_key(mut self, key: impl Into<String>) -> Self {
+        self.generated_output_key = Some(key.into());
+        self
+    }
+
     /// Add trusted ABI metadata for one exported Lean symbol.
     ///
     /// The runtime checked-lookup API accepts a Rust call shape only when it
@@ -401,6 +455,7 @@ impl CargoLeanCapability {
         let Some(lakefile) = existing_lakefile(&root) else {
             return Ok(None);
         };
+        validate_generated_output_key(&root, &self.target_name, self.generated_output_key.as_deref())?;
         if !target_declared_in_lakefile(&lakefile, &self.target_name)? {
             return Ok(None);
         }
@@ -414,6 +469,7 @@ impl CargoLeanCapability {
         let options = LakeBuildOptions {
             lean_sysroot: self.lean_sysroot.clone(),
             lean_num_threads: self.lean_num_threads,
+            generated_output_key: self.generated_output_key.clone(),
             private_bootstrap: self.private_bootstrap.clone(),
             writer_executable: self.writer_executable.clone(),
             dependencies: self.dependencies.clone(),
@@ -427,10 +483,17 @@ impl CargoLeanCapability {
             &build_inputs_fingerprint(&root, &self.target_name)?,
             &dependency_artifact_fingerprint(&root, &self.target_name, &options)?,
         );
-        if !fs::read_to_string(cache_path(&root, &self.target_name)).is_ok_and(|cached| cached == key) {
+        let cache = cache_path(&root, &self.target_name, &options);
+        let dylib_path = resolve_dylib_path(&root, &inferred, &self.target_name, &options);
+        let manifest_path = capability_manifest_path(&root, &self.target_name, &self.export_signatures, &options);
+        if options.generated_output_key.is_some() {
+            validate_generated_output_file(&root, &self.target_name, &cache)?;
+            validate_generated_output_file(&root, &self.target_name, &dylib_path)?;
+            validate_generated_output_file(&root, &self.target_name, &manifest_path)?;
+        }
+        if !fs::read_to_string(&cache).is_ok_and(|cached| cached == key) {
             return Ok(None);
         }
-        let dylib_path = resolve_dylib_path(&root, &inferred, &self.target_name);
         if !dylib_path.is_file() {
             return Ok(None);
         }
@@ -461,8 +524,8 @@ impl CargoLeanCapability {
             &self.export_signatures,
             &self.dependencies,
             selected.as_ref(),
+            &options,
         )?;
-        let manifest_path = capability_manifest_path(&root, &self.target_name, &self.export_signatures);
         let actual: serde_json::Value = match fs::read(&manifest_path) {
             Ok(bytes) => match serde_json::from_slice(&bytes) {
                 Ok(value) => value,
@@ -549,6 +612,7 @@ impl CargoLeanCapability {
         let lake_options = LakeBuildOptions {
             lean_sysroot: self.lean_sysroot.clone(),
             lean_num_threads: self.lean_num_threads,
+            generated_output_key: self.generated_output_key.clone(),
             private_bootstrap: self.private_bootstrap.clone(),
             writer_executable: self.writer_executable.clone(),
             dependencies: self.dependencies.clone(),
@@ -560,7 +624,7 @@ impl CargoLeanCapability {
             cargo_metadata,
             &lake_options,
         )?;
-        self.finish(dylib_path, cargo_metadata, selected_toolchain.as_ref())
+        self.finish(dylib_path, cargo_metadata, selected_toolchain.as_ref(), &lake_options)
     }
 
     fn discover_options(&self) -> DiscoverOptions {
@@ -580,6 +644,7 @@ impl CargoLeanCapability {
         dylib_path: PathBuf,
         cargo_metadata: CargoMetadata,
         selected_toolchain: Option<&ToolchainInfo>,
+        options: &LakeBuildOptions,
     ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
         let project_root =
             fs::canonicalize(&self.project_root).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
@@ -609,6 +674,7 @@ impl CargoLeanCapability {
             &self.export_signatures,
             &self.dependencies,
             selected_toolchain,
+            options,
         )?;
         cargo_metadata.println(format_args!("cargo:rustc-env={env_var}={}", dylib_path.display()));
         cargo_metadata.println(format_args!(
@@ -892,6 +958,7 @@ struct LakeBuildOptions {
     /// Value for `LEAN_NUM_THREADS` on the spawned `lake` command. `None` leaves Lake's default
     /// (hardware-concurrency) parallelism, which can fork-storm a machine; `Some(n)` caps it.
     lean_num_threads: Option<u32>,
+    generated_output_key: Option<String>,
     private_bootstrap: Option<crate::shared_writer::PrivateLakeBootstrap>,
     writer_executable: Option<PathBuf>,
     dependencies: Vec<LeanLibraryDependency>,
@@ -952,9 +1019,11 @@ fn build_lake_target_with_runner_and_options(
         target_name: target_name.to_owned(),
         reason: format!("could not canonicalize project root {} ({err})", project_root.display()),
     })?;
+    validate_generated_output_key(&project_root, target_name, options.generated_output_key.as_deref())?;
     runner
         .prepare(&project_root, options)
         .map_err(|error| writer_diagnostic(&project_root, target_name, &error, true))?;
+    validate_generated_output_key(&project_root, target_name, options.generated_output_key.as_deref())?;
     let lakefile_lean = project_root.join("lakefile.lean");
     cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile_lean.display()));
     let lakefile_toml = project_root.join("lakefile.toml");
@@ -1007,7 +1076,7 @@ fn build_lake_target_with_runner_and_options(
         cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", path.display()));
     }
 
-    let dylib = resolve_dylib_path(&project_root, &package_name, target_name);
+    let dylib = resolve_dylib_path(&project_root, &package_name, target_name, options);
     // All declared domains are already held by the runner. Normalize standard
     // output directories for the entire closure before source observation.
     for root in build_input_roots(&project_root, target_name)? {
@@ -1023,7 +1092,11 @@ fn build_lake_target_with_runner_and_options(
         &initial_inputs,
         &dependency_artifact_fingerprint(&project_root, target_name, options)?,
     );
-    let cache_path = cache_path(&project_root, target_name);
+    let cache_path = cache_path(&project_root, target_name, options);
+    if options.generated_output_key.is_some() {
+        validate_generated_output_file(&project_root, target_name, &dylib)?;
+        validate_generated_output_file(&project_root, target_name, &cache_path)?;
+    }
     if dylib.is_file() && fs::read_to_string(&cache_path).is_ok_and(|cached| cached == initial_cache_key) {
         cargo_metadata.trace(format_args!(
             "lean-toolchain: cache hit for Lake target `{target_name}` in {}; using {}",
@@ -1074,7 +1147,12 @@ fn build_lake_target_with_runner_and_options(
         &dependency_artifact_fingerprint(&project_root, target_name, options)?,
     );
 
-    let dylib = resolve_dylib_path(&project_root, &final_package_name, target_name);
+    let dylib = resolve_dylib_path(&project_root, &final_package_name, target_name, options);
+    if let Some(key) = options.generated_output_key.as_deref() {
+        validate_generated_output_directories(&project_root, target_name, key)?;
+        validate_generated_output_file(&project_root, target_name, &dylib)?;
+        validate_generated_output_file(&project_root, target_name, &cache_path)?;
+    }
     if !dylib.is_file() {
         return Err(LinkDiagnostics::LakeOutputUnresolved {
             project_root,
@@ -1090,7 +1168,12 @@ fn build_lake_target_with_runner_and_options(
             reason: format!("could not create cache directory {} ({err})", parent.display()),
         })?;
     }
-    fs::write(&cache_path, final_cache_key).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+    let publish = if options.generated_output_key.is_some() {
+        write_atomic(&cache_path, final_cache_key.as_bytes())
+    } else {
+        fs::write(&cache_path, final_cache_key)
+    };
+    publish.map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
         project_root,
         target_name: target_name.to_owned(),
         reason: format!("could not write cache file {} ({err})", cache_path.display()),
@@ -1300,9 +1383,118 @@ fn collect_lean_sources(
     Ok(())
 }
 
-fn resolve_dylib_path(project_root: &Path, package_name: &str, target_name: &str) -> PathBuf {
+const GENERATED_OUTPUT_PARENT: &str = "lean-rs-generated";
+
+fn validate_generated_output_key(
+    project_root: &Path,
+    target_name: &str,
+    key: Option<&str>,
+) -> Result<(), LinkDiagnostics> {
+    let Some(key) = key else { return Ok(()) };
+    if key.is_empty()
+        || key.len() > 64
+        || matches!(key, "." | "..")
+        || key.starts_with('.')
+        || key.ends_with('.')
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: "generated output key must be one lowercase ASCII component of at most 64 bytes without edge dots"
+                .to_owned(),
+        });
+    }
+    validate_generated_output_directories(project_root, target_name, key)?;
+    Ok(())
+}
+
+fn validate_generated_output_directories(
+    project_root: &Path,
+    target_name: &str,
+    key: &str,
+) -> Result<(), LinkDiagnostics> {
+    let selected = project_root.join(generated_build_dir_relative(key));
+    for path in [
+        project_root.join(".lake"),
+        project_root.join(".lake").join(GENERATED_OUTPUT_PARENT),
+        selected.clone(),
+        selected.join("lib"),
+        selected.join("lean-rs-build-cache"),
+    ] {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() && path.canonicalize().is_ok_and(|actual| actual == path) => {}
+            Ok(_) => {
+                return Err(LinkDiagnostics::LakeOutputUnresolved {
+                    project_root: project_root.to_path_buf(),
+                    target_name: target_name.to_owned(),
+                    reason: format!(
+                        "generated output directory is aliased or not a directory: {}",
+                        path.display()
+                    ),
+                });
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(input_diagnostic(project_root, target_name, &error)),
+        }
+    }
+    Ok(())
+}
+
+fn validate_generated_output_file(project_root: &Path, target_name: &str, path: &Path) -> Result<(), LinkDiagnostics> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_file()
+                && path.canonicalize().is_ok_and(|actual| actual == path)
+                && generated_file_has_one_link(&metadata) =>
+        {
+            Ok(())
+        }
+        Ok(_) => Err(LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!(
+                "generated output file is aliased or not a regular file: {}",
+                path.display()
+            ),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(input_diagnostic(project_root, target_name, &error)),
+    }
+}
+
+#[cfg(unix)]
+fn generated_file_has_one_link(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    metadata.nlink() == 1
+}
+
+#[cfg(not(unix))]
+fn generated_file_has_one_link(_metadata: &fs::Metadata) -> bool {
+    true
+}
+
+fn generated_build_dir_relative(key: &str) -> PathBuf {
+    Path::new(".lake").join(GENERATED_OUTPUT_PARENT).join(key)
+}
+
+fn selected_build_dir(project_root: &Path, options: &LakeBuildOptions) -> PathBuf {
+    options.generated_output_key.as_deref().map_or_else(
+        || project_root.join(".lake/build"),
+        |key| project_root.join(generated_build_dir_relative(key)),
+    )
+}
+
+fn resolve_dylib_path(
+    project_root: &Path,
+    package_name: &str,
+    target_name: &str,
+    options: &LakeBuildOptions,
+) -> PathBuf {
     let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = project_root.join(".lake").join("build").join("lib");
+    let lib_dir = selected_build_dir(project_root, options).join("lib");
     let escaped_package = package_name.replace('_', "__");
     let new_style = lib_dir.join(format!("lib{escaped_package}_{target_name}.{dylib_extension}"));
     let old_style = lib_dir.join(format!("lib{target_name}.{dylib_extension}"));
@@ -1315,11 +1507,12 @@ fn resolve_dylib_path(project_root: &Path, package_name: &str, target_name: &str
     }
 }
 
-fn cache_path(project_root: &Path, target_name: &str) -> PathBuf {
-    project_root
-        .join(".lake")
-        .join("lean-rs-build-cache")
-        .join(format!("{}.cache", sanitize_target_name(target_name)))
+fn cache_path(project_root: &Path, target_name: &str, options: &LakeBuildOptions) -> PathBuf {
+    let root = options.generated_output_key.as_ref().map_or_else(
+        || project_root.join(".lake/lean-rs-build-cache"),
+        |_| selected_build_dir(project_root, options).join("lean-rs-build-cache"),
+    );
+    root.join(format!("{}.cache", sanitize_target_name(target_name)))
 }
 
 fn write_capability_manifest(
@@ -1332,8 +1525,12 @@ fn write_capability_manifest(
     export_signatures: &[LeanExportSignature],
     explicit_dependencies: &[LeanLibraryDependency],
     selected_toolchain: Option<&ToolchainInfo>,
+    options: &LakeBuildOptions,
 ) -> Result<PathBuf, LinkDiagnostics> {
-    let manifest_path = capability_manifest_path(project_root, target_name, export_signatures);
+    let manifest_path = capability_manifest_path(project_root, target_name, export_signatures, options);
+    if options.generated_output_key.is_some() {
+        validate_generated_output_file(project_root, target_name, &manifest_path)?;
+    }
     let manifest = capability_manifest_value(
         project_root,
         target_name,
@@ -1344,6 +1541,7 @@ fn write_capability_manifest(
         export_signatures,
         explicit_dependencies,
         selected_toolchain,
+        options,
     )?;
     check_manifest_dependency_files(&manifest).map_err(|error| LinkDiagnostics::LakeOutputUnresolved {
         project_root: project_root.to_path_buf(),
@@ -1409,11 +1607,12 @@ fn capability_manifest_value(
     export_signatures: &[LeanExportSignature],
     explicit_dependencies: &[LeanLibraryDependency],
     selected_toolchain: Option<&ToolchainInfo>,
+    options: &LakeBuildOptions,
 ) -> Result<serde_json::Value, LinkDiagnostics> {
-    let mut dependencies = capability_dependencies(project_root, target_name)?;
+    let mut dependencies = capability_dependencies(project_root, target_name, options)?;
     dependencies.extend(explicit_dependencies.iter().map(lean_library_dependency_to_json));
     let fingerprint = manifest_toolchain_fingerprint(project_root, target_name, selected_toolchain)?;
-    let search_dirs = capability_search_dirs(project_root, dylib_path);
+    let search_dirs = capability_search_dirs(project_root, dylib_path, options);
     let build_toolchain = selected_toolchain.map(|info| {
         serde_json::json!({
             "source": format!("{:?}", info.source),
@@ -1560,9 +1759,14 @@ fn capability_manifest_path(
     project_root: &Path,
     target_name: &str,
     export_signatures: &[LeanExportSignature],
+    options: &LakeBuildOptions,
 ) -> PathBuf {
     let manifest_name = capability_manifest_name(target_name, export_signatures);
-    if let Some(out_dir) = env::var_os("OUT_DIR") {
+    if options.generated_output_key.is_some() {
+        selected_build_dir(project_root, options)
+            .join("lean-rs-build-cache")
+            .join(manifest_name)
+    } else if let Some(out_dir) = env::var_os("OUT_DIR") {
         PathBuf::from(out_dir).join(manifest_name)
     } else {
         project_root
@@ -1594,18 +1798,22 @@ fn capability_manifest_name(target_name: &str, export_signatures: &[LeanExportSi
     format!("{target}-{suffix}.lean-rs-capability.json")
 }
 
-fn capability_search_dirs(project_root: &Path, dylib_path: &Path) -> Vec<PathBuf> {
+fn capability_search_dirs(project_root: &Path, dylib_path: &Path, options: &LakeBuildOptions) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(parent) = dylib_path.parent() {
         dirs.push(parent.to_path_buf());
     }
-    dirs.push(project_root.join(".lake").join("build").join("lib"));
+    dirs.push(selected_build_dir(project_root, options).join("lib"));
     dirs.sort();
     dirs.dedup();
     dirs
 }
 
-fn capability_dependencies(project_root: &Path, target_name: &str) -> Result<Vec<serde_json::Value>, LinkDiagnostics> {
+fn capability_dependencies(
+    project_root: &Path,
+    target_name: &str,
+    options: &LakeBuildOptions,
+) -> Result<Vec<serde_json::Value>, LinkDiagnostics> {
     let manifest_path = project_root.join("lake-manifest.json");
     let bytes = match fs::read(&manifest_path) {
         Ok(bytes) => bytes,
@@ -1649,7 +1857,11 @@ fn capability_dependencies(project_root: &Path, target_name: &str) -> Result<Vec
                     dependency_root.display()
                 ),
             })?;
-        let dylib = resolve_dylib_path(&dependency_root, "lean_rs_interop_shims", "LeanRsInterop");
+        let dylib = resolve_dylib_path(&dependency_root, "lean_rs_interop_shims", "LeanRsInterop", options);
+        if let Some(key) = options.generated_output_key.as_deref() {
+            validate_generated_output_directories(&dependency_root, target_name, key)?;
+            validate_generated_output_file(&dependency_root, target_name, &dylib)?;
+        }
         dependencies.push(serde_json::json!({
             "name": name,
             "dylib_path": dylib.display().to_string(),
@@ -1915,7 +2127,7 @@ fn dependency_artifact_fingerprint(
     target: &str,
     options: &LakeBuildOptions,
 ) -> Result<String, LinkDiagnostics> {
-    let mut dependencies = capability_dependencies(root, target)?;
+    let mut dependencies = capability_dependencies(root, target, options)?;
     dependencies.extend(options.dependencies.iter().map(lean_library_dependency_to_json));
     let mut paths = std::collections::BTreeSet::new();
     for dependency in dependencies {
@@ -1951,11 +2163,19 @@ fn cache_key(
         .lean_sysroot
         .as_deref()
         .map_or("ambient", |path| path.to_str().unwrap_or("<non-utf8-sysroot>"));
-    format!(
-        "cache_version=2\ntarget={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\nlean_sysroot={sysroot}\ninputs_sha256={inputs}\ndependency_artifacts_sha256={dependency_artifacts}\n",
+    let mut key = format!(
+        "cache_version=2\ntarget={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\nlean_sysroot={sysroot}\n",
         source_set.paths.len(),
         source_set.max_mtime_ns
-    )
+    );
+    if let Some(generated_output) = &options.generated_output_key {
+        let _ = writeln!(key, "generated_output={generated_output}");
+    }
+    let _ = write!(
+        key,
+        "inputs_sha256={inputs}\ndependency_artifacts_sha256={dependency_artifacts}\n"
+    );
+    key
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -2004,7 +2224,7 @@ mod tests {
     use super::{
         CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, LakeBuildOptions, LakeRun, LakeRunner,
         build_lake_target_with_runner, build_lake_target_with_runner_and_options, capability_env_var,
-        capability_manifest_env_var, capability_manifest_name, command_detail,
+        capability_manifest_env_var, capability_manifest_name, command_detail, generated_output_key_for_sysroot,
     };
     use crate::LinkDiagnostics;
     use crate::{
@@ -2016,11 +2236,25 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
 
+    #[test]
+    fn build_selected_sysroot_uses_the_supported_version_output_policy() {
+        let sysroot = Path::new(crate::LEAN_HEADER_PATH)
+            .ancestors()
+            .nth(3)
+            .expect("build-selected header has a sysroot");
+        let expected = (crate::LEAN_VERSION == "4.36.0").then_some("lean-4.36.0");
+        assert_eq!(
+            generated_output_key_for_sysroot(sysroot).expect("supported exact build-selected sysroot"),
+            expected
+        );
+    }
+
     #[derive(Clone)]
     struct FakeLake {
         calls: Rc<Cell<usize>>,
         seen_sysroots: Rc<RefCell<Vec<Option<PathBuf>>>>,
         seen_threads: Rc<RefCell<Vec<Option<u32>>>>,
+        seen_generated_outputs: Rc<RefCell<Vec<Option<String>>>>,
         mode: FakeMode,
     }
 
@@ -2038,6 +2272,7 @@ mod tests {
                 calls: Rc::new(Cell::new(0)),
                 seen_sysroots: Rc::new(RefCell::new(Vec::new())),
                 seen_threads: Rc::new(RefCell::new(Vec::new())),
+                seen_generated_outputs: Rc::new(RefCell::new(Vec::new())),
                 mode,
             }
         }
@@ -2053,6 +2288,10 @@ mod tests {
         fn seen_threads(&self) -> Vec<Option<u32>> {
             self.seen_threads.borrow().clone()
         }
+
+        fn seen_generated_outputs(&self) -> Vec<Option<String>> {
+            self.seen_generated_outputs.borrow().clone()
+        }
     }
 
     impl LakeRunner for FakeLake {
@@ -2065,6 +2304,9 @@ mod tests {
             self.calls.set(self.calls.get().saturating_add(1));
             self.seen_sysroots.borrow_mut().push(options.lean_sysroot.clone());
             self.seen_threads.borrow_mut().push(options.lean_num_threads);
+            self.seen_generated_outputs
+                .borrow_mut()
+                .push(options.generated_output_key.clone());
             // Model cold Lake dependency output creation. Existing dependency
             // cache regressions must survive this excluded-output mutation.
             if project_root.join("lake-manifest.json").is_file() {
@@ -2074,18 +2316,14 @@ mod tests {
             }
             match self.mode {
                 FakeMode::SuccessModern => {
-                    let dylib = project_root
-                        .join(".lake")
-                        .join("build")
+                    let dylib = super::selected_build_dir(project_root, options)
                         .join("lib")
                         .join(format!("libmy__pkg_{target_name}.{}", dylib_ext()));
                     write_file(&dylib, "dylib");
                     Ok(success_run())
                 }
                 FakeMode::SuccessLegacy => {
-                    let dylib = project_root
-                        .join(".lake")
-                        .join("build")
+                    let dylib = super::selected_build_dir(project_root, options)
                         .join("lib")
                         .join(format!("lib{target_name}.{}", dylib_ext()));
                     write_file(&dylib, "dylib");
@@ -2118,6 +2356,31 @@ mod tests {
     fn make_project(name: &str, target: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("lean-toolchain-lake-{}-{}", std::process::id(), name));
         drop(fs::remove_dir_all(&root));
+        populate_project(&root, target);
+        root
+    }
+
+    struct GeneratedOutputFixture(PathBuf);
+    impl Drop for GeneratedOutputFixture {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(&self.0));
+        }
+    }
+
+    fn make_generated_output_project(name: &str, target: &str) -> GeneratedOutputFixture {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let root = workspace
+            .join("target/test-state")
+            .join(format!("generated-output-{}-{name}", std::process::id()));
+        drop(fs::remove_dir_all(&root));
+        populate_project(&root, target);
+        GeneratedOutputFixture(root)
+    }
+
+    fn populate_project(root: &Path, target: &str) {
         fs::create_dir_all(&root).expect("create temp project");
         write_file(
             &root.join("lakefile.lean"),
@@ -2131,7 +2394,6 @@ mod tests {
         );
         write_file(&root.join("lean-toolchain"), "leanprover/lean4:v4.29.1\n");
         write_file(&root.join(format!("{target}.lean")), "def hello : Nat := 1\n");
-        root
     }
 
     fn make_toml_project(name: &str, target: &str) -> PathBuf {
@@ -2551,8 +2813,8 @@ mod tests {
             assert!(
                 matches!(error, LinkDiagnostics::LakeOutputUnresolved { ref reason, .. } if reason.contains("inputs changed"))
             );
-            assert!(!super::cache_path(&root, target).exists());
-            assert!(!super::capability_manifest_path(&root, target, &[]).exists());
+            assert!(!super::cache_path(&root, target, &LakeBuildOptions::default()).exists());
+            assert!(!super::capability_manifest_path(&root, target, &[], &LakeBuildOptions::default()).exists());
         }
     }
 
@@ -2561,7 +2823,7 @@ mod tests {
         let root = make_project("ready-probe", "MyCapability");
         let builder = CargoLeanCapability::new(&root, "MyCapability").package("my_pkg");
         assert!(builder.probe_ready().expect("cold read probe").is_none());
-        assert!(!super::cache_path(&root, "MyCapability").exists());
+        assert!(!super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()).exists());
         let built = builder
             .clone()
             .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
@@ -2589,9 +2851,148 @@ mod tests {
         fs::write(built.manifest_path(), manifest_before).expect("restore exact metadata");
         write_file(&root.join("New.lean"), "def newSource := 1");
         assert!(builder.probe_ready().expect("source set changed").is_none());
-        fs::remove_file(super::cache_path(&root, "MyCapability")).expect("remove cache key");
+        fs::remove_file(super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()))
+            .expect("remove cache key");
         assert!(builder.probe_ready().expect("missing cache").is_none());
-        assert!(!super::cache_path(&root, "MyCapability").exists());
+        assert!(!super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()).exists());
+    }
+
+    #[test]
+    fn generated_output_key_selects_only_derived_build_cache_and_manifest_paths() {
+        let fixture = make_generated_output_project("selection", "MyCapability");
+        let root = &fixture.0;
+        let builder = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .generated_output_key("lean-4.36.0");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let built = builder
+            .clone()
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("versioned fake build");
+        let selected = root
+            .canonicalize()
+            .expect("canonical fixture")
+            .join(".lake/lean-rs-generated/lean-4.36.0");
+        assert_eq!(
+            super::generated_build_dir_relative("lean-4.36.0"),
+            PathBuf::from(".lake/lean-rs-generated/lean-4.36.0")
+        );
+        assert!(built.dylib_path().starts_with(&selected));
+        assert!(built.manifest_path().starts_with(&selected));
+        assert_eq!(runner.seen_generated_outputs(), vec![Some("lean-4.36.0".to_owned())]);
+        assert!(!root.join(".lake/build").exists());
+        assert!(!root.join(".lake/lean-rs-build-cache").exists());
+        assert_eq!(builder.probe_ready().expect("selected ready probe"), Some(built));
+        assert!(
+            CargoLeanCapability::new(&root, "MyCapability")
+                .package("my_pkg")
+                .probe_ready()
+                .expect("default probe")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn generated_output_key_rejects_arbitrary_paths_before_fake_lake() {
+        for key in [
+            "",
+            ".",
+            "..",
+            ".hidden",
+            "trailing.",
+            "Uppercase",
+            "../escape",
+            "/absolute",
+            "two/parts",
+            "bad key",
+        ] {
+            let fixture = make_generated_output_project(&format!("invalid-{}", key.len()), "MyCapability");
+            let root = &fixture.0;
+            let mut runner = FakeLake::new(FakeMode::SuccessModern);
+            let error = CargoLeanCapability::new(&root, "MyCapability")
+                .generated_output_key(key)
+                .build_with_runner(&mut runner, CargoMetadata::Suppress)
+                .expect_err("invalid generated output key");
+            assert!(
+                matches!(error, LinkDiagnostics::LakeOutputUnresolved { reason, .. } if reason.contains("generated output key"))
+            );
+            assert_eq!(runner.calls(), 0);
+            assert!(!root.join(".lake/lean-rs-generated").exists());
+        }
+    }
+
+    #[test]
+    fn generated_output_refuses_aliases_and_never_falls_back_to_default_outputs() {
+        struct DefaultOnlyLake;
+        impl LakeRunner for DefaultOnlyLake {
+            fn build_shared(
+                &mut self,
+                project_root: &Path,
+                target_name: &str,
+                _options: &LakeBuildOptions,
+            ) -> Result<LakeRun, std::io::Error> {
+                let dylib = project_root
+                    .join(".lake/build/lib")
+                    .join(format!("libmy__pkg_{target_name}.{}", dylib_ext()));
+                write_file(&dylib, "wrong default output");
+                Ok(success_run())
+            }
+        }
+
+        let fixture = make_generated_output_project("no-default-fallback", "MyCapability");
+        let root = &fixture.0;
+        CargoLeanCapability::new(root, "MyCapability")
+            .package("my_pkg")
+            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
+            .expect("seed default output");
+        let selected = CargoLeanCapability::new(root, "MyCapability")
+            .package("my_pkg")
+            .generated_output_key("lean-4.36.0");
+        assert!(selected.probe_ready().expect("keyed probe").is_none());
+        let error = selected
+            .build_with_runner(&mut DefaultOnlyLake, CargoMetadata::Suppress)
+            .expect_err("keyed build cannot accept default output");
+        assert!(
+            matches!(error, LinkDiagnostics::LakeOutputUnresolved { reason, .. } if reason.contains("expected shared library"))
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let parent = root.join(".lake/lean-rs-generated");
+            fs::create_dir_all(&parent).expect("generated parent");
+            symlink("../build", parent.join("aliased")).expect("alias default build");
+            let error = CargoLeanCapability::new(root, "MyCapability")
+                .generated_output_key("aliased")
+                .probe_ready()
+                .expect_err("aliased generated output rejected");
+            assert!(
+                matches!(error, LinkDiagnostics::LakeOutputUnresolved { ref reason, .. } if reason.contains("aliased")),
+                "unexpected dependency alias error: {error:?}"
+            );
+
+            let dependency = root.join("interop");
+            fs::create_dir_all(dependency.join(".lake/build")).expect("default dependency output");
+            fs::create_dir_all(dependency.join(".lake/lean-rs-generated")).expect("dependency generated parent");
+            symlink("../build", dependency.join(".lake/lean-rs-generated/lean-4.36.0"))
+                .expect("alias dependency output");
+            write_file(
+                &root.join("lake-manifest.json"),
+                r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"interop"}],"name":"my_pkg","lakeDir":".lake"}"#,
+            );
+            write_file(
+                &dependency.join("lake-manifest.json"),
+                r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"lean_rs_interop_shims","lakeDir":".lake"}"#,
+            );
+            let error = CargoLeanCapability::new(root, "MyCapability")
+                .generated_output_key("lean-4.36.0")
+                .probe_ready()
+                .expect_err("aliased dependency output rejected");
+            assert!(
+                matches!(error, LinkDiagnostics::LakeOutputUnresolved { ref reason, .. } if reason.contains("aliased")),
+                "unexpected dependency alias error: {error:?}"
+            );
+        }
     }
 
     #[test]

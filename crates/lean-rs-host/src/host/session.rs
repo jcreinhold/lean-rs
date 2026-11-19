@@ -549,10 +549,12 @@ fn comparable_roots(roots: &[String]) -> bool {
 
 impl<'lean, 'c> LeanSession<'lean, 'c> {
     pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> Vec<String> {
-        let project = capabilities.host().project();
-        let mut search_paths: Vec<String> = project
-            .olean_search_paths()
-            .into_iter()
+        let project_paths = capabilities.keyed_project_search_paths().map_or_else(
+            || capabilities.host().project().olean_search_paths_for_output(None),
+            <[std::path::PathBuf]>::to_vec,
+        );
+        let mut search_paths: Vec<String> = project_paths
+            .iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect();
         search_paths.extend(

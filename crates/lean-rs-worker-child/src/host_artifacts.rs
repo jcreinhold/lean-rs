@@ -5,7 +5,10 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use lean_rs_host::host::{LeanPreparedHostArtifacts, prepare_host_artifacts, ready_host_artifacts};
+use lean_rs_host::host::{
+    LeanPreparedHostArtifacts, prepare_host_artifacts, ready_host_artifacts_for_generated_output_with_ipc_root,
+    ready_host_artifacts_with_ipc_root,
+};
 use lean_rs_worker_protocol::protocol::HostSessionMode;
 use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
 use lean_toolchain::CapabilityManifest;
@@ -20,15 +23,25 @@ fn invalid(message: impl Into<String>) -> io::Error {
 
 pub(crate) fn preparation_mode() -> Option<ExitCode> {
     let arg = std::env::args_os().nth(1)?;
-    let probe = if arg == "--lean-rs-ready-host-artifacts" {
-        true
+    let (probe, generated) = if arg == "--lean-rs-ready-host-artifacts" {
+        (true, false)
+    } else if arg == "--lean-rs-ready-host-artifacts-generated" {
+        (true, true)
     } else if arg == "--lean-rs-prepare-host-artifacts" {
-        false
+        (false, false)
     } else {
         return None;
     };
     let result = (|| -> Result<Option<LeanPreparedHostArtifacts>, Box<dyn std::error::Error>> {
-        if std::env::args_os().count() != 2 || std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_none() {
+        let args = std::env::args_os().collect::<Vec<_>>();
+        let valid_args = if generated {
+            args.len() == 4
+        } else if probe {
+            args.len() == 2 || args.len() == 3
+        } else {
+            args.len() == 2
+        };
+        if !valid_args || std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_none() {
             return Err(
                 invalid("artifact preparation requires its sole mode flag and an explicit writer helper").into(),
             );
@@ -36,7 +49,20 @@ pub(crate) fn preparation_mode() -> Option<ExitCode> {
         // This branch precedes all runtime, parent-watchdog and native ownership
         // initialization. Any actual Lake work is owned by the configured H.
         if probe {
-            Ok(ready_host_artifacts()?)
+            if generated {
+                Ok(ready_host_artifacts_for_generated_output_with_ipc_root(
+                    args[3]
+                        .to_str()
+                        .ok_or_else(|| invalid("generated output key must be UTF-8"))?,
+                    Path::new(&args[2]),
+                )?
+                .map(LeanPreparedHostArtifacts::with_project_generated_output_matching_shims)
+                .transpose()?)
+            } else if let Some(ipc_root) = args.get(2) {
+                Ok(ready_host_artifacts_with_ipc_root(Path::new(ipc_root))?)
+            } else {
+                Ok(lean_rs_host::host::ready_host_artifacts()?)
+            }
         } else {
             Ok(Some(prepare_host_artifacts()?))
         }
@@ -64,7 +90,7 @@ fn write_descriptor(prepared: &LeanPreparedHostArtifacts) -> io::Result<()> {
             .ok_or_else(|| invalid("artifact descriptor paths must be UTF-8"))
     };
     let dto = LeanWorkerPreparedHostArtifacts {
-        protocol: 1,
+        protocol: if prepared.project_uses_generated_output() { 2 } else { 1 },
         shim_manifest_path: path_string(prepared.manifest_path())?,
         shim_manifest_json: prepared.manifest_json().to_owned(),
         artifact_roots: prepared
@@ -93,16 +119,23 @@ pub(crate) fn from_environment() -> io::Result<LeanPreparedHostArtifacts> {
         return Err(invalid("prepared descriptor exceeds 64 KiB"));
     }
     let dto: LeanWorkerPreparedHostArtifacts = serde_json::from_str(&value).map_err(io::Error::other)?;
-    if dto.protocol != 1 {
+    if dto.protocol != 1 && dto.protocol != 2 {
         return Err(invalid("unsupported prepared artifact protocol"));
     }
-    LeanPreparedHostArtifacts::from_snapshot(
+    let prepared = LeanPreparedHostArtifacts::from_snapshot(
         PathBuf::from(dto.shim_manifest_path),
         dto.shim_manifest_json,
         dto.artifact_roots.into_iter().map(PathBuf::from).collect(),
         dto.shim_search_paths.into_iter().map(PathBuf::from).collect(),
     )
-    .map_err(io::Error::other)
+    .map_err(io::Error::other)?;
+    if dto.protocol == 2 {
+        prepared
+            .with_project_generated_output_matching_shims()
+            .map_err(io::Error::other)
+    } else {
+        Ok(prepared)
+    }
 }
 
 pub(crate) struct ManifestSnapshot {

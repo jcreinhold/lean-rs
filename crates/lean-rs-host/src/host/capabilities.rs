@@ -69,6 +69,7 @@ pub struct LeanCapabilities<'lean, 'h> {
     // Prepared before any project read custody. Import and body paths only
     // read these locations; they must never run a nested Lake writer.
     shim_search_paths: Vec<PathBuf>,
+    keyed_project_search_paths: Option<Vec<PathBuf>>,
     artifact_roots: Vec<PathBuf>,
 }
 
@@ -103,11 +104,16 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         artifact_roots.extend(prepared.artifact_roots.iter().cloned());
         artifact_roots.sort();
         artifact_roots.dedup();
+        let keyed_project_search_paths = prepared
+            .project_generated_output_key
+            .as_deref()
+            .map(|key| host.project().olean_search_paths_for_output(Some(key)));
         Ok(Self {
             host,
             user_library: None,
             shim_capability,
             shim_search_paths: prepared.shim_search_paths.clone(),
+            keyed_project_search_paths,
             artifact_roots,
         })
     }
@@ -254,6 +260,10 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         &self.shim_search_paths
     }
 
+    pub(crate) fn keyed_project_search_paths(&self) -> Option<&[PathBuf]> {
+        self.keyed_project_search_paths.as_deref()
+    }
+
     /// Ordered project and shim search paths for an application's import attestation.
     #[must_use]
     pub fn import_search_paths(&self) -> Vec<String> {
@@ -277,6 +287,8 @@ pub struct LeanPreparedHostArtifacts {
     manifest_json: String,
     artifact_roots: Vec<PathBuf>,
     shim_search_paths: Vec<PathBuf>,
+    generated_output_key: Option<String>,
+    project_generated_output_key: Option<String>,
 }
 
 impl LeanPreparedHostArtifacts {
@@ -315,11 +327,14 @@ impl LeanPreparedHostArtifacts {
                 "invalid prepared host artifact storage descriptor".to_owned(),
             ));
         }
+        let generated_output_key = generated_output_key_from_search_paths(&shim_search_paths)?;
         Ok(Self {
             manifest_path,
             manifest_json,
             artifact_roots,
             shim_search_paths,
+            generated_output_key,
+            project_generated_output_key: None,
         })
     }
 
@@ -343,6 +358,82 @@ impl LeanPreparedHostArtifacts {
     pub fn shim_search_paths(&self) -> &[PathBuf] {
         &self.shim_search_paths
     }
+
+    /// Select the validated generated-output layout for this application's imports.
+    ///
+    /// Normal applications retain ordinary Lake paths. A fixture whose own Lake
+    /// config selects the prepared shim slot opts in before dispatch.
+    ///
+    /// # Errors
+    /// Returns an invalid or shim-mismatched key.
+    #[doc(hidden)]
+    pub fn with_project_generated_output_matching_shims(mut self) -> LeanResult<Self> {
+        let key = self.generated_output_key.clone().ok_or_else(|| {
+            lean_rs::__host_internals::host_module_init("prepared shims do not select a generated-output key")
+        })?;
+        self.project_generated_output_key = Some(key);
+        Ok(self)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn project_uses_generated_output(&self) -> bool {
+        self.project_generated_output_key.is_some()
+    }
+}
+
+fn generated_output_key_from_search_paths(paths: &[PathBuf]) -> LeanResult<Option<String>> {
+    let mut selected: Option<String> = None;
+    let mut unkeyed_seen = false;
+    for path in paths {
+        let output = path
+            .file_name()
+            .and_then(|part| (part == "lean").then_some(path))
+            .and_then(|path| path.parent())
+            .filter(|lib| lib.file_name().and_then(|part| part.to_str()) == Some("lib"))
+            .and_then(Path::parent);
+        let marker = output.and_then(Path::parent).filter(|generated| {
+            generated.file_name().and_then(|part| part.to_str()) == Some("lean-rs-generated")
+                && generated
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|part| part.to_str())
+                    == Some(".lake")
+        });
+        let key = if marker.is_some() {
+            let key = output
+                .and_then(Path::file_name)
+                .and_then(|component| component.to_str())
+                .filter(|key| valid_generated_output_component(key))
+                .ok_or_else(|| lean_rs::__host_internals::host_module_init("prepared shim output key is invalid"))?;
+            Some(key.to_owned())
+        } else {
+            None
+        };
+        match (&selected, key) {
+            (None, Some(key)) if !unkeyed_seen => selected = Some(key),
+            (Some(current), Some(key)) if current == &key => {}
+            (None, None) => unkeyed_seen = true,
+            _ => {
+                return Err(lean_rs::__host_internals::host_module_init(
+                    "prepared shim search paths select mixed output roots",
+                ));
+            }
+        }
+    }
+    Ok(selected)
+}
+
+fn valid_generated_output_component(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 64
+        && key != "."
+        && key != ".."
+        && !key.starts_with('.')
+        && !key.ends_with('.')
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 /// Prepare the bundled host capability without initializing any Lean runtime.
@@ -350,8 +441,24 @@ impl LeanPreparedHostArtifacts {
 /// # Errors
 /// Returns the configured writer, build, publication or snapshot validation failure.
 pub fn prepare_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
-    let built = crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures())?;
-    crate::host::lake::prepared_artifacts(&built)
+    prepare_host_artifacts_for_output(None)
+}
+
+/// Prepare the bundled host capability in one validated generated-output slot.
+///
+/// # Errors
+/// Returns an invalid output key, writer, build, publication or snapshot validation failure.
+#[doc(hidden)]
+pub fn prepare_host_artifacts_for_generated_output(
+    generated_output_key: &str,
+) -> LeanResult<LeanPreparedHostArtifacts> {
+    prepare_host_artifacts_for_output(Some(generated_output_key))
+}
+
+fn prepare_host_artifacts_for_output(generated_output_key: Option<&str>) -> LeanResult<LeanPreparedHostArtifacts> {
+    let selection = crate::host::lake::ShimOutputSelection::resolve(generated_output_key)?;
+    let built = crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures(), &selection)?;
+    crate::host::lake::prepared_artifacts(&built, selection.key())
 }
 
 /// Inspect existing bundled outputs under shared custody without a writer or runtime.
@@ -360,7 +467,33 @@ pub fn prepare_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
 /// Returns reader admission or invalid metadata errors. A cold/stale cache is `None`.
 #[cfg(unix)]
 pub fn ready_host_artifacts() -> LeanResult<Option<LeanPreparedHostArtifacts>> {
-    crate::host::lake::ready_artifacts(host_shim_export_signatures())
+    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
+    crate::host::lake::ready_artifacts(host_shim_export_signatures(), None, &selection)
+}
+
+/// Inspect existing bundled outputs using one explicit private IPC root.
+///
+/// # Errors
+/// Returns reader admission or invalid metadata errors. A cold/stale cache is `None`.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn ready_host_artifacts_with_ipc_root(ipc_root: &std::path::Path) -> LeanResult<Option<LeanPreparedHostArtifacts>> {
+    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
+    crate::host::lake::ready_artifacts(host_shim_export_signatures(), Some(ipc_root), &selection)
+}
+
+/// Inspect one validated generated-output slot using one explicit private IPC root.
+///
+/// # Errors
+/// Returns an invalid output key, reader admission or metadata error. A cold/stale cache is `None`.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn ready_host_artifacts_for_generated_output_with_ipc_root(
+    generated_output_key: &str,
+    ipc_root: &std::path::Path,
+) -> LeanResult<Option<LeanPreparedHostArtifacts>> {
+    let selection = crate::host::lake::ShimOutputSelection::resolve(Some(generated_output_key))?;
+    crate::host::lake::ready_artifacts(host_shim_export_signatures(), Some(ipc_root), &selection)
 }
 
 pub(super) fn reject_same_process_cargo_test_session_import() -> LeanResult<()> {
@@ -416,7 +549,8 @@ fn is_probably_cargo_test_binary() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::same_process_cargo_test_import_guard_active_from_facts;
+    use super::{generated_output_key_from_search_paths, same_process_cargo_test_import_guard_active_from_facts};
+    use std::path::PathBuf;
 
     #[test]
     fn cargo_test_import_guard_blocks_same_process_libtest_harnesses() {
@@ -438,5 +572,52 @@ mod tests {
         assert!(!same_process_cargo_test_import_guard_active_from_facts(
             None, false, false,
         ));
+    }
+
+    #[test]
+    fn prepared_search_paths_select_one_generated_output_or_the_default() {
+        let path = |package: &str, output: &str| PathBuf::from(format!("/sdk/{package}/.lake/{output}/lib/lean"));
+        assert_eq!(
+            generated_output_key_from_search_paths(&[
+                path("interop", "lean-rs-generated/lean-4.36.0"),
+                path("host", "lean-rs-generated/lean-4.36.0"),
+            ])
+            .expect("matching generated outputs"),
+            Some("lean-4.36.0".to_owned())
+        );
+        assert_eq!(
+            generated_output_key_from_search_paths(&[path("interop", "build"), path("host", "build")])
+                .expect("matching default outputs"),
+            None
+        );
+        assert!(
+            generated_output_key_from_search_paths(&[
+                path("interop", "build"),
+                path("host", "lean-rs-generated/lean-4.36.0"),
+            ])
+            .is_err()
+        );
+        assert!(
+            generated_output_key_from_search_paths(&[
+                path("interop", "lean-rs-generated/lean-4.36.0"),
+                path("host", "lean-rs-generated/../bad"),
+            ])
+            .is_err()
+        );
+        assert!(
+            generated_output_key_from_search_paths(&[
+                path("interop", "lean-rs-generated/.bad"),
+                path("host", "lean-rs-generated/.bad"),
+            ])
+            .is_err()
+        );
+        assert_eq!(
+            generated_output_key_from_search_paths(&[
+                PathBuf::from("/custom/interop/imports"),
+                PathBuf::from("/custom/host/imports"),
+            ])
+            .expect("legacy custom paths remain unkeyed"),
+            None
+        );
     }
 }

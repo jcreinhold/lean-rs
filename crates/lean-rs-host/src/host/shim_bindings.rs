@@ -71,7 +71,9 @@ mod tests {
 
     #[test]
     fn bundled_shim_manifest_contains_generated_signatures() {
-        let built = crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures())
+        let selection = crate::host::lake::ShimOutputSelection::resolve(None)
+            .expect("supported exact Lean sysroot selects shim outputs");
+        let built = crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures(), &selection)
             .expect("bundled shim capability builds");
         let manifest = CapabilityManifest::read(built.manifest_path()).expect("manifest parses");
         let generated = signatures_by_symbol(host_shim_export_signatures());

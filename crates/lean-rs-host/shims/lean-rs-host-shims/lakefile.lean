@@ -7,6 +7,12 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
   ⟨`pp.unicode.fun, true⟩,
 ]
 
+def leanRsBuildDir : FilePath :=
+  if Lean.versionString == "4.36.0" then
+    ".lake" / "lean-rs-generated" / "lean-4.36.0"
+  else
+    defaultBuildDir
+
 /-! Bundled Lake package shipping the mandatory and optional
     `lean_rs_host_*` `@[export]` Lean shims that the `lean-rs-host` Rust
     crate loads at runtime.
@@ -15,7 +21,8 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
     host crate builds this crate-owned package on demand, opens the produced
     dylib globally, and adds the produced `.olean` directory to session import
     search paths. -/
-package «lean_rs_host_shims»
+package «lean_rs_host_shims» where
+  buildDir := leanRsBuildDir
 
 require «lean_rs_interop_shims» from "../lean-rs-interop-shims"
 
