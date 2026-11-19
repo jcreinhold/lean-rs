@@ -6,6 +6,7 @@ owns this checkout and keeps it and the selected toolchain unchanged until its
 Rust tests exit. This is trusted job ownership, not a same-user writer lock.
 No shell code is emitted. A failed selection emits no environment variables.
 """
+
 import hashlib
 import json
 import os
@@ -46,6 +47,7 @@ def select(relative, library):
                 raise SystemExit("fixture grew while selecting")
             digest.update(chunk)
         after = os.fstat(source.fileno())
+
     def identity(st):
         return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
 
@@ -57,11 +59,18 @@ def select(relative, library):
 # Compile-time selection and runtime marker both belong to this job.
 # This is exclusive job ownership, not managed-reader or hostile-writer protection.
 scalar = select("fixtures/lean", "liblean__rs__fixture_LeanRsFixture")
-interop = select("crates/lean-rs/shims/lean-rs-interop-shims", "liblean__rs__interop__shims_LeanRsInterop")
-consumer = select("fixtures/interop-shims", "liblean__rs__interop__consumer_LeanRsInteropConsumer")
+interop = select(
+    "crates/lean-rs/shims/lean-rs-interop-shims",
+    "liblean__rs__interop__shims_LeanRsInterop",
+)
+consumer = select(
+    "fixtures/interop-shims", "liblean__rs__interop__consumer_LeanRsInteropConsumer"
+)
 sys.stdout.write("LEAN_RS_TEST_SCALAR_PRIVATE_JOB=1\n")
 sys.stdout.write(
-    "LEAN_RS_TEST_SCALAR_FIXTURE=" + json.dumps([str(scalar[0]), scalar[2], scalar[3]]) + "\n"
+    "LEAN_RS_TEST_SCALAR_FIXTURE="
+    + json.dumps([str(scalar[0]), scalar[2], scalar[3]])
+    + "\n"
 )
 sys.stdout.write("LEAN_RS_PROFILE_FIXTURE_SHA256=" + scalar[4] + "\n")
 sys.stdout.write("LEAN_RS_TEST_CALLBACK_PRIVATE_JOB=1\n")
@@ -70,6 +79,9 @@ for selected, selection_key, digest_key in [
     (consumer, "LEAN_RS_TEST_CALLBACK_CONSUMER", "LEAN_RS_CALLBACK_CONSUMER_SHA256"),
 ]:
     sys.stdout.write(
-        selection_key + "=" + json.dumps([str(selected[1]), selected[2], selected[3]]) + "\n"
+        selection_key
+        + "="
+        + json.dumps([str(selected[1]), selected[2], selected[3]])
+        + "\n"
     )
     sys.stdout.write(digest_key + "=" + selected[4] + "\n")

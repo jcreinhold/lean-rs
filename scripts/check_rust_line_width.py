@@ -2,10 +2,10 @@
 
 import argparse
 import os
-from pathlib import Path
 import re
 import subprocess
 import tomllib
+from pathlib import Path
 
 
 def git(*args: str) -> str:
@@ -20,14 +20,27 @@ def main() -> int:
         # GitHub uses an all-zero before SHA for the first push to a branch.
         base = git("hash-object", "-t", "tree", "-w", os.devnull).strip()
     else:
-        base = git("rev-parse", "--verify", "--end-of-options", f"{base}^{{tree}}").strip()
+        base = git(
+            "rev-parse", "--verify", "--end-of-options", f"{base}^{{tree}}"
+        ).strip()
 
     with Path("rustfmt.toml").open("rb") as config:
         max_width = tomllib.load(config)["max_width"]
     patch = git(
-        "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--no-color",
-        "--no-prefix", "--find-renames", "--unified=0", "--inter-hunk-context=0", "--diff-filter=AMR",
-        base, "--", "*.rs",
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--no-prefix",
+        "--find-renames",
+        "--unified=0",
+        "--inter-hunk-context=0",
+        "--diff-filter=AMR",
+        base,
+        "--",
+        "*.rs",
     )
 
     failed = False

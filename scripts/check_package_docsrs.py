@@ -25,12 +25,16 @@ CRATES = [
 ]
 
 CRATE_MANIFESTS = {
-    "lean-rs-interop-shims": pathlib.Path("crates/lean-rs/shims/lean-rs-interop-shims/Cargo.toml"),
+    "lean-rs-interop-shims": pathlib.Path(
+        "crates/lean-rs/shims/lean-rs-interop-shims/Cargo.toml"
+    ),
 }
 
 
 def crate_manifest(crate: str) -> pathlib.Path:
-    return ROOT / CRATE_MANIFESTS.get(crate, pathlib.Path("crates") / crate / "Cargo.toml")
+    return ROOT / CRATE_MANIFESTS.get(
+        crate, pathlib.Path("crates") / crate / "Cargo.toml"
+    )
 
 
 def fail(message: str) -> None:
@@ -38,7 +42,9 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def run(command: list[str], *, env: dict[str, str] | None = None, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run(
+    command: list[str], *, env: dict[str, str] | None = None, capture: bool = False
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=ROOT,
@@ -78,7 +84,9 @@ def check_docs_rs_metadata() -> str:
         if docs_rs.get("default-target") != "x86_64-unknown-linux-gnu":
             fail(f"{crate} must set docs.rs default-target to x86_64-unknown-linux-gnu")
         if docs_rs.get("targets") != []:
-            fail(f"{crate} must set docs.rs targets = [] to avoid cross-target doc builds")
+            fail(
+                f"{crate} must set docs.rs targets = [] to avoid cross-target doc builds"
+            )
 
     return version
 
@@ -238,7 +246,9 @@ def docs_rs_tarball_simulation(version: str) -> None:
                 tar.extractall(workspace)
 
         members = ",\n  ".join(f'"{crate}-{version}"' for crate in CRATES)
-        patches = "\n".join(f'{crate} = {{ path = "{crate}-{version}" }}' for crate in CRATES)
+        patches = "\n".join(
+            f'{crate} = {{ path = "{crate}-{version}" }}' for crate in CRATES
+        )
         (workspace / "Cargo.toml").write_text(
             f"""[workspace]
 resolver = "3"
@@ -259,8 +269,12 @@ members = [
         cargo_bin = str(cargo.parent)
         safe_path = os.pathsep.join([cargo_bin, "/usr/bin", "/bin"])
         env = {
-            "CARGO_HOME": os.environ.get("CARGO_HOME", str(pathlib.Path.home() / ".cargo")),
-            "RUSTUP_HOME": os.environ.get("RUSTUP_HOME", str(pathlib.Path.home() / ".rustup")),
+            "CARGO_HOME": os.environ.get(
+                "CARGO_HOME", str(pathlib.Path.home() / ".cargo")
+            ),
+            "RUSTUP_HOME": os.environ.get(
+                "RUSTUP_HOME", str(pathlib.Path.home() / ".rustup")
+            ),
             "HOME": os.environ.get("HOME", str(pathlib.Path.home())),
             "PATH": safe_path,
             "DOCS_RS": "1",
@@ -288,7 +302,9 @@ members = [
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Check lean-rs package contents and docs.rs-mode docs from tarballs.")
+    parser = argparse.ArgumentParser(
+        description="Check lean-rs package contents and docs.rs-mode docs from tarballs."
+    )
     parser.add_argument(
         "--allow-dirty",
         action="store_true",

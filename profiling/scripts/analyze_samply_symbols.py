@@ -9,7 +9,6 @@ import re
 import sys
 from pathlib import Path
 
-
 RAW_ADDR = re.compile(r"^0x[0-9a-fA-F]+$")
 
 
@@ -37,7 +36,11 @@ def main() -> int:
         strings = thread.get("stringArray", [])
         func_names = thread.get("funcTable", {}).get("name", [])
         for name_index in func_names:
-            if not isinstance(name_index, int) or name_index < 0 or name_index >= len(strings):
+            if (
+                not isinstance(name_index, int)
+                or name_index < 0
+                or name_index >= len(strings)
+            ):
                 continue
             name = str(strings[name_index])
             total += 1
