@@ -5,6 +5,7 @@
     clippy::panic,
     reason = "isolated real-process fixtures assert exact admission and descriptor outcomes"
 )]
+use super::tests::ExplicitIpcRoot;
 use super::*;
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt as _;
@@ -85,14 +86,14 @@ os.close(control);os.close(fd);event('closed')
 ";
 
 struct Fixture {
-    directory: SocketDirectory,
+    directory: ExplicitIpcRoot,
     roots: Vec<PathBuf>,
     locks: Vec<PathBuf>,
     helper: PathBuf,
 }
 impl Fixture {
     fn new(mode: &str) -> io::Result<Self> {
-        let (directory, _) = SocketDirectory::new(None)?;
+        let directory = ExplicitIpcRoot::new()?;
         let mut keyed = ["one", "two"]
             .into_iter()
             .map(|name| {
@@ -232,18 +233,20 @@ fn wait_for(mut ready: impl FnMut() -> bool) -> io::Result<()> {
 }
 fn union(proxy: bool, fixture: &Fixture, timeout: Duration, cancelled: &impl Fn() -> bool) -> io::Result<()> {
     if proxy {
-        drop(SharedReadProxy::acquire_union(
+        drop(SharedReadProxy::acquire_union_with_ipc_root(
             &fixture.helper,
             &fixture.roots,
             timeout,
             cancelled,
+            fixture.base(),
         )?);
     } else {
-        drop(SharedReader::acquire_union(
+        drop(SharedReader::acquire_union_with_ipc_root(
             &fixture.helper,
             &fixture.roots,
             timeout,
             cancelled,
+            fixture.base(),
         )?);
     }
     Ok(())
@@ -264,12 +267,13 @@ fn late_domain_contention_releases_all_earlier_reads_before_waiting() -> io::Res
         let mut early = Writer::start_after(&fixture.locks[0], &early_ready, &early_release, Some(&early_begin))?;
         let helper = fixture.helper.clone();
         let roots = fixture.roots.clone();
+        let ipc_root = fixture.base().to_path_buf();
         let (send, receive) = mpsc::channel();
         let thread = thread::spawn(move || {
             let result = if proxy {
-                SharedReadProxy::acquire_union(&helper, &roots, WAIT, &|| false).map(drop)
+                SharedReadProxy::acquire_union_with_ipc_root(&helper, &roots, WAIT, &|| false, &ipc_root).map(drop)
             } else {
-                SharedReader::acquire_union(&helper, &roots, WAIT, &|| false).map(drop)
+                SharedReader::acquire_union_with_ipc_root(&helper, &roots, WAIT, &|| false, &ipc_root).map(drop)
             };
             let _sent = send.send(result);
         });
@@ -296,7 +300,7 @@ fn late_domain_contention_releases_all_earlier_reads_before_waiting() -> io::Res
 fn fixed_root_order_is_preserved_after_lock_ordered_admission() -> io::Result<()> {
     let fixture = Fixture::new("normal")?;
     let roots = fixture.roots.iter().rev().cloned().collect::<Vec<_>>();
-    let readers = SharedReader::acquire_union(&fixture.helper, &roots, WAIT, &|| false)?;
+    let readers = SharedReader::acquire_union_with_ipc_root(&fixture.helper, &roots, WAIT, &|| false, fixture.base())?;
     assert_eq!(readers.len(), roots.len());
     for (reader, root) in readers.iter().zip(&roots) {
         reader.guardian_loan(root)?;
@@ -358,8 +362,9 @@ fn any_connected_or_failed_descriptor_exchange_is_hard_even_with_exit75() -> io:
         "malformed",
     ] {
         let fixture = Fixture::new(mode)?;
-        let error = SharedReader::acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| false)
-            .expect_err("post-connection failure cannot authorize admission retry");
+        let error =
+            SharedReader::acquire_union_with_ipc_root(&fixture.helper, &fixture.roots, WAIT, &|| false, fixture.base())
+                .expect_err("post-connection failure cannot authorize admission retry");
         assert!(
             !is_admission_contention(&error),
             "accepted a post-transfer busy marker for {mode}"
@@ -372,9 +377,10 @@ fn any_connected_or_failed_descriptor_exchange_is_hard_even_with_exit75() -> io:
 #[test]
 fn proxy_stdout_bytes_make_exit75_a_hard_failure() -> io::Result<()> {
     let fixture = Fixture::new("proxy_byte75")?;
-    let error = SharedReadProxy::acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| false)
-        .map(drop)
-        .expect_err("even partial stdout bytes invalidate pre-ready contention");
+    let error =
+        SharedReadProxy::acquire_union_with_ipc_root(&fixture.helper, &fixture.roots, WAIT, &|| false, fixture.base())
+            .map(drop)
+            .expect_err("even partial stdout bytes invalidate pre-ready contention");
     assert!(!is_admission_contention(&error));
     assert_eq!(fixture.starts()?, 1);
     Ok(())
@@ -428,9 +434,15 @@ fn proxy_cleanup_uncertainty_prevents_any_next_admission_attempt() -> io::Result
     let late_release = fixture.base().join("late.release");
     let mut late = Writer::start(&fixture.locks[1], &late_ready, &late_release)?;
     wait_for(|| late_ready.exists())?;
-    let error = SharedReadProxy::acquire_union(&fixture.helper, &fixture.roots, Duration::from_millis(220), &|| false)
-        .map(drop)
-        .expect_err("unconfirmed partial proxy closure cannot authorize retry");
+    let error = SharedReadProxy::acquire_union_with_ipc_root(
+        &fixture.helper,
+        &fixture.roots,
+        Duration::from_millis(220),
+        &|| false,
+        fixture.base(),
+    )
+    .map(drop)
+    .expect_err("unconfirmed partial proxy closure cannot authorize retry");
     assert!(!is_admission_contention(&error));
     assert!(fixture.observed("cleanup_wait"));
     assert_eq!(fixture.starts()?, 2, "retried while old SH cleanup unknown");
@@ -449,14 +461,19 @@ fn proxy_cleanup_uncertainty_prevents_any_next_admission_attempt() -> io::Result
 fn pre_cancelled_union_launches_no_helper_and_try_union_makes_one_round() -> io::Result<()> {
     let fixture = Fixture::new("always_busy")?;
     let cancelled = AtomicBool::new(true);
-    let error = SharedReader::acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| {
-        cancelled.load(Ordering::Acquire)
-    })
+    let error = SharedReader::acquire_union_with_ipc_root(
+        &fixture.helper,
+        &fixture.roots,
+        WAIT,
+        &|| cancelled.load(Ordering::Acquire),
+        fixture.base(),
+    )
     .expect_err("pre-cancel must not launch");
     assert_eq!(error.kind(), io::ErrorKind::Interrupted);
     assert_eq!(fixture.starts()?, 0);
-    let error = SharedReader::try_acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| false)
-        .expect_err("one pre-body admission round");
+    let error =
+        SharedReader::try_acquire_union_with_ipc_root(&fixture.helper, &fixture.roots, WAIT, &|| false, fixture.base())
+            .expect_err("one pre-body admission round");
     assert!(is_admission_contention(&error));
     assert_eq!(fixture.starts()?, 1);
     Ok(())
@@ -465,9 +482,10 @@ fn pre_cancelled_union_launches_no_helper_and_try_union_makes_one_round() -> io:
 #[test]
 fn proxy_readiness_then_exit75_never_authorizes_a_retry() -> io::Result<()> {
     let fixture = Fixture::new("proxy_ready75")?;
-    let error = SharedReadProxy::acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| false)
-        .map(drop)
-        .expect_err("a helper exit after readiness is a hard custody failure");
+    let error =
+        SharedReadProxy::acquire_union_with_ipc_root(&fixture.helper, &fixture.roots, WAIT, &|| false, fixture.base())
+            .map(drop)
+            .expect_err("a helper exit after readiness is a hard custody failure");
     assert!(!is_admission_contention(&error));
     let started = fixture.starts()?;
     assert!(
@@ -481,12 +499,19 @@ fn proxy_readiness_then_exit75_never_authorizes_a_retry() -> io::Result<()> {
 fn complete_domain_preflight_refuses_demand_before_spawning_any_helper() -> io::Result<()> {
     let fixture = Fixture::new("normal")?;
     let demand = crate::writer_demand::WriterDemand::announce(&fixture.locks, WAIT, &|| false)?;
-    let error = SharedReader::try_acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| false)
-        .expect_err("complete fixed domain demand is checked before any helper");
+    let error =
+        SharedReader::try_acquire_union_with_ipc_root(&fixture.helper, &fixture.roots, WAIT, &|| false, fixture.base())
+            .expect_err("complete fixed domain demand is checked before any helper");
     assert!(is_admission_contention(&error));
     assert_eq!(fixture.starts()?, 0);
     drop(demand);
-    let readers = SharedReader::try_acquire_union(&fixture.helper, &fixture.roots, WAIT, &|| false)?;
+    let readers = SharedReader::try_acquire_union_with_ipc_root(
+        &fixture.helper,
+        &fixture.roots,
+        WAIT,
+        &|| false,
+        fixture.base(),
+    )?;
     assert_eq!(readers.len(), fixture.roots.len());
     assert_eq!(fixture.starts()?, 2);
     Ok(())

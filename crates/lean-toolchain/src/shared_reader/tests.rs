@@ -8,22 +8,38 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static IPC_ROOT_NEXT: AtomicUsize = AtomicUsize::new(0);
 
-struct ExplicitIpcRoot(PathBuf);
+pub(super) struct ExplicitIpcRoot(pub(super) PathBuf);
 impl ExplicitIpcRoot {
-    fn new() -> io::Result<Self> {
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .ok_or_else(|| invalid("workspace"))?;
-        let base = workspace.join("target/test-state");
-        fs::create_dir_all(&base)?;
+    pub(super) fn new() -> io::Result<Self> {
+        let base = if let Some(explicit) = std::env::var_os("LEAN_RS_TEST_IPC_BASE") {
+            let base = PathBuf::from(explicit);
+            validate_ipc_root(&base)?;
+            if fs::symlink_metadata(&base)?.mode() & 0o7777 != 0o700 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "test IPC base must have mode 0700",
+                ));
+            }
+            base
+        } else {
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .ok_or_else(|| invalid("workspace"))?;
+            let base = workspace.join("target");
+            fs::create_dir_all(&base)?;
+            base.canonicalize()?
+        };
         let root = base.join(format!(
             "r{:x}{:02x}",
             std::process::id(),
             IPC_ROOT_NEXT.fetch_add(1, Ordering::Relaxed)
         ));
+        // Fail before creating fixture state if the actual per-test path will
+        // not fit the transport on this platform.
+        SocketAddr::from_pathname(root.join("lean-read-000000000000000000000000/fd.sock"))?;
         fs::DirBuilder::new().mode(0o700).create(&root)?;
-        Ok(Self(root.canonicalize()?))
+        Ok(Self(root))
     }
 }
 impl Drop for ExplicitIpcRoot {
