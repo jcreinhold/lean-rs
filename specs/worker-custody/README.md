@@ -117,15 +117,15 @@ so this is not a sandbox against adversarial native code.
 
 | Model step or fact | Current implementation | Focused evidence / missing evidence |
 | --- | --- | --- |
-| reserve before spawn | `LeanWorkerProcessTracker::launch`, `process.rs` | `reaper_start_failure_prevents_launch_and_releases_no_unowned_capacity`; `failed_launch_holds_reservation_until_spawn_returns` |
-| authenticate identities | `ParentLifetime::accept`, `crash_ownership.rs` | current code authenticates before returning a lease, but also publishes Running inside the same fallible call |
-| persist bootstrap recovery identity | no selected implementation | required so recovery can authenticate the exact pre-Running group after supervisor loss |
-| adopt cleanup lease | `OwnedChild::attach_lifetime`; `OwnedCommandGroup::adopt_private_session` | current supervisor adopts only after `accept` has published Running; this order does not conform to the selected contract |
-| publish Running, then ACK | `ParentLifetime::accept`; `OwnedChild::acknowledge_lifetime`; `supervisor.rs` | current order is publish → return lease → adopt → ACK; two-phase refactoring and crash-cut tests are missing |
+| reserve before possible spawn | `LeanWorkerProcessTracker::launch`; `ParentLifetime::dispatch`; `LeanWorkerProcessTracker::spawn_guarded` | tracker capacity and durable `dispatching` precede the spawn syscall; only a returned no-child spawn error may publish `preparing_closed`; rename/fsync uncertainty remains fail-closed |
+| authenticate identities and retain cleanup | `ParentLifetime::accept`; `BootstrapCustody`; `LeanWorkerNativePendingCleanup` | HELLO nonce/protocol/worker identity and kernel birth/session/group identities are checked; authenticated stream and identities enter shared custody before fallible publication; `native_pending_cleanup_retains_exact_closure` covers the retained error owner |
+| persist bootstrap recovery identity | `ParentLifetime::accept`; `native_guardian::publish_startup_owner` | durable `bootstrap` publication binds parent, worker, guardian, generation and capacity slot before adoption; recovery after loss of both cleanup authorities remains unsupported |
+| adopt cleanup lease | `OwnedChild::attach_lifetime`; `OwnedCommandGroup::adopt_private_session` | adoption precedes Running publication; an adoption or publication error returns typed `AfterSpawn` custody instead of a plain no-spawn error |
+| publish Running, then ACK | `ParentLifetimeLease::publish_running`; `ParentLifetimeLease::acknowledge`; `LeanWorkerNativeScopeLease::acknowledge` | ACK refuses a lease without durable Running; the clean partial-ACK fault test used synthetic admission to isolate the real write loop and observed a positive wire write followed by failure without reporting success |
 | guardian loss requests stop | `OwnedChild::poll_guardian`; `LeanWorkerProcessTracker::reap_pending` | source mapping exists; current-code guardian-loss regression is still missing |
-| supervisor loss | guardian parent stream and recorded identity; `native_guardian.rs` | guardian drains the group on owner loss; current-SDK fault qualification is missing |
+| supervisor loss | guardian parent stream and recorded identity; `native_guardian.rs` | guardian drains the group on owner loss; the current clean focused receipts do not cut supervisor loss after each bootstrap transition |
 | authentic physical closure | `OwnedCommandGroup::try_wait`; `ParentLifetimeLease::retirement_closed` | direct wait and ECHILD/whole-group tests; OS behavior remains assumed |
-| custody-capacity return | `LeanWorkerProcessTracker::release`; `ParentLifetimeLease::retirement_closed` | tracker reservation/drop tests; guarded closure requires group and guardian absence, but no refinement test exists |
+| custody-capacity return | `LeanWorkerProcessTracker::release`; `ParentLifetimeLease::retirement_closed`; `BootstrapCustody::closed` | guarded closure requires both group absence and guardian death; the clean retained-`AfterSpawn` test observed tracker 1 before closure and 0 after exact closure, but is not a proof of every wait/ECHILD/drop cut |
 | shared lock aliases | `shared_reader`, `native_guardian::retain_reads`, child inherited reads | transfer/union tests cover selected paths; no explicit-unlock negative test |
 | writer exclusion | `writer_lock` and shared-reader locks | same-inode contention tests; guardian-loss qualification exposed an early-admission trace |
 
@@ -140,14 +140,24 @@ one literal root-process descriptor. `GuardianReady` means the helper has sent
 its generation-bound HELLO and can drain the private group if ACK never arrives;
 artifact read transfer still occurs after startup and remains abstract here.
 
-The two-phase accept order alone is insufficient. Current Preparing collection
-uses exact parent death as closure even though a pre-ACK child may still exist.
-If the supervisor dies after spawn but before Running publication, that rule can
-return actor capacity before group absence. The selected uniform contract must
-therefore keep Preparing capacity fail-closed after possible spawn, persist the
-exact bootstrap identity, and let a guardian or adopted owner publish group
-closure. If both authorities disappear first, the reservation stays fenced;
-the model makes no automatic recovery claim for that state.
+The earlier implementation had two distinct hazards. Preparing collection
+could use exact parent death as closure even though a pre-ACK child still
+existed. Separately, retained `run-before-running/receipt.json` on SDK
+`21cd9f5` observed early registry admission while the payload group remained
+present, followed by tracker release while the guardian remained live after a
+publication collision. Current code instead publishes `dispatching` before
+possible spawn, installs authenticated custody before fallible `bootstrap`
+publication, adopts before Running, and requires Running before ACK. The clean
+focused receipts at `/tmp/lean-sdk-clean-partial-394b6f9/receipt.json` and
+`/tmp/lean-sdk-clean-afterspawn-escalated-394b6f9/receipt.json` cover an
+isolated real ACK write loop under synthetic admission and retained
+`AfterSpawn` cleanup on one Darwin host. They do not cover supervisor loss at
+every transition, ECHILD at every cleanup path, escaped descendants, both
+cleanup authorities disappearing, Linux managed-group parity, or power loss.
+If both authorities disappear in pre-Running `dispatching` or `bootstrap`
+without a durable closure receipt, the reservation remains fenced; neither the
+code nor the model claims automatic recovery for that state. Persisted Running
+has a separate passive group-absence recovery rule.
 
 ## TLC checks
 
