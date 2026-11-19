@@ -603,6 +603,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerCapabilityBuilder
 pub struct lean_rs_worker_parent::LeanWorkerChild
 impl lean_rs_worker_parent::LeanWorkerChild
+pub fn lean_rs_worker_parent::LeanWorkerChild::checked_native_loader_environment(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::env_override(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::for_toolchain(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -633,6 +634,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerChild
 pub struct lean_rs_worker_parent::LeanWorkerConfig
 impl lean_rs_worker_parent::LeanWorkerConfig
+pub fn lean_rs_worker_parent::LeanWorkerConfig::checked_native_loader_environment(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::current_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::env(self, impl core::convert::Into<std::ffi::os_str::OsString>, impl core::convert::Into<std::ffi::os_str::OsString>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::executable(&self) -> &std::path::Path
@@ -1608,3 +1610,4 @@ pub trait lean_rs_worker_parent::LeanWorkerProgressSink: core::marker::Send + co
 pub fn lean_rs_worker_parent::LeanWorkerProgressSink::report(&self, lean_rs_worker_parent::LeanWorkerProgressEvent)
 pub trait lean_rs_worker_parent::LeanWorkerTypedDataSink<Row>: core::marker::Send + core::marker::Sync
 pub fn lean_rs_worker_parent::LeanWorkerTypedDataSink::report(&self, lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>)
+pub fn lean_rs_worker_parent::inherit_checked_native_loader_environment(&mut std::process::Command) -> std::io::error::Result<()>

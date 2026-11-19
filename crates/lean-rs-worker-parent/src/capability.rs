@@ -1856,6 +1856,9 @@ fn spawn_checked_worker(
     let mut config = LeanWorkerConfig::new(worker_executable)
         .env("LEAN_SYSROOT", lean_sysroot.as_os_str())
         .shared_artifact_reads(worker_child.shared_artifact_reads);
+    if worker_child.check_loader_environment {
+        config = config.checked_native_loader_environment();
+    }
     if let Some(executable) = &worker_child.shared_writer_executable {
         config = config.env("LEAN_HOST_MCP_WRITER_EXECUTABLE", executable.as_os_str());
     }
@@ -2011,6 +2014,7 @@ pub struct LeanWorkerChild {
     lean_sysroot: Option<PathBuf>,
     shared_writer_executable: Option<PathBuf>,
     prepared_host_artifacts: Option<lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts>,
+    check_loader_environment: bool,
     shared_artifact_reads: bool,
     #[cfg(unix)]
     lifetime_directory: Option<PathBuf>,
@@ -2039,6 +2043,7 @@ impl LeanWorkerChild {
             lean_sysroot: None,
             shared_writer_executable: None,
             prepared_host_artifacts: None,
+            check_loader_environment: false,
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
@@ -2059,6 +2064,7 @@ impl LeanWorkerChild {
             lean_sysroot: None,
             shared_writer_executable: None,
             prepared_host_artifacts: None,
+            check_loader_environment: false,
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
@@ -2085,6 +2091,7 @@ impl LeanWorkerChild {
             lean_sysroot: Some(sysroot.into()),
             shared_writer_executable: None,
             prepared_host_artifacts: None,
+            check_loader_environment: false,
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
@@ -2168,6 +2175,14 @@ impl LeanWorkerChild {
     #[must_use]
     pub fn shared_artifact_reads(mut self, required: bool) -> Self {
         self.shared_artifact_reads = required;
+        self
+    }
+
+    /// Refuse native loader environment overrides before each worker launch or restart.
+    /// This is off by default and does not attest the native images.
+    #[must_use]
+    pub fn checked_native_loader_environment(mut self) -> Self {
+        self.check_loader_environment = true;
         self
     }
 

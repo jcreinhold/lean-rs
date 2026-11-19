@@ -311,6 +311,11 @@ supervision, but they do not own the primitive child cleanup semantics inside `l
 replacement, restart intensity, and stale-session invalidation remain in `lean-rs-worker-parent` and
 `lean-rs-worker-child`.
 
+An application that selects native images can opt in to `checked_native_loader_environment` on its worker
+configuration. Each launch and restart rejects loader overrides before it starts a child. The application still
+owns executable and image checks. Use `inherit_checked_native_loader_environment` for a separate helper only when the helper
+should inherit the parent environment; it freezes that environment with the helper's explicit additions and removals.
+
 ## Operational Assumptions
 
 - OS process signaling, pipe EOF, broken-pipe behavior, and RSS sampling follow the platform contracts available to Rust

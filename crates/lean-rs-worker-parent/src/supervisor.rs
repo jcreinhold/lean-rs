@@ -281,6 +281,7 @@ pub struct LeanWorkerConfig {
     executable: PathBuf,
     process_tracker: LeanWorkerProcessTracker,
     current_dir: Option<PathBuf>,
+    check_loader_environment: bool,
     shared_artifact_reads: bool,
     #[cfg(unix)]
     lifetime_directory: Option<PathBuf>,
@@ -306,6 +307,7 @@ impl LeanWorkerConfig {
             executable: executable.into(),
             process_tracker: LeanWorkerProcessTracker::new(),
             current_dir: None,
+            check_loader_environment: false,
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
@@ -387,6 +389,14 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn shared_artifact_reads(mut self, required: bool) -> Self {
         self.shared_artifact_reads = required;
+        self
+    }
+
+    /// Refuse native loader environment overrides before each worker launch or restart.
+    /// Other workers keep the default environment handling.
+    #[must_use]
+    pub fn checked_native_loader_environment(mut self) -> Self {
+        self.check_loader_environment = true;
         self
     }
 
@@ -1958,6 +1968,13 @@ impl LeanWorker {
         }
         for (key, value) in &config.env {
             command.env(key, value);
+        }
+        if config.check_loader_environment {
+            crate::inherit_checked_native_loader_environment(&mut command).map_err(|error| {
+                SpawnFailure::no_child(LeanWorkerError::Setup {
+                    message: error.to_string(),
+                })
+            })?;
         }
         if config.shared_artifact_reads {
             command.env("LEAN_RS_WORKER_SHARED_ARTIFACT_READS", "1");
@@ -5735,6 +5752,16 @@ mod tests {
     };
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn checked_worker_rejects_loader_override_before_spawn() {
+        let config = LeanWorkerConfig::new("unused-loader-test-executable")
+            .env("DYLD_LIBRARY_PATH", "/unused-loader-test-directory")
+            .checked_native_loader_environment();
+        let result = super::LeanWorker::spawn(&config);
+        assert!(matches!(result, Err(LeanWorkerError::Setup { message })
+            if message.starts_with("native loader environment override refused:")));
+    }
 
     #[cfg(unix)]
     #[test]
