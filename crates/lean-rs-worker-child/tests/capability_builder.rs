@@ -459,19 +459,88 @@ fn a_host_handle_built_without_imports_opens_no_session() {
 /// An import set the builder *was* given still fails at `open`, as before.
 #[test]
 fn a_host_handle_built_with_a_broken_import_still_fails_at_open() {
-    let project = TempLakeProject::new("host-handle-broken-eager-import");
-    project.write(
-        "lakefile.lean",
-        "import Lake\nopen Lake DSL\npackage worker_host_broken\nlean_lib Demo\n",
-    );
-    project.write("Demo.lean", "import Demo.Broken\n");
-    project.write("Demo/Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
-    project.lake_build_err("Demo.Broken");
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Selection {
+        project: PathBuf,
+        worker: PathBuf,
+        sysroot: PathBuf,
+        worker_sha256: String,
+    }
 
-    match LeanWorkerHostHandleBuilder::shims_only(project.path(), ["Demo.Broken"])
-        .worker_executable(worker_binary())
-        .open()
-    {
+    let mut temporary = None;
+    let (project, child) = if let Some(selection) = option_env!("LEAN_RS_TEST_BROKEN_IMPORT") {
+        use sha2::{Digest, Sha256};
+        let selected: Selection = serde_json::from_str(selection).expect("checked fixture selection");
+        assert_eq!(
+            selected.project.canonicalize().expect("canonical fixture"),
+            selected.project
+        );
+        assert_eq!(
+            selected.worker.canonicalize().expect("canonical worker"),
+            selected.worker
+        );
+        use std::fmt::Write as _;
+        use std::io::Read as _;
+        const MAX_WORKER_BYTES: u64 = 256 * 1024 * 1024;
+        let metadata = fs::symlink_metadata(&selected.worker).expect("selected worker metadata");
+        assert!(metadata.is_file() && metadata.len() <= MAX_WORKER_BYTES);
+        let mut file = fs::File::open(&selected.worker).expect("open selected worker");
+        let opened = file.metadata().expect("opened worker metadata");
+        assert!(opened.is_file() && opened.len() == metadata.len());
+        let mut remaining = opened.len();
+        let mut digest = Sha256::new();
+        let mut chunk = [0_u8; 16 * 1024];
+        loop {
+            let count = file.read(&mut chunk).expect("read selected worker");
+            if count == 0 {
+                break;
+            }
+            remaining = remaining.checked_sub(count as u64).expect("selected worker grew");
+            digest.update(&chunk[..count]);
+        }
+        assert_eq!(remaining, 0, "selected worker shrank");
+        assert_eq!(file.metadata().expect("final worker metadata").len(), opened.len());
+        let mut actual = String::new();
+        for byte in digest.finalize() {
+            write!(&mut actual, "{byte:02x}").expect("encode digest");
+        }
+        assert_eq!(actual, selected.worker_sha256, "selected worker changed");
+        assert!(std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE").is_none());
+        assert!(std::env::var_os("LEAN_PATH").is_none());
+        let bare_tracker = lean_rs_worker_parent::LeanWorkerProcessTracker::new();
+        match LeanWorkerHostHandleBuilder::shims_only(&selected.project, ["Demo.Broken"])
+            .worker_child(LeanWorkerChild::for_toolchain(worker_binary(), &selected.sysroot))
+            .process_tracker(bare_tracker.clone())
+            .open()
+        {
+            Err(LeanWorkerError::Worker { code, message }) => {
+                assert_eq!(code, "lean_rs.module_init", "{message}");
+                assert!(message.contains("application-installed worker authority"), "{message}");
+            }
+            _ => panic!("bare worker did not refuse the named import"),
+        }
+        assert_eq!(bare_tracker.active_processes(), 0, "bare worker must be reaped");
+        let child = LeanWorkerChild::for_toolchain(selected.worker, selected.sysroot);
+        (selected.project, child)
+    } else {
+        let project = temporary.insert(TempLakeProject::new("host-handle-broken-eager-import"));
+        project.write(
+            "lakefile.lean",
+            "import Lake\nopen Lake DSL\npackage worker_host_broken\nlean_lib Demo\n",
+        );
+        project.write("Demo.lean", "import Demo.Broken\n");
+        project.write("Demo/Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
+        project.lake_build_err("Demo.Broken");
+        (project.path().to_path_buf(), LeanWorkerChild::path(worker_binary()))
+    };
+    let tracker = lean_rs_worker_parent::LeanWorkerProcessTracker::new();
+    let result = LeanWorkerHostHandleBuilder::shims_only(project, ["Demo.Broken"])
+        .worker_child(child)
+        .process_tracker(tracker.clone())
+        .open();
+    assert_eq!(tracker.active_processes(), 0, "failed import must retire its child");
+    match result {
         Ok(_) => panic!("a named broken import should still fail while opening the handle"),
         Err(LeanWorkerError::Worker { code, message }) => {
             assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");

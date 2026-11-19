@@ -22,13 +22,21 @@ impl MetadataApp {
     fn deployment(&self) -> LeanResult<&Arc<Held>> {
         self.0
             .get_or_init(|| {
-                Held::acquire(Record::selected())
+                let record = Record::selected();
+                if record.broken_import != broken_import_profile()
+                    || (record.broken_import && (record.typed_session || record.verification))
+                {
+                    return Err("worker and record select different fixture profiles".to_owned());
+                }
+                Held::acquire(record)
                     .and_then(|held| {
                         held.verify()?;
                         Ok(Arc::new(held))
                     })
                     .map_err(|error| {
-                        audit(&format!("refused {error}"));
+                        if !broken_import_profile() {
+                            audit(&format!("refused {error}"));
+                        }
                         error.to_string()
                     })
             })
@@ -39,22 +47,23 @@ impl MetadataApp {
 fn denied() -> lean_rs::LeanError {
     lean_rs::error::host_internal("operation outside this metadata application")
 }
+fn broken_import_profile() -> bool {
+    option_env!("LEAN_RS_METADATA_BROKEN_IMPORT") == Some("1")
+}
 fn ioerr(e: std::io::Error) -> lean_rs::LeanError {
-    audit(&format!("refused {e}"));
+    if !broken_import_profile() {
+        audit(&format!("refused {e}"));
+    }
     lean_rs::error::host_internal(e.to_string())
 }
 impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.typed_session || path != d.consumer_manifest {
+        if d.broken_import || d.typed_session || path != d.consumer_manifest {
             return Err(denied());
         }
-        Ok(WorkerManifestRead::new(
-            d.project.clone(),
-            path.into(),
-            held.clone(),
-        ))
+        Ok(WorkerManifestRead::new(d.project.clone(), path.into(), held.clone()))
     }
     fn worker(
         &self,
@@ -64,7 +73,7 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.typed_session || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
+        if d.broken_import || d.typed_session || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
         audit("authorize-consumer-load");
@@ -93,13 +102,17 @@ impl WorkerAuthority for MetadataApp {
             || p.artifact_roots() != d.shim_roots
             || p.shim_search_paths() != d.shim_paths
         {
-            audit("refused prepared host descriptor");
+            if !d.broken_import {
+                audit("refused prepared host descriptor");
+            }
             return Err(denied());
         }
-        if !d.typed_session {
+        if !d.broken_import && !d.typed_session {
             held.check_interop_visibility(true).map_err(ioerr)?;
         }
-        audit("authorize-host-load");
+        if !d.broken_import {
+            audit("authorize-host-load");
+        }
         // SAFETY: the build-selected SDK supplied its own compiled shim and full generated ABI.
         // Admission checked both manifests, the common interop image and all image bytes
         // under the retained deployment guard. This worker uses the pinned private release.
@@ -114,7 +127,9 @@ impl WorkerAuthority for MetadataApp {
             )?
         };
         held.check_interop_visibility(true).map_err(ioerr)?;
-        audit("verified-global-interop-initializer");
+        if !d.broken_import {
+            audit("verified-global-interop-initializer");
+        }
         Ok(shim)
     }
     fn imports<'cap>(
@@ -128,14 +143,14 @@ impl WorkerAuthority for MetadataApp {
         if cap.library_path() != held.record.host_image {
             return Err(denied());
         }
-        held.record
-            .check_order(&paths, &names, &options)
-            .map_err(ioerr)?;
-        audit(if held.record.typed_session {
-            "authorize-Handles-SourceRanges-import"
-        } else {
-            "authorize-Callback-import"
-        });
+        held.record.check_order(&paths, &names, &options).map_err(ioerr)?;
+        if !held.record.broken_import {
+            audit(if held.record.typed_session {
+                "authorize-Handles-SourceRanges-import"
+            } else {
+                "authorize-Callback-import"
+            });
+        }
         // SAFETY: the checked scope has the sealed fixture’s exact names, audited profile and ordered
         // deployment roots. The retained guard covers each actual imported file and shadowing
         // prefix. No external inherited search path or plugin participates.
@@ -149,7 +164,8 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<(LeanLibrary<'static>, LeanModuleInitializer)> {
         let held = self.deployment()?;
         let expected = LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture");
-        if !held.record.typed_session
+        if held.record.broken_import
+            || !held.record.typed_session
             || path != held.record.consumer_image
             || requested != &expected
         {
@@ -216,7 +232,7 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<()> {
         let d = &self.deployment()?.record;
         let roots = d.verification_roots();
-        if !d.typed_session
+        if d.broken_import || !d.typed_session
             || !d.verification
             || context.capability.library_path() != d.host_image
             || observed != Some(roots.as_slice())
@@ -233,6 +249,9 @@ impl WorkerAuthority for MetadataApp {
         request: DeclarationVerificationRequest,
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationRequest>> {
+        if broken_import_profile() {
+            return Err(denied());
+        }
         if options.file != "/verify/theorem.lean"
             || !options.namespace.is_empty()
             || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT

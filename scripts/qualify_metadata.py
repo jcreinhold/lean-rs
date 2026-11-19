@@ -26,6 +26,8 @@ TARGET = SDK / "target"
 STATE = TARGET / "metadata-qualification/ordinary"
 STATE_LOCK = TARGET / "metadata-qualification/.ordinary.lock"
 SOCKET_ROOT = TARGET / "ws"
+BROKEN_IMPORT_TEST = "a_host_handle_built_with_a_broken_import_still_fails_at_open"
+MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
     "lean": "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e",
@@ -177,18 +179,22 @@ def space(path):
     require(shutil.disk_usage(path).free >= 25 * 2**30, f"less than 25 GiB free on {path}")
 
 
-def environment(state, helper, release, deployment=None):
+def build_environment(release, scratch):
     # These are trusted build tools. In particular, no loader overrides or Cargo wrappers
     # cross into the readiness executable, writer, guardian or child.
     prefix = release
     cargo = Path.home() / ".cargo/bin"
-    env = dict(HOME=str(Path.home()), PATH=os.pathsep.join(map(str, [
+    return dict(HOME=str(Path.home()), PATH=os.pathsep.join(map(str, [
         prefix / "bin", cargo, Path(sys.executable).parent, "/usr/bin", "/bin",
     ])), LEAN_SYSROOT=str(prefix), LEAN_NUM_THREADS="1", CARGO_BUILD_JOBS="1",
         CARGO_INCREMENTAL="0", CARGO_TARGET_DIR=str(TARGET), CARGO_NET_OFFLINE="true",
-        TMPDIR=str(TARGET / "tmp"),
-        LEAN_HOST_MCP_WRITER_EXECUTABLE=str(helper), D3_HELPER=str(helper),
-        LEAN_RS_WORKER_OWNERS_DIRECTORY=str(state / "owners"))
+        TMPDIR=str(scratch))
+
+
+def environment(state, helper, release, deployment=None):
+    env = build_environment(release, TARGET / "tmp")
+    env.update(LEAN_HOST_MCP_WRITER_EXECUTABLE=str(helper), D3_HELPER=str(helper),
+               LEAN_RS_WORKER_OWNERS_DIRECTORY=str(state / "owners"))
     if deployment is not None:
         env.update(LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(deployment),
                    LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(deployment),
@@ -401,10 +407,66 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
     shutil.rmtree(root)
 
 
+def qualify_broken_import(release, profile):
+    """Run one ordinary SDK worker test, without the downstream host helper."""
+    require(TARGET == TARGET.resolve(strict=True), "aliased SDK target")
+    parent = TARGET / "metadata-qualification"
+    require(parent == parent.resolve(strict=True), "aliased fixture directory")
+    timeout = shutil.which("gtimeout") if platform.system() == "Darwin" else shutil.which("timeout")
+    require(timeout is not None, "GNU timeout is required for the broken-import check")
+    check_tracked_fixture_sources()
+    space(TARGET)
+    state = parent / "broken-import"
+    state.mkdir(mode=0o700)  # Refuse a previous or uncertain invocation.
+    owner = state.stat()
+    scratch = state / "tmp"
+    scratch.mkdir(mode=0o700)
+    env = build_environment(release, scratch)
+
+    def run(command, cwd):
+        space(TARGET)
+        subprocess.run([timeout, "--signal=TERM", "--kill-after=15s", "8m", *command],
+                       cwd=cwd, env=env, check=True)
+
+    cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
+    run([*cargo, "--bin", "prepare"], APP)
+    run([TARGET / "debug/prepare", state, "--broken-import"], APP)
+    record = state / "deployment.json"
+    require(record == record.resolve(strict=True) and record.is_file(), "missing exact fixture record")
+    env.update(LEAN_RS_METADATA_BROKEN_IMPORT="1", LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
+               LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record))
+    run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
+    worker = TARGET / "debug/metadata-worker"
+    require(worker == worker.resolve(strict=True) and worker.is_file() and os.access(worker, os.X_OK)
+            and worker.stat().st_size <= MAX_FIXTURE_WORKER_BYTES, "selected fixture worker is not a bounded executable")
+    with worker.open("rb") as stream:
+        expected = os.fstat(stream.fileno()).st_size
+        require(expected <= MAX_FIXTURE_WORKER_BYTES, "selected fixture worker grew before hashing")
+        sha256 = hashlib.sha256()
+        remaining = expected
+        while chunk := stream.read(min(64 * 1024, remaining + 1)):
+            remaining -= len(chunk)
+            require(remaining >= 0, "selected fixture worker grew while hashing")
+            sha256.update(chunk)
+        require(remaining == 0, "selected fixture worker shrank while hashing")
+    env["LEAN_RS_TEST_BROKEN_IMPORT"] = json.dumps(dict(
+        project=str(state / "lean"), worker=str(worker), sysroot=str(release), worker_sha256=sha256.hexdigest()))
+    select_nextest_runner(env, profile)
+    run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail", "--retries", "0",
+         "-p", "lean-rs-worker-child", "--test", "capability_builder", "-E", f"test(={BROKEN_IMPORT_TEST})"], SDK)
+
+    # The named test confirms both workers were reaped. On a failure or
+    # timeout, keep this state and refuse further attempts pending closure.
+    closed = state.stat()
+    require(state == state.resolve(strict=True) and (closed.st_dev, closed.st_ino) == (owner.st_dev, owner.st_ino),
+            "broken-import fixture directory changed")
+    shutil.rmtree(state)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--writer", type=Path, required=True)
-    parser.add_argument("--writer-sha256", required=True, help="independently reviewed digest of this local helper")
+    parser.add_argument("--writer", type=Path)
+    parser.add_argument("--writer-sha256", help="independently reviewed digest of this local helper")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--disposable-clean", action="store_true",
                        help="prepare or consume a one-use typed deployment to check guarded Lake clean")
@@ -412,7 +474,8 @@ def main():
     modes.add_argument("--verify-declaration", action="store_true",
                        help="qualify four reviewed single-declaration requests on the typed fixture")
     commands = parser.add_subparsers(dest="command", required=True)
-    prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
+    commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
+    commands.add_parser("broken-import", help="run the private SDK broken-import fixture without a writer helper")
     run = commands.add_parser("run", help="execute the selected tests against a reviewed deployment")
     run.add_argument("--unknown-declaration", action="store_true",
                      help="with --typed-session, run only the unknown-declaration lookup")
@@ -423,6 +486,11 @@ def main():
     run.add_argument("--control-sha256", required=True)
     run.add_argument("--deployment-sha256", required=True)
     args = parser.parse_args()
+    if args.command == "broken-import":
+        if args.writer is not None or args.writer_sha256 is not None:
+            parser.error("broken-import does not use a writer helper")
+    elif args.writer is None or args.writer_sha256 is None:
+        parser.error("prepare and run require --writer and --writer-sha256")
     if args.command == "run" and args.unknown_declaration and not args.typed_session:
         parser.error("--unknown-declaration requires --typed-session")
     if args.command == "run" and args.pool_validator_recovery and args.typed_session:
@@ -436,6 +504,10 @@ def main():
         refuse_inherited_loader_overrides()
         profile = verified_platform()
         release = installed_lean_release(profile)
+        if args.command == "broken-import":
+            with ordinary_state_lock():
+                qualify_broken_import(release, profile)
+            return
         reviewed_writer(args.writer, args.writer_sha256)
         writer = args.writer.resolve(strict=True)
         typed = args.typed_session or args.disposable_clean or args.verify_declaration

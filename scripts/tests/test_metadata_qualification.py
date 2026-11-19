@@ -295,6 +295,62 @@ class MetadataQualificationTest(unittest.TestCase):
         state_lock.assert_not_called()
         self.launch.assert_not_called()
 
+    def test_broken_import_runs_exact_case_with_no_helper_then_cleans(self):
+        state = self.state.with_name("broken-import")
+        self.worker.chmod(0o500)
+        seen = []
+
+        def run(command, *, cwd, env, check):
+            seen.append((command, cwd, dict(env), check))
+            if command[-1] == "--broken-import":
+                (state / "deployment.json").write_text("{}")
+
+        with patch.object(qualification.shutil, "which", return_value="/reviewed/gtimeout"), \
+                patch.object(qualification.subprocess, "run", side_effect=run):
+            qualification.qualify_broken_import(self.target, qualification.DARWIN_ARM64_PINS)
+
+        self.assertEqual(len(seen), 4)
+        for command, _, env, check in seen:
+            self.assertEqual(command[:4], ["/reviewed/gtimeout", "--signal=TERM", "--kill-after=15s", "8m"])
+            self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", env)
+            self.assertNotIn("LEAN_RS_METADATA_AUDIT_PATH", env)
+            self.assertTrue(check)
+        command, cwd, env, _ = seen[-1]
+        self.assertEqual(cwd, self.sdk)
+        self.assertEqual(command[-2:], ["-E", f"test(={qualification.BROKEN_IMPORT_TEST})"])
+        self.assertEqual(command[command.index("--retries") + 1], "0")
+        self.assertEqual(env["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"],
+                         qualification.DARWIN_ARM64_PINS["nextest_runner"])
+        self.assertEqual(json.loads(env["LEAN_RS_TEST_BROKEN_IMPORT"])["project"], str(state / "lean"))
+        self.assertFalse(state.exists())
+
+    def test_broken_import_failure_retains_owned_state_and_refuses_replay(self):
+        state = self.state.with_name("broken-import")
+        with patch.object(qualification.shutil, "which", return_value="/reviewed/gtimeout"), \
+                patch.object(qualification.subprocess, "run",
+                             side_effect=subprocess.CalledProcessError(124, "timeout")) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                qualification.qualify_broken_import(self.target, qualification.DARWIN_ARM64_PINS)
+            self.assertTrue(state.is_dir())
+            with self.assertRaises(FileExistsError):
+                qualification.qualify_broken_import(self.target, qualification.DARWIN_ARM64_PINS)
+        run.assert_called_once()
+
+    def test_broken_import_refuses_platform_before_creating_state(self):
+        argv = ["qualify_metadata.py", "broken-import"]
+        with patch.object(sys, "argv", argv), \
+                patch.object(qualification.platform, "system", return_value="Linux"), \
+                patch.object(qualification.platform, "machine", return_value="x86_64"), \
+                patch.dict(os.environ, {}, clear=True), \
+                patch("sys.stderr", new_callable=io.StringIO) as error, \
+                patch.object(qualification, "ordinary_state_lock") as state_lock, \
+                self.assertRaises(SystemExit) as stopped:
+            qualification.main()
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertIn("awaits verified Lean release", error.getvalue())
+        state_lock.assert_not_called()
+        self.launch.assert_not_called()
+
 
 class FixtureSourceTest(unittest.TestCase):
     def test_ordinary_checkout_keeps_tracked_fixture_sources(self):

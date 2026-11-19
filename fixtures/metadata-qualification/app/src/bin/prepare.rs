@@ -2,7 +2,10 @@ use lean_rs_worker_protocol::worker_exports::metadata_signature;
 use lean_toolchain::CargoLeanCapability;
 use std::{
     env, fs,
-    os::unix::{fs::MetadataExt, net::SocketAddr},
+    os::unix::{
+        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
+        net::SocketAddr,
+    },
     path::{Path, PathBuf},
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,16 +14,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ancestors()
         .nth(3)
         .ok_or("fixture app is not under the repository root")?;
-    let project = sdk.join("fixtures/metadata-qualification/lean");
     let state = PathBuf::from(env::args_os().nth(1).ok_or("missing deployment state directory")?);
     if !state.is_absolute() || state.canonicalize()? != state {
         return Err("deployment state is missing or aliased".into());
     }
     let target = sdk.join("target").canonicalize()?;
-    let expected_state = target.join("metadata-qualification/ordinary");
+    let broken_import = match env::args().nth(2).as_deref() {
+        None => false,
+        Some("--broken-import") if env::args().len() == 3 => true,
+        _ => return Err("unknown metadata qualification profile".into()),
+    };
+    let state_name = if broken_import { "broken-import" } else { "ordinary" };
+    let expected_state = target.join("metadata-qualification").join(state_name);
     if state != expected_state {
         return Err("deployment state is outside the ordinary metadata target".into());
     }
+    let sysroot = PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
+    let generated_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?
+        .ok_or("installed Lean release does not use a generated-output slot")?;
+    if broken_import {
+        return prepare_broken_import(app, &state, &sysroot, generated_output_key);
+    }
+    let project = sdk.join("fixtures/metadata-qualification/lean");
     let socket_root = target.join("ws");
     let socket_metadata = fs::symlink_metadata(&socket_root)?;
     let effective_uid = rustix::process::geteuid().as_raw();
@@ -33,9 +48,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     SocketAddr::from_pathname(socket_root.join("lean-read-000000000000000000000000/fd.sock"))?;
     SocketAddr::from_pathname(socket_root.join("lean-worker-000000000000000000000000/parent.sock"))?;
-    let sysroot = PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
-    let generated_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?
-        .ok_or("installed Lean release does not use a generated-output slot")?;
     let prepared = lean_rs_host::host::prepare_host_artifacts_for_generated_output(generated_output_key)?
         .with_project_generated_output_matching_shims()?;
     let builder = CargoLeanCapability::new(&project, "LeanRsInteropConsumer")
@@ -93,9 +105,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "consumer_json": fs::read_to_string(built.manifest_path())?,
     });
     fs::write(state.join("prepared.json"), serde_json::to_vec_pretty(&record)?)?;
+    seal(app, &state)
+}
+
+fn prepare_broken_import(
+    app: &Path,
+    state: &Path,
+    sysroot: &Path,
+    key: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).is_some() {
+        return Err("private broken-import fixture must not inherit a writer executable".into());
+    }
+    let project = state.join("lean");
+    fs::DirBuilder::new().mode(0o700).create(&project)?;
+    fs::create_dir(project.join("Demo"))?;
+    fs::write(
+        project.join("lakefile.lean"),
+        "import Lake\nopen Lake DSL\npackage worker_host_broken\nlean_lib Demo\n",
+    )?;
+    fs::write(project.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
+    fs::write(project.join("Demo.lean"), "import Demo.Broken\n")?;
+    fs::write(
+        project.join("Demo/Broken.lean"),
+        "theorem broken : True := sorry_that_doesnt_exist\n",
+    )?;
+    // Let the caller see the actual Lean error without buffering its output.
+    // The checkout-local smoke runner supplies the outer process deadline.
+    let bad = std::process::Command::new(sysroot.join("bin/lake"))
+        .arg("build")
+        .arg("Demo.Broken")
+        .current_dir(&project)
+        .stdin(std::process::Stdio::null())
+        .status()?;
+    if bad.code() != Some(1) {
+        return Err("expected the selected Lean to reject Demo.Broken".into());
+    }
+    fs::create_dir_all(project.join(".lake/build/lib/lean"))?;
+    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(lock)?;
+
+    let shim = lean_rs_host::host::prepare_host_artifacts()?;
+    let mut scopes = shim.artifact_roots().to_vec();
+    scopes.push(project.clone());
+    scopes.sort();
+    let record = serde_json::json!({
+        "broken_import": true,
+        "typed_session": false,
+        "verification": false,
+        "generated_output_key": key,
+        "project": project,
+        "sysroot": sysroot,
+        "shim_manifest": shim.manifest_path(),
+        "shim_json": shim.manifest_json(),
+        "shim_roots": shim.artifact_roots(),
+        "shim_paths": shim.shim_search_paths(),
+        "roots": scopes,
+    });
+    fs::write(state.join("prepared.json"), serde_json::to_vec_pretty(&record)?)?;
+    seal(app, state)
+}
+
+fn seal(app: &Path, state: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let status = std::process::Command::new("python3")
         .arg(app.join("seal.py"))
-        .arg(&state)
+        .arg(state)
         .status()?;
     if !status.success() {
         return Err("deployment sealing failed".into());

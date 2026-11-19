@@ -125,11 +125,16 @@ fn require(ok: bool, detail: &str) -> R<()> {
 }
 #[derive(Deserialize)]
 pub struct Record {
+    #[serde(default)]
+    pub broken_import: bool,
     pub typed_session: bool,
     pub verification: bool,
     pub generated_output_key: String,
+    #[serde(default)]
     pub consumer_image: PathBuf,
+    #[serde(default)]
     pub consumer_manifest: PathBuf,
+    #[serde(default)]
     pub consumer_json: String,
     pub shim_manifest: PathBuf,
     pub shim_json: String,
@@ -166,7 +171,7 @@ impl Record {
         serde_json::from_slice(&bytes).expect("parse build-selected fixture record")
     }
     pub fn helper() -> PathBuf {
-        PathBuf::from(env!("D3_HELPER"))
+        PathBuf::from(option_env!("D3_HELPER").expect("ordinary deployment requires its selected helper"))
     }
     pub fn descriptor(&self) -> lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts {
         serde_json::from_value(serde_json::json!({
@@ -243,7 +248,9 @@ impl Record {
         names: &[String],
         options: &lean_rs::module::HostImportOptions,
     ) -> R<()> {
-        let expected: &[&str] = if self.typed_session {
+        let expected: &[&str] = if self.broken_import {
+            &["Demo.Broken"]
+        } else if self.typed_session {
             &["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"]
         } else {
             &[MODULE]
@@ -304,9 +311,15 @@ impl Held {
             let a = f.metadata()?;
             let b = fs::symlink_metadata(p)?;
             require(
-                b.is_file() && (a.dev(), a.ino()) == (b.dev(), b.ino()),
+                b.is_file() && a.nlink() == 1 && (a.dev(), a.ino()) == (b.dev(), b.ino()),
                 "changed lock identity",
             )?;
+            if record.broken_import {
+                require(
+                    lean_toolchain::shared_writer::previous_writer_stopped(&f)?,
+                    "prior writer remains active",
+                )?;
+            }
             held.push(f);
         }
         drop(admission);
@@ -393,11 +406,11 @@ impl Held {
         }
         require(found, "selected libleanshared absent")?;
         require(
-            fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
+            d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
             "consumer manifest or initializer differs",
         )?;
         require(
-            fs::read_to_string(&d.shim_manifest)? == d.shim_json,
+            d.shim_manifest.canonicalize()? == d.shim_manifest && fs::read_to_string(&d.shim_manifest)? == d.shim_json,
             "host manifest or initializer differs",
         )?;
         require(
@@ -412,7 +425,9 @@ impl Held {
             )?;
         }
         d.check_file(&d.interop_image)?;
-        d.check_file(&d.consumer_image)?;
+        if !d.broken_import {
+            d.check_file(&d.consumer_image)?;
+        }
         d.check_file(&d.host_image)?;
         for path in d.files.keys() {
             d.check_file(path)?;
@@ -431,7 +446,9 @@ impl Held {
             }
         }
         self.check_interop_visibility(false)?;
-        audit("verified-deployment");
+        if !d.broken_import {
+            audit("verified-deployment");
+        }
         Ok(())
     }
 }

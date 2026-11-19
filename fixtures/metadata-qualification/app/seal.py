@@ -74,7 +74,10 @@ def main():
     sdk=a.parents[2]
     state=Path(sys.argv[1]).resolve(strict=True)
     rec=json.loads((state/'prepared.json').read_text())
-    project=sdk/'fixtures/metadata-qualification/lean'; release=Path(rec['sysroot'])
+    broken=rec.get('broken_import', False)
+    project=state/'lean' if broken else sdk/'fixtures/metadata-qualification/lean'
+    assert Path(rec['project'])==project
+    release=Path(rec['sysroot'])
     bundle=sdk/'crates/lean-rs-host/shims'
     dep=bundle/'lean-rs-interop-shims'; host=bundle/'lean-rs-host-shims'
     key=rec['generated_output_key']
@@ -85,9 +88,9 @@ def main():
     hi=image(host,'lean__rs__host__shims_LeanRsHostShims')
     package, module = ('lean_rs_interop_consumer','LeanRsInteropConsumer')
     stem = package.replace('_','__') + '_' + module
-    ci=image(project,stem)
+    ci=None if broken else image(project,stem)
     shims=[out(dep)/'lean',out(host)/'lean']
-    assert Path(rec['consumer_image'])==ci and Path(rec['sysroot'])==release
+    if not broken: assert Path(rec['consumer_image'])==ci
     assert list(map(Path,rec['shim_paths']))==shims
     assert list(map(Path,rec['roots']))==sorted([project,dep,host])
     assert list(map(Path,rec['shim_roots']))==sorted([dep,host])
@@ -106,10 +109,11 @@ def main():
     def pin_content(path):
         assert path==path.resolve() and path.is_file(),path
         with path.open('rb') as stream: contentpins[str(path)]=hashlib.file_digest(stream,'sha256').hexdigest()
-    for manifest in ['consumer','shim']:
+    for manifest in (['shim'] if broken else ['consumer','shim']):
         path=Path(rec[manifest+'_manifest'])
         assert path.read_text()==rec[manifest+'_json']
-        pin(path)
+        # Ordinary preparation republishes identical shim metadata by rename.
+        if not broken: pin(path)
         v=json.loads(path.read_text())
         p,m,i=((package,module,ci) if manifest=='consumer' else ('lean_rs_host_shims','LeanRsHostShims',hi))
         assert (v['package'],v['module'],v['primary_dylib'])==(p,m,str(i))
@@ -117,30 +121,42 @@ def main():
         assert v['build_toolchain']['sysroot']==str(release) and v['toolchain_fingerprint']['lean_version']=='4.36.0'
         assert v['toolchain_fingerprint']['header_sha256']=='dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4'
     project_symbols = ['initialize_' + stem, 'lean_rs_interop_consumer_worker_metadata']
-    for f, syms in [(di,['initialize_lean__rs__interop__shims_LeanRsInterop']), (hi,['initialize_lean__rs__host__shims_LeanRsHostShims']), (ci,project_symbols)]:
+    images=[(di,['initialize_lean__rs__interop__shims_LeanRsInterop']), (hi,['initialize_lean__rs__host__shims_LeanRsHostShims'])]
+    if not broken: images.append((ci,project_symbols))
+    for f, syms in images:
         pin(f)
         check_native_image(f, syms, release/'lib/lean')
     for root in (dep,host,project): pin_content(root/'lake-manifest.json')
     packages=json.loads((project/'lake-manifest.json').read_text())['packages']
-    newdir=packages[0]['dir']
-    assert (project/newdir).resolve()==dep
-    project_deps=[project/newdir/'.lake/lean-rs-generated'/key/'lib/lean']
+    project_deps=[]
+    if broken:
+        assert packages==[]
+        assert (project/'Demo/Broken.lean').read_text()=='theorem broken : True := sorry_that_doesnt_exist\n'
+        for source in ('lakefile.lean','Demo.lean','Demo/Broken.lean','lean-toolchain'):
+            pin_content(project/source)
+    else:
+        newdir=packages[0]['dir']
+        assert (project/newdir).resolve()==dep
+        project_deps=[project/newdir/'.lake/lean-rs-generated'/key/'lib/lean']
+    project_oleans=project/'.lake/build/lib/lean' if broken else out(project)/'lean'
     # Both built packages must actually select the same source package.
     assert (host/json.loads((host/'lake-manifest.json').read_text())['packages'][0]['dir']).resolve()==dep
     for f in [release/'include/lean/lean.h',release/'bin/lean']: pin(f)
     assert filepins[str(release/'include/lean/lean.h')][2]=='dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4'
-    for r in [out(project)/'lean',*shims,release/'lib/lean']: tree(r)
+    for r in [project_oleans,*shims,release/'lib/lean']: tree(r)
     # Verify original transitive import selection and refuse local shadows of builtin namespaces.
     for prefix in ['Init','Lean','Lake','Std']:
-        for r in [out(project)/'lean',*shims]:
+        for r in [project_oleans,*shims]:
             assert not (r/prefix).exists() and not (r/(prefix+'.olean')).exists()
-    modules = ['LeanRsInteropConsumer/Callback']
-    for module in modules:
-        assert (out(project)/'lean'/(module+'.olean')).is_file()
+    if broken:
+        assert not any((r/'Demo/Broken.olean').exists() or (r/'Demo.olean').exists()
+                       for r in [project_oleans,*shims,release/'lib/lean'])
+    else:
+        assert (project_oleans/'LeanRsInteropConsumer/Callback.olean').is_file()
     assert (shims[0]/'LeanRsInterop.olean').is_file()
-    assert not (out(project)/'lean'/'LeanRsInterop').exists() and not (out(project)/'lean'/'LeanRsInterop.olean').exists()
+    assert not (project_oleans/'LeanRsInterop').exists() and not (project_oleans/'LeanRsInterop.olean').exists()
     rec.update(files=filepins,content_files=contentpins,directories=sorted(directories),interop_image=str(di),host_image=str(hi),
-               import_roots=list(map(str,[out(project)/'lean',*project_deps,*shims])))
+               import_roots=list(map(str,[project_oleans,*project_deps,*shims])))
     rec['ordered_directory_ids']=[(Path(root).stat().st_dev,Path(root).stat().st_ino) for root in rec['import_roots']]
     (state/'deployment.json').write_text(json.dumps(rec,separators=(',',':'),sort_keys=True))
     print('sealed native images, registration order and checked exports:',ci,di,hi,'files',len(filepins),'directories',len(directories),flush=True)
