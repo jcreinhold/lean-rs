@@ -445,12 +445,7 @@ fn validate_socket_root(root: &Path, socket: &Path) -> io::Result<()> {
         ));
     }
     let metadata = fs::symlink_metadata(root)?;
-    #[allow(
-        unsafe_code,
-        reason = "geteuid reads the current process identity without side effects"
-    )]
-    // SAFETY: geteuid takes no pointers and cannot invalidate Rust memory.
-    let uid = unsafe { libc::geteuid() };
+    let uid = rustix::process::geteuid().as_raw();
     if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o777 != 0o700 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
