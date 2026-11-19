@@ -20,7 +20,7 @@ fn native_pending_cleanup_remains_send_sync() {
 
 #[test]
 fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
-    let (scope, mut worker) = StoppingScope::start_and_kill();
+    let (scope, mut worker) = StoppingScope::start_and_kill(true);
     wait_for(|| {
         worker.try_wait().unwrap();
         scope.tracker.active_processes() == 0
@@ -30,8 +30,20 @@ fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
 }
 
 #[test]
+fn cancelling_attached_guarded_worker_before_ack_keeps_body_unstarted() {
+    let (scope, mut worker) = StoppingScope::start_and_kill(false);
+    wait_for(|| {
+        worker.try_wait().unwrap();
+        scope.tracker.active_processes() == 0
+    });
+    assert!(!scope.root.join("native-body").exists());
+    scope.check_repeat_wait_and_drop(worker);
+    scope.assert_closed(ExitReceipt::Observed);
+}
+
+#[test]
 fn guarded_release_deferred_drop() {
-    let (scope, worker) = StoppingScope::start_and_kill();
+    let (scope, worker) = StoppingScope::start_and_kill(true);
     drop(worker);
     wait_for(|| scope.tracker.active_processes() == 0);
     scope.assert_closed(ExitReceipt::Observed);
@@ -39,7 +51,7 @@ fn guarded_release_deferred_drop() {
 
 #[test]
 fn guarded_release_echild_sync() {
-    let (scope, mut worker) = StoppingScope::start_and_kill();
+    let (scope, mut worker) = StoppingScope::start_and_kill(true);
     reap_direct_child(&worker);
     wait_for(|| {
         assert!(worker.try_wait().is_err());
@@ -51,7 +63,7 @@ fn guarded_release_echild_sync() {
 
 #[test]
 fn guarded_release_echild_deferred() {
-    let (scope, worker) = StoppingScope::start_and_kill();
+    let (scope, worker) = StoppingScope::start_and_kill(true);
     reap_direct_child(&worker);
     drop(worker);
     wait_for(|| scope.tracker.active_processes() == 0);
@@ -60,7 +72,7 @@ fn guarded_release_echild_deferred() {
 
 #[test]
 fn native_pending_cleanup_retains_exact_closure() {
-    let (scope, worker) = StoppingScope::start_and_kill();
+    let (scope, worker) = StoppingScope::start_and_kill(true);
     let error = LeanWorkerNativeSpawnError::AfterSpawn {
         source: io::Error::new(io::ErrorKind::TimedOut, "injected startup error"),
         pending: LeanWorkerNativePendingCleanup::new(worker, scope.custody.clone()),
@@ -84,7 +96,7 @@ fn native_pending_cleanup_retains_exact_closure() {
 
 #[test]
 fn dropping_native_pending_cleanup_delegates_exact_closure() {
-    let (scope, worker) = StoppingScope::start_and_kill();
+    let (scope, worker) = StoppingScope::start_and_kill(true);
     let pending = LeanWorkerNativePendingCleanup::new(worker, scope.custody.clone());
     assert!(pending.cleanup_pending());
     drop(pending);
@@ -203,11 +215,12 @@ struct StoppingScope {
 }
 
 impl StoppingScope {
-    fn start_and_kill() -> (Self, OwnedChild) {
+    fn start_and_kill(acknowledge: bool) -> (Self, OwnedChild) {
         let root = directory().canonicalize().unwrap();
         write_guardian_script(&root);
         let mut lifetime = ParentLifetime::prepare_guarded(&root.join("owners"), Duration::from_secs(2)).unwrap();
         let mut command = native_worker_command(&root);
+        command.env("LEAN_STARTUP_FAULT_ROOT", &root);
         lifetime.configure(&mut command);
         let tracker = LeanWorkerProcessTracker::new();
         let mut worker = tracker.spawn_guarded(&mut command, &mut lifetime).unwrap();
@@ -225,9 +238,11 @@ impl StoppingScope {
         let body = root.join("native-body");
         assert!(!body.exists());
         worker.attach_lifetime(lease).unwrap();
-        worker.acknowledge_lifetime().unwrap();
-        wait_for(|| body.exists());
-        assert_eq!(fs::read_to_string(&body).unwrap(), pid.to_string());
+        if acknowledge {
+            worker.acknowledge_lifetime().unwrap();
+            wait_for(|| body.exists());
+            assert_eq!(fs::read_to_string(&body).unwrap(), pid.to_string());
+        }
 
         let observation = worker.exit_observation();
         assert_eq!(tracker.active_processes(), 1);
@@ -268,6 +283,8 @@ impl StoppingScope {
         assert_eq!(self.observation.confirmed_exit().is_some(), !status_missing);
         assert!(!lean_toolchain::process_group::group_present(self.pid).unwrap());
         assert!(!self.guardian.is_live().unwrap());
+        assert!(!self.root.join("worker-rescue").exists());
+        assert!(!self.root.join("guardian-rescue").exists());
         std::thread::sleep(Duration::from_millis(30));
         assert_eq!(self.tracker.active_processes(), 0);
         fs::remove_dir_all(self.root).unwrap();
