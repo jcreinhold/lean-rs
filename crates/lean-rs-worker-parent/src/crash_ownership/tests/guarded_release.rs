@@ -6,7 +6,10 @@ use super::{
     native_worker_command, wait_for, write_guardian_script,
 };
 use crate::process::{LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild};
-use std::{fs, io, path::PathBuf, process::Command, time::Duration};
+use std::os::fd::AsRawFd as _;
+use std::os::unix::{fs::PermissionsExt as _, process::CommandExt as _};
+use std::path::{Path, PathBuf};
+use std::{fs, io, process::Command, time::Duration};
 
 fn assert_send_sync<T: Send + Sync>() {}
 
@@ -90,21 +93,98 @@ fn dropping_native_pending_cleanup_delegates_exact_closure() {
 }
 
 #[test]
-fn native_spawn_error_before_target_preserves_source() {
+fn native_exec_failure_reaps_child_and_releases_registry_slot() {
     let root = directory().canonicalize().unwrap();
-    let scope = LeanWorkerNativeScope::prepare(&root.join("owners"), Duration::from_secs(2), None).unwrap();
-    let error = scope
-        .spawn(
-            &mut Command::new(root.join("absent-executable")),
-            Duration::from_secs(1),
-        )
-        .unwrap_err();
-    assert!(matches!(error, LeanWorkerNativeSpawnError::BeforeSpawn(_)));
-    let LeanWorkerNativeSpawnError::BeforeSpawn(source) = error else {
-        return;
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let registry = root.join("owners");
+    let slot = lean_toolchain::native_guardian::NativeCapacitySlot {
+        key: "exec-failure".into(),
+        scope: "main".into(),
+        limit: 1,
     };
-    assert_eq!(source.kind(), io::ErrorKind::NotFound);
+    let scope = LeanWorkerNativeScope::prepare(&registry, Duration::from_secs(2), Some(&slot)).unwrap();
+    let record = scope.0.directory.join("owner.json");
+    let socket_directory = scope.0.socket_directory.clone();
+    // The named file exists and is executable. Its unique interpreter does not exist.
+    let program = root.join("worker");
+    let interpreter = root.join("absent-interpreter");
+    let body = root.join("native-body");
+    assert!(!interpreter.exists());
+    fs::write(
+        &program,
+        format!("#!{}\nprintf started > '{}'\n", interpreter.display(), body.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+    let witness = root.join("pre-exec");
+    let mut command = Command::new(program);
+    record_pre_exec_pid(&mut command, &witness);
+
+    let error = scope.spawn(&mut command, Duration::from_secs(1)).unwrap_err();
+    assert!(matches!(
+        error,
+        LeanWorkerNativeSpawnError::BeforeSpawn(source) if source.raw_os_error() == Some(libc::ENOENT)
+    ));
+    let pid = libc::pid_t::from_ne_bytes(fs::read(witness).unwrap().try_into().unwrap());
+    assert!(pid > 1);
+    // SAFETY: the private pre-exec witness names this invocation's child.
+    // WNOHANG never waits for its exit, and the test discards status.
+    let waited = unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) };
+    assert_eq!(waited, -1);
+    assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+    assert!(!body.exists());
+    assert!(!socket_directory.exists());
+    assert_owner_phase(&record, "preparing_closed");
+    let successor = LeanWorkerNativeScope::prepare(&registry, Duration::from_secs(2), Some(&slot)).unwrap();
+    assert!(!record.exists());
+    drop(successor);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn native_dispatch_refusal_does_not_create_child() {
+    let root = directory().canonicalize().unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let scope = LeanWorkerNativeScope::prepare(&root.join("owners"), Duration::from_secs(2), None).unwrap();
+    let record = scope.0.directory.join("owner.json");
+    let socket_directory = scope.0.socket_directory.clone();
+    let staging = record.with_extension("guardian-write");
+    fs::write(&staging, b"dispatch write collision").unwrap();
+    let witness = root.join("pre-exec");
+    let mut command = Command::new("/usr/bin/true");
+    record_pre_exec_pid(&mut command, &witness);
+
+    let error = scope.spawn(&mut command, Duration::from_secs(1)).unwrap_err();
+    assert!(matches!(
+        error,
+        LeanWorkerNativeSpawnError::BeforeSpawn(source) if source.kind() == io::ErrorKind::AlreadyExists
+    ));
+    assert!(fs::read(witness).unwrap().is_empty());
+    assert_eq!(fs::read(staging).unwrap(), b"dispatch write collision");
+    assert_owner_phase(&record, "preparing");
+    assert!(!socket_directory.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn assert_owner_phase(record: &Path, expected: &str) {
+    let owner: serde_json::Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
+    assert_eq!(owner.get("phase").and_then(serde_json::Value::as_str), Some(expected));
+}
+
+fn record_pre_exec_pid(command: &mut Command, witness: &Path) {
+    let witness = fs::File::create_new(witness).unwrap();
+    // SAFETY: the closure owns the file, uses only async-signal-safe syscalls
+    // and stack data after fork, and the buffer is valid for the whole write.
+    unsafe {
+        command.pre_exec(move || {
+            let bytes = libc::getpid().to_ne_bytes();
+            if libc::write(witness.as_raw_fd(), bytes.as_ptr().cast(), bytes.len()) == 4 {
+                Ok(())
+            } else {
+                Err(io::Error::from_raw_os_error(libc::EIO))
+            }
+        });
+    }
 }
 
 #[derive(Clone, Copy)]

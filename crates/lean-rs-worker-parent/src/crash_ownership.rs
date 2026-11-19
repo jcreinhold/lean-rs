@@ -132,8 +132,9 @@ pub struct LeanWorkerNativeScopeLease(crate::process::OwnedChild);
 /// Startup failure with its original error and any outstanding cleanup owner.
 #[derive(Debug)]
 pub enum LeanWorkerNativeSpawnError {
-    /// No target was created. A failed durable dispatch write may still fence
-    /// the registry reservation; this is not proof that registry cleanup succeeded.
+    /// The SDK received no child handle. This covers errors before process
+    /// creation and launch errors such as exec failure in a child reaped by
+    /// the standard library. A failed dispatch write may still fence the registry.
     BeforeSpawn(io::Error),
     /// A child was created. Retain host resources until `custody_closed` is true.
     AfterSpawn {
@@ -227,7 +228,7 @@ impl LeanWorkerNativeScope {
     /// cancellable mid-wait. After return, the caller must check cancellation
     /// and its deadline before ACK. Host keepalive ownership remains the caller's.
     /// # Errors
-    /// Distinguishes no target from a created child with retained cleanup.
+    /// Distinguishes errors without a child handle from errors with retained cleanup.
     pub fn spawn(
         mut self,
         command: &mut Command,

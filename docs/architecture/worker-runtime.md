@@ -501,9 +501,9 @@ also has a 128-record backstop, 32 artifact domains per generation and 256 KiB p
 scans use the original remaining startup budget; filesystem syscalls themselves cannot be preempted by this userspace
 deadline.
 
-Preparing means spawn has not been authorized. Before the spawn syscall, the exact owner durably
-publishes `dispatching` and installs pending cleanup responsibility in the tracker. Only a true spawn error can
-explicitly retire that dispatch. Parent death never collects `dispatching`: the interval between possible spawn
+Preparing means spawn has not been authorized. Before calling `Command::spawn`, the exact owner durably
+publishes `dispatching` and reserves cleanup capacity in the tracker. An error returned from `Command::spawn`
+allows explicit retirement. Parent death never collects `dispatching`: the interval between possible spawn
 and authenticated durable identity is unknown and remains fenced. After HELLO the owner retains the authenticated
 stream and birth identities before any fallible write, publishes `bootstrap`, adopts the private group, publishes
 Running and finally ACKs. Pre-Running bootstrap capacity requires both group and guardian absence; Running retains
@@ -527,7 +527,8 @@ only after custody closes. Registry collection removes inputs before owner metad
 no-follow operations, unlinks symlinks themselves, and is bounded by 4096 entries, depth 32 and a two-second userspace
 budget. Unknown generation children, excessive depth and special files preserve the parseable owner record and fail
 closed. Partial count-budget deletion can resume on the next admission. A cancelled exact undispatched Preparing reservation first
-publishes `preparing_closed` in the same record. Dispatching requires an explicit no-spawn syscall outcome to retire. This permits cleanup retry and utility-capacity recovery while the original caller remains
+publishes `preparing_closed` in the same record. The command launch must return an error to retire dispatch explicitly.
+This permits cleanup retry and utility-capacity recovery while the original caller remains
 alive, without retiring a Running or uncertain payload. Already collected generations make post-closure cleanup a
 no-op. No additional cleanup process or journal is created.
 
@@ -547,8 +548,9 @@ upstream embedder choosing a custom lifetime directory must likewise configure e
 that namespace. Registries in unrelated directories cannot discover each other's ownership automatically.
 
 Public native startup returns `LeanWorkerNativeSpawnError`: `BeforeSpawn`
-proves no target was created (not successful registry retirement), while
-`AfterSpawn` preserves the original error and an owned
+means the SDK owns no child handle. This covers a refusal before a child exists and a
+launch error such as exec failure in a child reaped by the standard library. A failed dispatch write can still fence
+the registry. `AfterSpawn` preserves the original error and an owned
 `LeanWorkerNativePendingCleanup`. Callers retain host keepalive resources beside
 that owner until its exact `custody_closed` observation succeeds. Its `try_wait`
 remains separate: ECHILD does not become an exit receipt. Dropping pending
