@@ -513,6 +513,7 @@ impl lean_rs_worker_parent::LeanWorkerCancellationToken
 pub fn lean_rs_worker_parent::LeanWorkerCancellationToken::cancel(&self)
 pub fn lean_rs_worker_parent::LeanWorkerCancellationToken::is_cancelled(&self) -> bool
 pub fn lean_rs_worker_parent::LeanWorkerCancellationToken::new() -> Self
+pub fn lean_rs_worker_parent::LeanWorkerCancellationToken::with_deadline(&self, std::time::Instant) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerCancellationToken
 pub fn lean_rs_worker_parent::LeanWorkerCancellationToken::clone(&self) -> lean_rs_worker_parent::LeanWorkerCancellationToken
 impl core::default::Default for lean_rs_worker_parent::LeanWorkerCancellationToken
