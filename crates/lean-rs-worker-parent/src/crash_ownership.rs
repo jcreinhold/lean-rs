@@ -678,6 +678,8 @@ impl ParentLifetimeLease {
         if Instant::now() >= self.deadline {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "startup deadline elapsed"));
         }
+        #[cfg(test)]
+        lifecycle_tests::startup_faults::before_running_publication(&self.record);
         self.generation.phase = running();
         if self.guarded {
             native_guardian::publish_startup_owner(

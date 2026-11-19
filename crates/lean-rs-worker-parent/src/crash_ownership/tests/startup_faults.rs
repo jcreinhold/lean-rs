@@ -6,6 +6,18 @@ use std::net::Shutdown;
 thread_local! {
     static WRITE_HOOK: RefCell<Option<Box<dyn FnMut(usize)>>> = RefCell::new(None);
 }
+thread_local! {
+    static COLLIDE_RUNNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+pub(in crate::crash_ownership) fn before_running_publication(record: &Path) {
+    if COLLIDE_RUNNING.replace(false) {
+        let bootstrap: LeanWorkerOwnedGeneration = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
+        assert_eq!(bootstrap.phase, "bootstrap");
+        assert!(bootstrap.guardian.unwrap().is_live().unwrap());
+        fs::File::create_new(record.with_extension("write")).unwrap();
+    }
+}
+
 pub(in crate::crash_ownership) fn write_limit(length: usize) -> usize {
     WRITE_HOOK.with(|hook| if hook.borrow().is_some() { 1 } else { length })
 }
@@ -165,7 +177,9 @@ pub(super) fn collide_bootstrap_publication() {
         .unwrap();
 }
 pub(super) fn pause_drained_guardian(result: io::Result<()>) -> io::Result<()> {
-    if std::env::var_os("LEAN_STARTUP_COLLIDE_BOOTSTRAP").is_none() {
+    if std::env::var_os("LEAN_STARTUP_COLLIDE_BOOTSTRAP").is_none()
+        && std::env::var_os("LEAN_STARTUP_COLLIDE_RUNNING").is_none()
+    {
         return result;
     }
     let root = PathBuf::from(std::env::var_os(FAULT_ROOT).unwrap());
@@ -239,9 +253,25 @@ impl Drop for FinalCensus {
 #[test]
 #[ignore = "fresh one-use native qualification; exact command review required"]
 fn actual_after_spawn_retains_custody_until_guardian_exit() {
+    publication_failure(false);
+}
+
+#[test]
+#[ignore = "fresh one-use native qualification; exact command review required"]
+fn running_publication_failure_after_adoption_retains_slot() {
+    publication_failure(true);
+}
+
+fn publication_failure(running: bool) {
     let root = fresh_root();
     write_guardian_script(&root);
-    let scope = LeanWorkerNativeScope::prepare(&root.join("owners"), Duration::from_secs(2), None).unwrap();
+    let slot = running.then(|| native_guardian::NativeCapacitySlot {
+        key: "running-publication".into(),
+        scope: "main".into(),
+        limit: 1,
+    });
+    let prepare = || LeanWorkerNativeScope::prepare(&root.join("owners"), Duration::from_secs(2), slot.as_ref());
+    let scope = prepare().unwrap();
     let record = scope.0.directory.join("owner.json");
     let nonce = scope.0.nonce.clone();
     let _census = FinalCensus {
@@ -251,16 +281,29 @@ fn actual_after_spawn_retains_custody_until_guardian_exit() {
     let mut command = native_worker_command(&root);
     command
         .env(FAULT_ROOT, &root)
-        .env("LEAN_STARTUP_COLLIDE_BOOTSTRAP", "1")
+        .env(
+            if running {
+                "LEAN_STARTUP_COLLIDE_RUNNING"
+            } else {
+                "LEAN_STARTUP_COLLIDE_BOOTSTRAP"
+            },
+            "1",
+        )
         .env("LEAN_STARTUP_FAULT_RECORD", &record)
         .env_remove("LEAN_STARTUP_QUALIFICATION_ROOT")
         .env_remove("LEAN_NATIVE_GUARDIAN_FAILURE_ROOT");
+    COLLIDE_RUNNING.set(running);
     let error = scope.spawn(&mut command, Duration::from_secs(3)).unwrap_err();
     assert!(matches!(error, LeanWorkerNativeSpawnError::AfterSpawn { .. }));
     let LeanWorkerNativeSpawnError::AfterSpawn { source, mut pending } = error else {
         return;
     };
     assert_eq!(source.kind(), io::ErrorKind::AlreadyExists);
+    if running {
+        assert!(!COLLIDE_RUNNING.get());
+        assert_eq!(source.raw_os_error(), Some(libc::EEXIST));
+        assert!(pending.child.lifetime.is_some());
+    }
     wait_for(|| {
         // Advance direct-child reaping while the paused guardian still owns custody.
         assert!(pending.try_wait().unwrap().is_none());
@@ -290,6 +333,9 @@ fn actual_after_spawn_retains_custody_until_guardian_exit() {
     assert!(!pending.custody_closed().unwrap());
     assert!(pending.try_wait().unwrap().is_none());
     assert_eq!(pending.child.test_active_processes(), 1);
+    if running {
+        assert_eq!(prepare().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    }
     assert!(!root.join("native-body").exists());
     fs::write(root.join("guardian-release"), b"release only owned fixture").unwrap();
     wait_for(|| {
@@ -315,4 +361,22 @@ fn actual_after_spawn_retains_custody_until_guardian_exit() {
         .unwrap(),
     )
     .unwrap();
+    if running {
+        // Preserve the exact closed-record census before normal admission collects it.
+        drop(_census);
+        let successor = prepare().unwrap();
+        assert_ne!(successor.0.nonce, nonce);
+        assert!(!record.exists());
+        assert_eq!(prepare().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        fs::write(
+            root.join("successor.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "generation":successor.0.nonce,"predecessor":nonce,"original_errno":source.raw_os_error(),
+                "during_guardian":"WouldBlock","second_successor":"WouldBlock","body_started":false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        drop(successor);
+    }
 }
