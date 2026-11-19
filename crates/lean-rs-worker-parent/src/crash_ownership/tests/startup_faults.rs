@@ -274,7 +274,7 @@ fn publication_failure(running: bool) {
     let scope = prepare().unwrap();
     let record = scope.0.directory.join("owner.json");
     let nonce = scope.0.nonce.clone();
-    let _census = FinalCensus {
+    let census = FinalCensus {
         root: root.clone(),
         record: record.clone(),
     };
@@ -363,7 +363,7 @@ fn publication_failure(running: bool) {
     .unwrap();
     if running {
         // Preserve the exact closed-record census before normal admission collects it.
-        drop(_census);
+        drop(census);
         let successor = prepare().unwrap();
         assert_ne!(successor.0.nonce, nonce);
         assert!(!record.exists());

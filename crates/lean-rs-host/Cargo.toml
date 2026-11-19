@@ -19,8 +19,8 @@ include = [
   "shims/**/lakefile.lean",
   "shims/**/lean-toolchain",
   "src/**/*.rs",
-  "tests/**/*.rs",
   "tests/**/*.lean",
+  "tests/**/*.rs",
   "tests/compile_fail/**",
 ]
 keywords = ["bindings", "embedding", "host", "lean", "lean4"]
@@ -39,8 +39,8 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-sha2.workspace = true
 criterion = { workspace = true }
+sha2.workspace = true
 # Examples under `examples/` install a `tracing_subscriber::fmt` sink so
 # `RUST_LOG=lean_rs=info cargo run --example <name>` surfaces host spans. The
 # workspace dependency stays lean for production builds; this dev override
@@ -66,25 +66,25 @@ workspace = true
 ignored-paths = ["tests/compile_fail/*.rs"]
 
 [[example]]
+crate-type = ["rlib"]
 name = "theorem_query"
-crate-type = ["rlib"]
 
 [[example]]
+crate-type = ["rlib"]
 name = "progress"
-crate-type = ["rlib"]
 
 [[example]]
+crate-type = ["rlib"]
 name = "proof_check"
-crate-type = ["rlib"]
 
 [[example]]
+crate-type = ["rlib"]
 name = "meta_query"
-crate-type = ["rlib"]
 
 [[example]]
+crate-type = ["rlib"]
 name = "process_module_query"
-crate-type = ["rlib"]
 
 [[example]]
-name = "import_residue_probe"
 crate-type = ["rlib"]
+name = "import_residue_probe"

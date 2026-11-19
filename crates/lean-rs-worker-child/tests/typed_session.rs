@@ -2263,7 +2263,6 @@ fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
         "{facts:?}"
     );
 
-    drop(session);
     let report = worker.shutdown().expect("worker shutdown");
     assert_eq!(
         report.outcome,
@@ -3221,16 +3220,16 @@ mod disposable_clean {
                     continue;
                 }
                 if cleaned && path.starts_with(&build) {
-                    assert!(!path.try_exists()?, "clean left {path:?}");
+                    assert!(!path.try_exists()?, "clean left {}", path.display());
                     continue;
                 }
                 assert_eq!(path.canonicalize()?, *path);
                 let mut file = File::open(path)?;
                 let meta = file.metadata()?;
-                assert_eq!((meta.dev(), meta.ino()), (*dev, *ino), "{path:?}");
+                assert_eq!((meta.dev(), meta.ino()), (*dev, *ino), "{}", path.display());
                 let mut bytes = Vec::new();
                 file.read_to_end(&mut bytes)?;
-                assert_eq!(hex_digest(&bytes), *hash, "{path:?}");
+                assert_eq!(hex_digest(&bytes), *hash, "{}", path.display());
             }
             Ok(())
         }
@@ -3284,7 +3283,11 @@ mod disposable_clean {
             build.join("lib/lean/LeanRsFixture/Handles.olean"),
             build.join("lib/lean/LeanRsFixture/SourceRanges.olean"),
         ] {
-            assert!(sealed.files.contains_key(&path), "missing sealed output {path:?}");
+            assert!(
+                sealed.files.contains_key(&path),
+                "missing sealed output {}",
+                path.display()
+            );
         }
         assert!(!root.join("app/native-events.log").try_exists()?);
         for entry in fs::read_dir(&q.owners)? {
@@ -3357,7 +3360,9 @@ mod disposable_clean {
     }
 
     fn confirm_readers_closed(owner: &Owner, locks: Vec<File>, registry: &Path) -> Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now()
+            .checked_add(Duration::from_secs(5))
+            .ok_or("reader shutdown deadline overflow")?;
         while owner.process.observe()? != NativeOwnerObservation::Absent || owner.guardian.is_live()? {
             assert!(Instant::now() < deadline, "group or exact guardian still present");
             std::thread::sleep(Duration::from_millis(20));
@@ -3377,6 +3382,8 @@ mod disposable_clean {
                 (d.device, d.inode)
             )?);
         }
+        // Release the checked locks before the caller starts the writer.
+        drop(locks);
         Ok(())
     }
 
@@ -3402,9 +3409,8 @@ mod disposable_clean {
             .ok_or("missing observed read epochs")?;
         let (owner, locks) = observe_live_readers(root, &q, &sealed, pid, &epochs)?;
         sealed.check_outputs(false)?;
-        let refused = match SharedWriter::open(&q.helper, &q.fixture, Duration::from_secs(1)) {
-            Ok(_) => panic!("writer admitted while the reader was live"),
-            Err(error) => error,
+        let Err(refused) = SharedWriter::open(&q.helper, &q.fixture, Duration::from_secs(1)) else {
+            panic!("writer admitted while the reader was live");
         };
         assert_eq!(refused.kind(), std::io::ErrorKind::TimedOut);
         assert_eq!(
@@ -3418,7 +3424,6 @@ mod disposable_clean {
             session.host_runtime_metadata(None, None)?.artifact_read_epochs.as_ref(),
             Some(&epochs)
         );
-        drop(session);
         worker.shutdown()?;
         confirm_readers_closed(&owner, locks, &q.owners)?;
         let mut writer = SharedWriter::open(&q.helper, &q.fixture, Duration::from_secs(5))?;

@@ -77,12 +77,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if declared.len() != expected.len() || expected.values().any(|sig| !declared.contains(&sig.to_json())) {
         return Err("host shim does not implement the build-selected SDK ABI".into());
     }
-    let record = serde_json::json!({"typed_session":false,"verification":false,
-        "generated_output_key":generated_output_key,
-        "project":project,"sysroot":sysroot,"consumer_manifest":built.manifest_path(),"consumer_image":built.dylib_path(),
-        "shim_manifest":shim.manifest_path(),"shim_json":shim.manifest_json(),"shim_roots":shim.artifact_roots(),
-        "shim_paths":shim.shim_search_paths(),"roots":roots,
-        "consumer_json":fs::read_to_string(built.manifest_path())?});
+    let record = serde_json::json!({
+        "typed_session": false,
+        "verification": false,
+        "generated_output_key": generated_output_key,
+        "project": project,
+        "sysroot": sysroot,
+        "consumer_manifest": built.manifest_path(),
+        "consumer_image": built.dylib_path(),
+        "shim_manifest": shim.manifest_path(),
+        "shim_json": shim.manifest_json(),
+        "shim_roots": shim.artifact_roots(),
+        "shim_paths": shim.shim_search_paths(),
+        "roots": roots,
+        "consumer_json": fs::read_to_string(built.manifest_path())?,
+    });
     fs::write(state.join("prepared.json"), serde_json::to_vec_pretty(&record)?)?;
     let status = std::process::Command::new("python3")
         .arg(app.join("seal.py"))

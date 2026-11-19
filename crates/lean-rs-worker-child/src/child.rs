@@ -4007,7 +4007,7 @@ mod tests {
             compiled_lean_version: "4.36.0".into(),
             compiled_header_sha256: "a".repeat(64),
             runtime_lean_version: Some("4.36.0".into()),
-            checked_host_bindings: Default::default(),
+            checked_host_bindings: std::collections::BTreeMap::new(),
             artifact_read_epochs: Some(vec![LeanWorkerArtifactReadEpoch {
                 project_root: "/fixture".into(),
                 epoch: "17".into(),

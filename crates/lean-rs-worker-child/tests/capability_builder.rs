@@ -1150,8 +1150,8 @@ mod qualified_pool {
     fn owner_identities(owners: &Path, generation: &str) -> Result<(NativeProcessIdentity, NativeProcessIdentity)> {
         let owner: serde_json::Value = serde_json::from_slice(&fs::read(owners.join(generation).join("owner.json"))?)?;
         Ok((
-            serde_json::from_value(owner["process"].clone())?,
-            serde_json::from_value(owner["guardian"].clone())?,
+            serde_json::from_value(owner.get("process").ok_or("missing worker process identity")?.clone())?,
+            serde_json::from_value(owner.get("guardian").ok_or("missing worker guardian identity")?.clone())?,
         ))
     }
 
@@ -1169,7 +1169,12 @@ mod qualified_pool {
         let selection: serde_json::Value = serde_json::from_str(
             option_env!("LEAN_RS_TEST_QUALIFIED_METADATA").ok_or("missing checked metadata deployment")?,
         )?;
-        let owners = PathBuf::from(selection["owners"].as_str().ok_or("missing ownership registry")?);
+        let owners = PathBuf::from(
+            selection
+                .get("owners")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("missing ownership registry")?,
+        );
         assert_eq!(owners.canonicalize()?, owners);
         let events = owners
             .parent()
@@ -1189,9 +1194,8 @@ mod qualified_pool {
             ..LeanWorkerHostRuntimeExpectation::default()
         };
         let first = builder(&tracker).require_host_runtime(invalid);
-        let error = match pool.acquire_lease(first) {
-            Ok(_) => return Err("invalid runtime expectation unexpectedly opened".into()),
-            Err(error) => error,
+        let Err(error) = pool.acquire_lease(first) else {
+            return Err("invalid runtime expectation unexpectedly opened".into());
         };
         assert!(
             matches!(&error, LeanWorkerError::Protocol { message } if message.contains("host runtime compatibility")),
@@ -1205,8 +1209,10 @@ mod qualified_pool {
         );
         let after_failure = generations(&owners)?;
         let failed: Vec<_> = after_failure.difference(&before).collect();
-        assert_eq!(failed.len(), 1, "first key must launch exactly one owned generation");
-        let (process, guardian) = owner_identities(&owners, failed[0])?;
+        let [failed] = failed.as_slice() else {
+            return Err("first key must launch exactly one owned generation".into());
+        };
+        let (process, guardian) = owner_identities(&owners, failed)?;
         assert_eq!(
             process.observe()?,
             NativeOwnerObservation::Absent,
@@ -1236,13 +1242,11 @@ mod qualified_pool {
         );
         let after_success = generations(&owners)?;
         let succeeded: Vec<_> = after_success.difference(&after_failure).collect();
-        assert_eq!(
-            succeeded.len(),
-            1,
-            "fresh key must launch exactly one new owned generation"
-        );
-        assert_ne!(failed[0], succeeded[0], "closure records reused a generation identity");
-        let (process, guardian) = owner_identities(&owners, succeeded[0])?;
+        let [succeeded] = succeeded.as_slice() else {
+            return Err("fresh key must launch exactly one new owned generation".into());
+        };
+        assert_ne!(failed, succeeded, "closure records reused a generation identity");
+        let (process, guardian) = owner_identities(&owners, succeeded)?;
         assert_eq!(
             process.observe()?,
             NativeOwnerObservation::Absent,

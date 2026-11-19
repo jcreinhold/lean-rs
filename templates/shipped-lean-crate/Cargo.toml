@@ -1,42 +1,42 @@
 [package]
-name = "shipped-lean-crate"
-version = "0.1.0"
-edition = "2024"
-description = "Template showing how to ship Lean source in a Rust crate with lean-rs."
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/jcreinhold/lean-rs"
-publish = false
 default-run = "shipped-lean-crate"
+description = "Template showing how to ship Lean source in a Rust crate with lean-rs."
+edition = "2024"
+license = "MIT OR Apache-2.0"
+name = "shipped-lean-crate"
+publish = false
+repository = "https://github.com/jcreinhold/lean-rs"
+version = "0.1.0"
 
 include = [
   "Cargo.toml",
   "build.rs",
   "examples/**/*.rs",
-  "src/**/*.rs",
   "lean/**/*.lean",
+  "lean/lake-manifest.json",
   "lean/lakefile.lean",
   "lean/lean-toolchain",
-  "lean/lake-manifest.json",
+  "src/**/*.rs",
 ]
 
 [workspace]
 
 [dependencies]
+lean-rs-host = { path = "../../crates/lean-rs-host" }
 lean-toolchain = { path = "../../crates/lean-toolchain" }
-serde = {version="1",features=["derive"]}
-sha2="0.11"
-lean-rs-host={path="../../crates/lean-rs-host"}
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
 
-serde_json = "1"
-tempfile = "3.27"
 lean-rs = { path = "../../crates/lean-rs" }
 lean-rs-worker-child = { path = "../../crates/lean-rs-worker-child" }
 lean-rs-worker-parent = { path = "../../crates/lean-rs-worker-parent" }
+serde_json = "1"
+tempfile = "3.27"
 
 [build-dependencies]
-serde_json="1"
-serde = {version="1",features=["derive"]}
-sha2="0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
 
 lean-toolchain = { path = "../../crates/lean-toolchain" }
 

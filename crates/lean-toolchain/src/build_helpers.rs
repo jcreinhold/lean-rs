@@ -2166,7 +2166,13 @@ fn cache_key(
         .as_deref()
         .map_or("ambient", |path| path.to_str().unwrap_or("<non-utf8-sysroot>"));
     let mut key = format!(
-        "cache_version=2\ntarget={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\nlean_sysroot={sysroot}\n",
+        "cache_version=2\n\
+         target={target_name}\n\
+         package={package_name}\n\
+         manifest={manifest_digest}\n\
+         source_count={}\n\
+         source_max_mtime_ns={}\n\
+         lean_sysroot={sysroot}\n",
         source_set.paths.len(),
         source_set.max_mtime_ns
     );
@@ -2915,9 +2921,10 @@ mod tests {
                 .generated_output_key(key)
                 .build_with_runner(&mut runner, CargoMetadata::Suppress)
                 .expect_err("invalid generated output key");
-            assert!(
-                matches!(error, LinkDiagnostics::LakeOutputUnresolved { reason, .. } if reason.contains("generated output key"))
-            );
+            assert!(matches!(
+                error,
+                LinkDiagnostics::LakeOutputUnresolved { reason, .. } if reason.contains("generated output key")
+            ));
             assert_eq!(runner.calls(), 0);
             assert!(!root.join(".lake/lean-rs-generated").exists());
         }
@@ -2954,9 +2961,10 @@ mod tests {
         let error = selected
             .build_with_runner(&mut DefaultOnlyLake, CargoMetadata::Suppress)
             .expect_err("keyed build cannot accept default output");
-        assert!(
-            matches!(error, LinkDiagnostics::LakeOutputUnresolved { reason, .. } if reason.contains("expected shared library"))
-        );
+        assert!(matches!(
+            error,
+            LinkDiagnostics::LakeOutputUnresolved { reason, .. } if reason.contains("expected shared library")
+        ));
 
         #[cfg(unix)]
         {
@@ -2980,11 +2988,18 @@ mod tests {
                 .expect("alias dependency output");
             write_file(
                 &root.join("lake-manifest.json"),
-                r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"interop"}],"name":"my_pkg","lakeDir":".lake"}"#,
+                concat!(
+                    r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":["#,
+                    r#"{"type":"path","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","#,
+                    r#""inherited":false,"dir":"interop"}],"name":"my_pkg","lakeDir":".lake"}"#,
+                ),
             );
             write_file(
                 &dependency.join("lake-manifest.json"),
-                r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"lean_rs_interop_shims","lakeDir":".lake"}"#,
+                concat!(
+                    r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"#,
+                    r#""name":"lean_rs_interop_shims","lakeDir":".lake"}"#,
+                ),
             );
             let error = CargoLeanCapability::new(root, "MyCapability")
                 .generated_output_key("lean-4.36.0")

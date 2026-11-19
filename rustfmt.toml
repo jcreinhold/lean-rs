@@ -4,8 +4,8 @@ style_edition = "2024"
 
 # Use four-space indentation and LF line endings.
 hard_tabs = false
-tab_spaces = 4
 newline_style = "Unix"
+tab_spaces = 4
 
 # Keep standard wrapping heuristics at the shared line width.
 max_width = 120

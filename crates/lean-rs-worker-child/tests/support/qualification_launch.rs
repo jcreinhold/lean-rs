@@ -27,7 +27,7 @@ fn check_executable(path: &Path, approved: &str) {
     for byte in Sha256::digest(bytes) {
         write!(actual, "{byte:02x}").expect("write hexadecimal digest to String");
     }
-    assert_eq!(actual, approved, "unapproved executable {path:?}");
+    assert_eq!(actual, approved, "unapproved executable {}", path.display());
 }
 
 pub(super) fn checked(selection: &str) -> Qualification {

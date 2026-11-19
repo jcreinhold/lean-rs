@@ -875,7 +875,10 @@ fn stale_terminal_cannot_complete_or_redispatch_the_current_command() {
         );
         let calls: Vec<_> = events.iter().filter(|event| event.op == "json_command").collect();
         assert_eq!(calls.len(), 1, "all generations: {events:?}");
-        assert_eq!(calls[0].pid, current_pid);
+        assert_eq!(
+            calls.first().expect("one command reached the live worker").pid,
+            current_pid
+        );
         assert_eq!(
             events.iter().filter(|event| event.op == "spawn").count(),
             if previous_generation { 2 } else { 1 }

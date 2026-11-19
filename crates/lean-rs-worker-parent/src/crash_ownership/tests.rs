@@ -68,7 +68,7 @@ fn preparing_socket_collision_preserves_foreign_listener_and_releases_slot() {
             .filter(|path| path.is_dir())
             .collect::<Vec<_>>()
     };
-    assert_eq!(generations(), [resident.0.directory.clone()]);
+    assert_eq!(generations(), std::slice::from_ref(&resident.0.directory));
     let successor = LeanWorkerNativeScope::prepare(&registry, timeout, Some(&slot)).unwrap();
     assert!(successor.0.directory.join("owner.json").is_file());
     assert_eq!(identity(&resident_record), resident_identity);

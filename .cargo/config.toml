@@ -11,8 +11,8 @@ debug = "line-tables-only"
 debug = false
 
 [profile.debugging]
-inherits = "dev"
 debug = true
+inherits = "dev"
 
 [build]
 # Keep cargo itself from multiplying rustc/link jobs while Lean-linked tests
@@ -23,8 +23,8 @@ jobs = 1
 # Cargo does not allow a workspace config to replace the built-in `cargo test`
 # subcommand. Use `cargo xtest` for the full-suite gate so every test runs
 # under nextest's process isolation.
-xtest = ["nextest", "run", "--workspace"]
-xtest-ci = ["nextest", "run", "--workspace", "--profile", "ci"]
+xtest = "nextest run --workspace"
+xtest-ci = "nextest run --workspace --profile ci"
 
 [env]
 # Pin the Lean task manager to a single worker thread per process.
@@ -47,12 +47,12 @@ RUST_TEST_THREADS = "1"
 LEAN_RS_LEAN_MAX_MEMORY_KIB = "1572864"
 LEAN_RS_LONG_SESSION_IMPORTS = "1"
 LEAN_RS_LONG_SESSION_MAX_RSS_KIB = "1572864"
+LEAN_RS_POOL_MEMORY_MAX_IMPORTS = "1"
+LEAN_RS_POOL_MEMORY_MAX_WORKERS = "1"
+LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB = "1572864"
+LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB = "1572864"
 LEAN_RS_WORKER_MEMORY_MAX_IMPORTS = "1"
 LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB = "1572864"
-LEAN_RS_POOL_MEMORY_MAX_WORKERS = "1"
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB = "1572864"
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB = "1572864"
-LEAN_RS_POOL_MEMORY_MAX_IMPORTS = "1"
 
 # Quieter `tracing` output by default; override per-invocation with
 # `RUST_LOG=lean_rs=debug cargo ...`.

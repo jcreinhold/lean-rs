@@ -549,7 +549,9 @@ fn is_probably_cargo_test_binary() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{generated_output_key_from_search_paths, same_process_cargo_test_import_guard_active_from_facts};
+    use super::{
+        LeanResult, generated_output_key_from_search_paths, same_process_cargo_test_import_guard_active_from_facts,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -575,19 +577,17 @@ mod tests {
     }
 
     #[test]
-    fn prepared_search_paths_select_one_generated_output_or_the_default() {
+    fn prepared_search_paths_select_one_generated_output_or_the_default() -> LeanResult<()> {
         let path = |package: &str, output: &str| PathBuf::from(format!("/sdk/{package}/.lake/{output}/lib/lean"));
         assert_eq!(
             generated_output_key_from_search_paths(&[
                 path("interop", "lean-rs-generated/lean-4.36.0"),
                 path("host", "lean-rs-generated/lean-4.36.0"),
-            ])
-            .expect("matching generated outputs"),
+            ])?,
             Some("lean-4.36.0".to_owned())
         );
         assert_eq!(
-            generated_output_key_from_search_paths(&[path("interop", "build"), path("host", "build")])
-                .expect("matching default outputs"),
+            generated_output_key_from_search_paths(&[path("interop", "build"), path("host", "build")])?,
             None
         );
         assert!(
@@ -615,9 +615,9 @@ mod tests {
             generated_output_key_from_search_paths(&[
                 PathBuf::from("/custom/interop/imports"),
                 PathBuf::from("/custom/host/imports"),
-            ])
-            .expect("legacy custom paths remain unkeyed"),
+            ])?,
             None
         );
+        Ok(())
     }
 }

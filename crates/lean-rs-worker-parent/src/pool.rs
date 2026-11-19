@@ -1420,7 +1420,11 @@ mod tests {
 
         drop(failed.take().expect("failed opener spawned a child"));
         let started = Instant::now();
-        while !pool.pending_failed_opens[0].closed() || caller.active_processes() != 1 {
+        let pending = pool
+            .pending_failed_opens
+            .first()
+            .expect("failed opener must retain a pending cleanup");
+        while !pending.closed() || caller.active_processes() != 1 {
             assert!(
                 started.elapsed() < Duration::from_secs(2),
                 "deferred cleanup did not close"

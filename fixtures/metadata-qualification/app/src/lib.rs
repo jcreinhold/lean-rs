@@ -169,7 +169,14 @@ impl Record {
         PathBuf::from(env!("D3_HELPER"))
     }
     pub fn descriptor(&self) -> lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts {
-        serde_json::from_value(serde_json::json!({"protocol":2,"shim_manifest_path":self.shim_manifest,"shim_manifest_json":self.shim_json,"artifact_roots":self.shim_roots,"shim_search_paths":self.shim_paths})).unwrap()
+        serde_json::from_value(serde_json::json!({
+            "protocol": 2,
+            "shim_manifest_path": self.shim_manifest,
+            "shim_manifest_json": self.shim_json,
+            "artifact_roots": self.shim_roots,
+            "shim_search_paths": self.shim_paths,
+        }))
+        .unwrap()
     }
     fn check_file(&self, path: &Path) -> R<()> {
         let (dev, ino, digest) = self.files.get(path).ok_or_else(|| err("unselected file"))?;
