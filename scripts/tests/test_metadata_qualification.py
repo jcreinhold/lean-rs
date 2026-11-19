@@ -1,6 +1,7 @@
 """Pre-execution controls for the ordinary metadata qualification."""
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -239,15 +240,58 @@ class MetadataQualificationTest(unittest.TestCase):
             qualification.verified_platform("Linux", "x86_64")
         self.launch.assert_not_called()
 
+    def test_platform_profiles_select_only_the_reviewed_nextest_loader_cleanup(self):
+        cases = [
+            (qualification.DARWIN_ARM64_PINS,
+             "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER",
+             "/usr/bin/env -u DYLD_FALLBACK_LIBRARY_PATH -u DYLD_LIBRARY_PATH"),
+            (qualification.LINUX_X86_64_NEXTEST_RUNNER,
+             "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+             "/usr/bin/env -u LD_LIBRARY_PATH"),
+        ]
+        for profile, variable, command in cases:
+            with self.subTest(variable=variable):
+                env = {"PATH": "/usr/bin", "LEAN_SYSROOT": "/selected"}
+                qualification.select_nextest_runner(env, profile)
+                self.assertEqual(env, {
+                    "PATH": "/usr/bin", "LEAN_SYSROOT": "/selected", variable: command,
+                })
+
+    def test_platform_profile_refuses_inherited_target_runner_override(self):
+        variable = qualification.LINUX_X86_64_NEXTEST_RUNNER["nextest_runner_variable"]
+        env = {variable: "/unreviewed/runner"}
+        with self.assertRaisesRegex(ValueError, "duplicate target runner entry"):
+            qualification.select_nextest_runner(env, qualification.LINUX_X86_64_NEXTEST_RUNNER)
+        self.assertEqual(env[variable], "/unreviewed/runner")
+        self.launch.assert_not_called()
+
+    def test_linux_cli_refuses_inherited_loader_override_before_platform_or_state(self):
+        argv = ["qualify_metadata.py", "--writer", str(self.helper),
+                "--writer-sha256", qualification.digest(self.helper), "prepare"]
+        with patch.object(sys, "argv", argv), \
+                patch.object(qualification.platform, "system", return_value="Linux"), \
+                patch.dict(os.environ, {"LD_LIBRARY_PATH": "/unreviewed"}, clear=True), \
+                patch.object(qualification, "verified_platform") as platform_profile, \
+                patch.object(qualification, "ordinary_state_lock") as state_lock, \
+                self.assertRaises(SystemExit):
+            qualification.main()
+        platform_profile.assert_not_called()
+        state_lock.assert_not_called()
+        self.launch.assert_not_called()
+
     def test_linux_cli_refuses_before_state_lock_or_dispatch(self):
         argv = ["qualify_metadata.py", "--writer", str(self.helper),
                 "--writer-sha256", qualification.digest(self.helper), "prepare"]
         with patch.object(sys, "argv", argv), \
                 patch.object(qualification.platform, "system", return_value="Linux"), \
                 patch.object(qualification.platform, "machine", return_value="x86_64"), \
+                patch.dict(os.environ, {}, clear=True), \
+                patch("sys.stderr", new_callable=io.StringIO) as error, \
                 patch.object(qualification, "ordinary_state_lock") as state_lock, \
-                self.assertRaises(SystemExit):
+                self.assertRaises(SystemExit) as stopped:
             qualification.main()
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertIn("awaits verified Lean release", error.getvalue())
         state_lock.assert_not_called()
         self.launch.assert_not_called()
 

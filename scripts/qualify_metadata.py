@@ -32,6 +32,12 @@ DARWIN_ARM64_PINS = {
     "lake": LAKE_SHA256,
     "runtime": "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5",
     "runtime_name": "libleanshared.dylib",
+    "nextest_runner_variable": "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER",
+    "nextest_runner": "/usr/bin/env -u DYLD_FALLBACK_LIBRARY_PATH -u DYLD_LIBRARY_PATH",
+}
+LINUX_X86_64_NEXTEST_RUNNER = {
+    "nextest_runner_variable": "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+    "nextest_runner": "/usr/bin/env -u LD_LIBRARY_PATH",
 }
 
 
@@ -87,6 +93,23 @@ def verified_platform(system=None, machine=None):
     if system == "Linux":
         raise ValueError("Linux ordinary dispatch awaits verified Lean release, helper and worker artifact pins")
     raise ValueError(f"unsupported metadata qualification platform: {system} {machine}")
+
+
+def refuse_inherited_loader_overrides(system=None, environ=None):
+    system = platform.system() if system is None else system
+    environ = os.environ if environ is None else environ
+    if system == "Linux":
+        overrides = sorted(name for name in environ if name == "GLIBC_TUNABLES"
+                           or name.startswith(("DYLD_", "__XPC_DYLD_", "LD_")))
+        require(not overrides, f"inherited Linux loader override: {', '.join(overrides)}")
+
+
+def select_nextest_runner(env, profile):
+    """Select the reviewed target runner without changing the runner-entry environment."""
+    variable = profile["nextest_runner_variable"]
+    command = profile["nextest_runner"]
+    require(variable not in env, f"duplicate target runner entry: {variable}")
+    env[variable] = command
 
 
 def installed_lean_release(profile=None):
@@ -338,7 +361,7 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
     env[variable] = json.dumps(dict(
         worker=str(worker), worker_sha256=approved_worker, helper=str(helper), helper_sha256=writer_sha256,
         owners=str(owners), sysroot=d["sysroot"], prepared=expected, **selection))
-    env["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"] = "/usr/bin/env -u DYLD_FALLBACK_LIBRARY_PATH -u DYLD_LIBRARY_PATH"
+    select_nextest_runner(env, profile)
     space(TARGET)
     events = root / "app/native-events.log"
     before = events.read_bytes() if events.exists() else b""
@@ -410,6 +433,7 @@ def main():
             (args.command == "run" and args.unknown_declaration):
         parser.error("typed, verification and disposable-clean selectors are temporarily unavailable; ordinary metadata only")
     try:
+        refuse_inherited_loader_overrides()
         profile = verified_platform()
         release = installed_lean_release(profile)
         reviewed_writer(args.writer, args.writer_sha256)
