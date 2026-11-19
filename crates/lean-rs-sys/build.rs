@@ -402,6 +402,14 @@ fn emit_link_directives(prefix: &Path) {
         println!("cargo:rustc-link-lib=dylib=gmp");
         println!("cargo:rustc-link-lib=dylib=uv");
     } else {
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+        // Lean's Linux shared library exports unwind symbols. Put the GNU
+        // system unwinder first so Rust panics do not use Lean's definitions.
+        // See https://github.com/leanprover/lean4/issues/15112.
+        if target_os == "linux" && target_env == "gnu" {
+            println!("cargo:rustc-link-lib=dylib=gcc_s");
+        }
         println!("cargo:rustc-link-lib=dylib=leanshared");
         // Bake an rpath into this crate's own binaries (tests, examples,
         // benches) so they can load `libleanshared.{dylib,so}` at run-time
@@ -410,7 +418,6 @@ fn emit_link_directives(prefix: &Path) {
         // dependent crates that produce their own binaries need to emit
         // the same flag from their own build script (see
         // `crates/lean-rs/build.rs`).
-        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
         if matches!(target_os.as_str(), "macos" | "linux") {
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_lean.display());
         }
