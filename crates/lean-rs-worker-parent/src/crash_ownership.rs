@@ -70,15 +70,22 @@ fn write_before_deadline(stream: &mut UnixStream, mut bytes: &[u8], deadline: In
             let offered = lifecycle_tests::startup_faults::write_limit(bytes.len());
             #[cfg(not(test))]
             let offered = bytes.len();
-            match stream.write(&bytes[..offered]) {
+            let offered = bytes
+                .get(..offered)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "startup ACK write limit exceeds frame"))?;
+            match stream.write(offered) {
                 Ok(0) => return Err(io::Error::new(io::ErrorKind::WriteZero, "startup ACK closed")),
                 Ok(n) => {
                     #[cfg(test)]
                     lifecycle_tests::startup_faults::after_write(n);
-                    bytes = &bytes[n..];
+                    bytes = bytes.get(n..).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "startup ACK write exceeds offered bytes")
+                    })?;
                 }
                 Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {
-                    std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_duration_since(Instant::now())))
+                    std::thread::sleep(
+                        Duration::from_millis(1).min(deadline.saturating_duration_since(Instant::now())),
+                    );
                 }
                 Err(e) => return Err(e),
             }
@@ -152,6 +159,7 @@ impl std::error::Error for LeanWorkerNativeSpawnError {
 }
 
 /// Retained local process/tracker ownership after failed startup.
+///
 /// Dropping this value delegates cleanup, but does not certify closure. Unknown
 /// authenticated identity remains fenced; direct exit alone is not closure.
 #[derive(Debug)]
@@ -346,6 +354,9 @@ impl LeanWorkerNativeScopeLease {
     }
 
     /// Kernel identity authenticated for this actual bootstrap child.
+    ///
+    /// # Errors
+    /// Returns an error when the admitted lifetime is unavailable.
     pub fn owner(&self) -> io::Result<&LeanWorkerOwnedProcess> {
         Ok(&self.lifetime()?.owner)
     }
@@ -375,13 +386,15 @@ struct AuthenticatedBootstrap {
 impl BootstrapCustody {
     pub(crate) fn closed(&self) -> io::Result<bool> {
         let state = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(state) = state.as_ref() else {
+        let Some((owner, guardian)) = state
+            .as_ref()
+            .map(|state| (state.owner.clone(), state.guardian.clone()))
+        else {
             return Ok(false);
         };
-        Ok(
-            !lean_toolchain::process_group::group_present(state.owner.process_group)?
-                && state.guardian.as_ref().map_or(Ok(true), |g| g.is_live().map(|v| !v))?,
-        )
+        drop(state);
+        Ok(!lean_toolchain::process_group::group_present(owner.process_group)?
+            && guardian.as_ref().map_or(Ok(true), |g| g.is_live().map(|v| !v))?)
     }
     pub(crate) fn request_stop(&self) {
         if let Some(state) = self
