@@ -2847,45 +2847,155 @@ fn declaration_target_resolves_the_new_scan_forms_by_name() {
     }
 }
 
+enum VerificationBatchCase {
+    NamedScanForms,
+    OrderedResults,
+    MissingKernelConstant,
+    NoTargetsMissingImport,
+    SmallTotalBudget,
+}
+
+impl VerificationBatchCase {
+    fn request(self) -> lean_rs_host::host::process::DeclarationVerificationBatchRequest {
+        use lean_rs_host::host::process::{
+            DeclarationVerificationBatchItem, DeclarationVerificationBatchRequest, DeclarationVerificationTarget,
+            ModuleQueryOutputBudgets, SorryPolicy,
+        };
+        match self {
+            Self::NamedScanForms => {
+                let targets = [
+                    "ScanForms.multi",
+                    "ScanForms.zeroOrSucc",
+                    "ScanForms.origin",
+                    "ScanForms.Point",
+                    "ScanForms.Default",
+                ]
+                .into_iter()
+                .map(|name| DeclarationVerificationBatchItem {
+                    id: name.to_owned(),
+                    target: DeclarationVerificationTarget::Name { name: name.to_owned() },
+                })
+                .collect();
+                DeclarationVerificationBatchRequest {
+                    source: SCAN_FORMS_SOURCE.to_owned(),
+                    targets,
+                    sorry_policy: SorryPolicy::Deny,
+                    report_axioms: true,
+                    budgets: ModuleQueryOutputBudgets::default(),
+                }
+            }
+            Self::OrderedResults => {
+                let source = "\
+theorem closed : True := by
+  trivial
+theorem withSorry : True := by
+  sorry
+";
+                DeclarationVerificationBatchRequest {
+                    source: source.to_owned(),
+                    targets: vec![
+                        DeclarationVerificationBatchItem {
+                            id: "closed-row".to_owned(),
+                            target: DeclarationVerificationTarget::Name {
+                                name: "closed".to_owned(),
+                            },
+                        },
+                        DeclarationVerificationBatchItem {
+                            id: "sorry-row".to_owned(),
+                            target: DeclarationVerificationTarget::Name {
+                                name: "withSorry".to_owned(),
+                            },
+                        },
+                        DeclarationVerificationBatchItem {
+                            id: "missing-row".to_owned(),
+                            target: DeclarationVerificationTarget::Name {
+                                name: "notDefinedHere".to_owned(),
+                            },
+                        },
+                    ],
+                    sorry_policy: SorryPolicy::Deny,
+                    report_axioms: true,
+                    budgets: ModuleQueryOutputBudgets::default(),
+                }
+            }
+            Self::MissingKernelConstant => DeclarationVerificationBatchRequest {
+                // The source declaration resolves, but Lean cannot add a theorem
+                // whose type is not a proposition to the kernel environment.
+                source: "theorem absent : Nat := 0\n".to_owned(),
+                targets: vec![DeclarationVerificationBatchItem {
+                    id: "absent".to_owned(),
+                    target: DeclarationVerificationTarget::Name {
+                        name: "absent".to_owned(),
+                    },
+                }],
+                sorry_policy: SorryPolicy::Deny,
+                report_axioms: true,
+                budgets: ModuleQueryOutputBudgets::default(),
+            },
+            Self::NoTargetsMissingImport => DeclarationVerificationBatchRequest {
+                source: "import Foo.Bar.Baz\n\ndef x := 1\n".to_owned(),
+                targets: Vec::new(),
+                sorry_policy: SorryPolicy::Deny,
+                report_axioms: true,
+                budgets: ModuleQueryOutputBudgets::default(),
+            },
+            Self::SmallTotalBudget => DeclarationVerificationBatchRequest {
+                source: "theorem a : True := by trivial\ntheorem b : True := by trivial\n".to_owned(),
+                targets: vec![
+                    DeclarationVerificationBatchItem {
+                        id: "a-row".to_owned(),
+                        target: DeclarationVerificationTarget::Name { name: "a".to_owned() },
+                    },
+                    DeclarationVerificationBatchItem {
+                        id: "b-row".to_owned(),
+                        target: DeclarationVerificationTarget::Name { name: "b".to_owned() },
+                    },
+                ],
+                sorry_policy: SorryPolicy::Deny,
+                report_axioms: true,
+                budgets: ModuleQueryOutputBudgets {
+                    per_field_bytes: 1024,
+                    total_bytes: 1,
+                },
+            },
+        }
+    }
+}
+
+fn fixture_verify_declarations<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    case: VerificationBatchCase,
+) -> lean_rs::LeanResult<lean_rs_host::host::process::DeclarationVerificationBatchOutcome> {
+    let request = case.request();
+    let options = LeanElabOptions::new();
+    if !fixture::native_fixture_selected() {
+        return call_service!(caps, session, verify_declaration_batch, &request, &options, None);
+    }
+    let paths = fixture::native_elaboration_paths(caps, session);
+    let (env, scope) = session.source_context();
+    #[allow(
+        unsafe_code,
+        reason = "only the fixed verification requests in the held test fixture"
+    )]
+    // SAFETY: the cases fix the source, targets, policy and budgets. The
+    // exact held native roots serve the same default elaboration environment.
+    let admitted = unsafe {
+        caps.shim_capability()
+            .verification_batch_scope(env, scope, paths, request, options.source_options())
+    }?;
+    session.verify_declaration_batch(&admitted, None)
+}
+
 #[test]
 fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
-    use lean_rs_host::host::process::{
-        DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationStatus,
-        DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
-    };
+    use lean_rs_host::host::process::{DeclarationVerificationBatchOutcome, DeclarationVerificationStatus};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let targets = [
-        "ScanForms.multi",
-        "ScanForms.zeroOrSucc",
-        "ScanForms.origin",
-        "ScanForms.Point",
-        "ScanForms.Default",
-    ]
-    .into_iter()
-    .map(|name| lean_rs_host::host::process::DeclarationVerificationBatchItem {
-        id: name.to_owned(),
-        target: DeclarationVerificationTarget::Name { name: name.to_owned() },
-    })
-    .collect();
-    let request = DeclarationVerificationBatchRequest {
-        source: SCAN_FORMS_SOURCE.to_owned(),
-        targets,
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: true,
-        budgets: ModuleQueryOutputBudgets::default(),
-    };
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::NamedScanForms)
+        .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
     };
@@ -3142,57 +3252,15 @@ fn session_process_module_query_reports_missing_imports_with_result() {
 
 #[test]
 fn declaration_verification_batch_preserves_order_and_uses_one_dispatch() {
-    use lean_rs_host::host::process::{
-        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
-        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
-    };
+    use lean_rs_host::host::process::{DeclarationVerificationBatchOutcome, DeclarationVerificationStatus};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let source = "\
-theorem closed : True := by
-  trivial
-theorem withSorry : True := by
-  sorry
-";
-    let request = DeclarationVerificationBatchRequest {
-        source: source.to_owned(),
-        targets: vec![
-            DeclarationVerificationBatchItem {
-                id: "closed-row".to_owned(),
-                target: DeclarationVerificationTarget::Name {
-                    name: "closed".to_owned(),
-                },
-            },
-            DeclarationVerificationBatchItem {
-                id: "sorry-row".to_owned(),
-                target: DeclarationVerificationTarget::Name {
-                    name: "withSorry".to_owned(),
-                },
-            },
-            DeclarationVerificationBatchItem {
-                id: "missing-row".to_owned(),
-                target: DeclarationVerificationTarget::Name {
-                    name: "notDefinedHere".to_owned(),
-                },
-            },
-        ],
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: true,
-        budgets: ModuleQueryOutputBudgets::default(),
-    };
 
     let before = session.stats();
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::OrderedResults)
+        .expect("host stack reports no exception");
     let after = session.stats();
     assert_eq!(after.ffi_calls, before.ffi_calls + 1);
     assert_eq!(after.batch_items, before.batch_items + 3);
@@ -3297,36 +3365,12 @@ fn private_declaration_verification_reports_real_axioms() {
 
 #[test]
 fn declaration_without_kernel_constant_has_unavailable_axioms() {
-    use lean_rs_host::host::process::{
-        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
-        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
-    };
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    use lean_rs_host::host::process::{DeclarationVerificationBatchOutcome, DeclarationVerificationStatus};
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let request = DeclarationVerificationBatchRequest {
-        // The source declaration resolves, but Lean cannot add a theorem
-        // whose type is not a proposition to the kernel environment.
-        source: "theorem absent : Nat := 0\n".to_owned(),
-        targets: vec![DeclarationVerificationBatchItem {
-            id: "absent".to_owned(),
-            target: DeclarationVerificationTarget::Name {
-                name: "absent".to_owned(),
-            },
-        }],
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: true,
-        budgets: ModuleQueryOutputBudgets::default(),
-    };
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("verify");
+    let outcome =
+        fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::MissingKernelConstant).expect("verify");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("{outcome:?}")
     };
@@ -3347,30 +3391,14 @@ fn declaration_without_kernel_constant_has_unavailable_axioms() {
 
 #[test]
 fn declaration_verification_batch_empty_targets_still_reports_missing_imports() {
-    use lean_rs_host::host::process::{
-        DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, ModuleQueryOutputBudgets, SorryPolicy,
-    };
+    use lean_rs_host::host::process::DeclarationVerificationBatchOutcome;
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let request = DeclarationVerificationBatchRequest {
-        source: "import Foo.Bar.Baz\n\ndef x := 1\n".to_owned(),
-        targets: Vec::new(),
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: true,
-        budgets: ModuleQueryOutputBudgets::default(),
-    };
 
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::NoTargetsMissingImport)
+        .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::MissingImports {
         results,
         imports,
@@ -3386,43 +3414,14 @@ fn declaration_verification_batch_empty_targets_still_reports_missing_imports() 
 
 #[test]
 fn declaration_verification_batch_total_budget_exhaustion_returns_ordered_budget_rows() {
-    use lean_rs_host::host::process::{
-        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
-        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
-    };
+    use lean_rs_host::host::process::{DeclarationVerificationBatchOutcome, DeclarationVerificationStatus};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let request = DeclarationVerificationBatchRequest {
-        source: "theorem a : True := by trivial\ntheorem b : True := by trivial\n".to_owned(),
-        targets: vec![
-            DeclarationVerificationBatchItem {
-                id: "a-row".to_owned(),
-                target: DeclarationVerificationTarget::Name { name: "a".to_owned() },
-            },
-            DeclarationVerificationBatchItem {
-                id: "b-row".to_owned(),
-                target: DeclarationVerificationTarget::Name { name: "b".to_owned() },
-            },
-        ],
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: true,
-        budgets: ModuleQueryOutputBudgets {
-            per_field_bytes: 1024,
-            total_bytes: 1,
-        },
-    };
 
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::SmallTotalBudget)
+        .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
     };
