@@ -45,15 +45,22 @@ def fail(message: str) -> None:
 def run(
     command: list[str], *, env: dict[str, str] | None = None, capture: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=ROOT,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.PIPE if capture else None,
-        check=True,
-    )
+    try:
+        return subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        if error.stdout:
+            sys.stdout.write(error.stdout)
+        if error.stderr:
+            sys.stderr.write(error.stderr)
+        raise
 
 
 def read_toml(path: pathlib.Path) -> dict:
