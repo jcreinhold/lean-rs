@@ -166,6 +166,22 @@ def check_clean_deployment(root, approved_deployment):
     return dict(deployment=approved_deployment, config=config, lake=LAKE_SHA256)
 
 
+def scalar_fixture_inputs(project, deployment, helper, helper_sha256):
+    image = project / ".lake/build/lib/liblean__rs__fixture_LeanRsFixture.dylib"
+    require(str(project) == deployment["project"] and str(image) == deployment["consumer_image"]
+            and str(image) == json.loads(deployment["consumer_json"])["primary_dylib"],
+            "scalar test requires the sealed typed consumer image")
+    device, inode, sha256 = deployment["files"][str(image)]
+    require(image == image.resolve(strict=True) and image.is_file(), "expected canonical scalar fixture image")
+    with image.open("rb") as source:
+        stat = os.fstat(source.fileno())
+        require((stat.st_dev, stat.st_ino) == (device, inode), "scalar fixture image identity changed")
+        require(hashlib.file_digest(source, "sha256").hexdigest() == sha256, "scalar fixture image digest changed")
+    return dict(LEAN_RS_TEST_SCALAR_FIXTURE=json.dumps([str(project), device, inode]),
+                LEAN_RS_PROFILE_FIXTURE_SHA256=sha256, LEAN_RS_PROFILE_READER=str(helper),
+                LEAN_RS_PROFILE_READER_SHA256=helper_sha256)
+
+
 def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, typed_session=False, disposable_clean=False):
     space(root)
     require(root == root.resolve(strict=True) and root.stat().st_uid == os.getuid()
@@ -204,6 +220,8 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
         clean_inputs = check_clean_deployment(root, approved_deployment)
     helper = private_writer(root, writer, writer_sha256)
     env = environment(root, helper, root / "selector-target")
+    if typed_session and not disposable_clean:
+        scalar_inputs = scalar_fixture_inputs(root / "app/lean", d, helper, writer_sha256)
     # Only the independently approved worker can be executed, even for a read-only probe.
     ready = subprocess.check_output([worker, "--lean-rs-ready-host-artifacts"], cwd=root, env=env)
     expected = dict(protocol=1, shim_manifest_path=d["shim_manifest"], shim_manifest_json=d["shim_json"],
@@ -243,6 +261,11 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
         required = ["verified-deployment", "authorize-host-load", "verified-global-interop-initializer",
                     "authorize-LeanRsFixture-load", "authorize-Handles-SourceRanges-import"]
         require(names[:len(required)] == required, f"unexpected fixture admission order: {names}")
+    if typed_session and not disposable_clean:
+        space(root)
+        subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
+                        "-p", "lean-rs", "--lib", "-E", "test(=abi::tests::bool_round_trip_via_fixture)"],
+                       cwd=SDK, env={**env, **scalar_inputs}, check=True)
     space(root)
 
 
@@ -253,7 +276,7 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--disposable-clean", action="store_true",
                        help="prepare or consume a one-use typed deployment to check guarded Lake clean")
-    modes.add_argument("--typed-session", action="store_true", help="qualify the fixed LeanRsFixture Nat.add selector")
+    modes.add_argument("--typed-session", action="store_true", help="qualify the fixed LeanRsFixture Nat.add and scalar Boolean selectors")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
     prepare.add_argument("--lean-release", type=Path, required=True)

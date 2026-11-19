@@ -16,20 +16,43 @@ pub(super) struct ScalarFixture {
 
 impl ScalarFixture {
     pub(super) fn admit() -> io::Result<Self> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/lean")
-            .canonicalize()?;
+        // Only the named macOS library test receives this sealed project and image identity.
+        #[cfg(all(test, target_os = "macos"))]
+        let selected: Option<(PathBuf, u64, u64)> = option_env!("LEAN_RS_TEST_SCALAR_FIXTURE")
+            .map(serde_json::from_str)
+            .transpose()?;
+        #[cfg(not(all(test, target_os = "macos")))]
+        let selected: Option<(PathBuf, u64, u64)> = None;
+        let root = match &selected {
+            Some((root, _, _)) => {
+                if root.canonicalize()? != *root {
+                    return Err(io::Error::other("noncanonical selected scalar project"));
+                }
+                root.clone()
+            }
+            None => Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/lean")
+                .canonicalize()?,
+        };
         let readers = inputs::hold(std::slice::from_ref(&root))?;
         let lib = root.join(".lake/build/lib");
         let ext = std::env::consts::DLL_EXTENSION;
         let modern = lib.join(format!("liblean__rs__fixture_LeanRsFixture.{ext}"));
-        let image = if modern.exists() {
+        let image = if selected.is_some() || modern.exists() {
             modern
         } else {
             lib.join(format!("libLeanRsFixture.{ext}"))
         };
         if image.canonicalize()? != image {
             return Err(io::Error::other("noncanonical fixture image"));
+        }
+        #[cfg(all(test, target_os = "macos"))]
+        if let Some((_, device, inode)) = selected {
+            use std::os::unix::fs::MetadataExt as _;
+            let metadata = image.metadata()?;
+            if (metadata.dev(), metadata.ino()) != (device, inode) {
+                return Err(io::Error::other("selected scalar fixture image identity changed"));
+            }
         }
         inputs::check_digest(&image, option_env!("LEAN_RS_PROFILE_FIXTURE_SHA256"))?;
         Ok(Self {
