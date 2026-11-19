@@ -314,7 +314,7 @@ impl Held {
                 b.is_file() && a.nlink() == 1 && (a.dev(), a.ino()) == (b.dev(), b.ino()),
                 "changed lock identity",
             )?;
-            if record.broken_import {
+            if record.broken_import || record.typed_session {
                 require(
                     lean_toolchain::shared_writer::previous_writer_stopped(&f)?,
                     "prior writer remains active",
@@ -406,7 +406,9 @@ impl Held {
         }
         require(found, "selected libleanshared absent")?;
         require(
-            d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
+            (d.typed_session && !d.verification && d.consumer_manifest.as_os_str().is_empty()
+                && d.consumer_json.is_empty())
+                || d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
             "consumer manifest or initializer differs",
         )?;
         require(

@@ -19,12 +19,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("deployment state is missing or aliased".into());
     }
     let target = sdk.join("target").canonicalize()?;
-    let broken_import = match env::args().nth(2).as_deref() {
+    let profile = env::args().nth(2);
+    let broken_import = match profile.as_deref() {
         None => false,
+        Some("--typed-session") if env::args().len() == 3 => false,
         Some("--broken-import") if env::args().len() == 3 => true,
         _ => return Err("unknown metadata qualification profile".into()),
     };
-    let state_name = if broken_import { "broken-import" } else { "ordinary" };
+    let typed_session = profile.as_deref() == Some("--typed-session");
+    let state_name = if broken_import { "broken-import" } else if typed_session { "typed-session" } else { "ordinary" };
     let expected_state = target.join("metadata-qualification").join(state_name);
     if state != expected_state {
         return Err("deployment state is outside the ordinary metadata target".into());
@@ -32,6 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sysroot = PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
     let generated_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?
         .ok_or("installed Lean release does not use a generated-output slot")?;
+    if typed_session {
+        return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key);
+    }
     if broken_import {
         return prepare_broken_import(app, &state, &sysroot, generated_output_key);
     }
@@ -106,6 +112,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     fs::write(state.join("prepared.json"), serde_json::to_vec_pretty(&record)?)?;
     seal(app, &state)
+}
+
+fn prepare_typed_session(
+    app: &Path,
+    sdk: &Path,
+    state: &Path,
+    sysroot: &Path,
+    key: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Reuse the same run's prepared shims. This path never invokes Lake or a writer.
+    let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
+    if raw.len() > 64 * 1024 {
+        return Err("prepared descriptor exceeds limit".into());
+    }
+    let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts =
+        serde_json::from_str(&raw)?;
+    if selected.protocol != 2 {
+        return Err("unexpected prepared descriptor protocol".into());
+    }
+    let shim = lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(
+        selected.shim_manifest_path.into(),
+        selected.shim_manifest_json,
+        selected
+            .artifact_roots
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        selected
+            .shim_search_paths
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+    )?;
+    let project = sdk.join("fixtures/lean").canonicalize()?;
+    // The trusted job already built this exact checkout fixture once and keeps
+    // it unchanged until tests exit. This is not protection from same-user writes.
+    let project_metadata = fs::symlink_metadata(&project)?;
+    if project != sdk.join("fixtures/lean") || !project_metadata.is_dir()
+        || project_metadata.uid() != rustix::process::geteuid().as_raw()
+        || project_metadata.mode() & 0o7777 != 0o700 {
+        return Err("typed fixture is not the job-owned private checkout fixture".into());
+    }
+    let image = project.join(".lake/build/lib").join(format!(
+        "liblean__rs__fixture_LeanRsFixture.{}",
+        env::consts::DLL_EXTENSION
+    ));
+    if image.canonicalize()? != image || !fs::symlink_metadata(&image)?.is_file() {
+        return Err("missing canonical built scalar image".into());
+    }
+    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
+    match fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&lock) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    // Never replace, truncate or unlink an existing owner's record. Held checks
+    // this same lock identity and previous-writer closure under its real reader.
+    let metadata = fs::symlink_metadata(&lock)?;
+    if !metadata.is_file() || lock.canonicalize()? != lock || metadata.nlink() != 1 {
+        return Err("invalid fixture project lock".into());
+    }
+    let mut roots = shim.artifact_roots().to_vec();
+    roots.push(project.clone());
+    roots.sort();
+    let record = serde_json::json!({
+        "broken_import": false, "typed_session": true, "verification": false,
+        "generated_output_key": key, "project": project, "sysroot": sysroot,
+        "consumer_image": image,
+        "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),
+        "shim_roots": shim.artifact_roots(), "shim_paths": shim.shim_search_paths(), "roots": roots,
+    });
+    fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
+    seal(app, state)
 }
 
 fn prepare_broken_import(

@@ -102,7 +102,11 @@ def main():
     state = Path(sys.argv[1]).resolve(strict=True)
     rec = json.loads((state / "prepared.json").read_text())
     broken = rec.get("broken_import", False)
-    project = state / "lean" if broken else sdk / "fixtures/metadata-qualification/lean"
+    typed = rec.get("typed_session", False)
+    assert not (broken and typed)
+    if typed:
+        assert rec.get("verification") is False
+    project = state / "lean" if broken else sdk / ("fixtures/lean" if typed else "fixtures/metadata-qualification/lean")
     assert Path(rec["project"]) == project
     release = Path(rec["sysroot"])
     bundle = sdk / "crates/lean-rs-host/shims"
@@ -116,7 +120,10 @@ def main():
     hi = image(host, "lean__rs__host__shims_LeanRsHostShims")
     package, module = ("lean_rs_interop_consumer", "LeanRsInteropConsumer")
     stem = package.replace("_", "__") + "_" + module
-    ci = None if broken else image(project, stem)
+    if typed:
+        package, module = "lean_rs_fixture", "LeanRsFixture"
+        stem = "lean__rs__fixture_LeanRsFixture"
+    ci = None if broken else (project / ".lake/build/lib" / native_name(stem) if typed else image(project, stem))
     shims = [out(dep) / "lean", out(host) / "lean"]
     if not broken:
         assert Path(rec["consumer_image"]) == ci
@@ -146,11 +153,11 @@ def main():
         with path.open("rb") as stream:
             contentpins[str(path)] = hashlib.file_digest(stream, "sha256").hexdigest()
 
-    for manifest in ["shim"] if broken else ["consumer", "shim"]:
+    for manifest in ["shim"] if broken or typed else ["consumer", "shim"]:
         path = Path(rec[manifest + "_manifest"])
         assert path.read_text() == rec[manifest + "_json"]
         # Ordinary preparation republishes identical shim metadata by rename.
-        if not broken:
+        if not broken and not typed:
             pin(path)
         v = json.loads(path.read_text())
         p, m, i = (
@@ -178,7 +185,9 @@ def main():
             v["toolchain_fingerprint"]["header_sha256"]
             == "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4"
         )
-    project_symbols = ["initialize_" + stem, "lean_rs_interop_consumer_worker_metadata"]
+    project_symbols = ["initialize_" + stem]
+    if not typed:
+        project_symbols.append("lean_rs_interop_consumer_worker_metadata")
     images = [
         (di, ["initialize_lean__rs__interop__shims_LeanRsInterop"]),
         (hi, ["initialize_lean__rs__host__shims_LeanRsHostShims"]),
@@ -192,7 +201,9 @@ def main():
         pin_content(root / "lake-manifest.json")
     packages = json.loads((project / "lake-manifest.json").read_text())["packages"]
     project_deps = []
-    if broken:
+    if typed:
+        assert packages == []
+    elif broken:
         assert packages == []
         assert (
             project / "Demo/Broken.lean"
@@ -209,7 +220,7 @@ def main():
         assert (project / newdir).resolve() == dep
         project_deps = [project / newdir / ".lake/lean-rs-generated" / key / "lib/lean"]
     project_oleans = (
-        project / ".lake/build/lib/lean" if broken else out(project) / "lean"
+        project / ".lake/build/lib/lean" if broken or typed else out(project) / "lean"
     )
     # Both built packages must actually select the same source package.
     assert (
@@ -233,6 +244,9 @@ def main():
             (r / "Demo/Broken.olean").exists() or (r / "Demo.olean").exists()
             for r in [project_oleans, *shims, release / "lib/lean"]
         )
+    elif typed:
+        for module in ("LeanRsFixture/Handles", "LeanRsFixture/SourceRanges"):
+            assert (project_oleans / (module + ".olean")).is_file()
     else:
         assert (project_oleans / "LeanRsInteropConsumer/Callback.olean").is_file()
     assert (shims[0] / "LeanRsInterop.olean").is_file()

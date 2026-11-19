@@ -23,6 +23,11 @@ impl MetadataApp {
         self.0
             .get_or_init(|| {
                 let record = Record::selected();
+                if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
+                    && (record.broken_import || !record.typed_session || record.verification)
+                {
+                    return Err("ordinary typed worker requires its fixed typed fixture profile".to_owned());
+                }
                 if record.broken_import != broken_import_profile()
                     || (record.broken_import && (record.typed_session || record.verification))
                 {
@@ -179,11 +184,35 @@ impl WorkerAuthority for MetadataApp {
     }
     fn term<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: String,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: String,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedHostTerm<'static, 'cap>> {
-        Err(denied())
+        let d = &self.deployment()?.record;
+        if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
+            || d.broken_import || !d.typed_session || d.verification
+            || request != "(Nat.succ 0 : Nat)"
+            || !options.namespace.is_empty()
+            || options.file != "<elaborate>"
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || options.options_json != "{}"
+        {
+            return Err(denied());
+        }
+        // SAFETY: grant_source checked the actual Handles/SourceRanges import scope and
+        // complete search path. Held retains its sealed images and imports. Only this
+        // fixed recovery term with default options is admitted; no plugin is allowed.
+        unsafe {
+            session.capability.term_scope(
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                None,
+                options,
+            )
+        }
     }
     fn kernel<'cap>(
         &self,
@@ -233,7 +262,7 @@ impl WorkerAuthority for MetadataApp {
         let d = &self.deployment()?.record;
         let roots = d.verification_roots();
         if d.broken_import || !d.typed_session
-            || !d.verification
+            || (!d.verification && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1"))
             || context.capability.library_path() != d.host_image
             || observed != Some(roots.as_slice())
             || context.imports.plugin().is_some()
@@ -249,7 +278,7 @@ impl WorkerAuthority for MetadataApp {
         request: DeclarationVerificationRequest,
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationRequest>> {
-        if broken_import_profile() {
+        if broken_import_profile() || !self.deployment()?.record.verification {
             return Err(denied());
         }
         if options.file != "/verify/theorem.lean"
