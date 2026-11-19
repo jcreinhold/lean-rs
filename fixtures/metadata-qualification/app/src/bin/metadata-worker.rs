@@ -2,7 +2,8 @@ use lean_rs::host_bridge::{
     HostCachedModuleBatch, HostModuleBatch, HostModuleQuery, HostSourceOptions,
     TrustedHostKernelRequest, TrustedHostTerm, TrustedModuleSource,
     module_requests::{
-        DeclarationVerificationBatchRequest, DeclarationVerificationRequest, ProofAttemptRequest,
+        DeclarationVerificationBatchRequest, DeclarationVerificationRequest,
+        DeclarationVerificationTarget, ModuleQueryOutputBudgets, ProofAttemptRequest, SorryPolicy,
     },
 };
 use lean_rs::module::{
@@ -208,13 +209,84 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, ProofAttemptRequest>> {
         Err(denied())
     }
+    fn validate_source_context(
+        &self,
+        context: &WorkerSourceContext<'_, '_>,
+        observed: Option<&[String]>,
+    ) -> LeanResult<()> {
+        let d = &self.deployment()?.record;
+        let roots = d.verification_roots();
+        if !d.typed_session
+            || !d.verification
+            || context.capability.library_path() != d.host_image
+            || observed != Some(roots.as_slice())
+            || context.imports.plugin().is_some()
+        {
+            return Err(denied());
+        }
+        // This app minted the import scope only for the sealed names, order and profile.
+        context.imports.check_capability(context.capability)
+    }
     fn verify<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: DeclarationVerificationRequest,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: DeclarationVerificationRequest,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationRequest>> {
-        Err(denied())
+        if options.file != "/verify/theorem.lean"
+            || !options.namespace.is_empty()
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || options.options_json != "{}"
+        {
+            audit("refused-verification-options");
+            return Err(lean_rs::error::host_internal(
+                "verification fixture refused source options",
+            ));
+        }
+        let DeclarationVerificationTarget::Name { name } = &request.target else {
+            return Err(denied());
+        };
+        let defaults = ModuleQueryOutputBudgets::default();
+        if request.sorry_policy != SorryPolicy::Deny
+            || !request.report_axioms
+            || request.budgets.total_bytes != defaults.total_bytes
+        {
+            return Err(denied());
+        }
+        let ordinary = defaults.per_field_bytes;
+        let event = match (
+            request.source.as_str(),
+            name.as_str(),
+            request.budgets.per_field_bytes,
+        ) {
+            ("theorem t : True := by\n  trivial\n", "t", n) if n == ordinary => {
+                "authorize-verify-proved"
+            }
+            ("theorem t : True := by\n  sorry\n", "t", n) if n == ordinary => {
+                "authorize-verify-sorry"
+            }
+            ("theorem absent : Nat := 0\n", "absent", n) if n == ordinary => {
+                "authorize-verify-unavailable"
+            }
+            ("theorem t : True := by\n  sorry\n", "t", 1) => "authorize-verify-truncated",
+            _ => return Err(denied()),
+        };
+        let roots = self.deployment()?.record.verification_roots();
+        // SAFETY: grant_source validated this opened environment's exact import order immediately
+        // before calling verify. Held retains the sealed libraries, modules and release throughout.
+        // Only the four reviewed in-memory declarations and their exact options reach the shim.
+        let grant = unsafe {
+            session.capability.verification_scope(
+                session.environment,
+                session.imports,
+                roots,
+                request,
+                options,
+            )?
+        };
+        audit(event);
+        Ok(grant)
     }
     fn verify_batch<'cap>(
         &self,

@@ -14,7 +14,8 @@ import tempfile
 
 SDK = Path(__file__).resolve().parents[1]
 FIXTURE_SDK = "945792112a180bd9e3a90194159e0c9c158cde2d"
-APP_TREE = "9a37c723ce30cce1f8a63c5206a377b5e7632d7b"
+APP_TREE = "e50fe473928dede19987ab655000f80a8c5a74cd"
+TYPED_APP_TREE = "9a37c723ce30cce1f8a63c5206a377b5e7632d7b"
 # Metadata deployments sealed before the typed policy used this revision of the same app.
 ORIGINAL_APP_TREE = "ee1bf0cecda10560c7b58b33ea679188f87fea9c"
 TYPED_SDK = "9914894988ec3bfd123f1d10b407c066eb7c6888"
@@ -92,14 +93,14 @@ def environment(root, helper, target):
         LEAN_RS_WORKER_OWNERS_DIRECTORY=str(root / "owners"))
 
 
-def provision(writer, writer_sha256, release, typed_session=False, disposable_clean=False):
+def provision(writer, writer_sha256, release, typed_session=False, disposable_clean=False, verification=False):
     space(Path(tempfile.gettempdir()))
     prefix = "lean-e0-clean-" if disposable_clean else "lean-t0-metadata-"
     root = Path(tempfile.mkdtemp(prefix=prefix)).resolve(strict=True)
     print(f"Private deployment: {root}", flush=True)
     helper = private_writer(root, writer, writer_sha256)
     app = root / "app"
-    for name, data in fixture_sources(APP_TREE).items():
+    for name, data in fixture_sources(APP_TREE if verification else TYPED_APP_TREE).items():
         path = app / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -130,7 +131,9 @@ def provision(writer, writer_sha256, release, typed_session=False, disposable_cl
         preparation = [(project, ["lake", "update"])]
     env = environment(root, helper, root / "target")
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
-    prepare = [root / "target/debug/prepare"] + (["--typed-session"] if typed_session else [])
+    prepare = [root / "target/debug/prepare"]
+    if typed_session:
+        prepare.append("--verify-declaration" if verification else "--typed-session")
     for cwd, cmd in preparation + [(app, [*cargo, "--bin", "prepare"]), (app, prepare),
                      (app, [*cargo, "--features", "admitted", "--bin", "metadata-worker"])]:
         space(root)
@@ -182,7 +185,8 @@ def scalar_fixture_inputs(project, deployment, helper, helper_sha256):
                 LEAN_RS_PROFILE_READER_SHA256=helper_sha256)
 
 
-def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, typed_session=False, disposable_clean=False):
+def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
+            typed_session=False, disposable_clean=False, verification=False):
     space(root)
     require(root == root.resolve(strict=True) and root.stat().st_uid == os.getuid()
             and root.stat().st_mode & 0o077 == 0, "expected a private owned deployment directory")
@@ -192,7 +196,11 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
     check_file(record, approved_deployment)
     d = json.loads(record.read_bytes())
     require(d.get("typed_session", False) is typed_session, "deployment belongs to a different fixture policy")
-    tree = APP_TREE if "typed_session" in d else ORIGINAL_APP_TREE
+    require(d.get("verification", False) is verification, "deployment belongs to a different verification policy")
+    tree = TYPED_APP_TREE if "typed_session" in d else ORIGINAL_APP_TREE
+    if verification:
+        require(typed_session, "verification requires a typed deployment")
+        tree = APP_TREE
     for name, expected_source in fixture_sources(tree).items():
         path = root / "app" / name
         require(path == path.resolve(strict=True) and path.read_bytes() == expected_source,
@@ -220,7 +228,8 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
         clean_inputs = check_clean_deployment(root, approved_deployment)
     helper = private_writer(root, writer, writer_sha256)
     env = environment(root, helper, root / "selector-target")
-    if typed_session and not disposable_clean:
+    run_scalar = typed_session and not (disposable_clean or verification)
+    if run_scalar:
         scalar_inputs = scalar_fixture_inputs(root / "app/lean", d, helper, writer_sha256)
     # Only the independently approved worker can be executed, even for a read-only probe.
     ready = subprocess.check_output([worker, "--lean-rs-ready-host-artifacts"], cwd=root, env=env)
@@ -232,6 +241,9 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
         tests = ("describe_returns_row_for_known_declaration",)
         if disposable_clean:
             tests = ("disposable_clean::reader_blocks_clean_until_shutdown",)
+        elif verification:
+            variable = "LEAN_RS_TEST_QUALIFIED_VERIFICATION"
+            tests = ("verify_declaration_accepts_closed_theorem_and_rejects_sorry",)
         selection = {"fixture": d["project"]}
     else:
         variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
@@ -261,7 +273,12 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
         required = ["verified-deployment", "authorize-host-load", "verified-global-interop-initializer",
                     "authorize-LeanRsFixture-load", "authorize-Handles-SourceRanges-import"]
         require(names[:len(required)] == required, f"unexpected fixture admission order: {names}")
-    if typed_session and not disposable_clean:
+        if verification:
+            expected_events = required + ["authorize-verify-proved", "authorize-verify-sorry",
+                                          "authorize-verify-unavailable", "refused-verification-options",
+                                          "authorize-verify-truncated"]
+            require(names == expected_events, f"unexpected verification grants: {names}")
+    if run_scalar:
         space(root)
         subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
                         "-p", "lean-rs", "--lib", "-E", "test(=abi::tests::bool_round_trip_via_fixture)"],
@@ -277,6 +294,8 @@ def main():
     modes.add_argument("--disposable-clean", action="store_true",
                        help="prepare or consume a one-use typed deployment to check guarded Lake clean")
     modes.add_argument("--typed-session", action="store_true", help="qualify the fixed LeanRsFixture Nat.add and scalar Boolean selectors")
+    modes.add_argument("--verify-declaration", action="store_true",
+                       help="qualify four reviewed single-declaration requests on the typed fixture")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
     prepare.add_argument("--lean-release", type=Path, required=True)
@@ -288,15 +307,16 @@ def main():
     try:
         require((sys.platform, platform.machine()) == ("darwin", "arm64"), "requires macOS arm64")
         writer = reviewed_writer(args.writer, args.writer_sha256)
+        typed = args.typed_session or args.disposable_clean or args.verify_declaration
         if args.command == "prepare":
             release = args.lean_release.resolve(strict=True)
             check_file(release / "bin/lean", "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e")
             check_file(release / "bin/lake", LAKE_SHA256)
             check_file(release / "lib/lean/libleanshared.dylib", "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5")
-            provision(writer, args.writer_sha256, release, args.typed_session or args.disposable_clean, args.disposable_clean)
+            provision(writer, args.writer_sha256, release, typed, args.disposable_clean, args.verify_declaration)
         else:
             qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256,
-                    args.typed_session or args.disposable_clean, args.disposable_clean)
+                    typed, args.disposable_clean, args.verify_declaration)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")
 

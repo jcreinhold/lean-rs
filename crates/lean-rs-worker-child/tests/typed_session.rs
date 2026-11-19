@@ -2134,11 +2134,18 @@ fn verify_declaration_not_found_carries_similar_declarations() {
 
 #[test]
 fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
-    ensure_fixture_built();
+    let selected = option_env!("LEAN_RS_TEST_QUALIFIED_VERIFICATION");
+    let (config, session_config) = if let Some(selection) = selected {
+        let q = qualification_launch::checked(selection);
+        (checked_worker_config(&q), handles_session_at(q.fixture))
+    } else {
+        ensure_fixture_built();
+        (worker_config(), elaboration_session_config())
+    };
     let opts = LeanWorkerElabOptions::new().file_label("/verify/theorem.lean");
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
     let mut session = worker
-        .open_session(&elaboration_session_config(), None, None)
+        .open_session(&session_config, None, None)
         .expect("worker session opens");
     let closed = LeanWorkerDeclarationVerificationRequest {
         source: "theorem t : True := by\n  trivial\n".to_owned(),
@@ -2190,6 +2197,79 @@ fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
         }
         other => panic!("expected rejected verification, got {other:?}"),
     }
+
+    if selected.is_none() {
+        return;
+    }
+    let absent = LeanWorkerDeclarationVerificationRequest {
+        source: "theorem absent : Nat := 0\n".to_owned(),
+        target: LeanWorkerDeclarationVerificationTarget::Name {
+            name: "absent".to_owned(),
+        },
+        ..closed.clone()
+    };
+    let result = session
+        .verify_declaration(&absent, &opts, None, None)
+        .expect("worker verifies absent");
+    let LeanWorkerDeclarationVerificationResult::Ok {
+        verification_status,
+        facts,
+        ..
+    } = result
+    else {
+        panic!("expected verification facts, got {result:?}");
+    };
+    assert_eq!(verification_status, LeanWorkerDeclarationVerificationStatus::Rejected);
+    assert_eq!(
+        facts.target.as_ref().map(|target| target.declaration_name.as_str()),
+        Some("absent")
+    );
+    assert!(
+        !facts.axioms_available && !facts.axioms_truncated && facts.axioms.is_empty(),
+        "{facts:?}"
+    );
+
+    let changed_label = opts.clone().file_label("/verify/changed.lean");
+    let error = session
+        .verify_declaration(&closed, &changed_label, None, None)
+        .expect_err("changed label refused");
+    assert!(
+        matches!(&error, LeanWorkerError::Worker { code, message }
+            if code == "lean_rs.internal" && message.ends_with("verification fixture refused source options")),
+        "{error}"
+    );
+
+    let clipped = LeanWorkerDeclarationVerificationRequest {
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 1,
+            ..sorry.budgets.clone()
+        },
+        ..sorry
+    };
+    let result = session
+        .verify_declaration(&clipped, &opts, None, None)
+        .expect("worker verifies with a one-byte field");
+    let LeanWorkerDeclarationVerificationResult::Ok {
+        verification_status,
+        facts,
+        ..
+    } = result
+    else {
+        panic!("expected bounded verification facts, got {result:?}");
+    };
+    assert_eq!(verification_status, LeanWorkerDeclarationVerificationStatus::Rejected);
+    assert!(
+        facts.contains_sorry && facts.axioms_available && facts.axioms_truncated && facts.axioms.is_empty(),
+        "{facts:?}"
+    );
+
+    drop(session);
+    let report = worker.shutdown().expect("worker shutdown");
+    assert_eq!(
+        report.outcome,
+        lean_rs_worker_parent::LeanWorkerShutdownOutcome::Graceful
+    );
+    assert!(report.exit.success && report.kill_elapsed.is_none(), "{report:?}");
 }
 
 #[test]

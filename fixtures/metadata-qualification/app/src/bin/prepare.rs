@@ -10,10 +10,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sysroot =
         PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
     let prepared = lean_rs_host::host::prepare_host_artifacts()?;
-    let typed_session = match env::args().skip(1).collect::<Vec<_>>().as_slice() {
-        [] => false,
-        [mode] if mode == "--typed-session" => true,
-        _ => return Err("expected no arguments or --typed-session".into()),
+    let (typed_session, verification) = match env::args().skip(1).collect::<Vec<_>>().as_slice() {
+        [] => (false, false),
+        [mode] if mode == "--typed-session" => (true, false),
+        [mode] if mode == "--verify-declaration" => (true, true),
+        _ => return Err("expected no arguments, --typed-session or --verify-declaration".into()),
     };
     let builder = if typed_session {
         CargoLeanCapability::new(&project, "LeanRsFixture")
@@ -74,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("host shim does not implement the build-selected SDK ABI".into());
     }
-    let record = serde_json::json!({"typed_session":typed_session,"project":project,"sysroot":sysroot,"consumer_manifest":built.manifest_path(),"consumer_image":built.dylib_path(),
+    let record = serde_json::json!({"verification":verification,"typed_session":typed_session,"project":project,"sysroot":sysroot,"consumer_manifest":built.manifest_path(),"consumer_image":built.dylib_path(),
         "shim_manifest":shim.manifest_path(),"shim_json":shim.manifest_json(),"shim_roots":shim.artifact_roots(),
         "shim_paths":shim.shim_search_paths(),"roots":roots,
         "consumer_json":fs::read_to_string(built.manifest_path())?});

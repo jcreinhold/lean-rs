@@ -23,6 +23,7 @@ fn require(ok: bool, detail: &str) -> R<()> {
 #[derive(Deserialize)]
 pub struct Record {
     pub typed_session: bool,
+    pub verification: bool,
     pub consumer_image: PathBuf,
     pub consumer_manifest: PathBuf,
     pub consumer_json: String,
@@ -78,6 +79,13 @@ impl Record {
                 == digest,
             &format!("wrong file digest {}", path.display()),
         )
+    }
+    pub fn verification_roots(&self) -> Vec<String> {
+        self.import_roots
+            .iter()
+            .chain(std::iter::once(&self.sysroot.join("lib/lean")))
+            .map(|p| p.display().to_string())
+            .collect()
     }
     pub fn check_order(
         &self,
