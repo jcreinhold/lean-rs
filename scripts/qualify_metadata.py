@@ -18,6 +18,7 @@ APP_TREE = "9a37c723ce30cce1f8a63c5206a377b5e7632d7b"
 # Metadata deployments sealed before the typed policy used this revision of the same app.
 ORIGINAL_APP_TREE = "ee1bf0cecda10560c7b58b33ea679188f87fea9c"
 TYPED_SDK = "9914894988ec3bfd123f1d10b407c066eb7c6888"
+LAKE_SHA256 = "a0e516de0ba03a26cb90c80f06666022ef9de3f0943f8b26e9b902d229b43ebe"
 TESTS = ("builder_opens_worker_capability_and_validates_metadata",
          "metadata_mismatch_is_reported_by_bootstrap_check")
 
@@ -91,9 +92,10 @@ def environment(root, helper, target):
         LEAN_RS_WORKER_OWNERS_DIRECTORY=str(root / "owners"))
 
 
-def provision(writer, writer_sha256, release, typed_session=False):
+def provision(writer, writer_sha256, release, typed_session=False, disposable_clean=False):
     space(Path(tempfile.gettempdir()))
-    root = Path(tempfile.mkdtemp(prefix="lean-t0-metadata-")).resolve(strict=True)
+    prefix = "lean-e0-clean-" if disposable_clean else "lean-t0-metadata-"
+    root = Path(tempfile.mkdtemp(prefix=prefix)).resolve(strict=True)
     print(f"Private deployment: {root}", flush=True)
     helper = private_writer(root, writer, writer_sha256)
     app = root / "app"
@@ -134,11 +136,37 @@ def provision(writer, writer_sha256, release, typed_session=False):
         space(root)
         subprocess.run(cmd, cwd=cwd, env=env, check=True)
     space(root)
+    if disposable_clean:
+        # A clean run consumes this newly provisioned deployment. Existing review roots have no permit.
+        (root / "clean-ready").write_text(digest(app / "deployment.json"))
     for path in (root / "target/debug/metadata-worker", app / "deployment.json"):
         print(f"{digest(path)}  {path}")
 
 
-def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, typed_session=False):
+def check_clean_deployment(root, approved_deployment):
+    require(root.name.startswith("lean-e0-clean-"), "requires a fresh disposable clean deployment")
+    permit = root / "clean-ready"
+    require(permit == permit.resolve(strict=True) and permit.read_text() == approved_deployment,
+            "clean permit differs from the reviewed deployment")
+    require(not (root / "clean-started").exists() and not (root / "app/native-events.log").exists()
+            and all(entry.name == ".admission.lock" for entry in (root / "owners").iterdir()),
+            "clean deployment has already been used")
+    project = root / "app/lean"
+    build = project / ".lake/build"
+    require(project == project.resolve(strict=True) and not project.is_relative_to(SDK)
+            and build == build.resolve(strict=True) and build.is_dir(), "expected private, canonical Lake build directory")
+    # The selector rechecks these inputs under its writer before re-elaborating the package.
+    config = {}
+    for name in ("lakefile.lean", "lake-manifest.json", "lean-toolchain"):
+        original = subprocess.check_output(["/usr/bin/git", "--no-replace-objects", "-C", SDK,
+                                            "show", f"{TYPED_SDK}:fixtures/lean/{name}"])
+        config[name] = hashlib.sha256(original).hexdigest()
+        check_file(project / name, config[name])
+    check_file(root / "release/bin/lake", LAKE_SHA256)
+    return dict(deployment=approved_deployment, config=config, lake=LAKE_SHA256)
+
+
+def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, typed_session=False, disposable_clean=False):
     space(root)
     require(root == root.resolve(strict=True) and root.stat().st_uid == os.getuid()
             and root.stat().st_mode & 0o077 == 0, "expected a private owned deployment directory")
@@ -171,6 +199,9 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
             and manifest.read_bytes() == d["consumer_json"].encode(), "consumer manifest differs from review")
     owners = root / "owners"
     require(owners == owners.resolve(strict=True) and owners.is_dir(), "missing deployment ownership registry")
+    if disposable_clean:
+        require(typed_session, "clean requires the typed fixture")
+        clean_inputs = check_clean_deployment(root, approved_deployment)
     helper = private_writer(root, writer, writer_sha256)
     env = environment(root, helper, root / "selector-target")
     # Only the independently approved worker can be executed, even for a read-only probe.
@@ -181,10 +212,14 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
     if typed_session:
         variable, target = "LEAN_RS_TEST_QUALIFIED_TYPED_SESSION", "typed_session"
         tests = ("describe_returns_row_for_known_declaration",)
+        if disposable_clean:
+            tests = ("disposable_clean::reader_blocks_clean_until_shutdown",)
         selection = {"fixture": d["project"]}
     else:
         variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
         selection = {"manifest": str(manifest)}
+    if disposable_clean:
+        env["LEAN_RS_TEST_DISPOSABLE_CLEAN"] = json.dumps(clean_inputs)
     env[variable] = json.dumps(dict(
         worker=str(worker), worker_sha256=approved_worker, helper=str(helper), helper_sha256=writer_sha256,
         owners=str(owners), sysroot=d["sysroot"], prepared=expected, **selection))
@@ -195,7 +230,9 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, t
         before = events.read_bytes() if events.exists() else b""
     for name in tests:
         subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
-                        "-p", "lean-rs-worker-child", "--test", target, "-E", f"test(={name})"],
+                        "-p", "lean-rs-worker-child", "--test", target,
+                        *(["--run-ignored", "only", "--retries", "0", "--success-output", "immediate"] if disposable_clean else []),
+                        "-E", f"test(={name})"],
                        cwd=SDK, env=env, check=True)
     if typed_session:
         after = events.read_bytes()
@@ -213,7 +250,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--writer", type=Path, required=True)
     parser.add_argument("--writer-sha256", required=True, help="independently reviewed digest of this local helper")
-    parser.add_argument("--typed-session", action="store_true", help="qualify the fixed LeanRsFixture Nat.add selector")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--disposable-clean", action="store_true",
+                       help="prepare or consume a one-use typed deployment to check guarded Lake clean")
+    modes.add_argument("--typed-session", action="store_true", help="qualify the fixed LeanRsFixture Nat.add selector")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
     prepare.add_argument("--lean-release", type=Path, required=True)
@@ -228,11 +268,12 @@ def main():
         if args.command == "prepare":
             release = args.lean_release.resolve(strict=True)
             check_file(release / "bin/lean", "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e")
-            check_file(release / "bin/lake", "a0e516de0ba03a26cb90c80f06666022ef9de3f0943f8b26e9b902d229b43ebe")
+            check_file(release / "bin/lake", LAKE_SHA256)
             check_file(release / "lib/lean/libleanshared.dylib", "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5")
-            provision(writer, args.writer_sha256, release, args.typed_session)
+            provision(writer, args.writer_sha256, release, args.typed_session or args.disposable_clean, args.disposable_clean)
         else:
-            qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256, args.typed_session)
+            qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256,
+                    args.typed_session or args.disposable_clean, args.disposable_clean)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")
 

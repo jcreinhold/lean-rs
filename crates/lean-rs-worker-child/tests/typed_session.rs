@@ -273,17 +273,20 @@ fn describe_fixture() -> (LeanWorkerConfig, LeanWorkerSessionConfig) {
         return (worker_config(), handles_session_config());
     };
     let q = qualification_launch::checked(selection);
+    (checked_worker_config(&q), handles_session_at(q.fixture))
+}
+
+fn checked_worker_config(q: &qualification_launch::Qualification) -> LeanWorkerConfig {
     let prepared = serde_json::to_string(&q.prepared).expect("serialize prepared descriptor");
     assert!(prepared.len() <= 64 * 1024, "prepared descriptor exceeds launch limit");
-    let config = LeanWorkerConfig::new(q.worker)
+    LeanWorkerConfig::new(&q.worker)
         .checked_native_loader_environment()
-        .env("LEAN_SYSROOT", q.sysroot)
+        .env("LEAN_SYSROOT", q.sysroot.as_os_str())
         .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", prepared)
         .env("LEAN_HOST_MCP_WRITER_EXECUTABLE", q.helper.as_os_str())
-        .native_guardian(q.helper)
-        .lifetime_directory(q.owners)
-        .shared_artifact_reads(true);
-    (config, handles_session_at(q.fixture))
+        .native_guardian(&q.helper)
+        .lifetime_directory(&q.owners)
+        .shared_artifact_reads(true)
 }
 
 #[test]
@@ -3082,4 +3085,295 @@ fn inspect_declaration_pretty_and_raw_rendering_differ() {
         pretty_statement, raw_statement,
         "pretty (notation, no universes) and raw (Expr.toString) forms of Nat.rec should differ",
     );
+}
+
+#[cfg(target_os = "macos")]
+mod disposable_clean {
+    use super::{LeanWorker, checked_worker_config, handles_session_at, qualification_launch, workspace_root};
+    use lean_toolchain::native_guardian::{
+        NativeOwnerObservation, NativeProcessIdentity, NativeReadDomain, protected_native_reads_stopped,
+    };
+    use lean_toolchain::shared_writer::{SharedWriter, WriterDisposition, WriterFailure, project_lock_path};
+    use serde::Deserialize;
+    use sha2::{Digest, Sha256};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        error::Error,
+        fs::{self, File},
+        io::Read as _,
+        os::unix::fs::MetadataExt,
+        path::{Path, PathBuf},
+        process::Command,
+        time::{Duration, Instant},
+    };
+    type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
+    fn hex_digest(bytes: &[u8]) -> String {
+        use std::fmt::Write as _;
+        let mut result = String::with_capacity(64);
+        for byte in Sha256::digest(bytes) {
+            write!(result, "{byte:02x}").expect("hexadecimal digest");
+        }
+        result
+    }
+
+    #[derive(Deserialize)]
+    struct CleanSelection {
+        deployment: String,
+        config: BTreeMap<String, String>,
+        lake: String,
+    }
+
+    #[derive(Deserialize)]
+    struct Seal {
+        project: PathBuf,
+        roots: Vec<PathBuf>,
+        files: BTreeMap<PathBuf, (u64, u64, String)>,
+        consumer_image: PathBuf,
+        consumer_manifest: PathBuf,
+    }
+
+    impl Seal {
+        fn check_outputs(&self, cleaned: bool) -> Result<()> {
+            let build = self.project.join(".lake/build");
+            for (path, (dev, ino, hash)) in &self.files {
+                if !self.roots.iter().any(|r| path.starts_with(r)) {
+                    continue;
+                }
+                if cleaned && path.starts_with(&build) {
+                    assert!(!path.try_exists()?, "clean left {path:?}");
+                    continue;
+                }
+                assert_eq!(path.canonicalize()?, *path);
+                let mut file = File::open(path)?;
+                let meta = file.metadata()?;
+                assert_eq!((meta.dev(), meta.ino()), (*dev, *ino), "{path:?}");
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes)?;
+                assert_eq!(hex_digest(&bytes), *hash, "{path:?}");
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct Owner {
+        version: u32,
+        phase: String,
+        generation_id: String,
+        process: NativeProcessIdentity,
+        guardian: NativeProcessIdentity,
+        protected_domains: Vec<NativeReadDomain>,
+    }
+
+    fn claim_clean_deployment(
+        root: &Path,
+        q: &qualification_launch::Qualification,
+        approved: &CleanSelection,
+    ) -> Result<Seal> {
+        assert_eq!(root.canonicalize()?, root);
+        assert!(
+            root.file_name()
+                .is_some_and(|name| name.as_encoded_bytes().starts_with(b"lean-e0-clean-"))
+        );
+        assert!(!root.starts_with(workspace_root().canonicalize()?));
+        assert_eq!(q.fixture, root.join("app/lean"));
+        assert_eq!(q.fixture.canonicalize()?, q.fixture);
+        assert_eq!(q.sysroot, root.join("release"));
+        assert_eq!(q.helper, root.join("lean-host-mcp"));
+        assert_eq!(q.worker, root.join("target/debug/metadata-worker"));
+        assert_eq!(q.owners, root.join("owners"));
+        assert_eq!(
+            PathBuf::from(std::env::var_os("LEAN_RS_WORKER_OWNERS_DIRECTORY").ok_or("missing owner registry")?)
+                .canonicalize()?,
+            q.owners
+        );
+        let permit = root.join("clean-ready");
+        assert_eq!(permit.canonicalize()?, permit);
+        assert_eq!(fs::read_to_string(permit)?, approved.deployment);
+        let bytes = fs::read(root.join("app/deployment.json"))?;
+        assert_eq!(hex_digest(&bytes), approved.deployment);
+        let sealed: Seal = serde_json::from_slice(&bytes)?;
+        assert_eq!(sealed.project, q.fixture);
+        let build = q.fixture.join(".lake/build");
+        assert_eq!(build.canonicalize()?, build);
+        assert!(sealed.consumer_image.starts_with(&build));
+        for path in [
+            sealed.consumer_image.clone(),
+            sealed.consumer_manifest.clone(),
+            build.join("lib/lean/LeanRsFixture/Handles.olean"),
+            build.join("lib/lean/LeanRsFixture/SourceRanges.olean"),
+        ] {
+            assert!(sealed.files.contains_key(&path), "missing sealed output {path:?}");
+        }
+        assert!(!root.join("app/native-events.log").try_exists()?);
+        for entry in fs::read_dir(&q.owners)? {
+            assert_eq!(entry?.file_name(), ".admission.lock");
+        }
+        File::create_new(root.join("clean-started"))?;
+        Ok(sealed)
+    }
+
+    fn observe_live_readers(
+        root: &Path,
+        q: &qualification_launch::Qualification,
+        sealed: &Seal,
+        pid: u32,
+        epochs: &[lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch],
+    ) -> Result<(Owner, Vec<File>)> {
+        let records: Vec<_> = fs::read_dir(&q.owners)?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|e| e.file_name().as_encoded_bytes().starts_with(b"worker-"))
+            .collect();
+        assert_eq!(records.len(), 1);
+        let owner_bytes = fs::read(records[0].path().join("owner.json"))?;
+        let owner: Owner = serde_json::from_slice(&owner_bytes)?;
+        assert_eq!(
+            records[0].path(),
+            q.owners.join(format!("worker-{}", owner.generation_id))
+        );
+        assert_eq!((owner.version, owner.phase.as_str()), (2, "running"));
+        assert_eq!(owner.process.pid, pid);
+        assert_eq!(owner.process.observe()?, NativeOwnerObservation::Present);
+        assert_eq!(owner.guardian.session, pid);
+        assert_eq!(owner.guardian.process_group, owner.guardian.pid);
+        assert_ne!(owner.guardian.pid, pid);
+        assert!(owner.guardian.is_live()?);
+        let expected: BTreeSet<_> = sealed.roots.iter().collect();
+        assert!(expected.contains(&q.fixture));
+        assert_eq!(expected.len(), 3);
+        assert_eq!(epochs.len(), expected.len());
+        assert_eq!(owner.protected_domains.len(), expected.len());
+        assert_eq!(
+            owner
+                .protected_domains
+                .iter()
+                .map(|d| &d.project_root)
+                .collect::<BTreeSet<_>>(),
+            expected
+        );
+        let mut locks = Vec::new();
+        for d in &owner.protected_domains {
+            assert!(
+                epochs
+                    .iter()
+                    .any(|e| Path::new(&e.project_root) == d.project_root && e.epoch == d.epoch)
+            );
+            assert!(!d.epoch.is_empty());
+            assert_eq!(d.lock_path, project_lock_path(&d.project_root)?);
+            assert_eq!(d.lock_path.canonicalize()?, d.lock_path);
+            let file = File::open(&d.lock_path)?;
+            assert_eq!((file.metadata()?.dev(), file.metadata()?.ino()), (d.device, d.inode));
+            assert!(matches!(file.try_lock(), Err(fs::TryLockError::WouldBlock)));
+            locks.push(file);
+        }
+        fs::write(root.join("clean-owner.json"), &owner_bytes)?;
+        fs::write(
+            root.join("clean-session-epochs.json"),
+            serde_json::to_vec_pretty(epochs)?,
+        )?;
+        Ok((owner, locks))
+    }
+
+    fn confirm_readers_closed(owner: &Owner, locks: Vec<File>, registry: &Path) -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while owner.process.observe()? != NativeOwnerObservation::Absent || owner.guardian.is_live()? {
+            assert!(Instant::now() < deadline, "group or exact guardian still present");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        for file in &locks {
+            file.try_lock()?;
+        }
+        for (d, file) in owner.protected_domains.iter().zip(&locks) {
+            let named = fs::symlink_metadata(&d.lock_path)?;
+            assert_eq!(
+                (named.dev(), named.ino()),
+                (file.metadata()?.dev(), file.metadata()?.ino())
+            );
+            assert!(protected_native_reads_stopped(
+                registry,
+                &d.lock_path,
+                (d.device, d.inode)
+            )?);
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "one-use named --disposable-clean deployment and independently checked binaries required"]
+    fn reader_blocks_clean_until_shutdown() -> Result<()> {
+        let approved: CleanSelection = serde_json::from_str(
+            option_env!("LEAN_RS_TEST_DISPOSABLE_CLEAN").ok_or("missing disposable clean selection")?,
+        )?;
+        let q = qualification_launch::checked(
+            option_env!("LEAN_RS_TEST_QUALIFIED_TYPED_SESSION").ok_or("missing checked typed-session deployment")?,
+        );
+        let root = q.owners.parent().ok_or("missing private deployment root")?;
+        let sealed = claim_clean_deployment(root, &q, &approved)?;
+        let mut worker = LeanWorker::spawn(&checked_worker_config(&q))?;
+        let pid = worker.__child_pid_for_test().ok_or("worker has no pid")?;
+        let mut session = worker.open_session(&handles_session_at(q.fixture.clone()), None, None)?;
+        let row = session.describe("Nat.add", None, None)?.ok_or("missing Nat.add")?;
+        assert_eq!(row.name, "Nat.add");
+        let epochs = session
+            .host_runtime_metadata(None, None)?
+            .artifact_read_epochs
+            .ok_or("missing observed read epochs")?;
+        let (owner, locks) = observe_live_readers(root, &q, &sealed, pid, &epochs)?;
+        sealed.check_outputs(false)?;
+        let refused = match SharedWriter::open(&q.helper, &q.fixture, Duration::from_secs(1)) {
+            Ok(_) => panic!("writer admitted while the reader was live"),
+            Err(error) => error,
+        };
+        assert_eq!(refused.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(
+            WriterFailure::from_io(&refused)
+                .ok_or("missing admission evidence")?
+                .disposition,
+            WriterDisposition::NotStarted
+        );
+        sealed.check_outputs(false)?;
+        assert_eq!(
+            session.host_runtime_metadata(None, None)?.artifact_read_epochs.as_ref(),
+            Some(&epochs)
+        );
+        drop(session);
+        worker.shutdown()?;
+        confirm_readers_closed(&owner, locks, &q.owners)?;
+        let mut writer = SharedWriter::open(&q.helper, &q.fixture, Duration::from_secs(5))?;
+        assert_eq!(writer.write_roots(), std::slice::from_ref(&q.fixture));
+        sealed.check_outputs(false)?;
+        let build = q.fixture.join(".lake/build");
+        assert_eq!(build.canonicalize()?, build);
+        for name in ["lakefile.lean", "lake-manifest.json", "lean-toolchain"] {
+            let path = q.fixture.join(name);
+            assert_eq!(path.canonicalize()?, path);
+            assert_eq!(Some(&hex_digest(&fs::read(path)?)), approved.config.get(name));
+        }
+        let lake = q.sysroot.join("bin/lake");
+        assert_eq!(lake.canonicalize()?, lake);
+        assert_eq!(hex_digest(&fs::read(&lake)?), approved.lake);
+        let output = writer.run(
+            Command::new(lake)
+                .args(["-R", "-f", "lakefile.lean", "clean", "lean_rs_fixture"])
+                .current_dir(&q.fixture),
+            Duration::from_secs(60),
+        )?;
+        assert!(
+            output.status.success(),
+            "Lake clean failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!build.try_exists()?);
+        sealed.check_outputs(true)?;
+        eprintln!(
+            "generation {}: worker group {} absent, guardian {} stopped, {} reader domains closed. Writer refused with NotStarted. Lake clean exited successfully.",
+            owner.generation_id,
+            pid,
+            owner.guardian.pid,
+            owner.protected_domains.len()
+        );
+        Ok(())
+    }
 }
