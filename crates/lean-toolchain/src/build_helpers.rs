@@ -471,19 +471,13 @@ impl CargoLeanCapability {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(self.probe_error(&error)),
         };
-        if actual != expected
-            || expected
-                .get("dependencies")
-                .and_then(serde_json::Value::as_array)
-                .is_none_or(|deps| {
-                    deps.iter().any(|dep| {
-                        dep.get("dylib_path")
-                            .and_then(serde_json::Value::as_str)
-                            .is_none_or(|path| !Path::new(path).is_file())
-                    })
-                })
-        {
+        if actual != expected {
             return Ok(None);
+        }
+        match check_manifest_dependency_files(&expected) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(self.probe_error(&error)),
         }
         Ok(Some(BuiltLeanCapability {
             dylib_path,
@@ -1351,6 +1345,11 @@ fn write_capability_manifest(
         explicit_dependencies,
         selected_toolchain,
     )?;
+    check_manifest_dependency_files(&manifest).map_err(|error| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: error.to_string(),
+    })?;
     let bytes = serde_json::to_vec_pretty(&manifest).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
         project_root: project_root.to_path_buf(),
         target_name: target_name.to_owned(),
@@ -1372,6 +1371,32 @@ fn write_capability_manifest(
         ),
     })?;
     Ok(manifest_path)
+}
+
+// Check the same ordered dependency list on the read-only probe and immediately
+// before writer publication. Lake can produce some of these files during the build.
+fn check_manifest_dependency_files(manifest: &serde_json::Value) -> io::Result<()> {
+    let dependencies = manifest["dependencies"]
+        .as_array()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing manifest dependency list"))?;
+    for dependency in dependencies {
+        let path = dependency["dylib_path"]
+            .as_str()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing dependency dylib path"))?;
+        let metadata = fs::metadata(path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("could not inspect dependency dylib {path}: {error}"),
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("expected dependency dylib file at {path}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn capability_manifest_value(
@@ -2578,11 +2603,15 @@ mod tests {
         let builder = CargoLeanCapability::new(&root, "MyCapability")
             .lean_sysroot(&sysroot)
             .dependency(LeanLibraryDependency::path(&dependency_path));
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
         let built = builder
             .clone()
-            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
             .expect("fixture dependency build");
-        assert_eq!(builder.probe_ready().expect("matching explicit sysroot"), Some(built));
+        assert_eq!(
+            builder.probe_ready().expect("matching explicit sysroot"),
+            Some(built.clone())
+        );
         assert!(
             CargoLeanCapability::new(&root, "MyCapability")
                 .probe_ready()
@@ -2599,6 +2628,26 @@ mod tests {
         fs::remove_file(&dependency_path).expect("remove dependency dylib");
         assert!(builder.probe_ready().expect("missing dependency").is_none());
         assert!(!dependency_path.exists());
+        assert_eq!(runner.calls(), 1);
+        fs::remove_file(built.manifest_path()).expect("simulate partial publication");
+        // A previous build can have a valid cache entry for the primary target alone.
+        for _ in 0..2 {
+            let error = builder
+                .clone()
+                .build_with_runner(&mut runner, CargoMetadata::Suppress)
+                .expect_err("unresolved dependency prevents capability publication");
+            assert!(matches!(error, LinkDiagnostics::LakeOutputUnresolved { reason, .. }
+                if reason.contains(dependency_path.to_str().expect("UTF-8 fixture path"))));
+            assert!(!built.manifest_path().exists());
+        }
+        assert_eq!(runner.calls(), 2, "the second rejection used the primary target cache");
+        write_file(&dependency_path, "restored dependency");
+        let refreshed = builder
+            .clone()
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("publish the restored capability");
+        assert_eq!(builder.probe_ready().expect("refreshed dependency"), Some(refreshed));
+        assert_eq!(runner.calls(), 3);
     }
 
     #[test]

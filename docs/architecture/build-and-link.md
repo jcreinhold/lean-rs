@@ -116,6 +116,11 @@ miss once and rebuild through ordinary writer custody.
 A hit is accepted only when the cache key matches and the expected dylib exists. Cache write, manifest, traversal, and
 output-resolution failures are `LinkDiagnostics::LakeOutputUnresolved`.
 
+After the target succeeds, `CargoLeanCapability` checks each dependency library before publishing the capability
+manifest. A separately built dependency that is still missing yields `LakeOutputUnresolved` with its path. Under
+shared reader custody, `probe_ready()` reports a cache miss for the missing file. Release reader custody before
+building the missing dependency and refreshing the capability.
+
 ## Writer Custody
 
 `shared_writer::project_lock_path(root)` resolves one sibling lock outside the entire project root. It canonicalizes
