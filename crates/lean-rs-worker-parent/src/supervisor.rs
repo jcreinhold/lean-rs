@@ -1642,6 +1642,33 @@ impl Write for ScopedFrameWriter<'_> {
     }
 }
 
+type StartupScope<'a> = (&'static str, &'a LeanWorkerCancellationToken);
+
+fn startup_timeout_error(duration: Duration) -> LeanWorkerError {
+    LeanWorkerError::Timeout {
+        operation: "startup",
+        duration,
+        resource: Box::new(resource_facts(
+            "worker_timeout",
+            false,
+            Some("startup"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(duration),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )),
+    }
+}
+
 fn frame_timeout(started: Instant, configured: Duration, deadline: Option<Instant>) -> Duration {
     deadline.map_or(configured, |end| configured.min(end.saturating_duration_since(started)))
 }
@@ -1975,7 +2002,19 @@ impl LeanWorker {
     }
 
     fn spawn_tracked(config: &LeanWorkerConfig) -> Result<Self, SpawnFailure> {
+        Self::spawn_tracked_scoped(config, None)
+    }
+
+    fn spawn_tracked_scoped(config: &LeanWorkerConfig, scope: Option<StartupScope<'_>>) -> Result<Self, SpawnFailure> {
         let spawn_started = Instant::now();
+        let deadline = scope.and_then(|(_, token)| token.deadline());
+        let startup_timeout = frame_timeout(spawn_started, config.startup_timeout, deadline);
+        if let Some((operation, token)) = scope {
+            check_cancelled(operation, Some(token)).map_err(SpawnFailure::no_child)?;
+            if startup_timeout.is_zero() {
+                return Err(SpawnFailure::no_child(startup_timeout_error(startup_timeout)));
+            }
+        }
         let mut command = Command::new(&config.executable);
         // This child is a runtime process. A parent running inside Cargo may inherit
         // a build-script OUT_DIR that is outside the worker’s artifact custody.
@@ -2075,7 +2114,7 @@ impl LeanWorker {
                     directory,
                     config.lifetime_socket_directory.as_deref(),
                     config.native_guardian_executable.is_some(),
-                    config.startup_timeout.saturating_sub(spawn_started.elapsed()),
+                    startup_timeout.saturating_sub(spawn_started.elapsed()),
                     config.native_capacity_slot.as_ref(),
                 )
             })
@@ -2088,6 +2127,13 @@ impl LeanWorker {
         #[cfg(unix)]
         if let Some(lifetime) = &lifetime {
             lifetime.configure(&mut command);
+        }
+
+        if let Some((operation, token)) = scope {
+            check_cancelled(operation, Some(token)).map_err(SpawnFailure::no_child)?;
+            if spawn_started.elapsed() >= startup_timeout {
+                return Err(SpawnFailure::no_child(startup_timeout_error(startup_timeout)));
+            }
         }
 
         #[cfg(unix)]
@@ -2106,7 +2152,7 @@ impl LeanWorker {
         let initialized = (|| {
             #[cfg(unix)]
             let native_generation_id = if let Some(lifetime) = lifetime {
-                let remaining = config.startup_timeout.saturating_sub(spawn_started.elapsed());
+                let remaining = startup_timeout.saturating_sub(spawn_started.elapsed());
                 let lease =
                     lifetime
                         .accept(child.child_mut()?.id(), remaining)
@@ -2134,7 +2180,14 @@ impl LeanWorker {
             };
             #[cfg(not(unix))]
             let native_generation_id = None;
-            Self::initialize_child(config, spawn_started, &mut child, native_generation_id)
+            Self::initialize_child(
+                config,
+                spawn_started,
+                startup_timeout,
+                scope.is_some(),
+                &mut child,
+                native_generation_id,
+            )
         })();
         initialized.map_err(|error| SpawnFailure::after_spawn(child, error, StartupChild::cleanup))
     }
@@ -2142,6 +2195,8 @@ impl LeanWorker {
     fn initialize_child(
         config: &LeanWorkerConfig,
         spawn_started: Instant,
+        startup_timeout: Duration,
+        scoped: bool,
         child: &mut StartupChild,
         native_generation_id: Option<String>,
     ) -> Result<Self, LeanWorkerError> {
@@ -2179,7 +2234,7 @@ impl LeanWorker {
 
         // Lifeline authentication and pipe setup already consumed startup time.
         // READY shares that budget, including the existing zero-wait cleanup path.
-        let remaining = config.startup_timeout.saturating_sub(spawn_started.elapsed());
+        let remaining = startup_timeout.saturating_sub(spawn_started.elapsed());
         let (stdout, runtime_metadata) = match receiver.recv_timeout(remaining) {
             Ok((stdout, Ok(metadata))) => (stdout, metadata),
             Ok((_stdout, Err(_handshake_err))) => {
@@ -2200,28 +2255,7 @@ impl LeanWorker {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 handshake_stop.store(true, Ordering::Release);
                 let _exit = wait_with_stderr(child, stderr)?;
-                return Err(LeanWorkerError::Timeout {
-                    operation: "startup",
-                    duration: config.startup_timeout,
-                    resource: Box::new(resource_facts(
-                        "worker_timeout",
-                        false,
-                        Some("startup"),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        Some(config.startup_timeout),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )),
-                });
+                return Err(startup_timeout_error(startup_timeout));
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err(LeanWorkerError::Handshake {
@@ -2233,14 +2267,33 @@ impl LeanWorker {
         // Negotiate the per-connection frame cap to the child. The child
         // blocks on this frame after sending its handshake; until it lands,
         // no Request frame can be sent.
-        write_frame(
+        if scoped {
+            if spawn_started.elapsed() >= startup_timeout {
+                return Err(startup_timeout_error(startup_timeout));
+            }
+            stdin.get_mut().deadline = spawn_started.checked_add(startup_timeout);
+        }
+        let configured = write_frame(
             &mut stdin,
             Message::ConfigureFrameLimit { max_frame_bytes },
             max_frame_bytes,
-        )
-        .map_err(|err| LeanWorkerError::Protocol {
-            message: format!("failed to send ConfigureFrameLimit: {err}"),
+        );
+        stdin.get_mut().deadline = None;
+        configured.map_err(|error| {
+            if scoped
+                && matches!(&error, lean_rs_worker_protocol::protocol::ProtocolError::Io(source)
+                    if source.kind() == io::ErrorKind::TimedOut)
+            {
+                startup_timeout_error(startup_timeout)
+            } else {
+                LeanWorkerError::Protocol {
+                    message: format!("failed to send ConfigureFrameLimit: {error}"),
+                }
+            }
         })?;
+        if scoped && spawn_started.elapsed() >= startup_timeout {
+            return Err(startup_timeout_error(startup_timeout));
+        }
 
         let spawn_handshake_elapsed = spawn_started.elapsed();
         let child = child.take_child()?;
@@ -2288,7 +2341,7 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the worker is dead, the protocol fails, or
     /// the child returns a typed worker error.
     pub fn health(&mut self) -> Result<(), LeanWorkerError> {
-        self.prepare_host_request(false, None, None)?;
+        self.prepare_host_request(false, "health", None, None)?;
         self.send_request("health", Request::Health)?;
         self.record_request(false);
         let result = match self.read_response("health")? {
@@ -2311,7 +2364,7 @@ impl LeanWorker {
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
         let prepared = fixture_capability_manifest(fixture_root.as_ref());
         let manifest_path = self.seal_dispatch_error(prepared)?;
-        self.prepare_request(true)?;
+        self.prepare_request(true, "load_fixture_capability", None)?;
         self.send_request(
             "load_fixture_capability",
             Request::LoadFixtureCapability {
@@ -2340,7 +2393,7 @@ impl LeanWorker {
     ) -> Result<u64, LeanWorkerError> {
         let prepared = fixture_capability_manifest(fixture_root.as_ref());
         let manifest_path = self.seal_dispatch_error(prepared)?;
-        self.prepare_request(true)?;
+        self.prepare_request(true, "call_fixture_mul", None)?;
         self.send_request(
             "call_fixture_mul",
             Request::CallFixtureMul {
@@ -2660,7 +2713,7 @@ impl LeanWorker {
     ) -> Result<LeanWorkerExit, LeanWorkerError> {
         let prepared = fixture_capability_manifest(fixture_root.as_ref());
         let manifest_path = self.seal_dispatch_error(prepared)?;
-        self.prepare_request(true)?;
+        self.prepare_request(true, "trigger_lean_panic", None)?;
         self.send_request(
             "trigger_lean_panic",
             Request::TriggerLeanPanic {
@@ -2690,7 +2743,7 @@ impl LeanWorker {
     ) -> Result<u64, LeanWorkerError> {
         const OPERATION: &str = "emit_test_rows";
         self.check_request_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
+        self.prepare_request(false, OPERATION, cancellation)?;
         self.send_request_cancellable(Request::EmitTestRows { streams }, OPERATION, cancellation)?;
         self.record_request(false);
         match self.read_response_with_events(
@@ -2718,7 +2771,7 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "emit_test_rows_then_exit";
         self.check_request_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
+        self.prepare_request(false, OPERATION, cancellation)?;
         self.send_request_cancellable(Request::EmitTestRowsThenExit, OPERATION, cancellation)?;
         self.record_request(false);
         let response = self.read_response_with_events(
@@ -2744,7 +2797,7 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "emit_test_rows_then_panic";
         self.check_request_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
+        self.prepare_request(false, OPERATION, cancellation)?;
         self.send_request_cancellable(Request::EmitTestRowsThenPanic, OPERATION, cancellation)?;
         self.record_request(false);
         let response = self.read_response_with_events(
@@ -2870,7 +2923,11 @@ impl LeanWorker {
         self.release_host_read()?;
         // An explicit switch needs only its requested profile in the new child.
         if self.budget.accounting_unknown {
-            self.restart_with_reason(LeanWorkerRestartReason::ImportAccountingUnknown)?;
+            self.restart_for_request(
+                LeanWorkerRestartReason::ImportAccountingUnknown,
+                OPERATION,
+                cancellation,
+            )?;
         }
         let before_restarts = self.stats.restarts;
         // A hint, not a decision: it only picks which admission checks run
@@ -2878,7 +2935,7 @@ impl LeanWorker {
         // `HostSessionOpened` / `HostSessionReused` comes back, and the import
         // accounting below follows that, not this.
         let expect_reuse = self.reuse_hint_enabled && self.open_session_keys.iter().any(|key| key == config);
-        self.prepare_request(!expect_reuse)?;
+        self.prepare_request(!expect_reuse, OPERATION, cancellation)?;
         // `prepare_request` may have replaced the child — `max_requests`,
         // `idle_timeout`, and `max_rss_kib` all restart from inside it. A fresh
         // child necessarily imports, and reading that as "this worker binary
@@ -2942,7 +2999,7 @@ impl LeanWorker {
                 self.host_read_active = false;
                 // No body ran. A full process cycle invalidates every pooled
                 // environment and process-global Lean cache after any writer.
-                self.restart_with_reason(LeanWorkerRestartReason::Explicit)?;
+                self.restart_for_request(LeanWorkerRestartReason::Explicit, OPERATION, cancellation)?;
                 self.open_worker_session_attempt(config, cancellation, progress, false)
             }
             Response::HeaderImportRecycle if allow_retry => {
@@ -2953,7 +3010,7 @@ impl LeanWorker {
                         residue_bytes: self.budget.import_residue_bytes,
                         limit_bytes: self.config.restart_policy.max_import_residue_bytes.unwrap_or(0),
                     });
-                self.restart_with_reason(reason)?;
+                self.restart_for_request(reason, OPERATION, cancellation)?;
                 self.open_worker_session_attempt(config, cancellation, progress, false)
             }
             Response::HostSessionOpened { import_stats } => {
@@ -3421,7 +3478,7 @@ impl LeanWorker {
     ) -> Result<Vec<String>, LeanWorkerError> {
         const OPERATION: &str = "worker_list_declarations_strings";
         self.check_request_cancelled(OPERATION, cancellation)?;
-        self.prepare_host_request(false, cancellation, progress)?;
+        self.prepare_host_request(false, OPERATION, cancellation, progress)?;
         self.send_request_cancellable(
             Request::ListDeclarationsStrings {
                 filter,
@@ -3642,7 +3699,7 @@ impl LeanWorker {
             message: format!("worker data-stream request JSON encode failed: {err}"),
         });
         let request_json = self.seal_dispatch_error(encoded)?;
-        self.prepare_host_request(false, cancellation, progress)?;
+        self.prepare_host_request(false, OPERATION, cancellation, progress)?;
         self.send_request_cancellable(
             Request::RunDataStream {
                 export: export.to_owned(),
@@ -4119,12 +4176,13 @@ impl LeanWorker {
     fn prepare_host_request(
         &mut self,
         import_like: bool,
+        operation: &'static str,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<(), LeanWorkerError> {
         let config = self.open_session_keys.last().cloned();
         let generation = self.stats.restarts;
-        self.prepare_request(import_like)?;
+        self.prepare_request(import_like, operation, cancellation)?;
         if (self.stats.restarts != generation || (self.config.shared_artifact_reads && !self.host_read_active))
             && let Some(config) = config
         {
@@ -4133,11 +4191,21 @@ impl LeanWorker {
         Ok(())
     }
 
-    fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
+    fn prepare_request(
+        &mut self,
+        import_like: bool,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<(), LeanWorkerError> {
+        self.check_request_cancelled(operation, cancellation)?;
         self.check_generation_dispatch("worker_request", false)?;
         self.ensure_running()?;
         if self.budget.accounting_unknown {
-            self.restart_with_reason(LeanWorkerRestartReason::ImportAccountingUnknown)?;
+            self.restart_for_request(
+                LeanWorkerRestartReason::ImportAccountingUnknown,
+                operation,
+                cancellation,
+            )?;
         }
         if import_like {
             self.stats.import_like_admission_attempts = self.stats.import_like_admission_attempts.saturating_add(1);
@@ -4145,7 +4213,7 @@ impl LeanWorker {
         }
 
         if let Some(reason) = self.budget.request_limit_reached(&self.config.restart_policy) {
-            self.restart_with_reason(reason)?;
+            self.restart_for_request(reason, operation, cancellation)?;
             if import_like {
                 self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
             }
@@ -4153,7 +4221,7 @@ impl LeanWorker {
         }
 
         if import_like && let Some(reason) = self.budget.import_limit_reached(&self.config.restart_policy) {
-            self.restart_with_reason(reason)?;
+            self.restart_for_request(reason, operation, cancellation)?;
             self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
             return Ok(());
         }
@@ -4162,11 +4230,15 @@ impl LeanWorker {
             match self.child_rss_kib() {
                 Some(current_kib) if current_kib >= limit_kib => {
                     self.stats.last_rss_kib = Some(current_kib);
-                    self.restart_with_reason(LeanWorkerRestartReason::RssCeiling {
-                        current_kib,
-                        limit_kib,
-                        last_import_stats: self.stats.last_import_stats.clone(),
-                    })?;
+                    self.restart_for_request(
+                        LeanWorkerRestartReason::RssCeiling {
+                            current_kib,
+                            limit_kib,
+                            last_import_stats: self.stats.last_import_stats.clone(),
+                        },
+                        operation,
+                        cancellation,
+                    )?;
                     if import_like {
                         self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
                     }
@@ -4184,7 +4256,11 @@ impl LeanWorker {
         if let Some(limit) = self.config.restart_policy.idle_restart_after {
             let idle_for = self.last_activity.elapsed();
             if idle_for >= limit {
-                self.restart_with_reason(LeanWorkerRestartReason::Idle { idle_for, limit })?;
+                self.restart_for_request(
+                    LeanWorkerRestartReason::Idle { idle_for, limit },
+                    operation,
+                    cancellation,
+                )?;
                 if import_like {
                     self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
                 }
@@ -4229,6 +4305,18 @@ impl LeanWorker {
         self.budget.record_import(import_stats);
     }
 
+    fn restart_for_request(
+        &mut self,
+        reason: LeanWorkerRestartReason,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<(), LeanWorkerError> {
+        let scope = cancellation
+            .filter(|token| token.deadline().is_some())
+            .map(|token| (operation, token));
+        self.restart_with_reason_before_spawn_scoped_using(reason, || {}, scope, Self::spawn_tracked_scoped)
+    }
+
     fn restart_with_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
         self.restart_with_reason_before_spawn(reason, || {})
     }
@@ -4238,14 +4326,25 @@ impl LeanWorker {
         reason: LeanWorkerRestartReason,
         before_spawn: impl FnOnce(),
     ) -> Result<(), LeanWorkerError> {
-        self.restart_with_reason_before_spawn_using(reason, before_spawn, Self::spawn_tracked)
+        self.restart_with_reason_before_spawn_scoped_using(reason, before_spawn, None, Self::spawn_tracked_scoped)
     }
 
+    #[cfg(test)]
     fn restart_with_reason_before_spawn_using(
         &mut self,
         reason: LeanWorkerRestartReason,
         before_spawn: impl FnOnce(),
         spawn: impl FnOnce(&LeanWorkerConfig) -> Result<Self, SpawnFailure>,
+    ) -> Result<(), LeanWorkerError> {
+        self.restart_with_reason_before_spawn_scoped_using(reason, before_spawn, None, |config, _| spawn(config))
+    }
+
+    fn restart_with_reason_before_spawn_scoped_using(
+        &mut self,
+        reason: LeanWorkerRestartReason,
+        before_spawn: impl FnOnce(),
+        scope: Option<StartupScope<'_>>,
+        spawn: impl FnOnce(&LeanWorkerConfig, Option<StartupScope<'_>>) -> Result<Self, SpawnFailure>,
     ) -> Result<(), LeanWorkerError> {
         if self.generation_dispatch.is_some() {
             self.seal_generation_dispatch_internal();
@@ -4295,6 +4394,15 @@ impl LeanWorker {
             return Err(err);
         }
         before_spawn();
+        // Cleanup belongs to the retired generation even after the request
+        // expires. A successor is new work and cannot spend that budget again.
+        if let Some((operation, token)) = scope
+            && let Err(error) = check_cancelled(operation, Some(token))
+        {
+            self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
+            self.stats.last_replacement_skipped_reason = Some("request_scope_expired".to_owned());
+            return Err(error);
+        }
         if let Err(err) = self.admit_restart(replacement_started) {
             self.stats.replacement_budget_skipped = self.stats.replacement_budget_skipped.saturating_add(1);
             self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
@@ -4312,7 +4420,7 @@ impl LeanWorker {
             .last_restart_reason
             .as_ref()
             .map_or_else(|| "unknown".to_owned(), |reason| reason.stable_cause().to_owned());
-        let mut next = match spawn(&config) {
+        let mut next = match spawn(&config, scope) {
             Ok(next) => next,
             Err(failure) => {
                 self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
@@ -4448,7 +4556,7 @@ impl LeanWorker {
     ) -> Result<R, LeanWorkerError> {
         self.check_request_cancelled(operation, cancellation)?;
         let session_config = self.open_session_keys.last().cloned();
-        self.prepare_host_request(import_like, cancellation, progress)?;
+        self.prepare_host_request(import_like, operation, cancellation, progress)?;
         self.send_request_cancellable(request.clone(), operation, cancellation)?;
         self.record_request(import_like);
         let mut response = self.read_response_with_progress(operation, progress, cancellation)?;
@@ -4468,7 +4576,7 @@ impl LeanWorker {
                     limit_bytes: self.config.restart_policy.max_import_residue_bytes.unwrap_or(0),
                 }
             };
-            self.restart_with_reason(reason)?;
+            self.restart_for_request(reason, operation, cancellation)?;
             self.open_worker_session(&config, cancellation, progress)?;
             // Exactly one retry: the new generation admits its first necessary
             // header even when that header alone exceeds the byte budget.
@@ -6012,6 +6120,75 @@ mod tests {
             generation: worker.generation,
         };
         worker
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_deadline_stops_old_child_without_starting_an_expired_successor() {
+        let mut worker = sleeping_worker();
+        let old_pid = worker.child.as_ref().expect("old worker").id();
+        let scope = super::LeanWorkerCancellationToken::new().with_deadline(super::Instant::now());
+        let error = worker
+            .restart_with_reason_before_spawn_scoped_using(
+                LeanWorkerRestartReason::Cancelled {
+                    operation: "scoped_restart",
+                },
+                || assert!(!child_exists(old_pid), "cleanup precedes successor admission"),
+                Some(("scoped_restart", &scope)),
+                |_, _| panic!("an expired request started a successor"),
+            )
+            .expect_err("successor admission expired");
+        assert!(matches!(
+            error,
+            LeanWorkerError::Timeout { operation: "scoped_restart", resource, .. } if !resource.work_entered_child
+        ));
+        assert!(!child_exists(old_pid));
+        assert!(worker.pending_startup.is_none());
+        assert_eq!(worker.stats.replacement_successes, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_deadline_caps_request_recycle_startup_and_keeps_configured_budget() {
+        // The old child reads the graceful stop frame, then exits without a reply.
+        let old_script = "import sys; stream = sys.stdin.buffer; stream.read(int.from_bytes(stream.read(4), 'big'))";
+        let mut worker = piped_worker(std::process::Command::new("python3").args(["-c", old_script]));
+        let old_pid = worker.child.as_ref().expect("old worker").id();
+        let normal_timeout = Duration::from_secs(5);
+        worker.config = LeanWorkerConfig::new("/bin/sh")
+            .startup_timeout(normal_timeout)
+            .shutdown_timeout(Duration::from_millis(100))
+            .restart_policy(LeanWorkerRestartPolicy::default().max_requests(1));
+        worker.record_request(false);
+
+        let budget = Duration::from_millis(300);
+        let started = super::Instant::now();
+        let deadline = started.checked_add(budget).expect("short startup deadline");
+        let scope = super::LeanWorkerCancellationToken::new().with_deadline(deadline);
+        // The policy recycles before dispatch. The replacement shell never sends READY.
+        let error = worker
+            .worker_json_command("fixture", "{}".to_owned(), Some(&scope), None)
+            .expect_err("READY must not receive the normal five-second timeout");
+        assert!(
+            matches!(
+                &error,
+                LeanWorkerError::Timeout { operation: "startup", duration, .. }
+                    if !duration.is_zero() && *duration <= budget
+            ),
+            "{error:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "startup spent a fresh budget"
+        );
+        assert!(!child_exists(old_pid));
+        assert_eq!(worker.config.process_tracker.active_processes(), 0);
+        assert!(worker.pending_startup.is_none());
+        assert_eq!(worker.config.startup_timeout, normal_timeout);
+        assert_eq!(worker.stats.replacement_attempts, 1);
+        assert_eq!(worker.stats.replacement_successes, 0);
+        assert_eq!(worker.stats.requests, 1);
+        assert!(worker.last_request.is_none());
     }
 
     #[cfg(unix)]
