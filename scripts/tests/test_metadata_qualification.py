@@ -480,6 +480,130 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
         run.assert_called_once()
 
+    def run_typed_selection(self, *, live_pid=False):
+        broken = self.state.with_name("broken-import")
+        typed = self.state.with_name("typed-session")
+        self.worker.chmod(0o500)
+        seen = []
+        host, interop = (str(self.sdk / image) for image in ("host", "interop"))
+        record = {
+            "shim_manifest": str(self.sdk / "manifest"),
+            "shim_json": "{}",
+            "shim_roots": [str(self.sdk)],
+            "shim_paths": [str(self.sdk)],
+            "host_image": host,
+            "interop_image": interop,
+            "files": {host: [1, 2, "host-digest"], interop: [3, 4, "interop-digest"]},
+        }
+
+        def run(command, *, cwd, env, check, stdout):
+            seen.append((command, dict(env)))
+            if command[-1] == "--broken-import":
+                (broken / "deployment.json").write_text(json.dumps(record))
+            elif command[-1] == "--typed-session":
+                (typed / "deployment.json").write_text("{}")
+            elif "nextest" in command and "typed_session" in command:
+                Path(env["LEAN_RS_METADATA_AUDIT_PATH"]).write_text(
+                    "".join(
+                        f"{pid} verified-deployment\n"
+                        for pid in range(
+                            10, 10 + len(qualification.ORDINARY_TYPED_TESTS)
+                        )
+                    )
+                )
+
+        output = io.StringIO()
+        with (
+            patch.object(
+                qualification.shutil, "which", return_value="/reviewed/timeout"
+            ),
+            patch.object(qualification.subprocess, "run", side_effect=run),
+            patch.object(
+                qualification.os,
+                "kill",
+                side_effect=None if live_pid else ProcessLookupError,
+            ) as probe,
+            patch("sys.stdout", output),
+        ):
+            if live_pid:
+                with self.assertRaisesRegex(
+                    ValueError, "remains; keeping fixture state"
+                ):
+                    qualification.qualify_broken_import(
+                        self.target,
+                        qualification.DARWIN_ARM64_PINS,
+                        emit_host_selection=True,
+                        run_typed=True,
+                    )
+                self.assertTrue(typed.exists())
+                self.assertEqual(output.getvalue(), "")
+                with self.assertRaisesRegex(
+                    ValueError, "typed fixture state already exists"
+                ):
+                    qualification.qualify_broken_import(
+                        self.target,
+                        qualification.DARWIN_ARM64_PINS,
+                        emit_host_selection=True,
+                        run_typed=True,
+                    )
+            else:
+                qualification.qualify_broken_import(
+                    self.target,
+                    qualification.DARWIN_ARM64_PINS,
+                    emit_host_selection=True,
+                    run_typed=True,
+                )
+                self.assertFalse(typed.exists())
+                self.assertEqual(
+                    probe.call_count, len(qualification.ORDINARY_TYPED_TESTS)
+                )
+        self.assertFalse(broken.exists())
+        self.assertEqual(len(seen), 7)
+        return seen, output.getvalue()
+
+    def test_typed_group_reuses_prepared_shims_and_excludes_only_completed_tests(self):
+        seen, output = self.run_typed_selection()
+        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[-3:]
+        assignments = dict(line.split("=", 1) for line in output.splitlines())
+        descriptor = assignments["LEAN_RS_PREPARED_HOST_ARTIFACTS"]
+        self.assertEqual(prepare[-1], "--typed-session")
+        self.assertEqual(prepare_env["LEAN_RS_PREPARED_HOST_ARTIFACTS"], descriptor)
+        self.assertEqual(build[-1], "metadata-worker")
+        self.assertEqual(build_env["LEAN_RS_METADATA_ORDINARY_TYPED"], "1")
+        self.assertNotIn("LEAN_RS_METADATA_BROKEN_IMPORT", build_env)
+        self.assertNotIn("LEAN_RS_TEST_BROKEN_IMPORT", run_env)
+        self.assertEqual(nextest[nextest.index("--test-threads") + 1], "1")
+        self.assertEqual(nextest[nextest.index("--retries") + 1], "0")
+        self.assertEqual(
+            json.loads(run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"])["prepared"],
+            json.loads(descriptor),
+        )
+        selection = nextest[-1]
+        self.assertIn("binary(=typed_session)", selection)
+        self.assertEqual(selection.count("test(="), 19)
+        remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
+        self.assertEqual(
+            remaining,
+            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & (test(={qualification.BROKEN_IMPORT_TEST}))) | {selection}))",
+        )
+
+    def test_typed_group_with_live_worker_retains_only_typed_state(self):
+        self.run_typed_selection(live_pid=True)
+
+    def test_run_typed_requires_emitting_selections_before_any_fixture_work(self):
+        argv = ["qualify_metadata.py", "broken-import", "--run-typed"]
+        with (
+            patch.object(sys, "argv", argv),
+            patch("sys.stderr", new_callable=io.StringIO) as error,
+            patch.object(qualification, "ordinary_state_lock") as state_lock,
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            qualification.main()
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertIn("--run-typed requires --emit-host-selection", error.getvalue())
+        state_lock.assert_not_called()
+        self.launch.assert_not_called()
+
     def test_linux_broken_import_selects_official_pins_only_for_named_profile(self):
         pins = qualification.verified_platform("Linux", "x86_64", broken_import=True)
         self.assertEqual(

@@ -30,6 +30,27 @@ STATE = TARGET / "metadata-qualification/ordinary"
 STATE_LOCK = TARGET / "metadata-qualification/.ordinary.lock"
 SOCKET_ROOT = TARGET / "ws"
 BROKEN_IMPORT_TEST = "a_host_handle_built_with_a_broken_import_still_fails_at_open"
+ORDINARY_TYPED_TESTS = (
+    "describe_returns_row_for_known_declaration",
+    "describe_returns_none_for_unknown_declaration",
+    "search_declarations_returns_bounded_metadata_without_types",
+    "search_declarations_supports_structural_filters_and_deterministic_order",
+    "search_declarations_caps_broad_queries_and_reports_pruning",
+    "declaration_type_truncates_single_rendered_type",
+    "declaration_type_zero_cap_returns_empty_truncated_type",
+    "inspect_declaration_returns_known_theorem",
+    "inspect_declaration_returns_known_definition",
+    "inspect_declaration_returns_not_found_for_unknown_name",
+    "inspect_declaration_bounds_docstring_and_skips_proof_search_by_default",
+    "inspect_declaration_reports_proof_search_when_requested",
+    "inspect_declaration_truncates_large_type",
+    "inspect_declaration_default_stays_under_total_budget",
+    "search_result_name_can_be_inspected",
+    "list_declarations_strings_streams_full_env_without_frame_cap",
+    "describe_bulk_preserves_input_length_with_missing_slots",
+    "oversized_terminal_response_is_request_error_not_child_death",
+    "inspect_declaration_pretty_and_raw_rendering_differ",
+)
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
@@ -719,7 +740,146 @@ def qualify(
     shutil.rmtree(root)
 
 
-def qualify_broken_import(release, profile, *, emit_host_selection=False):
+def fixture_worker_digest(worker):
+    require(
+        worker == worker.resolve(strict=True)
+        and worker.is_file()
+        and os.access(worker, os.X_OK)
+        and worker.stat().st_size <= MAX_FIXTURE_WORKER_BYTES,
+        "selected fixture worker is not a bounded executable",
+    )
+    with worker.open("rb") as stream:
+        expected = os.fstat(stream.fileno()).st_size
+        require(
+            expected <= MAX_FIXTURE_WORKER_BYTES,
+            "selected fixture worker grew before hashing",
+        )
+        sha256 = hashlib.sha256()
+        remaining = expected
+        while chunk := stream.read(min(64 * 1024, remaining + 1)):
+            remaining -= len(chunk)
+            require(remaining >= 0, "selected fixture worker grew while hashing")
+            sha256.update(chunk)
+        require(remaining == 0, "selected fixture worker shrank while hashing")
+    return sha256.hexdigest()
+
+
+def remove_owned_state(state, owner):
+    closed = state.stat()
+    require(
+        state == state.resolve(strict=True)
+        and (closed.st_dev, closed.st_ino) == (owner.st_dev, owner.st_ino),
+        f"fixture directory changed: {state}",
+    )
+    shutil.rmtree(state)
+
+
+def scoped_tests(binary, names):
+    cases = " | ".join(f"test(={name})" for name in names)
+    return f"(binary(={binary}) & ({cases}))"
+
+
+def check_typed_children_closed(events):
+    with events.open("rb") as stream:
+        data = stream.read(16 * 1024 + 1)
+    require(
+        0 < len(data) <= 16 * 1024 and data.endswith(b"\n"),
+        "missing or incomplete typed worker audit",
+    )
+    admitted = set()
+    workers = set()
+    for line in data.splitlines():
+        raw, event = line.split(b" ", 1)
+        require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
+        pid = int(raw)
+        workers.add(pid)
+        if event == b"verified-deployment":
+            admitted.add(pid)
+    require(
+        len(admitted) >= len(ORDINARY_TYPED_TESTS),
+        "typed tests did not start the expected admitted workers",
+    )
+    for pid in workers:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        raise ValueError(f"typed worker PID {pid} remains; keeping fixture state")
+
+
+def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
+    state = parent / "typed-session"
+    state.mkdir(mode=0o700)
+    owner = state.stat()
+    scratch = state / "tmp"
+    scratch.mkdir(mode=0o700)
+    env.clear()
+    env.update(
+        build_environment(release, scratch), LEAN_RS_PREPARED_HOST_ARTIFACTS=descriptor
+    )
+    run([TARGET / "debug/prepare", state, "--typed-session"], APP)
+    record = state / "deployment.json"
+    require(
+        record == record.resolve(strict=True) and record.is_file(),
+        "missing exact typed fixture record",
+    )
+    audit_dir = state / "app"
+    audit_dir.mkdir(mode=0o700)
+    events = audit_dir / "native-events.log"
+    env.update(
+        LEAN_RS_METADATA_ORDINARY_TYPED="1",
+        LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
+        LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
+        LEAN_RS_METADATA_AUDIT_PATH=str(events),
+    )
+    run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
+    worker = TARGET / "debug/metadata-worker"
+    selection = json.dumps(
+        {
+            "worker": str(worker),
+            "worker_sha256": fixture_worker_digest(worker),
+            "fixture": str(SDK / "fixtures/lean"),
+            "sysroot": str(release),
+            "prepared": json.loads(descriptor),
+        },
+        separators=(",", ":"),
+    )
+    require(
+        len(selection.encode()) <= 64 * 1024, "typed selection exceeds launch limit"
+    )
+    env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"] = selection
+    select_nextest_runner(env, profile)
+    run(
+        [
+            "cargo",
+            "nextest",
+            "run",
+            "--locked",
+            "--offline",
+            "-j1",
+            "--test-threads",
+            "1",
+            "--no-tests",
+            "fail",
+            "--retries",
+            "0",
+            "-p",
+            "lean-rs-worker-child",
+            "--test",
+            "typed_session",
+            "-E",
+            scoped_tests("typed_session", ORDINARY_TYPED_TESTS),
+        ],
+        SDK,
+    )
+    # A failed run or unconfirmed closure leaves this one state in place.
+    check_typed_children_closed(events)
+    remove_owned_state(state, owner)
+
+
+def qualify_broken_import(
+    release, profile, *, emit_host_selection=False, run_typed=False
+):
     """Run one ordinary SDK worker test, without the downstream host helper."""
     require(TARGET == TARGET.resolve(strict=True), "aliased SDK target")
     parent = TARGET / "metadata-qualification"
@@ -730,6 +890,12 @@ def qualify_broken_import(release, profile, *, emit_host_selection=False):
         else shutil.which("timeout")
     )
     require(timeout is not None, "GNU timeout is required for the broken-import check")
+    if run_typed:
+        require(emit_host_selection, "--run-typed requires --emit-host-selection")
+        typed = parent / "typed-session"
+        require(
+            not os.path.lexists(typed), f"typed fixture state already exists: {typed}"
+        )
     check_tracked_fixture_sources()
     space(TARGET)
     state = parent / "broken-import"
@@ -764,32 +930,12 @@ def qualify_broken_import(release, profile, *, emit_host_selection=False):
     )
     run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
     worker = TARGET / "debug/metadata-worker"
-    require(
-        worker == worker.resolve(strict=True)
-        and worker.is_file()
-        and os.access(worker, os.X_OK)
-        and worker.stat().st_size <= MAX_FIXTURE_WORKER_BYTES,
-        "selected fixture worker is not a bounded executable",
-    )
-    with worker.open("rb") as stream:
-        expected = os.fstat(stream.fileno()).st_size
-        require(
-            expected <= MAX_FIXTURE_WORKER_BYTES,
-            "selected fixture worker grew before hashing",
-        )
-        sha256 = hashlib.sha256()
-        remaining = expected
-        while chunk := stream.read(min(64 * 1024, remaining + 1)):
-            remaining -= len(chunk)
-            require(remaining >= 0, "selected fixture worker grew while hashing")
-            sha256.update(chunk)
-        require(remaining == 0, "selected fixture worker shrank while hashing")
     env["LEAN_RS_TEST_BROKEN_IMPORT"] = json.dumps(
         {
             "project": str(state / "lean"),
             "worker": str(worker),
             "sysroot": str(release),
-            "worker_sha256": sha256.hexdigest(),
+            "worker_sha256": fixture_worker_digest(worker),
         }
     )
     select_nextest_runner(env, profile)
@@ -817,39 +963,66 @@ def qualify_broken_import(release, profile, *, emit_host_selection=False):
 
     # The named test confirms both workers were reaped. On a failure or
     # timeout, keep this state and refuse further attempts pending closure.
-    closed = state.stat()
-    require(
-        state == state.resolve(strict=True)
-        and (closed.st_dev, closed.st_ino) == (owner.st_dev, owner.st_ino),
-        "broken-import fixture directory changed",
-    )
     if emit_host_selection:
         with record.open("rb") as stream:
             data = stream.read(16 * 1024**2 + 1)
         require(len(data) <= 16 * 1024**2, "broken-import record exceeds fixture bound")
-        require(hashlib.sha256(data).hexdigest() == env["LEAN_RS_METADATA_DEPLOYMENT_SHA256"],
-                "broken-import selection changed after verification")
+        require(
+            hashlib.sha256(data).hexdigest()
+            == env["LEAN_RS_METADATA_DEPLOYMENT_SHA256"],
+            "broken-import selection changed after verification",
+        )
         selected = json.loads(data)
         manifest = Path(selected["shim_manifest"])
-        for name, image in (("host_image", selected["host_image"]),
-                            ("interop_image", selected["interop_image"])):
+        for name, image in (
+            ("host_image", selected["host_image"]),
+            ("interop_image", selected["interop_image"]),
+        ):
             require(Path(image).is_relative_to(SDK), f"invalid {name} selection")
-        image_pins = [[image, *selected["files"][image]]
-                      for image in (selected["host_image"], selected["interop_image"])]
-        host_selection = json.dumps(dict(
-            prefix=str(release), manifest=str(manifest),
-            manifest_sha256=hashlib.sha256(selected["shim_json"].encode()).hexdigest(),
-            roots=selected["shim_roots"], search_paths=selected["shim_paths"], images=image_pins,
-        ), separators=(",", ":"))
-        typed_descriptor = json.dumps(dict(
-            protocol=2, shim_manifest_path=str(manifest), shim_manifest_json=selected["shim_json"],
-            artifact_roots=selected["shim_roots"], shim_search_paths=selected["shim_paths"],
-        ), separators=(",", ":"))
-        require(len(typed_descriptor.encode()) <= 64 * 1024, "prepared shim descriptor exceeds wire bound")
-    shutil.rmtree(state)
+        image_pins = [
+            [image, *selected["files"][image]]
+            for image in (selected["host_image"], selected["interop_image"])
+        ]
+        host_selection = json.dumps(
+            {
+                "prefix": str(release),
+                "manifest": str(manifest),
+                "manifest_sha256": hashlib.sha256(
+                    selected["shim_json"].encode()
+                ).hexdigest(),
+                "roots": selected["shim_roots"],
+                "search_paths": selected["shim_paths"],
+                "images": image_pins,
+            },
+            separators=(",", ":"),
+        )
+        typed_descriptor = json.dumps(
+            {
+                "protocol": 2,
+                "shim_manifest_path": str(manifest),
+                "shim_manifest_json": selected["shim_json"],
+                "artifact_roots": selected["shim_roots"],
+                "shim_search_paths": selected["shim_paths"],
+            },
+            separators=(",", ":"),
+        )
+        require(
+            len(typed_descriptor.encode()) <= 64 * 1024,
+            "prepared shim descriptor exceeds wire bound",
+        )
+    remove_owned_state(state, owner)
+    if run_typed:
+        qualify_typed_group(parent, release, profile, run, env, cargo, typed_descriptor)
     if emit_host_selection:
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
         print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)
+        if run_typed:
+            typed = scoped_tests("typed_session", ORDINARY_TYPED_TESTS)
+            broken = scoped_tests("capability_builder", (BROKEN_IMPORT_TEST,))
+            print(
+                "LEAN_RS_TEST_REMAINING_FILTER="
+                f"not (package(=lean-rs-worker-child) & ({broken} | {typed}))"
+            )
 
 
 def main():
@@ -882,8 +1055,14 @@ def main():
         "broken-import",
         help="run the private SDK broken-import fixture without a writer helper",
     )
-    broken.add_argument("--emit-host-selection", action="store_true",
-                        help="emit checked environment assignments for these prepared shims")
+    broken.add_argument(
+        "--emit-host-selection",
+        action="store_true",
+        help="emit checked environment assignments for these prepared shims",
+    )
+    broken.add_argument(
+        "--run-typed", action="store_true", help="also run the fixed typed SDK tests"
+    )
     run = commands.add_parser(
         "run", help="execute the selected tests against a reviewed deployment"
     )
@@ -905,6 +1084,8 @@ def main():
     if args.command == "broken-import":
         if args.writer is not None or args.writer_sha256 is not None:
             parser.error("broken-import does not use a writer helper")
+        if args.run_typed and not args.emit_host_selection:
+            parser.error("--run-typed requires --emit-host-selection")
     elif args.writer is None or args.writer_sha256 is None:
         parser.error("prepare and run require --writer and --writer-sha256")
     if args.command == "run" and args.unknown_declaration and not args.typed_session:
@@ -932,7 +1113,11 @@ def main():
         release = installed_lean_release(profile)
         if args.command == "broken-import":
             with ordinary_state_lock():
-                if args.emit_host_selection:
+                if args.run_typed:
+                    qualify_broken_import(
+                        release, profile, emit_host_selection=True, run_typed=True
+                    )
+                elif args.emit_host_selection:
                     qualify_broken_import(release, profile, emit_host_selection=True)
                 else:
                     qualify_broken_import(release, profile)

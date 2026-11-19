@@ -483,7 +483,7 @@ else
 	SKIPPED+=("actionlint workflows")
 fi
 
-run_broken_import() {
+run_sdk_worker_tests() {
 	if [[ "$OS_KIND" == "Darwin" ]]; then
 		command -v gtimeout >/dev/null || { log_err "GNU gtimeout is required"; return 1; }
 	else
@@ -491,14 +491,20 @@ run_broken_import() {
 	fi
 	cargo fetch --locked --manifest-path "$REPO_ROOT/fixtures/metadata-qualification/app/Cargo.toml" || return
 	local selection
-	selection=$(env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import --emit-host-selection) || return
+	selection=$(env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import --emit-host-selection --run-typed) || return
 	LEAN_RS_TEST_ORDINARY_HOST_SHIMS=$(printf '%s\n' "$selection" | sed -n 's/^LEAN_RS_TEST_ORDINARY_HOST_SHIMS=//p')
-	[[ -n "$LEAN_RS_TEST_ORDINARY_HOST_SHIMS" ]] || { log_err "Missing selected SDK host shims"; return 1; }
+	LEAN_RS_TEST_REMAINING_FILTER=$(printf '%s\n' "$selection" | sed -n 's/^LEAN_RS_TEST_REMAINING_FILTER=//p')
+	if [[ -z "$LEAN_RS_TEST_ORDINARY_HOST_SHIMS" || -z "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
+		log_err "Missing SDK worker test selections"
+		LEAN_RS_TEST_REMAINING_FILTER=
+		return 1
+	fi
 	export LEAN_RS_TEST_ORDINARY_HOST_SHIMS
 }
 
+LEAN_RS_TEST_REMAINING_FILTER=
 if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
-	run_gate "Required standalone broken-import check" run_broken_import
+	run_gate "Required SDK worker tests" run_sdk_worker_tests
 fi
 
 # nextest on Linux preloads libgcc_s.so.1 — Lean's `libleanshared.so`
@@ -533,8 +539,8 @@ run_nextest() {
 		# anyway — those are the real leak gate.
 		env_args+=("LEAN_RS_LEAK_LOOP_ITERS=4")
 	fi
-	if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
-		"${env_args[@]}" cargo nextest run --workspace --profile ci -E 'not (package(=lean-rs-worker-child) & binary(=capability_builder) & test(=a_host_handle_built_with_a_broken_import_still_fails_at_open))'
+	if [[ -n "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
+		"${env_args[@]}" cargo nextest run --workspace --profile ci -E "$LEAN_RS_TEST_REMAINING_FILTER"
 	else
 		"${env_args[@]}" cargo nextest run --workspace --profile ci
 	fi
