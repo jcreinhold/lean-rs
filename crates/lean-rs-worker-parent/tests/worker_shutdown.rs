@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 use std::process::Command;
 
 use lean_rs_worker_parent::{
@@ -57,12 +57,37 @@ const FAKE_IMPORT_RESIDUE_BYTES: u64 = 1_000;
 //   cargo nextest run -p lean-rs-worker-parent --profile ci
 //
 fn main() {
-    public_worker_handles_keep_unwind_safety();
     if let Ok(mode) = env::var(FAKE_CHILD_ENV) {
         run_fake_child(&mode);
         return;
     }
+    const CASE: &str = "worker_shutdown_conformance";
+    let args: Vec<_> = env::args().skip(1).collect();
+    let mut args = args.iter().map(String::as_str);
+    let mut listing = false;
+    let mut ignored = false;
+    let mut selected = None;
+    while let Some(arg) = args.next() {
+        match arg {
+            "--list" => listing = true,
+            "--ignored" => ignored = true,
+            "--format" if args.next() == Some("terse") => {}
+            "--format=terse" | "--exact" | "--nocapture" | "--quiet" => {}
+            CASE if selected.is_none() => selected = Some(arg),
+            _ => panic!("unsupported worker shutdown test argument: {arg}"),
+        }
+    }
+    if listing {
+        if !ignored {
+            println!("{CASE}: test");
+        }
+        return;
+    }
+    if ignored {
+        return;
+    }
 
+    public_worker_handles_keep_unwind_safety();
     let tests: &[(&str, fn() -> Result<(), String>)] = &[
         (
             "terminal_refusal_survives_release_but_not_later_dispatch",
@@ -2265,7 +2290,38 @@ fn process_state(pid: u32) -> Result<ProcessState, String> {
     }
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code, reason = "query the exact Darwin process status without spawning ps")]
+fn process_state(pid: u32) -> Result<ProcessState, String> {
+    let native = i32::try_from(pid).map_err(|err| err.to_string())?;
+    if native <= 0 {
+        return Err(format!("invalid process PID {pid}"));
+    }
+    // SAFETY: zeroed proc_bsdinfo is valid writable C output storage.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = i32::try_from(std::mem::size_of_val(&info)).map_err(|err| err.to_string())?;
+    // SAFETY: errno is thread-local, and info is writable for exactly size bytes.
+    let got = unsafe {
+        *libc::__error() = 0;
+        libc::proc_pidinfo(native, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
+    };
+    let error = io::Error::last_os_error();
+    if got == 0 && error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(ProcessState::Missing);
+    }
+    if got != size || info.pbi_pid != pid {
+        return Err(format!(
+            "incomplete process status for PID {pid} ({got}/{size} bytes): {error}"
+        ));
+    }
+    Ok(if info.pbi_status == libc::SZOMB {
+        ProcessState::Zombie
+    } else {
+        ProcessState::Alive
+    })
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 fn process_state(pid: u32) -> Result<ProcessState, String> {
     let output = Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
