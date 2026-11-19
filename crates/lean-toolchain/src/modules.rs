@@ -217,6 +217,10 @@ pub fn discover_lake_modules(
 /// directory `A/` or an entry `A.olean` selects `A/B.olean`, even if that leaf is missing.
 /// Returns `None` if no root contains the prefix.
 ///
+/// Module names are nonempty components separated by dots. Each component
+/// starts with a Unicode alphabetic character or `_` and continues with
+/// Unicode alphanumeric characters, underscores or ASCII apostrophes.
+///
 /// The metadata callback should follow symlinks as [`fs::metadata`] does. The
 /// caller owns custody of the probes and must check the selected leaf under
 /// that custody before using it. Lookup alone supplies no generation identity
