@@ -186,7 +186,7 @@ def scalar_fixture_inputs(project, deployment, helper, helper_sha256):
 
 
 def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
-            typed_session=False, disposable_clean=False, verification=False):
+            typed_session=False, disposable_clean=False, verification=False, unknown_declaration=False):
     space(root)
     require(root == root.resolve(strict=True) and root.stat().st_uid == os.getuid()
             and root.stat().st_mode & 0o077 == 0, "expected a private owned deployment directory")
@@ -228,7 +228,7 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
         clean_inputs = check_clean_deployment(root, approved_deployment)
     helper = private_writer(root, writer, writer_sha256)
     env = environment(root, helper, root / "selector-target")
-    run_scalar = typed_session and not (disposable_clean or verification)
+    run_scalar = typed_session and not (disposable_clean or verification or unknown_declaration)
     if run_scalar:
         scalar_inputs = scalar_fixture_inputs(root / "app/lean", d, helper, writer_sha256)
     # Only the independently approved worker can be executed, even for a read-only probe.
@@ -244,6 +244,8 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
         elif verification:
             variable = "LEAN_RS_TEST_QUALIFIED_VERIFICATION"
             tests = ("verify_declaration_accepts_closed_theorem_and_rejects_sorry",)
+        elif unknown_declaration:
+            tests = ("describe_returns_none_for_unknown_declaration",)
         selection = {"fixture": d["project"]}
     else:
         variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
@@ -300,10 +302,14 @@ def main():
     prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
     prepare.add_argument("--lean-release", type=Path, required=True)
     run = commands.add_parser("run", help="execute the selected tests against a reviewed deployment")
+    run.add_argument("--unknown-declaration", action="store_true",
+                     help="with --typed-session, run only the unknown-declaration lookup")
     run.add_argument("deployment", type=Path)
     run.add_argument("--worker-sha256", required=True)
     run.add_argument("--deployment-sha256", required=True)
     args = parser.parse_args()
+    if args.command == "run" and args.unknown_declaration and not args.typed_session:
+        parser.error("--unknown-declaration requires --typed-session")
     try:
         require((sys.platform, platform.machine()) == ("darwin", "arm64"), "requires macOS arm64")
         writer = reviewed_writer(args.writer, args.writer_sha256)
@@ -316,7 +322,7 @@ def main():
             provision(writer, args.writer_sha256, release, typed, args.disposable_clean, args.verify_declaration)
         else:
             qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256,
-                    typed, args.disposable_clean, args.verify_declaration)
+                    typed, args.disposable_clean, args.verify_declaration, unknown_declaration=args.unknown_declaration)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")
 

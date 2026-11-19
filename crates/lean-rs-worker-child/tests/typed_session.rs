@@ -317,10 +317,10 @@ fn describe_returns_row_for_known_declaration() {
 
 #[test]
 fn describe_returns_none_for_unknown_declaration() {
-    ensure_fixture_built();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let (config, session_config) = describe_fixture();
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
     let mut session = worker
-        .open_session(&handles_session_config(), None, None)
+        .open_session(&session_config, None, None)
         .expect("worker session opens");
 
     let row = session
