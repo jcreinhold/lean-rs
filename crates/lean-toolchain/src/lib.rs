@@ -73,7 +73,7 @@ pub use loader::{
 pub use manifest_validation::CapabilityManifest;
 pub use modules::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
-    LeanModuleSetFingerprint, discover_lake_modules,
+    LeanModuleSetFingerprint, discover_lake_modules, olean_candidate,
 };
 pub use source_package::{
     GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageManifestPolicy,
