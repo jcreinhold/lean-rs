@@ -126,7 +126,7 @@ so this is not a sandbox against adversarial native code.
 | supervisor loss | guardian parent stream and recorded identity; `native_guardian.rs` | guardian drains the group on owner loss; the current clean focused receipts do not cut supervisor loss after each bootstrap transition |
 | authentic physical closure | `OwnedCommandGroup::try_wait`; `ParentLifetimeLease::retirement_closed` | direct wait and ECHILD/whole-group tests; OS behavior remains assumed |
 | custody-capacity return | `LeanWorkerProcessTracker::release`; `ParentLifetimeLease::retirement_closed`; `BootstrapCustody::closed` | guarded closure requires both group absence and guardian death; the clean retained-`AfterSpawn` test observed tracker 1 before closure and 0 after exact closure, but is not a proof of every wait/ECHILD/drop cut |
-| shared lock aliases | `shared_reader`, `native_guardian::retain_reads`, child inherited reads | transfer/union tests cover selected paths; no explicit-unlock negative test |
+| shared lock aliases | `shared_reader`, `native_guardian::retain_reads`, child inherited reads | `durable_fd_union_ack_survives_abrupt_root_exit_and_fd_closing_descendant` observes retention after close; `explicit_unlock_releases_alias_lock_but_registry_fences_live_group` observes raw EX and a late write after unlock while the managed reader fence still refuses admission |
 | writer exclusion | `writer_lock` and shared-reader locks | same-inode contention tests; guardian-loss qualification exposed an early-admission trace |
 
 This model returns the process tracker's custody-capacity reservation. Registry

@@ -288,7 +288,9 @@ fn fixture_worker() {
     let project = root.join("project");
     let lock = crate::shared_writer::project_lock_path(&project).unwrap();
     let record = root.join("owners").join(format!("worker-{NONCE}")).join("owner.json");
-    for sequence in 0..3 {
+    let hold_alias = root.join("hold-read-alias").exists();
+    let mut read_alias = None;
+    for sequence in 0..if hold_alias { 1 } else { 3 } {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -318,6 +320,9 @@ fn fixture_worker() {
         let published = read_owner(&record).unwrap();
         assert_eq!(field(&published, "protected_domains"), &json!([domain]));
         fs::write(root.join(format!("ack-{sequence}")), b"durable").unwrap();
+        if hold_alias {
+            read_alias = Some(file.try_clone().unwrap());
+        }
         drop(file);
     }
     let retain_control = root.join("retain-worker-control").exists();
@@ -342,6 +347,12 @@ fn fixture_worker() {
     };
     wait_until(|| heartbeat(&root) > 0);
     fs::write(root.join("body-ready"), std::process::id().to_string()).unwrap();
+    if let Some(alias) = &read_alias {
+        wait_until_within(Duration::from_secs(2), || root.join("unlock-read-alias").exists());
+        // Negative control: explicitly release the lock through a clone of the
+        // description loaned to the guardian while both still hold their aliases.
+        alias.unlock().unwrap();
+    }
     let until = Instant::now() + Duration::from_secs(6);
     let mut guardian_killed = false;
     while Instant::now() < until {
@@ -412,6 +423,32 @@ fn durable_fd_union_ack_survives_abrupt_root_exit_and_fd_closing_descendant() {
     let identity = exclusive.metadata().unwrap();
     assert!(
         protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (identity.dev(), identity.ino())).unwrap()
+    );
+}
+
+#[test]
+fn explicit_unlock_releases_alias_lock_but_registry_fences_live_group() {
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("hold-read-alias"), b"single loan with live clone").unwrap();
+    let mut generation = Generation::start(&fixture.root);
+    let contender = service_loss_regressions::Contender::start(&fixture, generation.worker.id());
+    assert!(generation.guardian.is_live().unwrap());
+    fs::write(fixture.root.join("unlock-read-alias"), b"deliberate unlock control").unwrap();
+    let observed = contender.acquired();
+    assert!(observed.group_present && observed.worker_live, "{observed:?}");
+    assert!(generation.guardian.is_live().unwrap());
+    assert!(!observed.managed_writer_ready, "{observed:?}");
+    let before = fixture.heartbeat();
+    wait_until(|| fixture.heartbeat() > before);
+
+    drop(generation.parent.take());
+    generation.closed();
+    let closed = contender.finish();
+    assert!(closed.payload_bytes_after_marker > 0, "{closed:?}");
+    let exclusive = fixture.exclusive();
+    let metadata = exclusive.metadata().unwrap();
+    assert!(
+        protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (metadata.dev(), metadata.ino())).unwrap()
     );
 }
 
