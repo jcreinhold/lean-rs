@@ -9,7 +9,9 @@ Before reusing a current or parked environment, it asks the same shim to compute
 current import admission. A changed order retires the child before the request body. A legacy shim can open fresh
 sessions. The ordered paths say where Lean searched. The application and artifact readers still own stability of
 the files and of earlier module prefixes that could shadow them. Relative entries use the worker’s working directory
-at import and comparison time.
+at import and comparison time. Before each source grant, `WorkerAuthority::validate_source_context` receives
+the opened session context and its retained root order. Applications that require this observation can refuse a
+legacy session with no recorded order.
 
 An application can select one native plugin in its unsafe import attestation. The application verifies the canonical
 image, explicit initializer, matching compiled modules and dependencies under its retained deployment custody. It

@@ -117,6 +117,22 @@ pub trait WorkerAuthority: Send + Sync {
         names: Vec<String>,
         options: HostImportOptions,
     ) -> LeanResult<TrustedHostImports<'static, 'cap>>;
+    /// Validate the opened session before granting any source operation.
+    ///
+    /// `observed_roots` borrows the ordered roots retained from this session's import,
+    /// including duplicates. `None` means the session has no retained observation.
+    /// The default permits the existing operation-specific authorizer to decide.
+    ///
+    /// # Errors
+    /// Return an error to stop this operation before its source grant.
+    fn validate_source_context(
+        &self,
+        _context: &WorkerSourceContext<'_, '_>,
+        _observed_roots: Option<&[String]>,
+    ) -> LeanResult<()> {
+        Ok(())
+    }
+
     /// Admit the exact term request for this session and source context.
     ///
     /// # Errors

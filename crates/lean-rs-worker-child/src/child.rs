@@ -1,4 +1,4 @@
-use crate::authority::{WorkerSourceContext, worker_authority};
+use crate::authority::{WorkerAuthority, WorkerSourceContext, worker_authority};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -1662,6 +1662,16 @@ impl HostAnchor {
     }
 }
 
+fn with_validated_source<C, R>(
+    context: C,
+    observed_roots: Option<&[String]>,
+    validate: impl FnOnce(&C, Option<&[String]>) -> LeanResult<()>,
+    grant: impl FnOnce(C) -> LeanResult<R>,
+) -> LeanResult<R> {
+    validate(&context, observed_roots)?;
+    grant(context)
+}
+
 impl HostSessionState {
     fn open(
         anchor: &'static HostAnchor,
@@ -1715,13 +1725,23 @@ impl HostSessionState {
         })
     }
 
-    fn source_context(&self) -> WorkerSourceContext<'_, 'static> {
+    fn grant_source<R>(
+        &self,
+        grant: impl FnOnce(&dyn WorkerAuthority, WorkerSourceContext<'_, 'static>) -> LeanResult<R>,
+    ) -> LeanResult<R> {
+        let authority = worker_authority()?;
         let (environment, imports) = self.session.source_context();
-        WorkerSourceContext {
+        let context = WorkerSourceContext {
             capability: self.capability,
             environment,
             imports,
-        }
+        };
+        with_validated_source(
+            context,
+            self.observed_roots,
+            |context, roots| authority.validate_source_context(context, roots),
+            |context| grant(authority, context),
+        )
     }
 
     fn elaborate_term(
@@ -1729,7 +1749,8 @@ impl HostSessionState {
         source: &str,
         options: &lean_rs_host::LeanElabOptions,
     ) -> LeanResult<Result<lean_rs::LeanExpr<'static>, lean_rs_host::LeanElabFailure>> {
-        let request = worker_authority()?.term(self.source_context(), source.to_owned(), options.source_options())?;
+        let request = self
+            .grant_source(|authority, context| authority.term(context, source.to_owned(), options.source_options()))?;
         self.session.elaborate(&request, None)
     }
 
@@ -1757,7 +1778,9 @@ impl HostSessionState {
             emit_progress(writer, "kernel_check", 0, Some(1));
         }
         let options = elab_options_to_host(options);
-        let req = worker_authority()?.kernel(self.source_context(), source.to_owned(), options.source_options())?;
+        let req = self.grant_source(|authority, context| {
+            authority.kernel(context, source.to_owned(), options.source_options())
+        })?;
         let outcome = self.session.kernel_check(&req, None, None)?;
         if progress {
             emit_progress(writer, "kernel_check", 1, Some(1));
@@ -2151,7 +2174,8 @@ impl HostSessionState {
         }
         let request = proof_attempt_request_host(request)?;
         let options = elab_options_to_host(options);
-        let request = worker_authority()?.proof(self.source_context(), request, options.source_options())?;
+        let request =
+            self.grant_source(|authority, context| authority.proof(context, request, options.source_options()))?;
         let result = self.session.attempt_proof(&request, None)?;
         if progress {
             emit_progress(writer, "attempt_proof", 1, Some(1));
@@ -2171,7 +2195,8 @@ impl HostSessionState {
         }
         let request = declaration_verification_request_host(request)?;
         let options = elab_options_to_host(options);
-        let request = worker_authority()?.verify(self.source_context(), request, options.source_options())?;
+        let request =
+            self.grant_source(|authority, context| authority.verify(context, request, options.source_options()))?;
         let result = self.session.verify_declaration(&request, None)?;
         if progress {
             emit_progress(writer, "verify_declaration", 1, Some(1));
@@ -2193,7 +2218,8 @@ impl HostSessionState {
         }
         let request = declaration_verification_batch_request_host(request)?;
         let options = elab_options_to_host(options);
-        let request = worker_authority()?.verify_batch(self.source_context(), request, options.source_options())?;
+        let request =
+            self.grant_source(|authority, context| authority.verify_batch(context, request, options.source_options()))?;
         let result = self.session.verify_declaration_batch(&request, None)?;
         if progress {
             emit_progress(writer, "verify_declaration_batch", 1, Some(1));
@@ -2291,14 +2317,16 @@ impl HostSessionState {
     ) -> LeanResult<LeanWorkerModuleQueryOutcome> {
         let options = elab_options_to_host(options);
         let query = module_query_host(query)?;
-        let request = worker_authority()?.query(
-            self.source_context(),
-            lean_rs::host_bridge::HostModuleQuery {
-                source: source.into(),
-                query,
-            },
-            options.source_options(),
-        )?;
+        let request = self.grant_source(|authority, context| {
+            authority.query(
+                context,
+                lean_rs::host_bridge::HostModuleQuery {
+                    source: source.into(),
+                    query,
+                },
+                options.source_options(),
+            )
+        })?;
         Ok(match self.session.process_module_query(&request, None)? {
             ModuleQueryOutcome::Ok { result, imports } => LeanWorkerModuleQueryOutcome::Ok {
                 result: module_query_result_wire(result),
@@ -2345,19 +2373,22 @@ impl HostSessionState {
             "{}\n{}\n{}\n{}\n{}",
             policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
         );
-        let cached = worker_authority()?.cached(
-            self.source_context(),
-            lean_rs::host_bridge::HostCachedModuleBatch {
-                batch: batch.clone(),
-                policy,
-            },
-            options.source_options(),
-        )?;
+        let cached = self.grant_source(|authority, context| {
+            authority.cached(
+                context,
+                lean_rs::host_bridge::HostCachedModuleBatch {
+                    batch: batch.clone(),
+                    policy,
+                },
+                options.source_options(),
+            )
+        })?;
         let cached = self.session.process_module_query_batch_cached(&cached, None)?;
         if !matches!(cached, ModuleQueryBatchCachedOutcome::Unsupported) {
             return Ok(module_query_batch_cached_outcome_wire(cached));
         }
-        let request = worker_authority()?.batch(self.source_context(), batch, options.source_options())?;
+        let request =
+            self.grant_source(|authority, context| authority.batch(context, batch, options.source_options()))?;
         Ok(match self.session.process_module_query_batch(&request, None)? {
             ModuleQueryBatchOutcome::Ok { result, imports } => {
                 let result = module_query_batch_envelope_wire(result);
@@ -3915,6 +3946,36 @@ mod tests {
         LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerSessionImportProfile,
     };
+
+    #[test]
+    fn source_grant_requires_validation_of_the_retained_import_order() {
+        let expected = ["project", "dependency", "project"].map(str::to_owned);
+        let reordered = ["dependency", "project", "project"].map(str::to_owned);
+        for (observed, allowed) in [
+            (None, false),
+            (Some(reordered.as_slice()), false),
+            (Some(expected.as_slice()), true),
+        ] {
+            let mut granted = false;
+            let result = super::with_validated_source(
+                expected.as_slice(),
+                observed,
+                |context, roots| {
+                    if roots == Some(*context) {
+                        Ok(())
+                    } else {
+                        Err(lean_rs::error::host_internal("unapproved import order"))
+                    }
+                },
+                |context| {
+                    granted = true;
+                    Ok(context)
+                },
+            );
+            assert_eq!(granted, allowed);
+            assert_eq!(result.ok(), allowed.then_some(expected.as_slice()));
+        }
+    }
 
     #[test]
     fn metadata_frame_omits_only_complete_order_when_over_budget() -> Result<(), Box<dyn std::error::Error>> {
