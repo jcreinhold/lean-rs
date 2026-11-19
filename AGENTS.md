@@ -38,6 +38,17 @@ Use nextest for runtime tests: cumulative Lean state can exhaust memory in a sha
 CI matrix and additional checks. Runtime gates use stable Rust on Linux and macOS; API and sanitizer jobs also use
 nightly.
 
+## Local storage
+
+- Keep no local evidence or work output by default. If a release or maintainer decision needs a durable record, commit
+  one brief note to Git; do not keep a parallel local archive.
+- Do not store repository work or evidence in `~/Documents/Codex`, `/private/tmp`, or `/tmp`. Do not put non-Git data
+  under `.git`, and do not use another path, an archive, compression, an alias, or split files to evade a storage limit.
+- Use the installed Elan toolchain and one normal Cargo target cache. Do not clone a Lean release, toolchain, or Cargo
+  target directory as evidence or for later reuse.
+- Before a command can create substantial data, state its exact output path, maximum allocated size, expiry, and cleanup
+  step. Do not start unless the bound fits. Remove transient output when the command ends or the work stops.
+
 ## Safety and completion
 
 - Workspace `unsafe_code` is denied. `lean-rs-sys` has the sole crate-wide opt-out. Elsewhere, allow unsafe at the
