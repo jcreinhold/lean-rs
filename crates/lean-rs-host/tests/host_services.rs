@@ -2050,25 +2050,100 @@ fn meta_missing_optional_symbol_returns_unsupported() {
 
 // -- process_module_query (bounded module projections) -------------------
 
+enum ModuleQueryCase {
+    Diagnostics,
+    TypeAt,
+    GoalAt,
+    References,
+    MissingImport,
+    HeaderError,
+}
+
+impl ModuleQueryCase {
+    fn request(self) -> (lean_rs::host_bridge::HostModuleQuery, LeanElabOptions) {
+        use lean_rs_host::host::process::ModuleQuery;
+
+        let (source, query, options) = match self {
+            Self::Diagnostics => (
+                "import Lean\n\ntheorem bad : True := 0\n",
+                ModuleQuery::Diagnostics,
+                LeanElabOptions::new(),
+            ),
+            Self::TypeAt => (
+                "def x := 1\ntheorem t : x = 1 := by rfl\n",
+                ModuleQuery::TypeAt { line: 2, column: 13 },
+                LeanElabOptions::new(),
+            ),
+            Self::GoalAt => (
+                "theorem t : True := by\n  trivial\n",
+                ModuleQuery::GoalAt { line: 2, column: 4 },
+                LeanElabOptions::new().diagnostic_byte_limit(256),
+            ),
+            Self::References => (
+                "def x := 1\ntheorem t : x = 1 := by rfl\n#check x\n",
+                ModuleQuery::References { name: "x".to_string() },
+                LeanElabOptions::new(),
+            ),
+            Self::MissingImport => (
+                "import Foo.Bar.Baz\n\ndef x := 1\n",
+                ModuleQuery::Diagnostics,
+                LeanElabOptions::new(),
+            ),
+            Self::HeaderError => (
+                "import 123\n\ntheorem t : True := by trivial\n",
+                ModuleQuery::Diagnostics,
+                LeanElabOptions::new(),
+            ),
+        };
+        (
+            lean_rs::host_bridge::HostModuleQuery {
+                source: source.into(),
+                query,
+            },
+            options,
+        )
+    }
+}
+
+fn fixture_module_query<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    case: ModuleQueryCase,
+) -> lean_rs::LeanResult<lean_rs_host::host::process::ModuleQueryOutcome> {
+    let (request, options) = case.request();
+    if !fixture::native_fixture_selected() {
+        return call_service!(
+            caps,
+            session,
+            process_module_query,
+            &request.source,
+            &request.query,
+            &options,
+            None
+        );
+    }
+    let paths = fixture::native_elaboration_paths(caps, session);
+    let (env, scope) = session.source_context();
+    #[allow(unsafe_code, reason = "only the fixed queries in the held test fixture")]
+    // SAFETY: the cases fix the source, query and options. The exact
+    // retained native roots serve the same elaboration environment.
+    let admitted = unsafe {
+        caps.shim_capability()
+            .module_query_scope(env, scope, paths, request, options.source_options())
+    }?;
+    session.process_module_query(&admitted, None)
+}
+
 #[test]
 fn session_process_module_query_returns_diagnostics_without_info_tree_payload() {
-    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQueryOutcome, ModuleQueryResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "import Lean\n\ntheorem bad : True := 0\n";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::Diagnostics,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_query(&caps, &mut session, ModuleQueryCase::Diagnostics)
+        .expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::Diagnostics(diagnostics),
@@ -2418,23 +2493,14 @@ fn command_message_capture_small_budget_truncates_later_messages() {
 
 #[test]
 fn session_process_module_query_type_at_returns_one_selected_term() {
-    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, TypeAtResult};
+    use lean_rs_host::host::process::{ModuleQueryOutcome, ModuleQueryResult, TypeAtResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "def x := 1\ntheorem t : x = 1 := by rfl\n";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::TypeAt { line: 2, column: 13 },
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome =
+        fixture_module_query(&caps, &mut session, ModuleQueryCase::TypeAt).expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result:
@@ -2469,23 +2535,14 @@ fn session_process_module_query_type_at_returns_one_selected_term() {
 
 #[test]
 fn session_process_module_query_goal_at_returns_selected_tactic_goals() {
-    use lean_rs_host::host::process::{GoalAtResult, ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{GoalAtResult, ModuleQueryOutcome, ModuleQueryResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "theorem t : True := by\n  trivial\n";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::GoalAt { line: 2, column: 4 },
-        &LeanElabOptions::new().diagnostic_byte_limit(256),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome =
+        fixture_module_query(&caps, &mut session, ModuleQueryCase::GoalAt).expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result:
@@ -3033,23 +3090,14 @@ fn declaration_outline_truncates_by_complete_rows_under_small_budget() {
 
 #[test]
 fn session_process_module_query_references_returns_name_locations_only() {
-    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQueryOutcome, ModuleQueryResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "def x := 1\ntheorem t : x = 1 := by rfl\n#check x\n";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::References { name: "x".to_string() },
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_query(&caps, &mut session, ModuleQueryCase::References)
+        .expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::References(result),
@@ -3072,23 +3120,14 @@ fn session_process_module_query_references_returns_name_locations_only() {
 
 #[test]
 fn session_process_module_query_reports_missing_imports_with_result() {
-    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQueryOutcome, ModuleQueryResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "import Foo.Bar.Baz\n\ndef x := 1\n";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::Diagnostics,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_query(&caps, &mut session, ModuleQueryCase::MissingImport)
+        .expect("host stack reports no exception");
     let ModuleQueryOutcome::MissingImports {
         result: ModuleQueryResult::Diagnostics(_),
         imports,
@@ -3402,23 +3441,14 @@ fn declaration_verification_batch_total_budget_exhaustion_returns_ordered_budget
 
 #[test]
 fn session_process_module_query_surfaces_header_parse_error() {
-    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome};
+    use lean_rs_host::host::process::ModuleQueryOutcome;
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "import 123\n\ntheorem t : True := by trivial\n";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::Diagnostics,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_query(&caps, &mut session, ModuleQueryCase::HeaderError)
+        .expect("host stack reports no exception");
     let ModuleQueryOutcome::HeaderParseFailed { diagnostics } = outcome else {
         panic!("expected HeaderParseFailed, got {outcome:?}");
     };
