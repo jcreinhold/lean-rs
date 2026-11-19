@@ -894,15 +894,11 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
 #[test]
 fn derived_cheap_inspection_skips_proof_search_indexes() {
     const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("fixture capability loads");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
     let mut session = caps
         .session(
-            &service_requests::imports(
-                &caps,
-                &["LeanRsFixture.SourceRanges"],
-                LeanSessionImportProfile::default(),
-            ),
+            &fixture_service_imports(&caps, "LeanRsFixture.SourceRanges"),
             None,
             None,
         )
@@ -929,15 +925,11 @@ fn derived_cheap_inspection_skips_proof_search_indexes() {
 #[test]
 fn derived_proof_search_inspection_reports_explicit_work() {
     const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("fixture capability loads");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
     let mut session = caps
         .session(
-            &service_requests::imports(
-                &caps,
-                &["LeanRsFixture.SourceRanges"],
-                LeanSessionImportProfile::default(),
-            ),
+            &fixture_service_imports(&caps, "LeanRsFixture.SourceRanges"),
             None,
             None,
         )
@@ -964,15 +956,11 @@ fn derived_proof_search_inspection_reports_explicit_work() {
 #[test]
 fn derived_statement_rendering_and_search_source_work_are_reported() {
     const DECL: &str = "LeanRsFixture.SourceRanges.knownTheorem";
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("fixture capability loads");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
     let mut session = caps
         .session(
-            &service_requests::imports(
-                &caps,
-                &["LeanRsFixture.SourceRanges"],
-                LeanSessionImportProfile::default(),
-            ),
+            &fixture_service_imports(&caps, "LeanRsFixture.SourceRanges"),
             None,
             None,
         )
@@ -1221,35 +1209,94 @@ fn session_list_declarations_strings_matches_filtered_count() {
 
 // -- elaborate + kernel_check -------------------------------------------
 
+fn fixture_service_imports<'lean, 'c>(
+    caps: &'c lean_rs_host::LeanCapabilities<'lean, '_>,
+    module: &str,
+) -> lean_rs::module::TrustedHostImports<'lean, 'c> {
+    assert!(matches!(
+        module,
+        "LeanRsHostShims.Elaboration" | "LeanRsFixture.SourceRanges"
+    ));
+    let profile = LeanSessionImportProfile::default();
+    if fixture::native_fixture_selected() {
+        fixture::native_imports_for(caps, &[module], profile)
+    } else {
+        service_requests::imports(caps, &[module], profile)
+    }
+}
+
 fn session_over_elaboration<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
     caps.session(
-        &service_requests::imports(
-            caps,
-            &["LeanRsHostShims.Elaboration"],
-            LeanSessionImportProfile::default(),
-        ),
+        &fixture_service_imports(caps, "LeanRsHostShims.Elaboration"),
         None,
         None,
     )
     .expect("session imports cleanly")
 }
 
+fn fixture_elaborate<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    source: &str,
+) -> lean_rs::LeanResult<Result<lean_rs::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>> {
+    let options = match source {
+        "(1 + 2 : Nat)" | "(Nat.succ 0 : Nat)" | "1 +" | "(1 + \"hi\" : Nat)" => LeanElabOptions::new(),
+        "(foo + bar + baz : Nat)" => LeanElabOptions::new().diagnostic_byte_limit(1),
+        _ => panic!("unapproved elaboration fixture expression"),
+    };
+    if !fixture::native_fixture_selected() {
+        return call_service!(caps, session, elaborate, source, None, &options, None);
+    }
+    let options = options.source_options();
+    let paths = fixture::native_elaboration_paths(caps, session);
+    let (env, scope) = session.source_context();
+    #[allow(unsafe_code, reason = "five fixed terms in the held test fixture")]
+    // SAFETY: the fixed request and its exact options use this held
+    // elaboration environment, without an expected type or other source.
+    let request = unsafe {
+        caps.shim_capability()
+            .term_scope(env, scope, paths, source.into(), None, options)
+    }?;
+    session.elaborate(&request, None)
+}
+
+fn fixture_kernel_check<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    source: &str,
+) -> lean_rs::LeanResult<LeanKernelOutcome<'lean>> {
+    let options = LeanElabOptions::new();
+    if !fixture::native_fixture_selected() {
+        return call_service!(caps, session, kernel_check, source, &options, None, None);
+    }
+    assert!(matches!(
+        source,
+        "theorem lean_rs_smoke : 1 + 1 = 2 := rfl"
+            | "theorem lean_rs_bad : 1 = 2 := rfl"
+            | "theorem :="
+            | "#check Nat"
+            | "theorem lean_rs_recheck : 1 + 1 = 2 := rfl"
+            | "theorem lean_rs_summary : 1 + 1 = 2 := rfl"
+    ));
+    let paths = fixture::native_elaboration_paths(caps, session);
+    let (env, scope) = session.source_context();
+    #[allow(unsafe_code, reason = "six fixed commands in the held test fixture")]
+    // SAFETY: the fixed command uses the held elaboration environment and
+    // default kernel request options, with no other source.
+    let request = unsafe {
+        caps.shim_capability()
+            .kernel_scope(env, scope, paths, source.into(), options.source_options())
+    }?;
+    session.kernel_check(&request, None, None)
+}
+
 #[test]
 fn elaborate_success_returns_expr() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        elaborate,
-        "(1 + 2 : Nat)",
-        None,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_elaborate(&caps, &mut session, "(1 + 2 : Nat)").expect("host stack reports no exception");
     let expr = outcome.expect("elaboration succeeds for a well-typed Nat term");
     // Returned LeanExpr is opaque; success path is asserted by Ok.
     drop(expr);
@@ -1257,21 +1304,13 @@ fn elaborate_success_returns_expr() {
 
 #[test]
 fn session_expr_to_string_raw_renders_elaborated_expr() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let expr = call_service!(
-        caps,
-        session,
-        elaborate,
-        "(Nat.succ 0 : Nat)",
-        None,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception")
-    .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let expr = fixture_elaborate(&caps, &mut session, "(Nat.succ 0 : Nat)")
+        .expect("host stack reports no exception")
+        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
     let rendered = session.expr_to_string_raw(&expr, None).expect("raw render");
     assert!(!rendered.is_empty(), "raw projection must be non-empty");
     assert!(
@@ -1282,12 +1321,11 @@ fn session_expr_to_string_raw_renders_elaborated_expr() {
 
 #[test]
 fn elaborate_syntax_failure_reports_diagnostic() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(caps, session, elaborate, "1 +", None, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = fixture_elaborate(&caps, &mut session, "1 +").expect("host stack reports no exception");
     let failure = outcome.expect_err("trailing operator must fail to parse");
     let first = failure
         .diagnostics()
@@ -1302,22 +1340,14 @@ fn elaborate_syntax_failure_reports_diagnostic() {
 
 #[test]
 fn elaborate_type_failure_reports_position() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     // Mixing `String` with arithmetic against `Nat` triggers an
     // elaborator type error that carries a position.
-    let outcome = call_service!(
-        caps,
-        session,
-        elaborate,
-        "(1 + \"hi\" : Nat)",
-        None,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome =
+        fixture_elaborate(&caps, &mut session, "(1 + \"hi\" : Nat)").expect("host stack reports no exception");
     let failure = outcome.expect_err("type-mismatched term must fail to elaborate");
     let diag = failure
         .diagnostics()
@@ -1343,13 +1373,12 @@ fn elaborate_type_failure_reports_position() {
 
 #[test]
 fn kernel_check_small_theorem_returns_evidence() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "theorem lean_rs_smoke : 1 + 1 = 2 := rfl";
-    let outcome = call_service!(caps, session, kernel_check, src, &LeanElabOptions::new(), None, None)
-        .expect("host stack reports no exception");
+    let outcome = fixture_kernel_check(&caps, &mut session, src).expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
         EvidenceStatus::Checked,
@@ -1368,13 +1397,12 @@ fn kernel_check_small_theorem_returns_evidence() {
 
 #[test]
 fn kernel_check_rejects_bad_proof() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "theorem lean_rs_bad : 1 = 2 := rfl";
-    let outcome = call_service!(caps, session, kernel_check, src, &LeanElabOptions::new(), None, None)
-        .expect("host stack reports no exception");
+    let outcome = fixture_kernel_check(&caps, &mut session, src).expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
         EvidenceStatus::Rejected,
@@ -1414,20 +1442,11 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
     // here. The Lean-side classification logic (which decides between
     // `Rejected` and `Unavailable`) is exercised by the fixture's own
     // tests, not by this Rust integration suite.
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        kernel_check,
-        "theorem :=",
-        &LeanElabOptions::new(),
-        None,
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_kernel_check(&caps, &mut session, "theorem :=").expect("host stack reports no exception");
     assert!(
         matches!(outcome.status(), EvidenceStatus::Rejected | EvidenceStatus::Unavailable),
         "malformed source must classify as Rejected or Unavailable, got {outcome:?}"
@@ -1447,23 +1466,14 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
 
 #[test]
 fn kernel_check_unsupported_on_non_declaration() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     // `#check` is a command that elaborates cleanly but adds no
     // constant to the environment, so the classifier returns
     // `Unsupported` (no new theorem/definition).
-    let outcome = call_service!(
-        caps,
-        session,
-        kernel_check,
-        "#check Nat",
-        &LeanElabOptions::new(),
-        None,
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_kernel_check(&caps, &mut session, "#check Nat").expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
         EvidenceStatus::Unsupported,
@@ -1473,20 +1483,12 @@ fn kernel_check_unsupported_on_non_declaration() {
 
 #[test]
 fn check_evidence_revalidates_checked_evidence() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        kernel_check,
-        "theorem lean_rs_recheck : 1 + 1 = 2 := rfl",
-        &LeanElabOptions::new(),
-        None,
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_kernel_check(&caps, &mut session, "theorem lean_rs_recheck : 1 + 1 = 2 := rfl")
+        .expect("host stack reports no exception");
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
         LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
@@ -1519,20 +1521,12 @@ fn check_evidence_revalidates_checked_evidence() {
 
 #[test]
 fn summarize_evidence_exposes_declaration_name() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        kernel_check,
-        "theorem lean_rs_summary : 1 + 1 = 2 := rfl",
-        &LeanElabOptions::new(),
-        None,
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_kernel_check(&caps, &mut session, "theorem lean_rs_summary : 1 + 1 = 2 := rfl")
+        .expect("host stack reports no exception");
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
         LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
@@ -1578,16 +1572,15 @@ fn summarize_evidence_exposes_declaration_name() {
 
 #[test]
 fn diagnostic_byte_limit_truncates() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     // Multiple unbound identifiers produce multiple diagnostics; a
     // single-byte budget cannot fit them all and must be reported as
     // truncated.
-    let opts = LeanElabOptions::new().diagnostic_byte_limit(1);
-    let outcome = call_service!(caps, session, elaborate, "(foo + bar + baz : Nat)", None, &opts, None)
-        .expect("host stack reports no exception");
+    let outcome =
+        fixture_elaborate(&caps, &mut session, "(foo + bar + baz : Nat)").expect("host stack reports no exception");
     let failure = outcome.expect_err("unbound identifiers must fail to elaborate");
     assert!(
         failure.truncated(),

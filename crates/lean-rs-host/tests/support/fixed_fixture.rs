@@ -847,6 +847,18 @@ pub(super) fn native_meta_term<'lean, 'c>(
     .expect("attest fixed Meta term")
 }
 
+#[allow(dead_code, reason = "host services only")]
+pub(super) fn native_elaboration_paths(
+    caps: &LeanCapabilities<'_, '_>,
+    session: &lean_rs_host::LeanSession<'_, '_>,
+) -> Vec<String> {
+    const MODULE: &str = "LeanRsHostShims.Elaboration";
+    let (_, imports) = session.source_context();
+    assert!(imports.matches_request(&caps.import_search_paths(), &[MODULE.into()]));
+    assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
+    native_source_paths(caps, &[MODULE]).expect("ordinary elaboration fixture selected")
+}
+
 fn native_source_paths(caps: &LeanCapabilities<'_, '_>, modules: &[&str]) -> Option<Vec<String>> {
     #[cfg(all(test, unix))]
     {
