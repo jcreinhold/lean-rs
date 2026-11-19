@@ -241,6 +241,8 @@ fn native_worker_fixture_entry() {
         Duration::from_secs(3),
     )
     .unwrap();
+    #[cfg(target_os = "macos")]
+    startup_traces::run_lean_body(Path::new(&root), &mut guardian);
     if std::env::var_os("LEAN_NATIVE_GUARDIAN_FAILURE_ROOT").is_some() {
         use std::os::fd::AsFd as _;
         use std::os::unix::fs::MetadataExt as _;
@@ -312,3 +314,7 @@ mod lifeline;
 
 #[path = "tests/startup_faults.rs"]
 pub(super) mod startup_faults;
+
+#[cfg(target_os = "macos")]
+#[path = "tests/startup_traces.rs"]
+mod startup_traces;
