@@ -634,11 +634,19 @@ fn session_over_handles<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lea
     .expect("session imports cleanly")
 }
 
+fn native_handles_session<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    if !fixture::native_fixture_selected() {
+        return session_over_handles(caps);
+    }
+    caps.session(&fixture::native_imports(caps, "LeanRsFixture.Handles"), None, None)
+        .expect("session imports cleanly")
+}
+
 #[test]
 fn session_import_then_query_fixture_definition() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     // `LeanRsFixture.Handles.nameAnonymous` is the first fixture export
     // in Handles.lean and is reachable through the imported environment.
@@ -652,9 +660,9 @@ fn session_import_then_query_fixture_definition() {
 
 #[test]
 fn session_declaration_kind_discriminates() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let fixture_def_kind = session
         .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
@@ -675,9 +683,9 @@ fn session_declaration_kind_discriminates() {
 
 #[test]
 fn session_declaration_type_round_trips_as_expr() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let type_handle = session
         .declaration_type("LeanRsFixture.Handles.nameAnonymous", None)
@@ -1050,9 +1058,9 @@ fn bracketed_import_query_reports_rejected_full_session_operations() {
 
 #[test]
 fn session_declaration_type_returns_none_for_missing() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let absent = session
         .declaration_type("This.Name.Does.Not.Exist", None)
@@ -1062,9 +1070,9 @@ fn session_declaration_type_returns_none_for_missing() {
 
 #[test]
 fn session_declaration_name_renders_dotted_form() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let rendered = session
         .declaration_name("LeanRsFixture.Handles.nameAnonymous", None)
@@ -1077,9 +1085,9 @@ fn session_declaration_name_renders_dotted_form() {
 
 #[test]
 fn session_query_missing_declaration_is_host_error() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let err = session
         .query_declaration("This.Name.Does.Not.Exist", None)
@@ -1100,9 +1108,9 @@ fn session_query_missing_declaration_is_host_error() {
 
 #[test]
 fn session_list_declarations_includes_prelude_and_fixture() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let names = session.list_declarations(None).expect("list declarations");
     // The Lean prelude alone contributes thousands; the fixture import
@@ -1115,9 +1123,9 @@ fn session_list_declarations_includes_prelude_and_fixture() {
 
 #[test]
 fn session_name_to_string_renders_prelude_name() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let names = session.list_declarations(None).expect("list declarations");
     let mut found_nat = false;
@@ -1143,9 +1151,9 @@ fn session_name_to_string_renders_prelude_name() {
 
 #[test]
 fn session_name_to_string_renders_names_with_numeric_components() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     // Generated names (compiler-introduced numeric components) are
     // suppressed by the default filter; flip the flag on so the listing
@@ -1173,9 +1181,9 @@ fn session_name_to_string_renders_names_with_numeric_components() {
 
 #[test]
 fn session_name_to_string_bulk_renders_listed_declarations() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let mut names = session.list_declarations(None).expect("list declarations");
     let take = names.len().min(1000);
@@ -1193,9 +1201,9 @@ fn session_name_to_string_bulk_renders_listed_declarations() {
 
 #[test]
 fn session_list_declarations_strings_matches_filtered_count() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_handles_session(&caps);
 
     let filter = LeanDeclarationFilter::default();
     let names = session

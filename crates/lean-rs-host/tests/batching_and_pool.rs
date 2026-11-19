@@ -25,7 +25,7 @@ use lean_rs_host::{
 // -- fixture setup -------------------------------------------------------
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -37,13 +37,17 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
+    caps.session(&fixture::native_imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly")
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixture::imports(caps, "LeanRsHostShims.Elaboration"), None, None)
-        .expect("session imports cleanly")
+    caps.session(
+        &fixture::native_imports(caps, "LeanRsHostShims.Elaboration"),
+        None,
+        None,
+    )
+    .expect("session imports cleanly")
 }
 
 fn assert_cancelled(err: LeanError) {
@@ -60,7 +64,7 @@ fn assert_cancelled(err: LeanError) {
 #[test]
 fn query_declarations_bulk_returns_all_for_existing_names() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let baseline = session.stats();
@@ -100,7 +104,7 @@ fn query_declarations_bulk_returns_all_for_existing_names() {
 #[test]
 fn query_declarations_bulk_errors_on_missing_name() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let err = session
@@ -131,7 +135,7 @@ fn query_declarations_bulk_errors_on_missing_name() {
 #[test]
 fn query_declarations_bulk_empty_input_is_no_op() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let baseline = session.stats();
@@ -147,7 +151,7 @@ fn query_declarations_bulk_empty_input_is_no_op() {
 #[test]
 fn declaration_type_bulk_returns_present_and_missing_slots_in_one_dispatch() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",
@@ -187,7 +191,7 @@ fn declaration_type_bulk_returns_present_and_missing_slots_in_one_dispatch() {
 #[test]
 fn declaration_kind_bulk_returns_expected_kinds_and_missing_slot() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",
@@ -230,7 +234,7 @@ fn declaration_kind_bulk_returns_expected_kinds_and_missing_slot() {
 #[test]
 fn declaration_name_bulk_round_trips_names_including_missing() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",
@@ -262,7 +266,7 @@ fn declaration_name_bulk_round_trips_names_including_missing() {
 #[test]
 fn declaration_bulk_empty_inputs_are_no_ops() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let baseline = session.stats();
@@ -290,7 +294,7 @@ fn declaration_bulk_empty_inputs_are_no_ops() {
 #[test]
 fn declaration_bulk_pre_cancelled_token_returns_cancelled_without_ffi() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let token = LeanCancellationToken::new();
     token.cancel();
@@ -313,7 +317,7 @@ fn declaration_bulk_observes_cancellation_between_items() {
     const ITEMS: usize = 100_000;
 
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let names = vec!["LeanRsFixture.Handles.nameAnonymous"; ITEMS];
     let token = LeanCancellationToken::new();
@@ -350,14 +354,14 @@ fn declaration_bulk_observes_cancellation_between_items() {
 #[test]
 fn elaborate_bulk_returns_per_source_results() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let baseline = session.stats();
 
     let outcomes = session
         .elaborate_bulk(
-            &fixture::term_batch(&caps, &session, &["(1 + 2 : Nat)", "1 +", "(1 + \"hi\" : Nat)"]),
+            &fixture::native_term_batch(&caps, &session, &["(1 + 2 : Nat)", "1 +", "(1 + \"hi\" : Nat)"]),
             None,
             None,
         )
@@ -384,12 +388,12 @@ fn elaborate_bulk_returns_per_source_results() {
 #[test]
 fn elaborate_bulk_empty_input_is_no_op() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let baseline = session.stats();
     let outcomes = session
-        .elaborate_bulk(&fixture::term_batch(&caps, &session, &[]), None, None)
+        .elaborate_bulk(&fixture::native_term_batch(&caps, &session, &[]), None, None)
         .expect("empty input returns empty vec");
     assert!(outcomes.is_empty(), "empty input yields empty output");
     assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
@@ -401,9 +405,9 @@ fn elaborate_bulk_empty_input_is_no_op() {
 fn session_pool_reuses_session() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 4);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     {
         let mut sess = pool
@@ -442,9 +446,9 @@ fn session_pool_reuses_session() {
 fn session_pool_default_and_explicit_default_profile_reuse() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 1);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(
         pool.acquire(&caps, &imports, None, None)
@@ -486,16 +490,20 @@ fn a_stale_pooled_environment_is_dropped_on_acquire() {
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
     // Shims-only: the late-extension module must register during
     // `Lean.importModules`, not at dylib load, where registration throws.
-    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
+    let caps = fixture::native_shims_only(&host).expect("shim-only capabilities load");
     let pool = SessionPool::with_capacity(runtime, 4);
-    let probe = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let probe = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(pool.acquire(&caps, &probe, None, None).expect("probe warms the pool"));
 
     // Behind the pool's back, on purpose.
     drop(
-        caps.session(&fixture::imports(&caps, "LeanRsFixtureLateExtension"), None, None)
-            .expect("registering import succeeds outside the pool"),
+        caps.session(
+            &fixture::native_imports(&caps, "LeanRsFixtureLateExtension"),
+            None,
+            None,
+        )
+        .expect("registering import succeeds outside the pool"),
     );
 
     drop(
@@ -521,10 +529,10 @@ fn a_stale_pooled_environment_is_dropped_on_acquire() {
 fn a_registering_import_sweeps_the_pool_immediately() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
+    let caps = fixture::native_shims_only(&host).expect("shim-only capabilities load");
     let pool = SessionPool::with_capacity(runtime, 4);
-    let probe = fixture::imports(&caps, "LeanRsFixture.Handles");
-    let registrar = fixture::imports(&caps, "LeanRsFixtureLateExtension");
+    let probe = fixture::native_imports(&caps, "LeanRsFixture.Handles");
+    let registrar = fixture::native_imports(&caps, "LeanRsFixtureLateExtension");
 
     drop(pool.acquire(&caps, &probe, None, None).expect("probe warms the pool"));
     assert_eq!(pool.len(), 1);
@@ -569,9 +577,9 @@ fn a_registering_import_sweeps_the_pool_immediately() {
 fn session_pool_import_profile_partitions_keys_before_import() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_memory_policy(runtime, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(
         pool.acquire(&caps, &imports, None, None)
@@ -580,7 +588,7 @@ fn session_pool_import_profile_partitions_keys_before_import() {
     let err = pool
         .acquire_with_profile(
             &caps,
-            &fixture::imports_for(
+            &fixture::native_imports_for(
                 &caps,
                 &["LeanRsFixture.Handles"],
                 LeanSessionImportProfile::FullPrivateCompat,
@@ -607,16 +615,16 @@ fn independently_admitted_equivalent_roots_do_not_reuse() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
     let dotted_host = LeanHost::from_lake_project(runtime, fixture_lake_root().join(".")).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let dotted_caps = fixture::capabilities(&dotted_host).expect("load caps from canonical-equivalent root");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let dotted_caps = fixture::native_capabilities(&dotted_host).expect("load caps from canonical-equivalent root");
     let pool = SessionPool::with_capacity(runtime, 1);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(
         pool.acquire(&caps, &imports, None, None)
             .expect("first root warms the pool"),
     );
-    let dotted_scope = fixture::imports(&dotted_caps, "LeanRsFixture.Handles");
+    let dotted_scope = fixture::native_imports(&dotted_caps, "LeanRsFixture.Handles");
     drop(
         pool.acquire(&dotted_caps, &dotted_scope, None, None)
             .expect("independently admitted import"),
@@ -630,8 +638,8 @@ fn independently_admitted_equivalent_roots_do_not_reuse() {
 #[test]
 fn session_pool_rejects_receipt_from_foreign_project_before_lookup() {
     let runtime = runtime();
-    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let other = fixture_lake_root()
+    let host = LeanHost::from_lake_project(runtime, fixture::fixture_root()).expect("host opens");
+    let other = fixture::fixture_root()
         .parent()
         .expect("qualified scratch")
         .join("lean-rs-interop-shims");
@@ -661,7 +669,7 @@ fn session_pool_rejects_receipt_from_foreign_project_before_lookup() {
 #[test]
 fn independent_project_receipts_miss_before_exhausted_import_budget() {
     let rt = runtime();
-    let root = fixture_lake_root();
+    let root = fixture::fixture_root();
     let first_host = LeanHost::from_lake_project(rt, &root).expect("fixture host");
     let other_root = root.parent().expect("fixture scratch").join("lean-rs-interop-shims");
     let second_host = LeanHost::from_lake_project(rt, other_root).expect("interop host");
@@ -690,9 +698,9 @@ fn session_pool_capacity_caps_storage() {
     // the test's peak memory bounded at two imported environments.
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 1);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     let s1 = pool.acquire(&caps, &imports, None, None).expect("acquire #1");
     let s2 = pool.acquire(&caps, &imports, None, None).expect("acquire #2");
@@ -713,17 +721,22 @@ fn session_pool_capacity_caps_storage() {
 fn session_pool_distinct_imports_do_not_match() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 4);
 
     drop(
-        pool.acquire(&caps, &fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
-            .expect("acquire A"),
+        pool.acquire(
+            &caps,
+            &fixture::native_imports(&caps, "LeanRsFixture.Handles"),
+            None,
+            None,
+        )
+        .expect("acquire A"),
     );
     drop(
         pool.acquire(
             &caps,
-            &fixture::imports(&caps, "LeanRsHostShims.Elaboration"),
+            &fixture::native_imports(&caps, "LeanRsHostShims.Elaboration"),
             None,
             None,
         )
@@ -749,9 +762,9 @@ fn session_pool_distinct_imports_do_not_match() {
 fn session_pool_zero_capacity_never_reuses() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 0);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(pool.acquire(&caps, &imports, None, None).expect("acquire #1"));
     drop(pool.acquire(&caps, &imports, None, None).expect("acquire #2"));
@@ -770,14 +783,24 @@ fn session_pool_zero_capacity_never_reuses() {
 fn session_pool_memory_policy_refuses_cache_miss_after_import_budget() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_memory_policy(runtime, 0, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
 
     drop(
-        pool.acquire(&caps, &fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
-            .expect("first fresh import fits the budget"),
+        pool.acquire(
+            &caps,
+            &fixture::native_imports(&caps, "LeanRsFixture.Handles"),
+            None,
+            None,
+        )
+        .expect("first fresh import fits the budget"),
     );
-    let Err(err) = pool.acquire(&caps, &fixture::imports(&caps, "LeanRsFixture.Handles"), None, None) else {
+    let Err(err) = pool.acquire(
+        &caps,
+        &fixture::native_imports(&caps, "LeanRsFixture.Handles"),
+        None,
+        None,
+    ) else {
         panic!("second fresh import should be refused before Lean imports again");
     };
 
@@ -827,9 +850,9 @@ fn session_pool_memory_policy_refuses_cache_miss_after_import_budget() {
 fn session_pool_memory_policy_allows_reuse_after_import_budget() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_memory_policy(runtime, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(
         pool.acquire(&caps, &imports, None, None)
@@ -851,10 +874,15 @@ fn session_pool_memory_policy_allows_reuse_after_import_budget() {
 fn session_pool_memory_policy_refuses_cache_miss_at_rss_ceiling() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_memory_policy(runtime, 0, SessionPoolMemoryPolicy::disabled().max_rss_kib(1));
 
-    let Err(err) = pool.acquire(&caps, &fixture::imports(&caps, "LeanRsFixture.Handles"), None, None) else {
+    let Err(err) = pool.acquire(
+        &caps,
+        &fixture::native_imports(&caps, "LeanRsFixture.Handles"),
+        None,
+        None,
+    ) else {
         panic!("RSS ceiling of 1 KiB should refuse before the first import");
     };
 
@@ -880,9 +908,9 @@ fn session_pool_memory_policy_refuses_cache_miss_at_rss_ceiling() {
 fn session_pool_drain_drops_cached_entries() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 4);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(pool.acquire(&caps, &imports, None, None).expect("warm pool"));
     assert_eq!(pool.len(), 1, "warm pool has one cached environment");
@@ -917,9 +945,9 @@ fn session_pool_drain_drops_cached_entries() {
 fn session_pool_drain_leaves_checked_out_sessions_valid() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 2);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     let mut sess = pool.acquire(&caps, &imports, None, None).expect("checked-out session");
     assert_eq!(pool.drain(), 0, "no free-list entries while the session is checked out");
@@ -953,7 +981,7 @@ fn session_pool_drain_leaves_checked_out_sessions_valid() {
 fn bulk_vs_singular_timing_note() {
     const ITEMS: usize = 8;
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     // Round-trippable fixture defs only (axiom/def/theorem/opaque). The

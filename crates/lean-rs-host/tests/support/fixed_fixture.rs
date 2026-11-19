@@ -212,6 +212,18 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
 }
 
 #[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_fixture_selected() -> bool {
+    #[cfg(all(test, unix))]
+    {
+        ordinary_fixture().is_some()
+    }
+    #[cfg(not(all(test, unix)))]
+    {
+        false
+    }
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
 pub(super) fn native_fixture_root() -> PathBuf {
     #[cfg(all(test, unix))]
     if let Some(fixture) = ordinary_fixture() {
@@ -250,6 +262,18 @@ pub(super) fn native_project_library() -> lean_rs::module::LeanLibrary<'static> 
 pub(super) fn native_capabilities<'h>(
     host: &'h LeanHost<'static>,
 ) -> lean_rs::LeanResult<LeanCapabilities<'static, 'h>> {
+    native_capabilities_for(host, true)
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_shims_only<'h>(host: &'h LeanHost<'static>) -> lean_rs::LeanResult<LeanCapabilities<'static, 'h>> {
+    native_capabilities_for(host, false)
+}
+
+fn native_capabilities_for<'h>(
+    host: &'h LeanHost<'static>,
+    load_project: bool,
+) -> lean_rs::LeanResult<LeanCapabilities<'static, 'h>> {
     #[cfg(all(test, unix))]
     if let Some(fixture) = ordinary_fixture() {
         let (shims, text) = fixture
@@ -280,6 +304,9 @@ pub(super) fn native_capabilities<'h>(
                 fixture,
             )?
         };
+        if !load_project {
+            return LeanCapabilities::from_prepared(host, &prepared, loaded);
+        }
         return LeanCapabilities::from_prepared_capability(
             host,
             &prepared,
@@ -292,7 +319,11 @@ pub(super) fn native_capabilities<'h>(
             "LeanRsFixture",
         );
     }
-    capabilities(host)
+    if load_project {
+        capabilities(host)
+    } else {
+        shims_only(host)
+    }
 }
 
 #[derive(Deserialize)]
@@ -546,6 +577,32 @@ pub(super) fn imports_for<'lean, 'c>(
     names: &[&str],
     profile: lean_rs_host::LeanSessionImportProfile,
 ) -> TrustedHostImports<'lean, 'c> {
+    imports_for_fixture(caps, names, profile, false)
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_imports<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    module: &str,
+) -> TrustedHostImports<'lean, 'c> {
+    native_imports_for(caps, &[module], lean_rs_host::LeanSessionImportProfile::Private)
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_imports_for<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    names: &[&str],
+    profile: lean_rs_host::LeanSessionImportProfile,
+) -> TrustedHostImports<'lean, 'c> {
+    imports_for_fixture(caps, names, profile, true)
+}
+
+fn imports_for_fixture<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    names: &[&str],
+    profile: lean_rs_host::LeanSessionImportProfile,
+    ordinary: bool,
+) -> TrustedHostImports<'lean, 'c> {
     assert!(matches!(
         names,
         ["LeanRsFixture.Handles"
@@ -562,30 +619,84 @@ pub(super) fn imports_for<'lean, 'c>(
             || (names == ["LeanRsFixture.Handles"]
                 && profile == lean_rs_host::LeanSessionImportProfile::FullPrivateCompat)
     );
-    for name in names {
-        let relative = PathBuf::from(name.replace('.', "/")).with_extension("olean");
-        assert!(
-            paths().iter().any(|root| root.join(&relative).is_file()),
-            "missing admitted direct module {name}"
-        );
-    }
     let options = lean_rs_host::LeanImportProfileMode::FullSession(profile)
         .native_options(&lean_rs_host::LeanImportProfilerOptions::default());
-    let roots = approved_graph(caps, names, &options, "session");
+    #[cfg(all(test, unix))]
+    let ordinary_paths = if ordinary {
+        native_import_paths(caps, names)
+    } else {
+        None
+    };
+    #[cfg(not(all(test, unix)))]
+    let ordinary_paths: Option<Vec<String>> = None;
+    let roots = ordinary_paths.unwrap_or_else(|| {
+        for name in names {
+            let relative = PathBuf::from(name.replace('.', "/")).with_extension("olean");
+            assert!(
+                paths().iter().any(|root| root.join(&relative).is_file()),
+                "missing admitted direct module {name}"
+            );
+        }
+        approved_graph(caps, names, &options, "session")
+    });
+    #[cfg(not(all(test, unix)))]
+    let _ = ordinary;
     #[allow(
         unsafe_code,
         reason = "two fixed source-reviewed imports in the admitted ordered fixture and release closure"
     )]
-    // SAFETY: these fixed fixture graphs have been approved with the protected inventory,
-    // held directories and pinned release. Bind this particular capability and exact roots.
+    // SAFETY: The same finite graph and option policy applies to both
+    // profiles. The strict route checks its reviewed inventory; the ordinary
+    // test job owns the source-built fixture and holds the exact shim roots.
     unsafe {
         caps.shim_capability().import_scope_with_options(
             roots,
             names.iter().map(|n| (*n).to_owned()).collect(),
-            lean_rs_host::LeanImportProfileMode::FullSession(profile)
-                .native_options(&lean_rs_host::LeanImportProfilerOptions::default()),
+            options,
         )
     }
+}
+
+#[cfg(all(test, unix))]
+fn native_import_paths(caps: &LeanCapabilities<'_, '_>, names: &[&str]) -> Option<Vec<String>> {
+    ordinary_fixture().map(|fixture| checked_native_import_paths(fixture, caps, names))
+}
+
+#[cfg(all(test, unix))]
+fn checked_native_import_paths(
+    fixture: &OrdinaryFixture,
+    caps: &LeanCapabilities<'_, '_>,
+    names: &[&str],
+) -> Vec<String> {
+    let (shims, _) = fixture.shims.as_ref().expect("same prepared host shims");
+    let paths = std::iter::once(fixture.project.join(".lake/build/lib/lean"))
+        .chain(shims.search_paths.iter().cloned())
+        .collect::<Vec<_>>();
+    let actual = caps.import_search_paths();
+    assert!(actual.iter().map(Path::new).eq(paths.iter().map(PathBuf::as_path)));
+    let [(host_image, ..), _] = &shims.images;
+    assert_eq!(caps.shim_capability().library_path(), host_image);
+    for root in &paths {
+        assert_eq!(root.canonicalize().expect("canonical test import root"), *root);
+        for prefix in ["Init", "Lean", "Lake", "Std"] {
+            assert!(
+                !root.join(prefix).exists() && !root.join(format!("{prefix}.olean")).exists(),
+                "selected fixture shadows installed module {prefix}"
+            );
+        }
+    }
+    for name in names {
+        let relative = PathBuf::from(name.replace('.', "/")).with_extension("olean");
+        let mut named = paths
+            .iter()
+            .map(|root| root.join(&relative))
+            .filter(|path| path.exists());
+        let path = named.next().expect("selected direct module exists");
+        assert!(named.next().is_none(), "ambiguous direct module {name}");
+        assert!(path.is_file());
+        assert_eq!(path.canonicalize().expect("canonical selected module"), path);
+    }
+    actual
 }
 
 /// A separately reviewed build-time policy approves exact graph requests for these
@@ -761,10 +872,51 @@ pub(super) fn term_batch<'lean, 'c>(
     session: &lean_rs_host::LeanSession<'lean, '_>,
     cases: &[&str],
 ) -> lean_rs::host_bridge::TrustedHostTermBatch<'lean, 'c> {
+    term_batch_for(caps, session, cases, false)
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_term_batch<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    session: &lean_rs_host::LeanSession<'lean, '_>,
+    cases: &[&str],
+) -> lean_rs::host_bridge::TrustedHostTermBatch<'lean, 'c> {
+    term_batch_for(caps, session, cases, true)
+}
+
+fn term_batch_for<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    session: &lean_rs_host::LeanSession<'lean, '_>,
+    cases: &[&str],
+    ordinary: bool,
+) -> lean_rs::host_bridge::TrustedHostTermBatch<'lean, 'c> {
     assert!(cases.is_empty() || cases == ["(1 + 2 : Nat)", "1 +", "(1 + \"hi\" : Nat)"]);
     let (env, imports) = session.source_context();
     assert!(imports.matches_request(&caps.import_search_paths(), &["LeanRsHostShims.Elaboration".into()]));
     assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
+    #[cfg(all(test, unix))]
+    let ordinary_paths = if ordinary {
+        native_import_paths(caps, &["LeanRsHostShims.Elaboration"]).map(|mut paths| {
+            paths.push(
+                Path::new(lean_toolchain::LEAN_HEADER_PATH)
+                    .ancestors()
+                    .nth(3)
+                    .expect("build-selected Lean prefix")
+                    .join("lib/lean")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            paths
+        })
+    } else {
+        None
+    };
+    #[cfg(not(all(test, unix)))]
+    let ordinary_paths: Option<Vec<String>> = {
+        let _ = ordinary;
+        None
+    };
+    let paths = ordinary_paths.unwrap_or_else(resolution);
     #[allow(
         unsafe_code,
         reason = "exact source-reviewed test batches in the admitted fixture environment"
@@ -775,7 +927,7 @@ pub(super) fn term_batch<'lean, 'c>(
         caps.shim_capability().term_batch_scope(
             env,
             imports,
-            resolution(),
+            paths,
             cases.iter().map(|s| (*s).to_owned()).collect(),
             lean_rs_host::LeanElabOptions::new().source_options(),
         )
