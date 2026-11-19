@@ -31,9 +31,10 @@
 // smallest scope that compiles.
 #![allow(unsafe_code)]
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet, btree_map::Entry};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use lean_rs_sys::lean_object;
 use object::{Object, ObjectSection, ObjectSymbol, SectionKind, SymbolSection};
@@ -60,7 +61,7 @@ use crate::runtime::LeanRuntime;
 /// `LeanRuntime: Sync`). A negative-bound compile-time assertion in
 /// the test module fails if either auto-trait is ever implemented.
 pub struct LeanLibrary<'lean> {
-    library: std::sync::Arc<libloading::Library>,
+    library: Arc<libloading::Library>,
     loader_identity: usize,
     path: PathBuf,
     runtime: &'lean LeanRuntime,
@@ -122,7 +123,9 @@ impl<'lean> LeanLibrary<'lean> {
     /// The actual library and all dependencies must be trusted native code for
     /// this Lean runtime. Their loader constructors, module initializers, global
     /// registrations, and unload behavior must be safe. All initializer symbols
-    /// must follow Lean's initializer ABI. Keep required code/data loaded while
+    /// must follow Lean's initializer ABI. The application must coordinate transitive
+    /// and external initialization so a failed dependency cannot appear initialized
+    /// inside another native initializer. Keep required code/data loaded while
     /// any native value or process-global registration can refer to it. A path,
     /// file-format check, or build manifest does not establish these facts.
     pub unsafe fn open(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
@@ -142,7 +145,7 @@ impl<'lean> LeanLibrary<'lean> {
         let (library, loader_identity) = identify_library(library);
         Ok(Self {
             loader_identity,
-            library: std::sync::Arc::new(library),
+            library: Arc::new(library),
             path: path.to_path_buf(),
             runtime,
             globals,
@@ -184,7 +187,7 @@ impl<'lean> LeanLibrary<'lean> {
         let (library, loader_identity) = identify_library(library);
         Ok(Self {
             loader_identity,
-            library: std::sync::Arc::new(library),
+            library: Arc::new(library),
             path: path.to_path_buf(),
             runtime,
             globals,
@@ -195,10 +198,10 @@ impl<'lean> LeanLibrary<'lean> {
     ///
     /// Resolves the Lake-mangled initializer symbol against this
     /// library, invokes it under a panic boundary with the runtime
-    /// `builtin` flag, and decodes the resulting `IO Unit`. Idempotent:
-    /// the Lean-emitted initializer body short-circuits to `IO.ok(())`
-    /// on its second and later calls, so repeated invocations are safe
-    /// and cheap.
+    /// `builtin` flag, and decodes the resulting `IO Unit`. Successful
+    /// initialization is idempotent. If this call enters native code and fails,
+    /// the loader retains the image until process exit and returns the original error
+    /// on subsequent calls to the same native initializer, including through another handle.
     ///
     /// # Errors
     ///
@@ -207,8 +210,8 @@ impl<'lean> LeanLibrary<'lean> {
     /// - [`HostStage::Link`] if `package` or `module` is not a valid
     ///   Lake identifier, or the mangled initializer symbol is not
     ///   exported by this library.
-    /// - [`HostStage::Load`] if the initializer panics or returns
-    ///   `IO.error`.
+    /// - [`HostStage::Load`] if the initializer is already running, panics,
+    ///   returns `IO.error`, or previously failed.
     pub fn initialize_module<'lib>(&'lib self, package: &str, module: &str) -> LeanResult<LeanModule<'lean, 'lib>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -218,9 +221,58 @@ impl<'lean> LeanLibrary<'lean> {
         )
         .entered();
         let name = InitializerName::from_lake_names(package, module)?;
-        let init = self.lookup_initializer(&name)?;
-        call_initializer(self.runtime, init, &name)?;
+        self.run_initializer(&name)?;
         Ok(LeanModule::new(self, name))
+    }
+
+    fn run_initializer(&self, name: &InitializerName) -> LeanResult<()> {
+        // Generated initializers set their "already initialized" bit before fallible
+        // work. Only the first native result distinguishes failure from success.
+        struct Attempt {
+            // Retain the mapping while running or failed, so this address cannot be
+            // recycled even after every application handle to the failed image drops.
+            _image: Arc<libloading::Library>,
+            failure: Option<LeanError>,
+        }
+        static ATTEMPTS: Mutex<BTreeMap<usize, Attempt>> = Mutex::new(BTreeMap::new());
+        let init = self.lookup_initializer(name)?;
+        let address = init as usize;
+        {
+            let mut attempts = ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match attempts.entry(address) {
+                Entry::Occupied(entry) => {
+                    return Err(entry.get().failure.clone().unwrap_or_else(|| {
+                        LeanError::module_init(format!("module '{}' initializer is already running", name.display()))
+                    }));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(Attempt {
+                        _image: Arc::clone(&self.library),
+                        failure: None,
+                    });
+                }
+            }
+        }
+
+        // Foreign code can call back into the loader. Never hold the registry lock
+        // across initialization; the occupied entry also rejects same-address reentry.
+        let result = call_initializer(self.runtime, init, name);
+        let mut attempts = ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &result {
+            Ok(()) => {
+                attempts.remove(&address);
+            }
+            Err(error) => {
+                attempts.insert(
+                    address,
+                    Attempt {
+                        _image: Arc::clone(&self.library),
+                        failure: Some(error.clone()),
+                    },
+                );
+            }
+        }
+        result
     }
 
     /// Check the original loader arguments without reopening the image.
@@ -253,7 +305,7 @@ impl<'lean> LeanLibrary<'lean> {
         pinned
             .get_or_insert_with(Default::default)
             .entry(self.loader_identity)
-            .or_insert_with(|| std::sync::Arc::clone(&self.library));
+            .or_insert_with(|| Arc::clone(&self.library));
     }
 
     /// On-disk path the library was opened from. Used only for
@@ -479,6 +531,6 @@ fn reopening_pinned_image_does_not_retain_additional_wrappers() {
         let reopened = unsafe { LeanLibrary::open(first.runtime, first.path()) }.expect("reopen held fixture");
         assert_eq!(reopened.loader_identity, first.loader_identity);
         reopened.pin_for_process();
-        assert_eq!(std::sync::Arc::strong_count(&reopened.library), 1);
+        assert_eq!(Arc::strong_count(&reopened.library), 1);
     }
 }

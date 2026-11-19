@@ -29,13 +29,9 @@
 //!
 //! ## Idempotency
 //!
-//! The Lean-emitted C body of every initializer begins with
-//! `if (_G_initialized) return lean_io_result_mk_ok(lean_box(0));`. The
-//! second and later calls return `IO.ok(())` in a handful of instructions
-//! without re-running the cascading sub-initializers. `lean-rs` therefore
-//! does **not** maintain a Rust-side "already initialized" cache;
-//! delegating to the Lean static keeps the invariant in exactly one place
-//! and removes interior mutability from `LeanLibrary`.
+//! Lean sets its initialized flag before running fallible dependency and module code.
+//! Later invocations can return `IO.ok(())` even after the first call failed.
+//! The library records that failure against the resolved native initializer.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
@@ -219,9 +215,7 @@ pub(crate) type RawInitializer = unsafe extern "C" fn(u8) -> *mut lean_object;
 /// Run a module initializer under a panic boundary and classify any
 /// `IO` failure as a [`HostStage::Load`] host error.
 ///
-/// The Lean static `_G_initialized` makes the second and later calls
-/// for the same module a cheap `IO.ok(())` return; this function is
-/// safe to call repeatedly without bookkeeping on the Rust side.
+/// The owning library checks for a previous failure before calling this function.
 pub(crate) fn call_initializer(runtime: &LeanRuntime, init: RawInitializer, name: &InitializerName) -> LeanResult<()> {
     let _span = tracing::debug_span!(
         target: "lean_rs",

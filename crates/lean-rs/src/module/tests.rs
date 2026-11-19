@@ -24,21 +24,7 @@ fn runtime() -> &'static LeanRuntime {
 fn checked_fixture(exports: &[LeanExportSignature]) -> LeanCapability<'static> {
     let image = crate::fixed_test_library();
     let path = image.path().with_extension("test-manifest.json");
-    let manifest = serde_json::json!({
-        "schema_version": lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
-        "target_name": "LeanRsFixture",
-        "package": "lean_rs_fixture",
-        "module": "LeanRsFixture",
-        "primary_dylib": image.path().display().to_string(),
-        "exports": exports.iter().map(LeanExportSignature::to_json).collect::<Vec<_>>(),
-        "dependencies": [],
-        "toolchain_fingerprint": {
-            "lean_version": lean_rs_sys::LEAN_VERSION,
-            "resolved_version": lean_rs_sys::LEAN_RESOLVED_VERSION,
-            "header_sha256": lean_rs_sys::LEAN_HEADER_DIGEST,
-        },
-    });
-    let bytes = serde_json::to_vec(&manifest).expect("encode test manifest");
+    let bytes = fixture_manifest(image.path(), "lean_rs_fixture", "LeanRsFixture", exports);
     #[allow(
         unsafe_code,
         reason = "only the retained fixture is named and the dependency array is empty"
@@ -47,6 +33,27 @@ fn checked_fixture(exports: &[LeanExportSignature]) -> LeanCapability<'static> {
     // its fixed initializer and no dependencies. The image remains live through exit.
     unsafe { LeanCapability::from_manifest_snapshot(runtime(), &path, &bytes) }.expect("fixture capability opens")
 }
+
+fn fixture_manifest(image: &std::path::Path, package: &str, module: &str, exports: &[LeanExportSignature]) -> Vec<u8> {
+    let manifest = serde_json::json!({
+        "schema_version": lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
+        "target_name": module,
+        "package": package,
+        "module": module,
+        "primary_dylib": image,
+        "exports": exports.iter().map(LeanExportSignature::to_json).collect::<Vec<_>>(),
+        "dependencies": [],
+        "toolchain_fingerprint": {
+            "lean_version": lean_rs_sys::LEAN_VERSION,
+            "resolved_version": lean_rs_sys::LEAN_RESOLVED_VERSION,
+            "header_sha256": lean_rs_sys::LEAN_HEADER_DIGEST,
+        },
+    });
+    serde_json::to_vec(&manifest).expect("encode test manifest")
+}
+
+#[cfg(unix)]
+mod initializer_failure;
 
 fn arg(repr: LeanExportAbiRepr) -> LeanExportArgAbi {
     LeanExportArgAbi::new(repr, ownership(repr))
