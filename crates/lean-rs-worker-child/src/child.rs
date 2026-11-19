@@ -431,6 +431,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     // asked for. A linear scan, not a map: `HostSessionMode` is not `Hash`,
     // and a child serves one key in practice, so the list is length 1.
     let mut anchors: Vec<&'static HostAnchor> = Vec::new();
+    let plugin = GenerationPlugin::default();
     let mut session_import_bytes = 0_u64;
     let mut session_imports = 0_u64;
     let import_count_limit = std::env::var("LEAN_RS_WORKER_MAX_IMPORTS")
@@ -688,6 +689,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     || (import_count_limit != 0 && session_imports >= import_count_limit);
                 let response = open_or_reuse_host_session(
                     anchor,
+                    &plugin,
                     &mut host_session,
                     &mut parked,
                     session_pool_capacity,
@@ -1129,6 +1131,23 @@ struct HostSessionKey {
     import_profile: LeanWorkerSessionImportProfile,
 }
 
+/// Lean plugin initializers can publish process-wide state before an import fails.
+#[derive(Default)]
+struct GenerationPlugin(std::cell::OnceCell<Option<(String, String)>>);
+
+impl GenerationPlugin {
+    fn accepts(&self, selected: Option<(&str, &str)>) -> bool {
+        self.0
+            .get()
+            .is_none_or(|attempted| attempted.as_ref().map(|(image, init)| (image.as_str(), init.as_str())) == selected)
+    }
+
+    fn record_attempt(&self, selected: Option<(&str, &str)>) {
+        self.0
+            .get_or_init(|| selected.map(|(image, init)| (image.to_owned(), init.to_owned())));
+    }
+}
+
 /// The leaked, session-independent half of a host session: everything a
 /// [`LeanSession`] borrows from but that does not depend on the import set.
 ///
@@ -1356,12 +1375,20 @@ impl From<LeanError> for WorkerCallError {
 /// it, so the retry may still land on a pooled key.
 fn open_or_reuse_host_session(
     anchor: &'static HostAnchor,
+    plugin: &GenerationPlugin,
     host_session: &mut Option<HostSessionState>,
     parked: &mut Vec<HostSessionState>,
     capacity: usize,
     import_budget_exhausted: bool,
     key: HostSessionKey,
 ) -> Response {
+    let (profile, scope) = match anchor.import_scope(&key) {
+        Ok(request) => request,
+        Err(err) => return error_response(&err),
+    };
+    if !plugin.accepts(scope.plugin()) {
+        return Response::HostArtifactEpochChanged;
+    }
     // Before any reuse decision, and before capacity eviction: dropping dead
     // entries can only free slots, so the LRU loop below never discards a live
     // entry while a dead one is still in the list.
@@ -1371,10 +1398,6 @@ fn open_or_reuse_host_session(
     // accounting therefore stays honest with no new wire signal.
     evict_stale_host_sessions(host_session, parked);
 
-    let (profile, scope) = match anchor.import_scope(&key) {
-        Ok(request) => request,
-        Err(err) => return error_response(&err),
-    };
     let current = host_session.as_ref().filter(|state| state.key == key);
     let parked_index = parked.iter().position(|state| state.key == key);
     let candidate = current.or_else(|| parked_index.and_then(|index| parked.get(index)));
@@ -1441,6 +1464,7 @@ fn open_or_reuse_host_session(
         evicted.evict();
     }
 
+    plugin.record_attempt(scope.plugin());
     match HostSessionState::open(anchor, key, profile, &scope) {
         Ok(None) => Response::HostArtifactEpochChanged,
         Ok(Some(state)) => {
@@ -3965,6 +3989,23 @@ mod tests {
     /// participate: a key that ignored one would reuse an environment the
     /// request did not ask for, and every answer computed from it would be
     /// quietly wrong rather than merely stale.
+    #[test]
+    fn first_import_attempt_fixes_plugin_for_the_worker_generation() {
+        let plugin = super::GenerationPlugin::default();
+        let first = Some(("/fixture/Plugin.dylib", "initialize_Plugin"));
+        assert!(plugin.accepts(first));
+        // The import may fail after running the initializer, before it creates a session.
+        plugin.record_attempt(first);
+        assert!(plugin.accepts(first));
+        assert!(!plugin.accepts(None));
+        assert!(!plugin.accepts(Some(("/fixture/Other.dylib", "initialize_Plugin"))));
+        assert!(!plugin.accepts(Some(("/fixture/Plugin.dylib", "initialize_Other"))));
+        let legacy = super::GenerationPlugin::default();
+        legacy.record_attempt(None);
+        assert!(legacy.accepts(None));
+        assert!(!legacy.accepts(first));
+    }
+
     #[test]
     fn every_dimension_of_a_session_key_defeats_reuse() {
         assert_eq!(session_key(), session_key());

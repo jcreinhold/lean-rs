@@ -169,6 +169,53 @@ impl<'lean> TrustedHostCapability<'lean> {
     ) -> TrustedHostImports<'lean, 'cap> {
         TrustedHostImports::new(self, search_paths, imports, options)
     }
+
+    /// Attest one native plugin and its matching compiled modules for this import.
+    ///
+    /// # Safety
+    ///
+    /// All obligations of [`Self::import_scope_with_options`] apply. Under retained custody,
+    /// verify that the canonical image, its transitive native dependencies, the exact Lean
+    /// initializer ABI and the selected compiled modules belong to one trusted deployment.
+    /// Fix the native loader environment before process startup. The initializer may run again
+    /// on a fresh import and may publish process-wide state even if a later import step fails.
+    /// Keep this image and module generation fixed for the native process, including after a
+    /// failed import, and retain any data its registrations may use. Loading a plugin can run
+    /// its initializer even when environment-extension loading is disabled.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a missing or noncanonical image, a non-UTF-8 path, or an invalid symbol name.
+    #[allow(
+        unsafe_code,
+        reason = "the application attests the plugin and its compiled import graph"
+    )]
+    pub unsafe fn import_scope_with_plugin<'cap>(
+        &'cap self,
+        search_paths: Vec<String>,
+        imports: Vec<String>,
+        options: HostImportOptions,
+        image: PathBuf,
+        initializer: String,
+    ) -> LeanResult<TrustedHostImports<'lean, 'cap>> {
+        if !image.is_absolute() || !image.is_file() || image.canonicalize().ok().as_ref() != Some(&image) {
+            return Err(LeanError::module_init(
+                "plugin image must be an existing canonical absolute file",
+            ));
+        }
+        let image = image
+            .into_os_string()
+            .into_string()
+            .map_err(|_| LeanError::module_init("plugin image path must be UTF-8"))?;
+        if initializer.is_empty() || initializer.as_bytes().contains(&0) {
+            return Err(LeanError::module_init(
+                "plugin initializer must be a nonempty symbol without NUL",
+            ));
+        }
+        let mut scope = TrustedHostImports::new(self, search_paths, imports, options);
+        scope.plugin = Some((image, initializer));
+        Ok(scope)
+    }
 }
 
 /// An attestation usable only by the bracketed import operation.
@@ -231,6 +278,7 @@ pub struct TrustedHostImports<'lean, 'cap> {
     search_paths: Vec<String>,
     imports: Vec<String>,
     options: HostImportOptions,
+    plugin: Option<(String, String)>,
     identity: HostImportIdentity,
     pub(crate) native_identity: crate::Obj<'lean>,
 }
@@ -250,6 +298,7 @@ impl<'lean, 'cap> TrustedHostImports<'lean, 'cap> {
             // A fresh Lean heap object for every attestation. Native cache entries retain
             // this object, so pointer identity cannot be recycled while an entry exists.
             native_identity: crate::abi::string::from_str(capability.capability.library().runtime(), "import scope"),
+            plugin: None,
             identity: HostImportIdentity(std::rc::Rc::new(())),
         }
     }
@@ -283,6 +332,14 @@ impl<'lean, 'cap> TrustedHostImports<'lean, 'cap> {
 }
 
 impl TrustedHostImports<'_, '_> {
+    /// Application-selected canonical plugin image and exact initializer for this scope.
+    #[must_use]
+    pub fn plugin(&self) -> Option<(&str, &str)> {
+        self.plugin
+            .as_ref()
+            .map(|(image, initializer)| (image.as_str(), initializer.as_str()))
+    }
+
     /// Exact ordered module names admitted by the unsafe artifact assertion.
     #[must_use]
     pub fn imports(&self) -> &[String] {

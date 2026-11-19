@@ -1841,6 +1841,7 @@ pub unsafe fn lean_rs::module::TrustedHostCapability<'lean>::bracketed_import_sc
 pub unsafe fn lean_rs::module::TrustedHostCapability<'lean>::from_loaded(lean_rs::LeanCapability<'lean>) -> Self
 pub unsafe fn lean_rs::module::TrustedHostCapability<'lean>::import_scope<'cap>(&'cap self, alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>) -> lean_rs::module::TrustedHostImports<'lean, 'cap>
 pub unsafe fn lean_rs::module::TrustedHostCapability<'lean>::import_scope_with_options<'cap>(&'cap self, alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, lean_rs::module::HostImportOptions) -> lean_rs::module::TrustedHostImports<'lean, 'cap>
+pub unsafe fn lean_rs::module::TrustedHostCapability<'lean>::import_scope_with_plugin<'cap>(&'cap self, alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, lean_rs::module::HostImportOptions, std::path::PathBuf, alloc::string::String) -> lean_rs::error::LeanResult<lean_rs::module::TrustedHostImports<'lean, 'cap>>
 pub fn lean_rs::module::TrustedHostCapability<'lean>::library_path(&self) -> &std::path::Path
 impl<'lean> lean_rs::module::TrustedHostCapability<'lean>
 pub unsafe fn lean_rs::module::TrustedHostCapability<'lean>::cached_module_batch_scope<'cap>(&'cap self, &lean_rs::host_bridge::HostEnvironment<'lean>, &lean_rs::module::TrustedHostImports<'lean, '_>, alloc::vec::Vec<alloc::string::String>, lean_rs::host_bridge::HostCachedModuleBatch, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::TrustedModuleSource<'lean, 'cap, lean_rs::host_bridge::HostCachedModuleBatch>>
@@ -1864,6 +1865,7 @@ pub struct lean_rs::module::TrustedHostImports<'lean, 'cap>
 impl lean_rs::module::TrustedHostImports<'_, '_>
 pub fn lean_rs::module::TrustedHostImports<'_, '_>::imports(&self) -> &[alloc::string::String]
 pub fn lean_rs::module::TrustedHostImports<'_, '_>::matches_request(&self, &[alloc::string::String], &[alloc::string::String]) -> bool
+pub fn lean_rs::module::TrustedHostImports<'_, '_>::plugin(&self) -> core::option::Option<(&str, &str)>
 impl<'lean, 'cap> lean_rs::module::TrustedHostImports<'lean, 'cap>
 pub fn lean_rs::module::TrustedHostImports<'lean, 'cap>::check_capability(&self, &lean_rs::module::TrustedHostCapability<'_>) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs::module::TrustedHostImports<'lean, 'cap>::identity(&self) -> lean_rs::module::HostImportIdentity

@@ -11,6 +11,14 @@ sessions. The ordered paths say where Lean searched. The application and artifac
 the files and of earlier module prefixes that could shadow them. Relative entries use the worker’s working directory
 at import and comparison time.
 
+An application can select one native plugin in its unsafe import attestation. The application verifies the canonical
+image, explicit initializer, matching compiled modules and dependencies under its retained deployment custody. It
+establishes the loader environment before executing the worker or its helpers. Ordinary requests supply only the
+existing import fields. Lean loads the plugin during the import transaction and can retain it if the import fails.
+The worker binds the policy on its first import attempt. Changing the image, initializer or presence of the plugin
+requires a fresh worker. Plugin-free imports continue to work with older shims. A plugin requires the versioned
+plugin entry and supports ordinary session import and path comparison.
+
 ## Supported operations
 
 The adapter exposes bounded service operations rather than runtime-bound handles:

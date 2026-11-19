@@ -487,23 +487,8 @@ pub struct HostShimBindings<'lean, 'cap> {
     queries: DeclarationQueries<'lean, 'cap>,
     progress: ProgressQueries<'lean, 'cap>,
     session_import: LeanExported<'lean, 'cap, (Vec<String>, Vec<String>), LeanIo<HostEnvironment<'lean>>>,
-    import_paths: Option<
-        LeanExported<
-            'lean,
-            'cap,
-            (
-                Vec<String>,
-                Vec<String>,
-                bool,
-                u8,
-                bool,
-                Option<(bool, bool, String)>,
-                Option<Vec<String>>,
-                bool,
-            ),
-            LeanIo<(Option<HostEnvironment<'lean>>, Vec<String>)>,
-        >,
-    >,
+    import_paths: Option<SessionImportPaths<'lean, 'cap, Vec<String>>>,
+    import_plugin: Option<SessionImportPaths<'lean, 'cap, (Vec<String>, String, String)>>,
     import_profile: LeanExported<
         'lean,
         'cap,
@@ -594,6 +579,22 @@ pub struct HostShimBindings<'lean, 'cap> {
     evidence_summary: LeanExported<'lean, 'cap, (HostEnvironment<'lean>, HostEvidence<'lean>), LeanIo<Obj<'lean>>>,
 }
 
+type SessionImportPaths<'lean, 'cap, Paths> = LeanExported<
+    'lean,
+    'cap,
+    (
+        Paths,
+        Vec<String>,
+        bool,
+        u8,
+        bool,
+        Option<(bool, bool, String)>,
+        Option<Vec<String>>,
+        bool,
+    ),
+    LeanIo<(Option<HostEnvironment<'lean>>, Vec<String>)>,
+>;
+
 impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
     /// Bind concrete operations from an immutable host-contract attestation.
     ///
@@ -622,6 +623,16 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
                 session_import: bind(capability, &mut receipts, "lean_rs_host_session_import")?,
                 import_paths: {
                     const SYMBOL: &str = "lean_rs_host_session_import_paths_v1";
+                    optional_import_binding(bind(capability, &mut receipts, SYMBOL), || {
+                        capability
+                            .capability()
+                            .library()
+                            .resolve_function_symbol(SYMBOL)
+                            .is_ok()
+                    })?
+                },
+                import_plugin: {
+                    const SYMBOL: &str = "lean_rs_host_session_import_plugin_v1";
                     optional_import_binding(bind(capability, &mut receipts, SYMBOL), || {
                         capability
                             .capability()
@@ -677,25 +688,42 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
         expected: Option<&[String]>,
         compare_only: bool,
     ) -> LeanResult<Option<(Option<HostEnvironment<'lean>>, Vec<String>)>> {
-        let Some(call) = &self.import_paths else {
-            return Ok(None);
-        };
         let (paths, imports) = scope.native_inputs(self.capability)?;
         let options = scope.options();
-        // SAFETY: the attestation covers these exact inputs. The versioned export returns
-        // an owned Prod (Option Environment) (Array String) at the matching runtime.
+        let profiler = (options != &crate::module::HostImportOptions::default())
+            .then(|| (options.profiler, options.trace_profiler, options.trace_output.clone()));
+        let expected = expected.map(<[String]>::to_vec);
+        // SAFETY: the immutable scope attests this input and profile. Both versioned exports
+        // return the same owned pair. Only the plugin entry accepts the attested symbol.
         unsafe {
-            call.call(
-                paths,
-                imports,
-                options.import_all,
-                options.level,
-                options.load_extensions,
-                (options != &crate::module::HostImportOptions::default())
-                    .then(|| (options.profiler, options.trace_profiler, options.trace_output.clone())),
-                expected.map(<[String]>::to_vec),
-                compare_only,
-            )
+            if let Some((image, initializer)) = scope.plugin() {
+                let call = self.import_plugin.as_ref().ok_or_else(|| {
+                    crate::LeanError::module_init("loaded host shim does not support an attested plugin import")
+                })?;
+                call.call(
+                    (paths, image.to_owned(), initializer.to_owned()),
+                    imports,
+                    options.import_all,
+                    options.level,
+                    options.load_extensions,
+                    profiler,
+                    expected,
+                    compare_only,
+                )
+            } else if let Some(call) = &self.import_paths {
+                call.call(
+                    paths,
+                    imports,
+                    options.import_all,
+                    options.level,
+                    options.load_extensions,
+                    profiler,
+                    expected,
+                    compare_only,
+                )
+            } else {
+                return Ok(None);
+            }
         }
         .map(Some)
     }
@@ -718,9 +746,15 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
     #[allow(unsafe_code, reason = "fixed synchronous import contract with owned String arrays")]
     pub fn session_import_in(
         &self,
-        _transaction: &mut HostImportTransaction,
+        transaction: &mut HostImportTransaction,
         scope: &TrustedHostImports<'lean, '_>,
     ) -> LeanResult<HostEnvironment<'lean>> {
+        if scope.plugin().is_some() {
+            return self
+                .session_import_paths_in(transaction, scope, None, false)?
+                .and_then(|(environment, _)| environment)
+                .ok_or_else(|| crate::LeanError::module_init("plugin import returned no environment"));
+        }
         let (search_paths, imports) = scope.native_inputs(self.capability)?;
         let options = scope.options();
         // SAFETY: the scope selects the attested module graph and exact profile. Both
@@ -755,6 +789,11 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
         scope: &TrustedHostImports<'lean, '_>,
         callback: &crate::LeanProgressCallback<'_>,
     ) -> LeanResult<HostEnvironment<'lean>> {
+        if scope.plugin().is_some() {
+            return Err(crate::LeanError::module_init(
+                "progress import does not support an attested plugin",
+            ));
+        }
         let (paths, imports) = scope.native_inputs(self.capability)?;
         let options = scope.options();
         if !options.load_extensions || options.profiler || options.trace_profiler || !options.trace_output.is_empty() {

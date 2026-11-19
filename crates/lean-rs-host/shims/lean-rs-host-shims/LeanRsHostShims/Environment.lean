@@ -277,22 +277,19 @@ def restoreSourceSearchPath (paths : Array String) (identity : String) : IO Unit
   Lean.searchPathRef.set (paths.toList.map System.FilePath.mk)
 
 private def importAtInstalledPaths (importNames : Array String)
-    (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
+    (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) (plugins : Array Plugin := #[]) : IO Environment := do
   let imports := importNames.map fun n => { module := n.toName, importAll := importAll : Import }
   unsafe Lean.enableInitializersExecution
-  Lean.importModules imports opts 0 (loadExts := loadExts) (level := level)
+  Lean.importModules imports opts 0 (plugins := plugins) (loadExts := loadExts) (level := level)
 
 private def runSessionImport (searchPaths : Array String) (importNames : Array String)
     (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
   initHostSearchPath searchPaths
   importAtInstalledPaths importNames importAll loadExts level opts
 
-/-- Observe the path used by this import. A comparison or a known mismatch
-    returns before installing paths or looking up a module. -/
-@[export lean_rs_host_session_import_paths_v1]
-def sessionImportPathsV1 (searchPaths importNames : Array String) (importAll : Bool)
+private def sessionImportPaths (searchPaths importNames : Array String) (importAll : Bool)
     (levelCode : UInt8) (loadExts : Bool) (profilerOptions : Option (Bool × Bool × String))
-    (expected : Option (Array String)) (compareOnly : Bool) : IO (Option Environment × Array String) := do
+    (expected : Option (Array String)) (compareOnly : Bool) (plugins : Array Plugin) : IO (Option Environment × Array String) := do
   let some level := importLevelFromCode? levelCode |
     throw <| IO.userError s!"unsupported Lean import profiling level code: {levelCode}"
   withHostSearchPath (← Lean.findSysroot) (searchPaths.toList.map System.FilePath.mk) fun paths => do
@@ -309,8 +306,25 @@ def sessionImportPathsV1 (searchPaths importNames : Array String) (importAll : B
     let opts := match profilerOptions with
       | none => Options.empty
       | some (profiler, traceProfiler, output) => mkImportOptions profiler traceProfiler output
-    let env ← importAtInstalledPaths importNames importAll loadExts level opts
+    let env ← importAtInstalledPaths importNames importAll loadExts level opts plugins
     return (some env, roots)
+
+/-- Observe the path used by this import. A comparison or a known mismatch
+    returns before installing paths or looking up a module. -/
+@[export lean_rs_host_session_import_paths_v1]
+def sessionImportPathsV1 (searchPaths importNames : Array String) (importAll : Bool)
+    (levelCode : UInt8) (loadExts : Bool) (profilerOptions : Option (Bool × Bool × String))
+    (expected : Option (Array String)) (compareOnly : Bool) : IO (Option Environment × Array String) := do
+  sessionImportPaths searchPaths importNames importAll levelCode loadExts profilerOptions expected compareOnly #[]
+
+/-- Import with one plugin attested by the application for this module generation. -/
+@[export lean_rs_host_session_import_plugin_v1]
+def sessionImportPluginV1 (deployment : Array String × (String × String)) (importNames : Array String)
+    (importAll : Bool) (levelCode : UInt8) (loadExts : Bool) (profilerOptions : Option (Bool × Bool × String))
+    (expected : Option (Array String)) (compareOnly : Bool) : IO (Option Environment × Array String) := do
+  let (paths, image, initializer) := deployment
+  sessionImportPaths paths importNames importAll levelCode loadExts profilerOptions expected compareOnly
+    #[{ path := System.FilePath.mk image, initFn? := some initializer }]
 
 @[export lean_rs_host_env_import_stats]
 def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) : IO ImportStats := do

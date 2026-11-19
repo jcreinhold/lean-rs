@@ -3673,6 +3673,66 @@ fn session_import_observes_lean_root_order_before_reusing_a_profile() {
     );
 }
 
+#[test]
+fn session_import_runs_the_selected_plugin_with_its_compiled_module() {
+    let project = TempLakeProject::new("import-plugin");
+    let root = project.path().canonicalize().expect("private plugin project");
+    project.write("QualifiedPlugin.lean", include_str!("lean/QualifiedPlugin.lean"));
+    let prefix = Path::new(lean_toolchain::LEAN_HEADER_PATH)
+        .ancestors()
+        .nth(3)
+        .expect("selected Lean release prefix");
+    let path = std::env::join_paths([prefix.join("bin"), PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+        .expect("fixture executable search path");
+    // Select the linked release and a clean loader environment before executing native tools.
+    let tool = |name: &str| {
+        let mut command = Command::new(prefix.join("bin").join(name));
+        command
+            .current_dir(&root)
+            .env_clear()
+            .env("PATH", &path)
+            .env("LEAN_SYSROOT", prefix);
+        command
+    };
+    let run = |command: &mut Command| {
+        let output = command.output().expect("execute selected Lean tool");
+        assert!(
+            output.status.success(),
+            "{command:?}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run(tool("lean").args([
+        "-o",
+        "QualifiedPlugin.olean",
+        "-c",
+        "QualifiedPlugin.c",
+        "QualifiedPlugin.lean",
+    ]));
+    let image = root.join(format!(
+        "{}QualifiedPlugin{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    ));
+    run(tool("leanc")
+        .args(["-DLEAN_EXPORTING", "-shared", "-o"])
+        .arg(&image)
+        .arg("QualifiedPlugin.c"));
+    let shims = lean_rs_host::host::prepare_host_artifacts().expect("prepare bundled shims");
+    let paths = std::env::join_paths(shims.shim_search_paths()).expect("shim import paths");
+    let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lean/session_import_plugin.lean");
+    let marker = root.join("initialized");
+    run(tool("lean")
+        .env("LEAN_PATH", paths)
+        .env("LEAN_RS_TEST_PLUGIN_MARKER", &marker)
+        .arg("--run")
+        .arg(probe)
+        .arg(&root)
+        .arg(image)
+        .arg(marker));
+}
+
 /// Check reuse by object identity, not timing. Compile the private-state probe
 /// with the shim source so no test-only symbol enters the shipped library.
 #[test]

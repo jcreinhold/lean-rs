@@ -20,6 +20,7 @@
 //! | ------------------------------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 //! | `lean_rs_host_session_import`                          | yes        | `Array String -> Array String -> IO Environment`                                                                                                                           |
 //! | `lean_rs_host_session_import_paths_v1`                 | optional   | Profiled import or comparison returning `IO (Option Environment × Array String)` |
+//! | `lean_rs_host_session_import_plugin_v1`                | optional   | Same result with one application-attested plugin |
 //! | `lean_rs_host_session_import_progress`                 | yes        | `Array String -> Array String -> USize -> USize -> IO (Except UInt8 Environment)`                                                                                    |
 //! | `lean_rs_host_session_import_profile`                  | yes        | `Array String -> Array String -> Bool -> UInt8 -> Bool -> Bool -> Bool -> String -> IO Environment`                                                                 |
 //! | `lean_rs_host_session_import_profile_progress`         | yes        | `Array String -> Array String -> Bool -> UInt8 -> USize -> USize -> IO (Except UInt8 Environment)`                                                                  |
@@ -657,6 +658,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         scope: &TrustedHostImports<'lean, 'c>,
         expected: &[String],
     ) -> LeanResult<Option<bool>> {
+        if scope.plugin() != self.imports.plugin() {
+            return Ok(Some(false));
+        }
         if scope.imports() != self.imports.imports() || scope.options() != self.imports.options() {
             return Err(conversion_error(
                 "root comparison requires the imported names and options",
