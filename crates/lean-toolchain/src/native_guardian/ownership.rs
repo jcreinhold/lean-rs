@@ -342,8 +342,8 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
 pub fn dispatch_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
     transition_preparing(record, nonce, "preparing", "dispatching")
 }
-/// Retire dispatch only after the controlled command launch returned an error
-/// without a child handle.
+/// Retire dispatch only when the sole launch owner proves no child was started:
+/// a synchronous veto before the spawn call, or a spawn error without a child handle.
 /// # Errors
 /// Refuses a changed owner/state or failed durable publication.
 #[doc(hidden)]

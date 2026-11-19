@@ -161,6 +161,31 @@ struct PendingChild {
     bootstrap: Option<crate::crash_ownership::BootstrapCustody>,
 }
 
+#[derive(Debug)]
+pub(crate) enum CheckedSpawnError<E> {
+    Io(io::Error),
+    Refused {
+        reason: E,
+        retirement_error: Option<io::Error>,
+    },
+}
+
+impl<E> From<io::Error> for CheckedSpawnError<E> {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+#[cfg(unix)]
+impl CheckedSpawnError<std::convert::Infallible> {
+    fn into_io(self) -> io::Error {
+        match self {
+            Self::Io(error) => error,
+            Self::Refused { reason, .. } => match reason {},
+        }
+    }
+}
+
 impl LeanWorkerProcessTracker {
     /// Create an empty tracker shared by a worker and all of its replacements.
     #[must_use]
@@ -191,20 +216,54 @@ impl LeanWorkerProcessTracker {
         self.launch(Self::start_reaper, || command.spawn())
     }
 
+    pub(crate) fn spawn_checked<E>(
+        &self,
+        command: &mut std::process::Command,
+        admit: impl FnOnce() -> Result<(), E>,
+    ) -> Result<OwnedChild, CheckedSpawnError<E>> {
+        self.launch_with_error(Self::start_reaper, || {
+            admit().map_err(|reason| CheckedSpawnError::Refused {
+                reason,
+                retirement_error: None,
+            })?;
+            command.spawn().map_err(CheckedSpawnError::Io)
+        })
+    }
+
     #[cfg(unix)]
     pub(crate) fn spawn_guarded(
         &self,
         command: &mut std::process::Command,
         lifetime: &mut crate::crash_ownership::ParentLifetime,
     ) -> io::Result<OwnedChild> {
+        self.spawn_guarded_checked(command, lifetime, || Ok(()))
+            .map_err(CheckedSpawnError::into_io)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn spawn_guarded_checked<E>(
+        &self,
+        command: &mut std::process::Command,
+        lifetime: &mut crate::crash_ownership::ParentLifetime,
+        admit: impl FnOnce() -> Result<(), E>,
+    ) -> Result<OwnedChild, CheckedSpawnError<E>> {
         let custody = lifetime.custody.clone();
-        let mut child = self.launch(Self::start_reaper, || {
+        let mut child = self.launch_with_error(Self::start_reaper, || {
             lifetime.dispatch()?;
+            if let Err(reason) = admit() {
+                // This closure is the sole launch owner and has not called
+                // spawn. If retirement fails, keep the record for the normal collector.
+                let retirement_error = lifetime.no_spawn().err();
+                return Err(CheckedSpawnError::Refused {
+                    reason,
+                    retirement_error,
+                });
+            }
             match command.spawn() {
                 Ok(child) => Ok(child),
                 Err(error) => {
                     let _retired = lifetime.no_spawn();
-                    Err(error)
+                    Err(CheckedSpawnError::Io(error))
                 }
             }
         })?;
@@ -217,6 +276,14 @@ impl LeanWorkerProcessTracker {
         start: impl FnOnce(Self) -> io::Result<std::thread::Thread>,
         spawn: impl FnOnce() -> io::Result<Child>,
     ) -> io::Result<OwnedChild> {
+        self.launch_with_error(start, spawn)
+    }
+
+    fn launch_with_error<E: From<io::Error>>(
+        &self,
+        start: impl FnOnce(Self) -> io::Result<std::thread::Thread>,
+        spawn: impl FnOnce() -> Result<Child, E>,
+    ) -> Result<OwnedChild, E> {
         {
             let mut reaper = self.0.reaper.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if reaper.is_none() {

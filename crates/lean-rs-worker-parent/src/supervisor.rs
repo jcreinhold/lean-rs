@@ -1,5 +1,5 @@
 use crate::pipe::Pipe;
-use crate::process::{LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild};
+use crate::process::{CheckedSpawnError, LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
@@ -2129,24 +2129,59 @@ impl LeanWorker {
             lifetime.configure(&mut command);
         }
 
-        if let Some((operation, token)) = scope {
-            check_cancelled(operation, Some(token)).map_err(SpawnFailure::no_child)?;
-            if spawn_started.elapsed() >= startup_timeout {
-                return Err(SpawnFailure::no_child(startup_timeout_error(startup_timeout)));
+        let admit = || {
+            if let Some((operation, token)) = scope {
+                check_cancelled(operation, Some(token))?;
+                if spawn_started.elapsed() >= startup_timeout {
+                    return Err(startup_timeout_error(startup_timeout));
+                }
             }
-        }
+            Ok(())
+        };
+        admit().map_err(SpawnFailure::no_child)?;
 
         #[cfg(unix)]
         let spawned = match lifetime.as_mut() {
-            Some(lifetime) => config.process_tracker.spawn_guarded(&mut command, lifetime),
-            None => config.process_tracker.spawn(&mut command),
+            Some(lifetime) if scope.is_some() => {
+                config
+                    .process_tracker
+                    .spawn_guarded_checked(&mut command, lifetime, admit)
+            }
+            Some(lifetime) => config
+                .process_tracker
+                .spawn_guarded(&mut command, lifetime)
+                .map_err(CheckedSpawnError::Io),
+            None if scope.is_some() => config.process_tracker.spawn_checked(&mut command, admit),
+            None => config
+                .process_tracker
+                .spawn(&mut command)
+                .map_err(CheckedSpawnError::Io),
         };
         #[cfg(not(unix))]
-        let spawned = config.process_tracker.spawn(&mut command);
-        let mut child = StartupChild(Some(spawned.map_err(|source| {
-            SpawnFailure::no_child(LeanWorkerError::Spawn {
-                executable: config.executable.clone(),
-                source,
+        let spawned = if scope.is_some() {
+            config.process_tracker.spawn_checked(&mut command, admit)
+        } else {
+            config
+                .process_tracker
+                .spawn(&mut command)
+                .map_err(CheckedSpawnError::Io)
+        };
+        let mut child = StartupChild(Some(spawned.map_err(|failure| {
+            SpawnFailure::no_child(match failure {
+                CheckedSpawnError::Io(source) => LeanWorkerError::Spawn {
+                    executable: config.executable.clone(),
+                    source,
+                },
+                CheckedSpawnError::Refused {
+                    reason,
+                    retirement_error: None,
+                } => reason,
+                CheckedSpawnError::Refused {
+                    reason,
+                    retirement_error: Some(error),
+                } => LeanWorkerError::Setup {
+                    message: format!("{reason}; no child started, but owner record retirement is unconfirmed: {error}"),
+                },
             })
         })?));
         let initialized = (|| {

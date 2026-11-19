@@ -969,6 +969,114 @@ mod tests {
     }
 
     #[test]
+    fn scoped_deadline_veto_after_durable_dispatch_retires_only_when_published() -> io::Result<()> {
+        use crate::process::{CheckedSpawnError, LeanWorkerProcessTracker};
+        use crate::session::{LeanWorkerCancellationToken, check_cancelled};
+        use crate::supervisor::LeanWorkerError;
+
+        struct TestRoot(PathBuf);
+        impl Drop for TestRoot {
+            fn drop(&mut self) {
+                // The test owns this private registry and never launches a payload.
+                drop(fs::remove_dir_all(&self.0));
+            }
+        }
+
+        let target = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .ok_or_else(|| io::Error::other("worker-parent workspace root missing"))?
+            .join("target")
+            .canonicalize()?;
+        for collide in [false, true] {
+            let name = format!("og{}{}", std::process::id(), usize::from(collide));
+            let path = target.join(name);
+            fs::DirBuilder::new().mode(0o700).create(&path)?;
+            let root = TestRoot(path);
+            let registry = root.0.join("registry");
+            let slot = native_guardian::NativeCapacitySlot {
+                key: "one-actor".to_owned(),
+                scope: "main".to_owned(),
+                limit: 1,
+            };
+            let mut lifetime = ParentLifetime::prepare_with_socket_directory(
+                &registry,
+                Some(&root.0),
+                true,
+                Duration::from_secs(1),
+                Some(&slot),
+            )?;
+            let record = lifetime.directory.join("owner.json");
+            let nonce = lifetime.nonce.clone();
+            let marker = root.0.join("payload-started");
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", r#"printf started > "$1""#, "--"]).arg(&marker);
+            let tracker = LeanWorkerProcessTracker::new();
+            // Use a real expired monotonic deadline directly at the inner
+            // gate so the caller's earlier check cannot skip this boundary.
+            let expiry = LeanWorkerCancellationToken::new().with_deadline(Instant::now());
+            let failure = tracker
+                .spawn_guarded_checked(&mut command, &mut lifetime, || {
+                    let durable: serde_json::Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+                    assert_eq!(
+                        durable.get("generation_id").and_then(serde_json::Value::as_str),
+                        Some(nonce.as_str())
+                    );
+                    assert_eq!(
+                        durable.get("phase").and_then(serde_json::Value::as_str),
+                        Some("dispatching")
+                    );
+                    if collide {
+                        drop(
+                            OpenOptions::new()
+                                .create_new(true)
+                                .write(true)
+                                .open(record.with_extension("guardian-write"))
+                                .unwrap(),
+                        );
+                    }
+                    check_cancelled("scoped_test_launch", Some(&expiry))
+                })
+                .unwrap_err();
+            let CheckedSpawnError::Refused {
+                reason,
+                retirement_error,
+            } = failure
+            else {
+                return Err(io::Error::other(format!("expected the in-owner veto: {failure:?}")));
+            };
+            assert!(matches!(
+                reason,
+                LeanWorkerError::Timeout { operation: "scoped_test_launch", resource, .. } if !resource.work_entered_child
+            ));
+            assert_eq!(
+                retirement_error.as_ref().map(io::Error::kind),
+                collide.then_some(io::ErrorKind::AlreadyExists)
+            );
+            assert_eq!(tracker.active_processes(), 0);
+            assert!(!marker.exists());
+            drop(lifetime);
+            let durable: serde_json::Value = serde_json::from_slice(&fs::read(&record)?)?;
+            let phase = if collide { "dispatching" } else { "preparing_closed" };
+            assert_eq!(durable.get("phase").and_then(serde_json::Value::as_str), Some(phase));
+            let next = native_guardian::reserve_owner_record_with_slot(
+                &registry,
+                &"1".repeat(48),
+                Duration::from_secs(1),
+                Some(&slot),
+            );
+            if collide {
+                assert_eq!(next.unwrap_err().kind(), io::ErrorKind::WouldBlock);
+                assert!(record.exists(), "the unresolved dispatch must remain fenced");
+            } else {
+                assert!(next?.is_file());
+                assert!(!record.exists(), "the closed reservation is collectable");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn exact_birth_capture_never_accepts_a_forged_incarnation() {
         let actual = LeanWorkerOwnedProcess::capture(std::process::id()).unwrap().unwrap();
         assert!(!actual.start.is_empty());
