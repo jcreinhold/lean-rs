@@ -1,77 +1,238 @@
-"""Pre-execution controls for the named metadata qualification."""
+"""Pre-execution controls for the ordinary metadata qualification."""
 import hashlib
+import json
 import os
-import subprocess
 from pathlib import Path
+import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from scripts import qualify_metadata
+from scripts import qualify_metadata as qualification
+
+
+REAL_SPACE = qualification.space
 
 
 class MetadataQualificationTest(unittest.TestCase):
-    def test_mismatched_worker_or_record_cannot_start_readiness(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(qualify_metadata, "space"):
-            root = Path(tmp).resolve()
-            worker = root / "target/debug/metadata-worker"
-            record = root / "app/deployment.json"
-            for path in (worker, record):
-                path.parent.mkdir(parents=True)
-                path.write_bytes(b"substituted")
-            actual = qualify_metadata.digest(worker)
-            approved = hashlib.sha256(b"reviewed").hexdigest()
-            for worker_hash, record_hash, refused in [(approved, actual, worker), (actual, approved, record)]:
-                with self.subTest(refused=refused), patch("subprocess.Popen") as launch:
-                    with self.assertRaises(ValueError) as error:
-                        qualify_metadata.qualify(root, b"", approved, worker_hash, record_hash)
-                    self.assertEqual(str(error.exception), f"SHA-256 mismatch: {refused}")
-                    launch.assert_not_called()
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory(dir=qualification.TARGET)
+        self.addCleanup(scratch.cleanup)
+        self.target = Path(scratch.name).resolve()
+        self.sdk = self.target / "sdk"
+        self.sdk.mkdir()
+        self.state = self.target / "metadata-qualification/ordinary"
+        self.state.mkdir(parents=True, mode=0o700)
+        self.socket_root = self.target / "ws"
+        self.socket_root.mkdir(mode=0o700)
+        (self.state / "phase").write_text("prepared\n")
+        self.worker = self.target / "debug/metadata-worker"
+        self.worker.parent.mkdir()
+        self.worker.write_bytes(b"local worker")
+        self.control = self.target / "debug/control"
+        self.control.write_bytes(b"local control")
+        self.record = self.state / "deployment.json"
+        self.record.write_text("{}")
+        self.helper = self.target / "writer"
+        self.helper.write_bytes(b"local writer")
+        self.helper.chmod(0o500)
+        for name, value in (("SDK", self.sdk), ("TARGET", self.target), ("STATE", self.state),
+                            ("SOCKET_ROOT", self.socket_root)):
+            self.enterContext(patch.object(qualification, name, value))
+        self.enterContext(patch.object(qualification, "space"))
+        self.enterContext(patch.object(qualification, "check_tracked_fixture_sources"))
+        self.launch = self.enterContext(patch("subprocess.Popen"))
 
-    def test_only_reviewed_writer_bytes_reach_the_private_copy(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("subprocess.Popen") as launch:
-            root = Path(tmp).resolve()
-            source = root / "source"
-            source.write_bytes(b"local writer")
-            source.chmod(0o500)
-            approved = qualify_metadata.digest(source)
-            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
-                qualify_metadata.reviewed_writer(source, "0" * 64)
-            data = qualify_metadata.reviewed_writer(source, approved)
-            source.unlink()
-            source.write_bytes(b"substitute")
-            private = qualify_metadata.private_writer(root, data, approved)
-            self.assertEqual(private.read_bytes(), b"local writer")
-            private.unlink()
-            private.write_bytes(b"substitute")
-            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
-                qualify_metadata.private_writer(root, data, approved)
-            launch.assert_not_called()
+    def valid_record(self):
+        project = self.sdk / "fixtures/metadata-qualification/lean"
+        project.mkdir(parents=True)
+        manifest = project / "consumer.json"
+        manifest.write_text("{}")
+        image = self.target / "lib/lean/libleanshared.dylib"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"test native image")
+        stat = image.stat()
+        owners = self.state / "owners"
+        owners.mkdir()
+        (owners / ".admission.lock").touch(mode=0o600)
+        (self.state / "app").mkdir()
+        data = {
+            "typed_session": False,
+            "verification": False,
+            "generated_output_key": qualification.GENERATED_OUTPUT_KEY,
+            "sysroot": str(self.target),
+            "project": str(project),
+            "files": {str(image): [stat.st_dev, stat.st_ino, qualification.digest(image)]},
+            "consumer_manifest": str(manifest),
+            "consumer_json": "{}",
+            "shim_manifest": "shim.json",
+            "shim_json": "{}",
+            "shim_roots": [],
+            "shim_paths": [],
+        }
+        self.record.write_text(json.dumps(data))
+        expected = {"protocol": 2, "shim_manifest_path": "shim.json", "shim_manifest_json": "{}",
+                    "artifact_roots": [], "shim_search_paths": []}
+        return owners, expected
 
-    def test_typed_app_matches_its_pinned_git_tree(self):
-        app = qualify_metadata.SDK / "fixtures/metadata-qualification/app"
-        sources = qualify_metadata.fixture_sources(qualify_metadata.APP_TREE)
+    def qualify(self, worker_hash=None, record_hash=None, **options):
+        qualification.qualify(
+            self.state, self.helper, qualification.digest(self.helper),
+            worker_hash or qualification.digest(self.worker),
+            record_hash or qualification.digest(self.record), release=self.target,
+            approved_control=qualification.digest(self.control), **options
+        )
+
+    def test_wrong_worker_or_record_refuses_before_readiness(self):
+        wrong = hashlib.sha256(b"substituted").hexdigest()
+        for args, refused in [({"worker_hash": wrong}, self.worker), ({"record_hash": wrong}, self.record)]:
+            with self.subTest(refused=refused), self.assertRaisesRegex(ValueError, f"SHA-256 mismatch: {refused}"):
+                self.qualify(**args)
+        self.launch.assert_not_called()
+
+    def test_wrong_control_refuses_before_readiness(self):
+        with self.assertRaisesRegex(ValueError, f"SHA-256 mismatch: {self.control}"):
+            qualification.qualify(
+                self.state, self.helper, qualification.digest(self.helper),
+                qualification.digest(self.worker), qualification.digest(self.record),
+                release=self.target, approved_control="0" * 64,
+            )
+        self.launch.assert_not_called()
+
+    def test_wrong_or_indirect_writer_refuses(self):
+        approved = qualification.digest(self.helper)
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            qualification.reviewed_writer(self.helper, "0" * 64)
+        alias = self.target / "writer-symlink"
+        alias.symlink_to(self.helper)
+        with self.assertRaisesRegex(ValueError, "expected a canonical executable writer"):
+            qualification.reviewed_writer(alias, approved)
+        qualification.reviewed_writer(self.helper, approved)
+        self.assertFalse((self.state / "lean-host-mcp").exists())
+        self.launch.assert_not_called()
+
+    def test_wrong_policy_refuses_before_readiness(self):
+        self.record.write_text('{"typed_session": true, "verification": false}')
+        with self.assertRaisesRegex(ValueError, "does not declare the ordinary fixture policy"):
+            self.qualify()
+        self.launch.assert_not_called()
+
+    def test_unsupported_routes_refuse_before_readiness(self):
+        for mode in ("typed_session", "disposable_clean", "verification", "unknown_declaration"):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "unavailable"):
+                self.qualify(**{mode: True})
+        self.launch.assert_not_called()
+
+    def test_free_space_floor_refuses_before_any_launch(self):
+        # Use the real floor check while controlling the reading.
+        with patch.object(qualification, "space", REAL_SPACE), patch.object(
+            qualification.shutil, "disk_usage", return_value=SimpleNamespace(free=25 * 2**30 - 1)
+        ):
+            with self.assertRaisesRegex(ValueError, "less than 25 GiB free"):
+                self.qualify()
+        self.launch.assert_not_called()
+
+    def test_uncertain_readiness_is_not_replayed(self):
+        self.valid_record()
+        with patch.object(qualification.subprocess, "check_output",
+            side_effect=subprocess.CalledProcessError(1, [str(self.worker)]),
+        ) as readiness:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.qualify()
+            self.assertEqual((self.state / "phase").read_text(), "dispatched\n")
+            with self.assertRaisesRegex((ValueError, RuntimeError), "already|started|consumed"):
+                self.qualify()
+        readiness.assert_called_once()
+        self.launch.assert_not_called()
+
+    def test_success_collects_exact_registry_before_state_cleanup(self):
+        owners, expected = self.valid_record()
+        events = self.state / "app/native-events.log"
+        prefix = ["verified-deployment", "authorize-consumer-load", "authorize-host-load",
+                  "verified-global-interop-initializer", "authorize-Callback-import"]
+        next_pid = iter((101, 202))
+
+        def run(command, **_kwargs):
+            if command[:3] == ["cargo", "nextest", "run"]:
+                pid = next(next_pid)
+                with events.open("a") as stream:
+                    for event in prefix:
+                        stream.write(f"{pid} {event}\n")
+            elif command == [self.control, "collect-closed"]:
+                self.assertEqual([path.name for path in owners.iterdir()], [".admission.lock"])
+            else:
+                self.fail(f"unexpected command: {command}")
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(qualification.subprocess, "check_output", return_value=json.dumps(expected).encode()) as readiness, \
+                patch.object(qualification.subprocess, "run", side_effect=run) as invoked:
+            self.qualify()
+        readiness.assert_called_once()
+        command = readiness.call_args.args[0]
+        self.assertEqual(
+            command,
+            [
+                self.worker,
+                "--lean-rs-ready-host-artifacts-generated",
+                self.socket_root,
+                qualification.GENERATED_OUTPUT_KEY,
+            ],
+        )
+        self.assertNotIn("LEAN_RS_WORKER_ARTIFACT_IPC_ROOT", readiness.call_args.kwargs["env"])
+        self.assertFalse(self.state.exists())
+        self.assertFalse(self.socket_root.exists())
+        self.assertEqual(invoked.call_args_list[-1].args[0], [self.control, "collect-closed"])
+
+    def test_failed_exact_collection_retains_dispatched_state(self):
+        _owners, expected = self.valid_record()
+        events = self.state / "app/native-events.log"
+        prefix = ["verified-deployment", "authorize-consumer-load", "authorize-host-load",
+                  "verified-global-interop-initializer", "authorize-Callback-import"]
+        next_pid = iter((303, 404))
+
+        def run(command, **_kwargs):
+            if command[:3] == ["cargo", "nextest", "run"]:
+                pid = next(next_pid)
+                with events.open("a") as stream:
+                    for event in prefix:
+                        stream.write(f"{pid} {event}\n")
+                return subprocess.CompletedProcess(command, 0)
+            raise subprocess.CalledProcessError(1, command)
+
+        with patch.object(qualification.subprocess, "check_output", return_value=json.dumps(expected).encode()), \
+                patch.object(qualification.subprocess, "run", side_effect=run):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.qualify()
+        self.assertTrue(self.state.is_dir())
+        self.assertEqual((self.state / "phase").read_text(), "dispatched\n")
+
+    def test_reads_only_the_installed_repository_pin(self):
+        sdk = self.target / "sdk"
+        sdk.mkdir(exist_ok=True)
+        (sdk / "lean-toolchain").write_text("leanprover/lean4:v4.36.0\n")
+        elan = self.target / "elan"
+        release = elan / "toolchains/leanprover--lean4---v4.36.0"
+        release.mkdir(parents=True)
+        with patch.object(qualification, "SDK", sdk), patch.dict(os.environ, {"ELAN_HOME": str(elan)}, clear=True), \
+                patch.object(qualification, "check_file") as check:
+            self.assertEqual(qualification.installed_lean_release(), release)
+            self.assertEqual([call.args[0] for call in check.call_args_list],
+                             [release / "bin/lean", release / "bin/lake", release / "lib/lean/libleanshared.dylib"])
+            with patch.dict(os.environ, {"LEAN_SYSROOT": str(sdk)}):
+                with self.assertRaisesRegex(ValueError, "inherited LEAN_SYSROOT differs"):
+                    qualification.installed_lean_release()
+            release.rmdir()
+            with self.assertRaises(FileNotFoundError):
+                qualification.installed_lean_release()
+        self.launch.assert_not_called()
+
+
+class FixtureSourceTest(unittest.TestCase):
+    def test_ordinary_checkout_keeps_tracked_fixture_sources(self):
+        app = qualification.SDK / "fixtures/metadata-qualification/app"
+        sources = qualification.fixture_sources(qualification.APP_TREE)
+        # The ordinary runner uses tracked source in place; the revised sources can
+        # differ from the old tree, but must not lose any fixture inputs.
         tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "."], cwd=app)
-        self.assertEqual(set(sources), {Path(os.fsdecode(name)) for name in tracked.split(b"\0") if name})
-        for name, expected in sources.items():
-            with self.subTest(name=name):
-                self.assertEqual((app / name).read_bytes(), expected)
-
-    def test_wrong_policy_and_substituted_source_refuse_before_readiness(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(qualify_metadata, "space"):
-            root = Path(tmp).resolve()
-            worker = root / "target/debug/metadata-worker"
-            worker.parent.mkdir(parents=True)
-            worker.write_bytes(b"worker")
-            app = root / "app"
-            app.mkdir()
-            record = app / "deployment.json"
-            record.write_text('{"typed_session": true}')
-            (app / "build.rs").write_bytes(b"substituted")
-            with patch.object(qualify_metadata, "fixture_sources", return_value={Path("build.rs"): b"reviewed"}), \
-                    patch("subprocess.Popen") as launch:
-                for typed_session, message in [(False, "different fixture policy"), (True, "source differs")]:
-                    with self.subTest(typed=typed_session), self.assertRaisesRegex(ValueError, message):
-                        qualify_metadata.qualify(root, b"", "", qualify_metadata.digest(worker),
-                                                 qualify_metadata.digest(record), typed_session)
-                launch.assert_not_called()
+        self.assertTrue(set(sources) <= {Path(os.fsdecode(name)) for name in tracked.split(b"\0") if name})

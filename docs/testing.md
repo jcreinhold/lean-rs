@@ -93,28 +93,29 @@ the shell variable lets Cargo restore the configured value `1`.
 
 ## Worker fixture qualification on macOS arm64
 
-The named runner builds the tracked application in `fixtures/metadata-qualification/app` from a pinned Git tree.
-Its default mode runs the original metadata positive and mismatch selectors in `capability_builder`. Add
-`--typed-session` before both subcommands to qualify the original `typed_session` assertion for `Nat.add`.
-The typed deployment admits the fixed `LeanRsFixture` project and its ordered `Handles` and `SourceRanges` imports.
-Ordinary nextest builds retain their usual fixture setup.
+The named runner builds the tracked ordinary application in `fixtures/metadata-qualification/app`. Its default mode
+runs the metadata positive and mismatch selectors in `capability_builder`. Typed, verification and disposable-clean
+routes are currently unavailable in this runner rather than sharing the ordinary fixture's authority.
 
-Use a Git checkout, Python 3.12 or later, a trusted Rust toolchain, and the local Lean 4.36.0 arm64 release. Select
+Use a Git checkout, Python 3.12 or later, a trusted Rust toolchain, and the installed release selected by the repository
+`lean-toolchain` pin. Select
 the executable writer for this platform and obtain its SHA-256 from an independent local review. Use canonical
 absolute paths and keep the private deployment and release stable through preparation and execution.
 
 ```sh
 python3 scripts/qualify_metadata.py --writer "$WRITER" --writer-sha256 "$REVIEWED_WRITER_SHA256" \
-  prepare --lean-release "$LEAN_RELEASE"
+  prepare
 python3 scripts/qualify_metadata.py --writer "$WRITER" --writer-sha256 "$REVIEWED_WRITER_SHA256" \
-  run "$DEPLOYMENT" --worker-sha256 "$REVIEWED_WORKER_SHA256" --deployment-sha256 "$REVIEWED_DEPLOYMENT_SHA256"
+  run "$DEPLOYMENT" --worker-sha256 "$REVIEWED_WORKER_SHA256" --control-sha256 "$REVIEWED_CONTROL_SHA256" \
+  --deployment-sha256 "$REVIEWED_DEPLOYMENT_SHA256"
 ```
 
-Preparation saves a verified copy of the writer and prints the private directory and two candidate hashes before
-worker launch. Each build embeds local paths and file identities. Have its worker and deployment reviewed before
+Preparation uses the reviewed canonical writer in place and prints the worker, control and deployment candidate hashes before
+worker launch. Each build embeds local paths and file identities. Have all three reviewed before
 passing those hashes to `run`. The runner checks the deployed app sources, writer, worker, record, and selected
-runtime before readiness. The ready descriptor must match the sealed record. The original reviewed metadata
-deployments use the earlier pinned Git tree of the same app. Evidence and owner records remain in the deployment.
+runtime before readiness. The readiness command and guarded worker use the same explicit private `target/ws` IPC root;
+the runner removes it only after exact owner collection and an empty-root check. The ready descriptor must match the
+sealed record. Failed or uncertain dispatch retains the one-use deployment and does not replay it.
 
 ## Native guardian service-loss regressions
 

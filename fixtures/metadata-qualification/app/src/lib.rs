@@ -13,6 +13,7 @@ use std::{
 
 pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
+pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
 type R<T> = io::Result<T>;
 fn err(s: impl Into<String>) -> io::Error {
     io::Error::other(s.into())
@@ -24,6 +25,7 @@ fn require(ok: bool, detail: &str) -> R<()> {
 pub struct Record {
     pub typed_session: bool,
     pub verification: bool,
+    pub generated_output_key: String,
     pub consumer_image: PathBuf,
     pub consumer_manifest: PathBuf,
     pub consumer_json: String,
@@ -39,18 +41,33 @@ pub struct Record {
     pub ordered_directory_ids: Vec<(u64, u64)>,
     pub sysroot: PathBuf,
     files: BTreeMap<PathBuf, (u64, u64, String)>,
+    content_files: BTreeMap<PathBuf, String>,
     directories: BTreeSet<PathBuf>,
 }
 impl Record {
     pub fn selected() -> Self {
-        serde_json::from_slice(include_bytes!("../deployment.json"))
-            .expect("build-selected fixture record")
+        let path = Path::new(
+            option_env!("LEAN_RS_METADATA_DEPLOYMENT_RECORD")
+                .expect("worker built without a selected deployment record"),
+        );
+        let bytes = fs::read(path).expect("read build-selected fixture record");
+        let actual = Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            actual,
+            option_env!("LEAN_RS_METADATA_DEPLOYMENT_SHA256")
+                .expect("worker built without a selected deployment digest"),
+            "build-selected fixture record changed"
+        );
+        serde_json::from_slice(&bytes).expect("parse build-selected fixture record")
     }
     pub fn helper() -> PathBuf {
         PathBuf::from(env!("D3_HELPER"))
     }
     pub fn descriptor(&self) -> lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts {
-        serde_json::from_value(serde_json::json!({"protocol":1,"shim_manifest_path":self.shim_manifest,"shim_manifest_json":self.shim_json,"artifact_roots":self.shim_roots,"shim_search_paths":self.shim_paths})).unwrap()
+        serde_json::from_value(serde_json::json!({"protocol":2,"shim_manifest_path":self.shim_manifest,"shim_manifest_json":self.shim_json,"artifact_roots":self.shim_roots,"shim_search_paths":self.shim_paths})).unwrap()
     }
     fn check_file(&self, path: &Path) -> R<()> {
         let (dev, ino, digest) = self.files.get(path).ok_or_else(|| err("unselected file"))?;
@@ -79,6 +96,27 @@ impl Record {
                 == digest,
             &format!("wrong file digest {}", path.display()),
         )
+    }
+    fn check_content_file(&self, path: &Path) -> R<()> {
+        let digest = self.content_files.get(path).ok_or_else(|| err("unselected content file"))?;
+        require(path.canonicalize()? == path, "aliased deployment content file")?;
+        let mut f = fs::File::open(path)?;
+        require(f.metadata()?.is_file(), "deployment content path is not a file")?;
+        let mut hash = Sha256::new();
+        let mut buf = vec![0; 128 * 1024];
+        loop {
+            let read = f.read(&mut buf)?;
+            if read == 0 {
+                break;
+            }
+            hash.update(&buf[..read]);
+        }
+        let actual = hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        require(actual == digest.as_str(), "deployment content file changed")
     }
     pub fn verification_roots(&self) -> Vec<String> {
         self.import_roots
@@ -113,13 +151,24 @@ impl Record {
 }
 
 pub fn audit(event: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("native-events.log");
-    let mut f = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .unwrap();
-    writeln!(f, "{} {event}", std::process::id()).unwrap();
+    const MAX_EVENT_BYTES: usize = 2 * 1024;
+    const MAX_AUDIT_BYTES: u64 = 16 * 1024;
+    let path = Path::new(
+        option_env!("LEAN_RS_METADATA_AUDIT_PATH").expect("worker built without a selected bounded audit path"),
+    );
+    let line = format!("{} {event}\n", std::process::id());
+    assert!(
+        line.len() <= MAX_EVENT_BYTES,
+        "fixture audit event exceeds its byte limit"
+    );
+    let mut f = fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+    f.try_lock().expect("fixture audit file has another writer");
+    assert!(
+        f.metadata().unwrap().len() + u64::try_from(line.len()).unwrap() <= MAX_AUDIT_BYTES,
+        "fixture audit exceeds its byte limit"
+    );
+    f.write_all(line.as_bytes()).unwrap();
+    f.unlock().unwrap();
 }
 pub struct Held {
     pub record: Record,
@@ -135,7 +184,6 @@ impl Held {
         locks.sort();
         let admission = lean_toolchain::writer_demand::ReadAdmission::try_acquire(&locks)?
             .ok_or_else(|| err("competing writer"))?;
-        locks.push(record.sysroot.parent().unwrap().join("release.lock"));
         let mut held = vec![];
         for p in locks {
             require(p.canonicalize()? == p, "aliased custody domain")?;
@@ -150,10 +198,7 @@ impl Held {
             held.push(f);
         }
         drop(admission);
-        Ok(Self {
-            record,
-            _locks: held,
-        })
+        Ok(Self { record, _locks: held })
     }
     pub fn check_interop_visibility(&self, loaded: bool) -> R<()> {
         // SAFETY: the symbol literal is NUL-terminated. This only inspects dyld's
@@ -165,28 +210,17 @@ impl Held {
                 c"initialize_lean__rs__interop__shims_LeanRsInterop".as_ptr(),
             );
             if !loaded {
-                return require(
-                    address.is_null(),
-                    "interop initializer already globally visible",
-                );
+                return require(address.is_null(), "interop initializer already globally visible");
             }
-            require(
-                !address.is_null(),
-                "interop initializer missing from global scope",
-            )?;
+            require(!address.is_null(), "interop initializer missing from global scope")?;
             let mut info = std::mem::MaybeUninit::<libc::Dl_info>::uninit();
             require(
                 libc::dladdr(address, info.as_mut_ptr()) != 0,
                 "interop initializer has no loaded image",
             )?;
             let info = info.assume_init();
-            require(
-                !info.dli_fname.is_null(),
-                "missing loaded interop image path",
-            )?;
-            let actual = Path::new(std::ffi::OsStr::from_bytes(
-                CStr::from_ptr(info.dli_fname).to_bytes(),
-            ));
+            require(!info.dli_fname.is_null(), "missing loaded interop image path")?;
+            let actual = Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(info.dli_fname).to_bytes()));
             require(
                 actual.canonicalize()? == self.record.interop_image,
                 "wrong mapped global interop initializer",
@@ -214,9 +248,7 @@ impl Held {
                 }
                 let path = Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(ptr).to_bytes()));
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
-                if name.starts_with("libleanshared")
-                    || name == "libInit_shared.dylib"
-                    || name == "libLake_shared.dylib"
+                if name.starts_with("libleanshared") || name == "libInit_shared.dylib" || name == "libLake_shared.dylib"
                 {
                     require(
                         path.canonicalize()? == libs.join(name.as_ref()),
@@ -224,9 +256,7 @@ impl Held {
                     )?;
                     found |= name == "libleanshared.dylib";
                 }
-                if name.contains("LeanRsInterop")
-                    || name.contains("LeanRsHostShims")
-                    || name.contains("LeanRsFixture")
+                if name.contains("LeanRsInterop") || name.contains("LeanRsHostShims") || name.contains("LeanRsFixture")
                 {
                     return Err(err("preloaded application capability"));
                 }
@@ -258,11 +288,11 @@ impl Held {
         for path in d.files.keys() {
             d.check_file(path)?;
         }
+        for path in d.content_files.keys() {
+            d.check_content_file(path)?;
+        }
         for dir in &d.directories {
-            require(
-                dir.canonicalize()? == *dir && dir.is_dir(),
-                "import directory changed",
-            )?;
+            require(dir.canonicalize()? == *dir && dir.is_dir(), "import directory changed")?;
             for child in fs::read_dir(dir)? {
                 let p = child?.path();
                 require(

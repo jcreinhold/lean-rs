@@ -8,6 +8,27 @@ use std::{path::PathBuf, time::Duration};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = std::env::args().nth(1).ok_or("mode")?;
     let d = Record::selected();
+    if mode == "collect-closed" {
+        let selected = PathBuf::from(
+            option_env!("LEAN_RS_METADATA_DEPLOYMENT_RECORD").ok_or("missing selected deployment record")?,
+        );
+        let expected = selected
+            .parent()
+            .ok_or("selected deployment has no state directory")?
+            .join("owners");
+        let owners = PathBuf::from(std::env::var_os("LEAN_RS_WORKER_OWNERS_DIRECTORY").ok_or("missing owners")?);
+        if owners != expected || owners != owners.canonicalize()? {
+            return Err("collector owners differ from the reviewed disposable deployment".into());
+        }
+        lean_toolchain::native_guardian::collect_closed_owner_records(&owners, Duration::from_secs(2))?;
+        let mut entries = std::fs::read_dir(&owners)?;
+        let entry = entries.next().ok_or("missing admission lock")??;
+        if entry.file_name() != ".admission.lock" || entries.next().is_some() {
+            return Err("closed collector left an unexpected registry entry".into());
+        }
+        println!("closed owner records collected");
+        return Ok(());
+    }
     let mut prepared = d.descriptor();
     if mode == "reversed" {
         prepared.shim_search_paths.reverse();
@@ -22,12 +43,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("unknown prepared deployment".into());
     }
     let worker = std::env::current_exe()?.with_file_name("metadata-worker");
+    let owners = PathBuf::from(std::env::var_os("LEAN_RS_WORKER_OWNERS_DIRECTORY").ok_or("missing owners")?);
+    let state = owners.parent().ok_or("owners have no state directory")?;
+    let qualification = state.parent().ok_or("state has no qualification directory")?;
+    let cargo_target = qualification.parent().ok_or("state is not below the Cargo target")?;
+    if owners.file_name().and_then(|name| name.to_str()) != Some("owners")
+        || state.file_name().and_then(|name| name.to_str()) != Some("ordinary")
+        || qualification.file_name().and_then(|name| name.to_str()) != Some("metadata-qualification")
+    {
+        return Err("owners path is outside the ordinary metadata state".into());
+    }
+    let socket_root = cargo_target.join("ws");
     let child = LeanWorkerChild::path(worker)
         .shared_writer_executable(Record::helper())
         .native_guardian(Record::helper())
-        .lifetime_directory(PathBuf::from(
-            std::env::var_os("LEAN_RS_WORKER_OWNERS_DIRECTORY").unwrap(),
-        ))
+        .lifetime_directory(owners)
+        .lifetime_socket_directory(socket_root)
         .prepared_host_artifacts(prepared)
         .shared_artifact_reads(true);
     let target = LeanBuiltCapability::manifest_path(&d.consumer_manifest);
@@ -44,23 +75,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .request_timeout(Duration::from_secs(100))
         .startup_timeout(Duration::from_secs(40))
         .require_host_runtime(Default::default())
-        .expect_metadata(
-            EXPORT,
-            json!({"caller":"private-metadata-fixture"}),
-            selected.clone(),
-        );
+        .expect_metadata(EXPORT, json!({"caller":"private-metadata-fixture"}), selected.clone());
     match (mode.as_str(), builder.open()) {
         ("positive", Ok(cap)) => {
             assert_eq!(cap.validated_metadata(), Some(&expected));
-            let mut effective: Vec<_> = d
-                .import_roots
-                .iter()
-                .map(|p| p.to_str().unwrap().to_owned())
-                .collect();
+            let mut effective: Vec<_> = d.import_roots.iter().map(|p| p.to_str().unwrap().to_owned()).collect();
             effective.push(d.sysroot.join("lib/lean").to_str().unwrap().to_owned());
-            let runtime = cap
-                .host_runtime_metadata()
-                .ok_or("missing runtime metadata")?;
+            let runtime = cap.host_runtime_metadata().ok_or("missing runtime metadata")?;
             assert_eq!(runtime.effective_import_roots.as_ref(), Some(&effective));
             let mut domains: Vec<_> = runtime
                 .artifact_read_epochs
@@ -95,10 +116,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&actual)?
             );
         }
-        (
-            "reversed" | "wrong-image" | "wrong-initializer" | "wrong-ordered-directories",
-            Err(e),
-        ) => println!("refusal {e:?}"),
+        ("reversed" | "wrong-image" | "wrong-initializer" | "wrong-ordered-directories", Err(e)) => {
+            println!("refusal {e:?}")
+        }
         (_, Err(e)) => return Err(format!("unexpected result: {e:?}").into()),
         (_, Ok(_)) => return Err("unexpected success".into()),
     }

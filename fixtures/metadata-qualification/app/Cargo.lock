@@ -201,6 +201,7 @@ dependencies = [
  "lean-toolchain",
  "libc",
  "mach2",
+ "rustix",
  "serde",
  "serde_json",
 ]
@@ -285,6 +286,7 @@ dependencies = [
  "lean-toolchain",
  "libc",
  "mach2",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

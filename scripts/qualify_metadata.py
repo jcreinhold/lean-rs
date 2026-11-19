@@ -1,7 +1,8 @@
 """Provision or qualify the reviewed macOS arm64 Lean 4.36 worker fixture."""
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -9,8 +10,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import tarfile
-import tempfile
 
 SDK = Path(__file__).resolve().parents[1]
 FIXTURE_SDK = "945792112a180bd9e3a90194159e0c9c158cde2d"
@@ -22,6 +21,12 @@ TYPED_SDK = "9914894988ec3bfd123f1d10b407c066eb7c6888"
 LAKE_SHA256 = "a0e516de0ba03a26cb90c80f06666022ef9de3f0943f8b26e9b902d229b43ebe"
 TESTS = ("builder_opens_worker_capability_and_validates_metadata",
          "metadata_mismatch_is_reported_by_bootstrap_check")
+APP = SDK / "fixtures/metadata-qualification/app"
+TARGET = SDK / "target"
+STATE = TARGET / "metadata-qualification/ordinary"
+STATE_LOCK = TARGET / "metadata-qualification/.ordinary.lock"
+SOCKET_ROOT = TARGET / "ws"
+GENERATED_OUTPUT_KEY = "lean-4.36.0"
 
 
 def require(condition, message):
@@ -29,9 +34,78 @@ def require(condition, message):
         raise ValueError(message)
 
 
+@contextmanager
+def ordinary_state_lock():
+    directory = STATE_LOCK.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    require(directory == directory.resolve(strict=True), "ordinary state parent is aliased")
+    fd = os.open(STATE_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    lock = os.fdopen(fd, "r+b")
+    try:
+        stat = os.fstat(lock.fileno())
+        require(stat.st_uid == os.getuid() and stat.st_mode & 0o077 == 0,
+                "ordinary state lock is not private to its owner")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("another ordinary metadata action owns the stable state lock") from error
+        yield
+    finally:
+        lock.close()
+
+
+def write_phase(state, phase):
+    pending = state / ".phase.new"
+    with pending.open("x") as stream:
+        stream.write(phase + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    pending.replace(state / "phase")
+    directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def installed_lean_release():
+    pin = (SDK / "lean-toolchain").read_text().strip()
+    require(pin and "\n" not in pin, "expected one repository Lean toolchain pin")
+    directory = pin.replace("/", "--").replace(":", "---")
+    elan_home = Path(os.environ.get("ELAN_HOME", Path.home() / ".elan")).expanduser()
+    toolchains = elan_home / "toolchains"
+    release = (toolchains / directory).resolve(strict=True)
+    require(release.parent == toolchains.resolve(strict=True),
+            "repository Lean toolchain did not resolve inside the installed Elan toolchains directory")
+    inherited = os.environ.get("LEAN_SYSROOT")
+    if inherited is not None:
+        require(Path(inherited).expanduser().resolve(strict=True) == release,
+                "inherited LEAN_SYSROOT differs from the repository Lean toolchain pin")
+    check_file(release / "bin/lean", "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e")
+    check_file(release / "bin/lake", LAKE_SHA256)
+    check_file(release / "lib/lean/libleanshared.dylib",
+               "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5")
+    return release
+
+
+def check_tracked_fixture_sources():
+    for path in [APP / "Cargo.toml", APP / "Cargo.lock", APP / "build.rs", APP / "seal.py", APP / "src/lib.rs",
+                 APP / "src/bin/control.rs", APP / "src/bin/prepare.rs", APP / "src/bin/metadata-worker.rs",
+                 SDK / "fixtures/metadata-qualification/lean/lakefile.lean",
+                 SDK / "fixtures/metadata-qualification/lean/lake-manifest.json",
+                 SDK / "fixtures/metadata-qualification/lean/lean-toolchain",
+                 SDK / "fixtures/metadata-qualification/lean/LeanRsInteropConsumer.lean",
+                 SDK / "fixtures/metadata-qualification/lean/LeanRsInteropConsumer/Callback.lean"]:
+        require(path == path.resolve(strict=True) and path.is_file(), f"expected canonical fixture source: {path}")
+        relative = path.relative_to(SDK)
+        subprocess.run(["/usr/bin/git", "--no-replace-objects", "-C", SDK,
+                        "ls-files", "--error-unmatch", "--", relative],
+                       check=True, stdout=subprocess.DEVNULL)
 
 
 def check_file(path, approved):
@@ -60,89 +134,55 @@ def reviewed_writer(path, approved):
     return data
 
 
-def private_writer(directory, data, approved):
-    helper = directory / "lean-host-mcp"
-    if not helper.exists():
-        with tempfile.TemporaryDirectory(dir=directory) as scratch:
-            staged = Path(scratch) / "writer"
-            staged.write_bytes(data)
-            staged.chmod(0o500)
-            try:
-                os.link(staged, helper)
-            except FileExistsError:
-                pass  # Another run published its copy first. Check it below.
-    check_file(helper, approved)
-    require(os.access(helper, os.X_OK), f"private writer is not executable: {helper}")
-    return helper
-
-
 def space(path):
     require(shutil.disk_usage(path).free >= 25 * 2**30, f"less than 25 GiB free on {path}")
 
 
-def environment(root, helper, target):
+def environment(state, helper, release, deployment=None):
     # These are trusted build tools. In particular, no loader overrides or Cargo wrappers
     # cross into the readiness executable, writer, guardian or child.
-    prefix = root / "release"
+    prefix = release
     cargo = Path.home() / ".cargo/bin"
-    return dict(HOME=str(Path.home()), PATH=os.pathsep.join(map(str, [
+    env = dict(HOME=str(Path.home()), PATH=os.pathsep.join(map(str, [
         prefix / "bin", cargo, Path(sys.executable).parent, "/usr/bin", "/bin",
     ])), LEAN_SYSROOT=str(prefix), LEAN_NUM_THREADS="1", CARGO_BUILD_JOBS="1",
-        CARGO_INCREMENTAL="0", CARGO_TARGET_DIR=str(target), CARGO_NET_OFFLINE="true",
+        CARGO_INCREMENTAL="0", CARGO_TARGET_DIR=str(TARGET), CARGO_NET_OFFLINE="true",
+        TMPDIR=str(TARGET / "tmp"),
         LEAN_HOST_MCP_WRITER_EXECUTABLE=str(helper), D3_HELPER=str(helper),
-        LEAN_RS_WORKER_OWNERS_DIRECTORY=str(root / "owners"))
+        LEAN_RS_WORKER_OWNERS_DIRECTORY=str(state / "owners"))
+    if deployment is not None:
+        env.update(LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(deployment),
+                   LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(deployment),
+                   LEAN_RS_METADATA_AUDIT_PATH=str(state / "app/native-events.log"))
+    return env
 
 
 def provision(writer, writer_sha256, release, typed_session=False, disposable_clean=False, verification=False):
-    space(Path(tempfile.gettempdir()))
-    prefix = "lean-e0-clean-" if disposable_clean else "lean-t0-metadata-"
-    root = Path(tempfile.mkdtemp(prefix=prefix)).resolve(strict=True)
-    print(f"Private deployment: {root}", flush=True)
-    helper = private_writer(root, writer, writer_sha256)
-    app = root / "app"
-    for name, data in fixture_sources(APP_TREE if verification else TYPED_APP_TREE).items():
-        path = app / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    tree = subprocess.check_output(["/usr/bin/git", "--no-replace-objects", "-C", SDK, "archive", TYPED_SDK if typed_session else FIXTURE_SDK])
-    sdk = root / "sdk"
-    sdk.mkdir()
-    with tarfile.open(fileobj=io.BytesIO(tree)) as archive:
-        archive.extractall(sdk, filter="data")
-    subprocess.run(["/bin/cp", "-cR", release, root / "release"], check=True)
-    (root / "owners").mkdir(mode=0o700)
-    project = app / "lean"
-    if typed_session:
-        # The SDK archive supplies tracked sources only. Build and seal in their final location.
-        shutil.copytree(sdk / "fixtures/lean", project)
-        require(not (project / ".lake").exists(), "expected a cold LeanRsFixture project")
-        preparation = []
-    else:
-        project.mkdir()
-        source = sdk / "fixtures/interop-shims"
-        shutil.copytree(source / "LeanRsInteropConsumer", project / "LeanRsInteropConsumer")
-        for name in ("LeanRsInteropConsumer.lean", "lean-toolchain"):
-            shutil.copyfile(source / name, project / name)
-        dependency = "../../crates/lean-rs/shims/lean-rs-interop-shims"
-        lakefile = (source / "lakefile.lean").read_text()
-        require(lakefile.count(dependency) == 1, "unexpected fixture Lake dependency")
-        (project / "lakefile.lean").write_text(lakefile.replace(
-            dependency, str(sdk / "crates/lean-rs-host/shims/lean-rs-interop-shims")))
-        preparation = [(project, ["lake", "update"])]
-    env = environment(root, helper, root / "target")
+    require(not (typed_session or disposable_clean or verification),
+            "typed, verification and disposable-clean provisioning is unavailable in the canonical ordinary runner")
+    space(TARGET)
+    check_tracked_fixture_sources()
+    require(not STATE.exists(), f"ordinary deployment state already exists: {STATE}")
+    require(not SOCKET_ROOT.exists(), f"ordinary socket root already exists: {SOCKET_ROOT}")
+    STATE.mkdir(parents=True, mode=0o700)
+    SOCKET_ROOT.mkdir(mode=0o700)
+    (STATE / "owners").mkdir(mode=0o700)
+    (STATE / "app").mkdir(mode=0o700)
+    helper = writer.resolve(strict=True)
+    require(digest(helper) == writer_sha256, "reviewed helper changed before provisioning")
+    env = environment(STATE, helper, release)
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
-    prepare = [root / "target/debug/prepare"]
-    if typed_session:
-        prepare.append("--verify-declaration" if verification else "--typed-session")
-    for cwd, cmd in preparation + [(app, [*cargo, "--bin", "prepare"]), (app, prepare),
-                     (app, [*cargo, "--features", "admitted", "--bin", "metadata-worker"])]:
-        space(root)
-        subprocess.run(cmd, cwd=cwd, env=env, check=True)
-    space(root)
-    if disposable_clean:
-        # A clean run consumes this newly provisioned deployment. Existing review roots have no permit.
-        (root / "clean-ready").write_text(digest(app / "deployment.json"))
-    for path in (root / "target/debug/metadata-worker", app / "deployment.json"):
+    for cmd in ([*cargo, "--bin", "prepare"], [str(TARGET / "debug/prepare"), str(STATE)]):
+        space(TARGET)
+        subprocess.run(cmd, cwd=APP, env=env, check=True)
+    record = STATE / "deployment.json"
+    env = environment(STATE, helper, release, record)
+    space(TARGET)
+    subprocess.run([*cargo, "--features", "admitted", "--bin", "metadata-worker", "--bin", "control"],
+                   cwd=APP, env=env, check=True)
+    space(TARGET)
+    write_phase(STATE, "prepared")
+    for path in (TARGET / "debug/metadata-worker", TARGET / "debug/control", record):
         print(f"{digest(path)}  {path}")
 
 
@@ -185,31 +225,67 @@ def scalar_fixture_inputs(project, deployment, helper, helper_sha256):
                 LEAN_RS_PROFILE_READER_SHA256=helper_sha256)
 
 
+def check_installed_toolchain_pins(deployment, release):
+    selected = [(Path(name), pin) for name, pin in deployment["files"].items()
+                if Path(name).is_relative_to(release)]
+    require(selected, "deployment does not pin the selected installed Lean toolchain")
+    for path, (device, inode, sha256) in selected:
+        stat = path.stat()
+        require((stat.st_dev, stat.st_ino) == (device, inode),
+                f"installed Lean toolchain file identity changed: {path}")
+        check_file(path, sha256)
+
+
+def check_unavailable_typed_audit(events, before, verification):
+    """Retained policy assertions for typed modes while this runner cannot provision them safely."""
+    after = events.read_bytes()
+    require(after.startswith(before), "native fixture event history changed")
+    grants = [line.split(" ", 1) for line in after[len(before):].decode().splitlines()]
+    require(grants and len({pid for pid, _ in grants}) == 1, "expected a single fresh fixture worker")
+    names = [event for _, event in grants]
+    required = ["verified-deployment", "authorize-host-load", "verified-global-interop-initializer",
+                "authorize-LeanRsFixture-load", "authorize-Handles-SourceRanges-import"]
+    require(names[:len(required)] == required, f"unexpected fixture admission order: {names}")
+    if verification:
+        expected = required + ["authorize-verify-proved", "authorize-verify-sorry",
+                               "authorize-verify-unavailable", "refused-verification-options",
+                               "authorize-verify-truncated"]
+        require(names == expected, f"unexpected verification grants: {names}")
+
+
 def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
-            typed_session=False, disposable_clean=False, verification=False, unknown_declaration=False):
-    space(root)
-    require(root == root.resolve(strict=True) and root.stat().st_uid == os.getuid()
-            and root.stat().st_mode & 0o077 == 0, "expected a private owned deployment directory")
-    worker = root / "target/debug/metadata-worker"
-    record = root / "app/deployment.json"
+            typed_session=False, disposable_clean=False, verification=False, unknown_declaration=False,
+            release=None, approved_control=None):
+    require(not (typed_session or disposable_clean or verification or unknown_declaration),
+            "typed, verification and disposable-clean selectors are unavailable in the canonical ordinary runner")
+    release = installed_lean_release() if release is None else release
+    space(TARGET)
+    require(root == STATE and root == root.resolve(strict=True), "unexpected or aliased ordinary deployment state path")
+    require(root.stat().st_uid == os.getuid() and root.stat().st_mode & 0o777 == 0o700,
+            "ordinary deployment state is not private to its owner")
+    require(SOCKET_ROOT == SOCKET_ROOT.resolve(strict=True) and SOCKET_ROOT.is_dir()
+            and SOCKET_ROOT.stat().st_uid == os.geteuid() and SOCKET_ROOT.stat().st_mode & 0o777 == 0o700,
+            "ordinary socket root is not canonical and private")
+    require(not any(SOCKET_ROOT.iterdir()), "ordinary socket root is not empty before dispatch")
+    check_tracked_fixture_sources()
+    worker = TARGET / "debug/metadata-worker"
+    control = TARGET / "debug/control"
+    record = root / "deployment.json"
     check_file(worker, approved_worker)
+    check_file(control, approved_control)
     check_file(record, approved_deployment)
     d = json.loads(record.read_bytes())
-    require(d.get("typed_session", False) is typed_session, "deployment belongs to a different fixture policy")
-    require(d.get("verification", False) is verification, "deployment belongs to a different verification policy")
-    tree = TYPED_APP_TREE if "typed_session" in d else ORIGINAL_APP_TREE
-    if verification:
-        require(typed_session, "verification requires a typed deployment")
-        tree = APP_TREE
-    for name, expected_source in fixture_sources(tree).items():
-        path = root / "app" / name
-        require(path == path.resolve(strict=True) and path.read_bytes() == expected_source,
-                f"fixture source differs from pinned Git tree: {name}")
-    require(d["sysroot"] == str(root / "release") and d["project"] == str(root / "app/lean"),
+    project = SDK / "fixtures/metadata-qualification/lean"
+    require(d.get("typed_session") is False and d.get("verification") is False,
+            "ordinary deployment does not declare the ordinary fixture policy")
+    require(d.get("generated_output_key") == GENERATED_OUTPUT_KEY,
+            "ordinary deployment selected a different generated-output slot")
+    require(d["sysroot"] == str(release) and d["project"] == str(project),
             "deployment record belongs to a different application or release")
-    # dyld runs before the app can check its own record. Recheck the private
-    # release libraries sealed by the producer, while the owner keeps this deployment stable.
-    libdir = root / "release/lib/lean"
+    # Elan does not participate in the project locks. Recheck the selected installed
+    # toolchain before and after the smoke, and report any concurrent change as failure.
+    check_installed_toolchain_pins(d, release)
+    libdir = release / "lib/lean"
     sealed = {Path(name): pin for name, pin in d["files"].items()
               if Path(name).parent == libdir and name.endswith(".dylib")}
     require(libdir / "libleanshared.dylib" in sealed and set(libdir.glob("*.dylib")) == sealed.keys(),
@@ -219,73 +295,62 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
         require((stat.st_dev, stat.st_ino) == (device, inode), f"runtime file identity changed: {image}")
         check_file(image, sha256)
     manifest = Path(d["consumer_manifest"])
-    require(manifest.is_relative_to(root / "app/lean") and manifest == manifest.resolve(strict=True)
+    require(manifest.is_relative_to(project) and manifest == manifest.resolve(strict=True)
             and manifest.read_bytes() == d["consumer_json"].encode(), "consumer manifest differs from review")
     owners = root / "owners"
     require(owners == owners.resolve(strict=True) and owners.is_dir(), "missing deployment ownership registry")
-    if disposable_clean:
-        require(typed_session, "clean requires the typed fixture")
-        clean_inputs = check_clean_deployment(root, approved_deployment)
-    helper = private_writer(root, writer, writer_sha256)
-    env = environment(root, helper, root / "selector-target")
-    run_scalar = typed_session and not (disposable_clean or verification or unknown_declaration)
-    if run_scalar:
-        scalar_inputs = scalar_fixture_inputs(root / "app/lean", d, helper, writer_sha256)
+    helper = writer.resolve(strict=True)
+    require(digest(helper) == writer_sha256, "reviewed helper changed before qualification")
+    env = environment(root, helper, release, record)
+    require((root / "phase").read_text() == "prepared\n", "ordinary deployment was already dispatched")
+    write_phase(root, "dispatched")
     # Only the independently approved worker can be executed, even for a read-only probe.
-    ready = subprocess.check_output([worker, "--lean-rs-ready-host-artifacts"], cwd=root, env=env)
-    expected = dict(protocol=1, shim_manifest_path=d["shim_manifest"], shim_manifest_json=d["shim_json"],
+    ready = subprocess.check_output(
+        [worker, "--lean-rs-ready-host-artifacts-generated", SOCKET_ROOT, GENERATED_OUTPUT_KEY], cwd=APP, env=env)
+    expected = dict(protocol=2, shim_manifest_path=d["shim_manifest"], shim_manifest_json=d["shim_json"],
                     artifact_roots=d["shim_roots"], shim_search_paths=d["shim_paths"])
     require(json.loads(ready) == expected, "readiness descriptor differs from the reviewed deployment")
-    if typed_session:
-        variable, target = "LEAN_RS_TEST_QUALIFIED_TYPED_SESSION", "typed_session"
-        tests = ("describe_returns_row_for_known_declaration",)
-        if disposable_clean:
-            tests = ("disposable_clean::reader_blocks_clean_until_shutdown",)
-        elif verification:
-            variable = "LEAN_RS_TEST_QUALIFIED_VERIFICATION"
-            tests = ("verify_declaration_accepts_closed_theorem_and_rejects_sorry",)
-        elif unknown_declaration:
-            tests = ("describe_returns_none_for_unknown_declaration",)
-        selection = {"fixture": d["project"]}
-    else:
-        variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
-        selection = {"manifest": str(manifest)}
-    if disposable_clean:
-        env["LEAN_RS_TEST_DISPOSABLE_CLEAN"] = json.dumps(clean_inputs)
+    variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
+    selection = {"manifest": str(manifest)}
     env[variable] = json.dumps(dict(
         worker=str(worker), worker_sha256=approved_worker, helper=str(helper), helper_sha256=writer_sha256,
         owners=str(owners), sysroot=d["sysroot"], prepared=expected, **selection))
     env["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"] = "/usr/bin/env -u DYLD_FALLBACK_LIBRARY_PATH -u DYLD_LIBRARY_PATH"
-    space(root)
-    if typed_session:
-        events = root / "app/native-events.log"
-        before = events.read_bytes() if events.exists() else b""
+    space(TARGET)
+    events = root / "app/native-events.log"
+    before = events.read_bytes() if events.exists() else b""
     for name in tests:
         subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
                         "-p", "lean-rs-worker-child", "--test", target,
-                        *(["--run-ignored", "only", "--retries", "0", "--success-output", "immediate"] if disposable_clean else []),
                         "-E", f"test(={name})"],
                        cwd=SDK, env=env, check=True)
-    if typed_session:
-        after = events.read_bytes()
-        require(after.startswith(before), "native fixture event history changed")
-        grants = [line.split(" ", 1) for line in after[len(before):].decode().splitlines()]
-        require(grants and len({pid for pid, _ in grants}) == 1, "expected a single fresh fixture worker")
-        names = [event for _, event in grants]
-        required = ["verified-deployment", "authorize-host-load", "verified-global-interop-initializer",
-                    "authorize-LeanRsFixture-load", "authorize-Handles-SourceRanges-import"]
-        require(names[:len(required)] == required, f"unexpected fixture admission order: {names}")
-        if verification:
-            expected_events = required + ["authorize-verify-proved", "authorize-verify-sorry",
-                                          "authorize-verify-unavailable", "refused-verification-options",
-                                          "authorize-verify-truncated"]
-            require(names == expected_events, f"unexpected verification grants: {names}")
-    if run_scalar:
-        space(root)
-        subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
-                        "-p", "lean-rs", "--lib", "-E", "test(=abi::tests::bool_round_trip_via_fixture)"],
-                       cwd=SDK, env={**env, **scalar_inputs}, check=True)
-    space(root)
+    after = events.read_bytes()
+    require(after.startswith(before), "native fixture event history changed")
+    grants = [line.split(" ", 1) for line in after[len(before):].decode().splitlines()]
+    blocks = []
+    for pid, event in grants:
+        if not blocks or blocks[-1][0] != pid:
+            blocks.append((pid, []))
+        blocks[-1][1].append(event)
+    require(len(blocks) == 2 and blocks[0][0] != blocks[1][0],
+            "expected exactly two distinct authorized fixture workers")
+    prefix = ["verified-deployment", "authorize-consumer-load", "authorize-host-load",
+              "verified-global-interop-initializer"]
+    for _, names in blocks:
+        require(names[:len(prefix)] == prefix and len(names) > len(prefix)
+                and all(event == "authorize-Callback-import" for event in names[len(prefix):]),
+                f"unexpected ordinary fixture admission order: {names}")
+    subprocess.run([control, "collect-closed"], cwd=APP, env=env, check=True)
+    owner_entries = list(owners.iterdir())
+    require(len(owner_entries) == 1 and owner_entries[0].name == ".admission.lock"
+            and owner_entries[0].is_file() and owner_entries[0] == owner_entries[0].resolve(strict=True)
+            and owner_entries[0].stat().st_uid == os.getuid(),
+            "worker ownership records remain after the selected checks")
+    check_installed_toolchain_pins(d, release)
+    space(TARGET)
+    require(not any(SOCKET_ROOT.iterdir()), "ordinary socket root retains a launch entry")
+    SOCKET_ROOT.rmdir()
+    shutil.rmtree(root)
 
 
 def main():
@@ -300,30 +365,34 @@ def main():
                        help="qualify four reviewed single-declaration requests on the typed fixture")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
-    prepare.add_argument("--lean-release", type=Path, required=True)
     run = commands.add_parser("run", help="execute the selected tests against a reviewed deployment")
     run.add_argument("--unknown-declaration", action="store_true",
                      help="with --typed-session, run only the unknown-declaration lookup")
     run.add_argument("deployment", type=Path)
     run.add_argument("--worker-sha256", required=True)
+    run.add_argument("--control-sha256", required=True)
     run.add_argument("--deployment-sha256", required=True)
     args = parser.parse_args()
     if args.command == "run" and args.unknown_declaration and not args.typed_session:
         parser.error("--unknown-declaration requires --typed-session")
+    if args.typed_session or args.disposable_clean or args.verify_declaration or \
+            (args.command == "run" and args.unknown_declaration):
+        parser.error("typed, verification and disposable-clean selectors are temporarily unavailable; ordinary metadata only")
     try:
         require((sys.platform, platform.machine()) == ("darwin", "arm64"), "requires macOS arm64")
-        writer = reviewed_writer(args.writer, args.writer_sha256)
+        release = installed_lean_release()
+        reviewed_writer(args.writer, args.writer_sha256)
+        writer = args.writer.resolve(strict=True)
         typed = args.typed_session or args.disposable_clean or args.verify_declaration
-        if args.command == "prepare":
-            release = args.lean_release.resolve(strict=True)
-            check_file(release / "bin/lean", "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e")
-            check_file(release / "bin/lake", LAKE_SHA256)
-            check_file(release / "lib/lean/libleanshared.dylib", "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5")
-            provision(writer, args.writer_sha256, release, typed, args.disposable_clean, args.verify_declaration)
-        else:
-            qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256,
-                    typed, args.disposable_clean, args.verify_declaration, unknown_declaration=args.unknown_declaration)
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as error:
+        with ordinary_state_lock():
+            if args.command == "prepare":
+                provision(writer, args.writer_sha256, release, typed, args.disposable_clean, args.verify_declaration)
+            else:
+                qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256,
+                        typed, args.disposable_clean, args.verify_declaration,
+                        unknown_declaration=args.unknown_declaration,
+                        approved_control=args.control_sha256)
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")
 
 
