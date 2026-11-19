@@ -395,6 +395,9 @@ pub struct TrustedWorkerCapability<'lean> {
 impl<'lean> TrustedWorkerCapability<'lean> {
     /// Attest exact symbol contracts for the actual loaded worker capability.
     ///
+    /// This consumes an initialized capability. Its primary image and dependencies
+    /// remain mapped until process exit even if the allowlist is rejected.
+    ///
     /// # Safety
     ///
     /// Every listed symbol in this retained capability must implement the
@@ -412,8 +415,10 @@ impl<'lean> TrustedWorkerCapability<'lean> {
         capability: LeanCapability<'lean>,
         contracts: impl IntoIterator<Item = (String, WorkerExportContract)>,
     ) -> LeanResult<Self> {
-        let contracts = collect_contracts(contracts)?;
+        // Earlier native initialization or export calls may already have exposed
+        // image-backed values and registrations, even when admission returns an error.
         capability.pin_for_process();
+        let contracts = collect_contracts(contracts)?;
         Ok(Self {
             capability,
             contracts,

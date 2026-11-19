@@ -54,6 +54,8 @@ fn fixture_manifest(image: &std::path::Path, package: &str, module: &str, export
 
 #[cfg(unix)]
 mod initializer_failure;
+#[cfg(unix)]
+pub(super) mod native_image;
 
 fn arg(repr: LeanExportAbiRepr) -> LeanExportArgAbi {
     LeanExportArgAbi::new(repr, ownership(repr))

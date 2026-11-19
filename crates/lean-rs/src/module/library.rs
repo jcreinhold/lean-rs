@@ -534,3 +534,66 @@ fn reopening_pinned_image_does_not_retain_additional_wrappers() {
         assert_eq!(Arc::strong_count(&reopened.library), 1);
     }
 }
+
+#[cfg(all(test, unix))]
+#[test]
+#[allow(
+    clippy::expect_used,
+    reason = "report fixture and ownership failures at their source"
+)]
+fn rejected_loaded_worker_keeps_image_for_escaping_value() {
+    use super::tests::native_image::{build_image, private_dir};
+    use super::{LeanCapability, TrustedWorkerCapability, WorkerExportContract};
+    use crate::abi::traits::TryFromLean;
+    use crate::{LeanDiagnosticCode, Obj};
+
+    let dir = private_dir();
+    let image = build_image(
+        &dir,
+        "worker",
+        &[(
+            "WorkerLifetime",
+            r#"
+@[export lifetime_text] def lifetimeText (_ : UInt8) : String := "retained worker value"
+@[export lifetime_add] def lifetimeAdd (a b : UInt64) : UInt64 := a + b
+"#,
+        )],
+    );
+    let runtime = LeanRuntime::init().expect("paired runtime");
+    // SAFETY: the test owns this exact image, compiled above with the linked
+    // runtime. Its initializers install only literals. The independent handle
+    // keeps the mapping valid even if the ownership assertion below fails.
+    let safety_guard = unsafe { LeanLibrary::open(runtime, &image) }.expect("fixture guard");
+    // SAFETY: same private image and guard. WorkerLifetime is the selected module.
+    let capability = unsafe { LeanCapability::open(runtime, &image, "probe", "WorkerLifetime") }.expect("fixture");
+    let owner = Arc::downgrade(&capability.library().library);
+    let module = capability.module().expect("initialized fixture");
+    // SAFETY: lifetime_text accepts UInt8 and returns one owned Lean String.
+    // Obj preserves that object without copying its embedded literal to Rust.
+    let value = unsafe {
+        module
+            .exported_unchecked::<(u8,), Obj<'_>>("lifetime_text")
+            .expect("String export")
+            .call(0)
+    }
+    .expect("live Lean value");
+
+    let add = ("lifetime_add".to_owned(), WorkerExportContract::U64Binary);
+    // SAFETY: both entries describe the actual UInt64 -> UInt64 -> UInt64
+    // function. Only allowlist uniqueness is invalid. No callback is installed.
+    let refused = unsafe { TrustedWorkerCapability::from_loaded(capability, [add.clone(), add]) };
+    assert_eq!(
+        refused.err().expect("duplicate must be rejected").code(),
+        LeanDiagnosticCode::SymbolLookup
+    );
+    assert!(
+        owner.strong_count() > 0,
+        "admission released the initialized image owner"
+    );
+    drop(safety_guard);
+    assert_eq!(
+        String::try_from_lean(value).expect("decode after admission failure"),
+        "retained worker value"
+    );
+    std::fs::remove_dir_all(dir).expect("remove fixture");
+}
