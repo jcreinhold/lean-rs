@@ -506,9 +506,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 Path(env["LEAN_RS_METADATA_AUDIT_PATH"]).write_text(
                     "".join(
                         f"{pid} verified-deployment\n"
-                        for pid in range(
-                            10, 10 + len(qualification.ORDINARY_TYPED_TESTS)
-                        )
+                        for pid in range(10, 10 + qualification.ORDINARY_APP_TEST_COUNT)
                     )
                 )
 
@@ -555,7 +553,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
                 self.assertFalse(typed.exists())
                 self.assertEqual(
-                    probe.call_count, len(qualification.ORDINARY_TYPED_TESTS)
+                    probe.call_count, qualification.ORDINARY_APP_TEST_COUNT
                 )
         self.assertFalse(broken.exists())
         self.assertEqual(len(seen), 7)
@@ -581,7 +579,8 @@ class MetadataQualificationTest(unittest.TestCase):
         )
         selection = nextest[-1]
         self.assertIn("binary(=typed_session)", selection)
-        self.assertEqual(selection.count("test(="), 19)
+        self.assertIn("binary(=session_reuse)", selection)
+        self.assertEqual(selection.count("test(="), 25)
         remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
         self.assertEqual(
             remaining,

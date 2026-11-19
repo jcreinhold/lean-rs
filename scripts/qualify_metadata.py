@@ -51,6 +51,15 @@ ORDINARY_TYPED_TESTS = (
     "oversized_terminal_response_is_request_error_not_child_death",
     "inspect_declaration_pretty_and_raw_rendering_differ",
 )
+ORDINARY_SESSION_REUSE_TESTS = (
+    "reopening_an_identical_session_does_not_import_again",
+    "max_imports_does_not_restart_on_an_identical_reopen",
+    "a_full_pool_evicts_least_recently_used_and_re_imports",
+    "a_pool_with_room_serves_the_return_without_importing",
+    "pool_capacity_is_independent_of_the_import_restart_bound",
+    "an_explicit_child_environment_outranks_the_configured_capacity",
+)
+ORDINARY_APP_TEST_COUNT = len(ORDINARY_TYPED_TESTS) + len(ORDINARY_SESSION_REUSE_TESTS)
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
@@ -779,6 +788,12 @@ def scoped_tests(binary, names):
     return f"(binary(={binary}) & ({cases}))"
 
 
+def ordinary_app_tests():
+    typed = scoped_tests("typed_session", ORDINARY_TYPED_TESTS)
+    reuse = scoped_tests("session_reuse", ORDINARY_SESSION_REUSE_TESTS)
+    return f"{typed} | {reuse}"
+
+
 def check_typed_children_closed(events):
     with events.open("rb") as stream:
         data = stream.read(16 * 1024 + 1)
@@ -796,7 +811,7 @@ def check_typed_children_closed(events):
         if event == b"verified-deployment":
             admitted.add(pid)
     require(
-        len(admitted) >= len(ORDINARY_TYPED_TESTS),
+        len(admitted) >= ORDINARY_APP_TEST_COUNT,
         "typed tests did not start the expected admitted workers",
     )
     for pid in workers:
@@ -865,8 +880,10 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
             "lean-rs-worker-child",
             "--test",
             "typed_session",
+            "--test",
+            "session_reuse",
             "-E",
-            scoped_tests("typed_session", ORDINARY_TYPED_TESTS),
+            ordinary_app_tests(),
         ],
         SDK,
     )
@@ -1015,7 +1032,7 @@ def qualify_broken_import(
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
         print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)
         if run_typed:
-            typed = scoped_tests("typed_session", ORDINARY_TYPED_TESTS)
+            typed = ordinary_app_tests()
             broken = scoped_tests("capability_builder", (BROKEN_IMPORT_TEST,))
             print(
                 "LEAN_RS_TEST_REMAINING_FILTER="
