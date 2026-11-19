@@ -50,11 +50,17 @@ pub(crate) fn preparation_mode() -> Option<ExitCode> {
         // initialization. Any actual Lake work is owned by the configured H.
         if probe {
             if generated {
+                let [_, _, ipc_root, output_key] = args.as_slice() else {
+                    return Err(invalid(
+                        "artifact preparation requires its sole mode flag and an explicit writer helper",
+                    )
+                    .into());
+                };
                 Ok(ready_host_artifacts_for_generated_output_with_ipc_root(
-                    args[3]
+                    output_key
                         .to_str()
                         .ok_or_else(|| invalid("generated output key must be UTF-8"))?,
-                    Path::new(&args[2]),
+                    Path::new(ipc_root),
                 )?
                 .map(LeanPreparedHostArtifacts::with_project_generated_output_matching_shims)
                 .transpose()?)
