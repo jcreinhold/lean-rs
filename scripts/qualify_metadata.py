@@ -255,11 +255,14 @@ def check_unavailable_typed_audit(events, before, verification):
 
 def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
             typed_session=False, disposable_clean=False, verification=False, unknown_declaration=False,
-            release=None, approved_control=None):
+            pool_validator_recovery=False, release=None, approved_control=None):
     require(not (typed_session or disposable_clean or verification or unknown_declaration),
             "typed, verification and disposable-clean selectors are unavailable in the canonical ordinary runner")
     release = installed_lean_release() if release is None else release
     space(TARGET)
+    require(not pool_validator_recovery or (
+        not typed_session and not disposable_clean and not verification and not unknown_declaration),
+        "pool validator recovery requires its named ordinary metadata route")
     require(root == STATE and root == root.resolve(strict=True), "unexpected or aliased ordinary deployment state path")
     require(root.stat().st_uid == os.getuid() and root.stat().st_mode & 0o777 == 0o700,
             "ordinary deployment state is not private to its owner")
@@ -311,6 +314,8 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
                     artifact_roots=d["shim_roots"], shim_search_paths=d["shim_paths"])
     require(json.loads(ready) == expected, "readiness descriptor differs from the reviewed deployment")
     variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
+    if pool_validator_recovery:
+        tests = ("qualified_pool::failed_validator_releases_pool_slot_before_fresh_key",)
     selection = {"manifest": str(manifest)}
     env[variable] = json.dumps(dict(
         worker=str(worker), worker_sha256=approved_worker, helper=str(helper), helper_sha256=writer_sha256,
@@ -322,6 +327,8 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
     for name in tests:
         subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
                         "-p", "lean-rs-worker-child", "--test", target,
+                        *(["--run-ignored", "only", "--retries", "0", "--success-output", "immediate"]
+                          if pool_validator_recovery else []),
                         "-E", f"test(={name})"],
                        cwd=SDK, env=env, check=True)
     after = events.read_bytes()
@@ -368,6 +375,8 @@ def main():
     run = commands.add_parser("run", help="execute the selected tests against a reviewed deployment")
     run.add_argument("--unknown-declaration", action="store_true",
                      help="with --typed-session, run only the unknown-declaration lookup")
+    run.add_argument("--pool-validator-recovery", action="store_true",
+                     help="with the ordinary metadata fixture, run only the two-launch pool validator recovery check")
     run.add_argument("deployment", type=Path)
     run.add_argument("--worker-sha256", required=True)
     run.add_argument("--control-sha256", required=True)
@@ -375,6 +384,10 @@ def main():
     args = parser.parse_args()
     if args.command == "run" and args.unknown_declaration and not args.typed_session:
         parser.error("--unknown-declaration requires --typed-session")
+    if args.command == "run" and args.pool_validator_recovery and args.typed_session:
+        parser.error("--pool-validator-recovery requires the ordinary metadata fixture")
+    if args.command == "run" and args.pool_validator_recovery and args.unknown_declaration:
+        parser.error("--pool-validator-recovery conflicts with --unknown-declaration")
     if args.typed_session or args.disposable_clean or args.verify_declaration or \
             (args.command == "run" and args.unknown_declaration):
         parser.error("typed, verification and disposable-clean selectors are temporarily unavailable; ordinary metadata only")
@@ -391,6 +404,7 @@ def main():
                 qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256,
                         typed, args.disposable_clean, args.verify_declaration,
                         unknown_declaration=args.unknown_declaration,
+                        pool_validator_recovery=args.pool_validator_recovery, release=release,
                         approved_control=args.control_sha256)
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")

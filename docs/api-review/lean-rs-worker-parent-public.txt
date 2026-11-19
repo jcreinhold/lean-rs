@@ -1213,7 +1213,7 @@ impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerPoolSnapshot
 impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerPoolSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerPoolSnapshot
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerPoolSnapshot
-pub struct lean_rs_worker_parent::LeanWorkerProcessTracker(_)
+pub struct lean_rs_worker_parent::LeanWorkerProcessTracker(_, _)
 impl lean_rs_worker_parent::LeanWorkerProcessTracker
 pub fn lean_rs_worker_parent::LeanWorkerProcessTracker::active_processes(&self) -> usize
 pub fn lean_rs_worker_parent::LeanWorkerProcessTracker::new() -> Self

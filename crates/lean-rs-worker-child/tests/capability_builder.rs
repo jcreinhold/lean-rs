@@ -14,6 +14,8 @@ use lean_rs_worker_parent::{
     LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig, LeanWorkerSessionImportProfile,
     LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
+#[cfg(target_os = "macos")]
+use lean_rs_worker_parent::{LeanWorkerHostRuntimeExpectation, LeanWorkerProcessTracker};
 use lean_rs_worker_protocol::worker_exports::fixture_mul_signature;
 use lean_toolchain::CargoLeanCapability;
 use serde_json::json;
@@ -1095,5 +1097,164 @@ fn open_session_with_imports_overrides_builder_imports() {
         Ok(_) => panic!("override with a bogus import should be rejected by the child"),
         Err(LeanWorkerError::Worker { .. } | LeanWorkerError::CapabilityBuild { .. }) => {}
         Err(other) => panic!("expected the child to reject the bad import, got {other:?}"),
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod qualified_pool {
+    use super::{
+        LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerHostRuntimeExpectation, LeanWorkerPool,
+        LeanWorkerPoolConfig, LeanWorkerProcessTracker, metadata_qualification,
+    };
+    use lean_toolchain::native_guardian::{NativeOwnerObservation, NativeProcessIdentity};
+    use std::{
+        collections::BTreeSet,
+        error::Error,
+        fs,
+        path::{Path, PathBuf},
+        time::Duration,
+    };
+
+    type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
+    fn generations(owners: &Path) -> Result<BTreeSet<String>> {
+        Ok(fs::read_dir(owners)?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .filter(|name| name.starts_with("worker-"))
+                    .map(str::to_owned)
+            })
+            .collect())
+    }
+
+    fn authorization_pids(path: &Path, offset: usize) -> Result<(usize, Vec<u32>)> {
+        let bytes = fs::read(path)?;
+        let suffix = bytes.get(offset..).ok_or("authorization log shrank")?;
+        let pids = std::str::from_utf8(suffix)?
+            .lines()
+            .map(|line| {
+                line.split_once(' ')
+                    .ok_or("invalid authorization event")?
+                    .0
+                    .parse::<u32>()
+                    .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok((bytes.len(), pids))
+    }
+
+    fn owner_identities(owners: &Path, generation: &str) -> Result<(NativeProcessIdentity, NativeProcessIdentity)> {
+        let owner: serde_json::Value = serde_json::from_slice(&fs::read(owners.join(generation).join("owner.json"))?)?;
+        Ok((
+            serde_json::from_value(owner["process"].clone())?,
+            serde_json::from_value(owner["guardian"].clone())?,
+        ))
+    }
+
+    fn builder(tracker: &LeanWorkerProcessTracker) -> LeanWorkerCapabilityBuilder {
+        metadata_qualification::builder()
+            .process_tracker(tracker.clone())
+            .startup_timeout(Duration::from_secs(40))
+            .request_timeout(Duration::from_secs(100))
+            .shutdown_timeout(Duration::from_secs(2))
+    }
+
+    #[test]
+    #[ignore = "named qualified metadata deployment and checked two-launch authorization required"]
+    fn failed_validator_releases_pool_slot_before_fresh_key() -> Result<()> {
+        let selection: serde_json::Value = serde_json::from_str(
+            option_env!("LEAN_RS_TEST_QUALIFIED_METADATA").ok_or("missing checked metadata deployment")?,
+        )?;
+        let owners = PathBuf::from(selection["owners"].as_str().ok_or("missing ownership registry")?);
+        assert_eq!(owners.canonicalize()?, owners);
+        let events = owners
+            .parent()
+            .ok_or("ownership registry has no deployment root")?
+            .join("app/native-events.log");
+        let events_before = match fs::read(&events) {
+            Ok(bytes) => bytes.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        let before = generations(&owners)?;
+        let tracker = LeanWorkerProcessTracker::new();
+        let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+
+        let invalid = LeanWorkerHostRuntimeExpectation {
+            compiled_header_sha256: Some("00".repeat(32)),
+            ..LeanWorkerHostRuntimeExpectation::default()
+        };
+        let first = builder(&tracker).require_host_runtime(invalid);
+        let error = match pool.acquire_lease(first) {
+            Ok(_) => return Err("invalid runtime expectation unexpectedly opened".into()),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, LeanWorkerError::Protocol { message } if message.contains("host runtime compatibility")),
+            "expected the post-launch runtime validator to refuse the first key: {error:?}"
+        );
+        assert_eq!(pool.snapshot().workers, 0, "failed cold open retained a pool entry");
+        assert_eq!(
+            tracker.active_processes(),
+            0,
+            "failed cold open retained process custody"
+        );
+        let after_failure = generations(&owners)?;
+        let failed: Vec<_> = after_failure.difference(&before).collect();
+        assert_eq!(failed.len(), 1, "first key must launch exactly one owned generation");
+        let (process, guardian) = owner_identities(&owners, failed[0])?;
+        assert_eq!(
+            process.observe()?,
+            NativeOwnerObservation::Absent,
+            "failed worker identity remained present"
+        );
+        assert!(!guardian.is_live()?, "failed worker guardian remained live");
+        let (events_after_failure, first_pids) = authorization_pids(&events, events_before)?;
+        assert_eq!(first_pids.len(), 5, "first worker authorization trace differs");
+        assert!(
+            first_pids.iter().all(|pid| *pid == process.pid),
+            "first authorization trace does not belong to the failed generation"
+        );
+
+        {
+            let lease = pool.acquire_lease(builder(&tracker))?;
+            assert_eq!(
+                lease.snapshot().workers,
+                1,
+                "fresh key did not acquire the released slot"
+            );
+        }
+        drop(pool);
+        assert_eq!(
+            tracker.active_processes(),
+            0,
+            "successful fresh key did not close on pool drop"
+        );
+        let after_success = generations(&owners)?;
+        let succeeded: Vec<_> = after_success.difference(&after_failure).collect();
+        assert_eq!(
+            succeeded.len(),
+            1,
+            "fresh key must launch exactly one new owned generation"
+        );
+        assert_ne!(failed[0], succeeded[0], "closure records reused a generation identity");
+        let (process, guardian) = owner_identities(&owners, succeeded[0])?;
+        assert_eq!(
+            process.observe()?,
+            NativeOwnerObservation::Absent,
+            "successful worker identity remained present after pool drop"
+        );
+        assert!(!guardian.is_live()?, "successful worker guardian remained live");
+        let (_, second_pids) = authorization_pids(&events, events_after_failure)?;
+        assert_eq!(second_pids.len(), 5, "second worker authorization trace differs");
+        assert!(
+            second_pids.iter().all(|pid| *pid == process.pid),
+            "second authorization trace does not belong to the successful generation"
+        );
+        Ok(())
     }
 }

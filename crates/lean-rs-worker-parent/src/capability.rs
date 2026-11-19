@@ -481,6 +481,18 @@ impl LeanWorkerCapabilityBuilder {
             .unwrap_or(crate::supervisor::LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT)
     }
 
+    pub(crate) fn observe_process_attempt(mut self) -> (Self, crate::process::LeanWorkerProcessAttempt) {
+        let tracker = self.process_tracker.clone().unwrap_or_default();
+        let (tracker, attempt) = tracker.observe_attempt();
+        self.process_tracker = Some(tracker);
+        (self, attempt)
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn test_process_tracker(&self) -> Option<&LeanWorkerProcessTracker> {
+        self.process_tracker.as_ref()
+    }
+
     /// Check deployment facts before running a real worker command.
     ///
     /// The report validates the worker child locator, manifest-backed

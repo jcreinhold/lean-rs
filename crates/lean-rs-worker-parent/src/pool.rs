@@ -376,6 +376,7 @@ pub struct LeanWorkerPoolSnapshot {
 pub struct LeanWorkerPool {
     config: LeanWorkerPoolConfig,
     entries: Vec<PoolEntry>,
+    pending_failed_opens: Vec<crate::process::LeanWorkerProcessAttempt>,
     queue_timeouts: u64,
     memory_budget_rejections: u64,
     cold_open_attempts: u64,
@@ -422,6 +423,7 @@ impl LeanWorkerPool {
         Self {
             config,
             entries: Vec::new(),
+            pending_failed_opens: Vec::new(),
             queue_timeouts: 0,
             memory_budget_rejections: 0,
             cold_open_attempts: 0,
@@ -458,6 +460,14 @@ impl LeanWorkerPool {
         &mut self,
         builder: LeanWorkerCapabilityBuilder,
     ) -> Result<LeanWorkerSessionLease<'_>, LeanWorkerError> {
+        self.acquire_lease_with_open(builder, LeanWorkerCapabilityBuilder::open)
+    }
+
+    fn acquire_lease_with_open(
+        &mut self,
+        builder: LeanWorkerCapabilityBuilder,
+        open: impl FnOnce(LeanWorkerCapabilityBuilder) -> Result<LeanWorkerCapability, LeanWorkerError>,
+    ) -> Result<LeanWorkerSessionLease<'_>, LeanWorkerError> {
         let key = builder.session_key();
         match self.admit_lease(&key)? {
             PoolAdmissionDecision::ReuseWarmEntry { index } => {
@@ -471,7 +481,11 @@ impl LeanWorkerPool {
             PoolAdmissionDecision::OpenColdEntry => {}
         }
 
-        let capability = match builder.clone().open() {
+        let (observed_builder, attempt) = builder.clone().observe_process_attempt();
+        // Retain the reservation before entering caller-controlled startup so
+        // unwind cannot lose an asynchronously closing owned scope.
+        self.pending_failed_opens.push(attempt);
+        let capability = match open(observed_builder) {
             Ok(capability) => capability,
             Err(err) => {
                 self.cold_opens_in_progress = self.cold_opens_in_progress.saturating_sub(1);
@@ -493,6 +507,9 @@ impl LeanWorkerPool {
             active_leases: 0,
             commands_since_open: 0,
         });
+        // The retained entry now owns the pool slot; remove its temporary
+        // cold-open reservation only after that transfer is complete.
+        self.pending_failed_opens.pop();
         let index = self
             .entries
             .len()
@@ -512,6 +529,7 @@ impl LeanWorkerPool {
     }
 
     fn admit_lease(&mut self, key: &LeanWorkerSessionKey) -> Result<PoolAdmissionDecision, LeanWorkerError> {
+        self.pending_failed_opens.retain(|attempt| !attempt.closed());
         self.remember_seen_key(key);
         if let Some(index) = self.entries.iter().position(|entry| &entry.key == key) {
             self.record_key_hit();
@@ -527,7 +545,7 @@ impl LeanWorkerPool {
         self.record_cold_open_attempt();
         let rss_before_admission = self.refresh_total_child_rss();
         self.rss_before_admission_kib = rss_before_admission.available_total();
-        if self.entries.len() >= self.config.max_workers {
+        if self.entries.len().saturating_add(self.pending_failed_opens.len()) >= self.config.max_workers {
             return self.pool_full_error();
         }
         self.ensure_spawn_within_total_rss_budget(rss_before_admission)?;
@@ -1342,4 +1360,97 @@ fn worker_session_missing(err: &LeanWorkerError) -> bool {
 
 fn normalize_import_workspace_root(path: PathBuf) -> PathBuf {
     std::fs::canonicalize(&path).unwrap_or(path)
+}
+
+#[cfg(all(test, unix))]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::process::LeanWorkerProcessTracker;
+
+    fn key(name: &str) -> LeanWorkerSessionKey {
+        LeanWorkerSessionKey::new(".", name, name, std::iter::empty::<String>())
+    }
+
+    fn stop(child: &mut crate::process::OwnedChild) {
+        child.kill().expect("stop test child");
+        let started = Instant::now();
+        while child.try_wait().expect("wait for test child").is_none() {
+            assert!(started.elapsed() < Duration::from_secs(2), "test child did not stop");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn failed_open_reservation_tracks_only_its_deferred_owned_scopes() {
+        let caller = LeanWorkerProcessTracker::new();
+        let mut unrelated_command = std::process::Command::new("/bin/sleep");
+        unrelated_command.arg("30");
+        let mut unrelated = caller
+            .spawn(&mut unrelated_command)
+            .expect("spawn unrelated test child");
+
+        let builder = |name| {
+            LeanWorkerCapabilityBuilder::new(".", name, name, std::iter::empty::<String>())
+                .process_tracker(caller.clone())
+        };
+        let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+        let mut failed = None;
+        assert!(matches!(
+            pool.acquire_lease_with_open(builder("failed"), |observed| {
+                let mut command = std::process::Command::new("/bin/sleep");
+                command.arg("30");
+                failed = Some(
+                    observed.test_process_tracker()
+                        .expect("cold opener has a process tracker")
+                        .spawn(&mut command)
+                        .expect("spawn failed-open test child"),
+                );
+                Err(LeanWorkerError::Protocol { message: "original cold-open error".to_owned() })
+            }),
+            Err(LeanWorkerError::Protocol { message }) if message == "original cold-open error"
+        ));
+        assert_eq!(pool.snapshot().workers, 0);
+        assert_eq!(caller.active_processes(), 2);
+        assert!(matches!(
+            pool.acquire_lease_with_open(builder("fresh"), |_| panic!("blocked key reached opener")),
+            Err(LeanWorkerError::WorkerPoolExhausted { .. })
+        ));
+        assert_eq!(caller.active_processes(), 2);
+
+        drop(failed.take().expect("failed opener spawned a child"));
+        let started = Instant::now();
+        while !pool.pending_failed_opens[0].closed() || caller.active_processes() != 1 {
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "deferred cleanup did not close"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(caller.active_processes(), 1, "unrelated child must still be owned");
+        assert!(
+            matches!(
+                pool.acquire_lease_with_open(builder("fresh"), |_| {
+                    Err(LeanWorkerError::Protocol { message: "fresh key reached opener".to_owned() })
+                }),
+                Err(LeanWorkerError::Protocol { message }) if message == "fresh key reached opener"
+            ),
+            "unrelated caller-tracker work must not occupy this pool's failed-open slot"
+        );
+        stop(&mut unrelated);
+    }
+
+    #[test]
+    fn pre_spawn_attempt_does_not_retain_pool_capacity() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let (_observed, attempt) = tracker.observe_attempt();
+        let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+        pool.pending_failed_opens.push(attempt);
+
+        assert!(matches!(
+            pool.admit_lease(&key("pre-spawn")),
+            Ok(PoolAdmissionDecision::OpenColdEntry)
+        ));
+        assert!(pool.pending_failed_opens.is_empty());
+    }
 }
