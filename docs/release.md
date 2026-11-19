@@ -64,9 +64,9 @@ Lean runtime or establish callback/worker safety by itself.
 
 ## Optional dry run
 
-Dispatch the Release workflow with `dry_run: true`. It runs verification, API checks, and
+Dispatch the Release workflow with `dry_run: true` (the default). It runs verification, API checks, and
 [`scripts/publish-workspace.sh --dry-run`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/publish-workspace.sh) without uploading crates or creating a
-GitHub Release.
+GitHub Release. Manual runs of Release cannot upload crates; use the tag for a live release.
 
 A dry run cannot resolve an unpublished workspace dependency from crates.io. It can therefore fail at a downstream crate
 even when the real ordered upload would succeed. Inspect the failure rather than treating it as a successful publish
@@ -85,6 +85,7 @@ gh run watch <run-id>
 
 Use `git tag -a` for an unsigned annotated tag. The workflow checks tag/version agreement before publishing. It marks
 versions containing `-` as prereleases and extracts the matching changelog section for the release body.
+Release and recovery runs do not run at the same time. Both check the changelog before uploading crates.
 
 ## Recover a partial upload
 
@@ -94,8 +95,10 @@ failure; that resumes the same release without a version bump.
 
 For a separate publish-only run, dispatch [Release recovery](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release-recover.yml) at the exact
 release commit with its version, without the `v` prefix. It uses the same publish script and ensures the GitHub Release
-exists. It checks the workspace version but does not repeat the full verification gates; use it only for contents
-already verified for that release. `dry_run: true` has the same dependency-resolution limitation described above.
+exists. A live recovery requires the existing release tag to point to that commit. Recovery does not repeat
+the full verification gates; use it only for contents
+already verified for that release. Recovery defaults to `dry_run: true`, with the same dependency-resolution
+limit described above. Set it to `false` only when you intend to resume the upload.
 
 Published crate versions are immutable. If crate contents need a fix, prepare and verify a patch release. Do not move an
 existing release tag or use `--allow-dirty` to publish changed contents under it.

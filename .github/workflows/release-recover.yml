@@ -29,12 +29,11 @@ on:
       dry_run:
         description: "Verify-build the missing crates with --dry-run; do not upload or touch the release."
         type: boolean
-        default: false
+        default: true
 
 concurrency:
-  # Never let two recovery runs (or a recovery and the tag release) publish the
-  # same version concurrently.
-  group: release-${{ inputs.version }}
+  # All release and recovery runs share this group, regardless of the selected ref.
+  group: publish-lean-rs
   cancel-in-progress: false
 
 permissions:
@@ -56,6 +55,47 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify input version matches workspace
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          wsver=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
+          if [ "$REQUESTED_VERSION" != "$wsver" ]; then
+            echo "::error::Requested version $REQUESTED_VERSION != workspace version $wsver. Recovery uploads the crate contents on this ref; check out the matching commit or fix the input."
+            exit 1
+          fi
+          echo "RELEASE_VERSION=$wsver" >> "$GITHUB_ENV"
+
+      - name: Verify the published tag points to this commit
+        if: inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          tag="v$RELEASE_VERSION"
+          git fetch --no-tags --depth=1 origin "refs/tags/$tag"
+          if [ "$(git rev-parse 'FETCH_HEAD^{commit}')" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::Tag $tag does not point to the selected commit. Select the original release commit."
+            exit 1
+          fi
+
+      - name: Extract CHANGELOG section
+        run: |
+          set -euo pipefail
+          version="$RELEASE_VERSION"
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-body.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-body.md"; then
+            echo "::error::No CHANGELOG section for [$version]."
+            exit 1
+          fi
+          echo "--- Release body ---"
+          cat "$RUNNER_TEMP/release-body.md"
+          echo "--- End release body ---"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -96,17 +136,6 @@ jobs:
           lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
           echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
-      - name: Verify input version matches workspace
-        run: |
-          set -euo pipefail
-          wsver=$(cargo metadata --no-deps --format-version 1 \
-            | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
-          if [ "${{ inputs.version }}" != "$wsver" ]; then
-            echo "::error::Requested version ${{ inputs.version }} != workspace version $wsver. Recovery uploads the crate contents on this ref; check out the matching commit or fix the input."
-            exit 1
-          fi
-          echo "Workspace version $wsver matches requested version."
-
       # Same idempotent per-crate publish that `release.yml` now uses; the
       # algorithm and crate order live once in scripts/publish-workspace.sh. The
       # script derives the version from cargo metadata, which the step above has
@@ -121,24 +150,6 @@ jobs:
             scripts/publish-workspace.sh
           fi
 
-      - name: Extract CHANGELOG section
-        if: inputs.dry_run != true
-        run: |
-          set -euo pipefail
-          version="${{ inputs.version }}"
-          awk -v ver="$version" '
-            $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
-            capture && /^## \[/ { exit }
-            capture { print }
-          ' CHANGELOG.md > release-body.md
-          if [ ! -s release-body.md ]; then
-            echo "::error::No CHANGELOG section for [$version]."
-            exit 1
-          fi
-          echo "--- Release body ---"
-          cat release-body.md
-          echo "--- End release body ---"
-
       - name: Ensure GitHub Release exists
         # softprops/action-gh-release upserts: it creates the release for the
         # existing tag if absent, or updates the body if it already exists.
@@ -146,6 +157,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ inputs.version }}
-          body_path: release-body.md
+          body_path: ${{ runner.temp }}/release-body.md
           prerelease: ${{ contains(inputs.version, '-') }}
           make_latest: ${{ contains(inputs.version, '-') && 'false' || 'true' }}
