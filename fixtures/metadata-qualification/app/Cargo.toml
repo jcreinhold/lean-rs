@@ -1,0 +1,38 @@
+[package]
+name = "metadata-qualification"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = {version="1",features=["derive"]}
+serde_json="1"
+sha2="0.11"
+mach2="0.6"
+libc="0.2"
+lean-toolchain = {path = "../sdk/crates/lean-toolchain"}
+lean-rs = {path = "../sdk/crates/lean-rs"}
+lean-rs-host = {path = "../sdk/crates/lean-rs-host"}
+lean-rs-worker-parent = {path = "../sdk/crates/lean-rs-worker-parent"}
+lean-rs-worker-child = {path = "../sdk/crates/lean-rs-worker-child"}
+lean-rs-worker-protocol = {path = "../sdk/crates/lean-rs-worker-protocol"}
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[features]
+admitted = []
+
+[[bin]]
+name = "metadata-worker"
+path = "src/bin/metadata-worker.rs"
+required-features = ["admitted"]
+
+[[bin]]
+name = "control"
+path = "src/bin/control.rs"
+required-features = ["admitted"]
+
+[[bin]]
+name = "substitute"
+path = "src/bin/substitute.rs"
+required-features = ["admitted"]
