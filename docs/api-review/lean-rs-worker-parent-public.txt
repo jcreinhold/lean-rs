@@ -279,6 +279,24 @@ impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerImportPlanError
 impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerImportPlanError
 impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerImportPlanError
 impl !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerImportPlanError
+pub enum lean_rs_worker_parent::LeanWorkerNativeSpawnError
+pub lean_rs_worker_parent::LeanWorkerNativeSpawnError::AfterSpawn
+pub lean_rs_worker_parent::LeanWorkerNativeSpawnError::AfterSpawn::pending: lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+pub lean_rs_worker_parent::LeanWorkerNativeSpawnError::AfterSpawn::source: std::io::error::Error
+pub lean_rs_worker_parent::LeanWorkerNativeSpawnError::BeforeSpawn(std::io::error::Error)
+impl core::error::Error for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+pub fn lean_rs_worker_parent::LeanWorkerNativeSpawnError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+pub fn lean_rs_worker_parent::LeanWorkerNativeSpawnError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+pub fn lean_rs_worker_parent::LeanWorkerNativeSpawnError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+impl core::marker::Send for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+impl core::marker::Sync for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerNativeSpawnError
+impl !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerNativeSpawnError
 pub enum lean_rs_worker_parent::LeanWorkerRestartPolicyClass
 pub lean_rs_worker_parent::LeanWorkerRestartPolicyClass::Custom
 pub lean_rs_worker_parent::LeanWorkerRestartPolicyClass::Default
@@ -929,12 +947,26 @@ impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerModuleWork
 impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerModuleWork
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerModuleWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerModuleWork
+pub struct lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+pub fn lean_rs_worker_parent::LeanWorkerNativePendingCleanup::cleanup_pending(&self) -> bool
+pub fn lean_rs_worker_parent::LeanWorkerNativePendingCleanup::custody_closed(&self) -> std::io::error::Result<bool>
+pub fn lean_rs_worker_parent::LeanWorkerNativePendingCleanup::try_wait(&mut self) -> std::io::error::Result<core::option::Option<std::process::ExitStatus>>
+impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+pub fn lean_rs_worker_parent::LeanWorkerNativePendingCleanup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl core::marker::Send for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl core::marker::Sync for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerNativePendingCleanup
 pub struct lean_rs_worker_parent::LeanWorkerNativeScope(_)
 impl lean_rs_worker_parent::LeanWorkerNativeScope
-pub fn lean_rs_worker_parent::LeanWorkerNativeScope::accept(self, u32, core::time::Duration) -> std::io::error::Result<lean_rs_worker_parent::LeanWorkerNativeScopeLease>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::configure(&self, &mut std::process::Command)
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::input_directory(&self) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::prepare(&std::path::Path, core::time::Duration, core::option::Option<&lean_toolchain::native_guardian::ownership::NativeCapacitySlot>) -> std::io::error::Result<Self>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScope::spawn(self, &mut std::process::Command, core::time::Duration) -> core::result::Result<lean_rs_worker_parent::LeanWorkerNativeScopeLease, lean_rs_worker_parent::LeanWorkerNativeSpawnError>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerNativeScope
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerNativeScope
@@ -948,12 +980,18 @@ pub struct lean_rs_worker_parent::LeanWorkerNativeScopeLease(_)
 impl lean_rs_worker_parent::LeanWorkerNativeScopeLease
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::acknowledge(&mut self) -> std::io::error::Result<()>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::cleanup_inputs(&self) -> std::io::error::Result<()>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::cleanup_pending(&self) -> bool
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::custody_closed(&self) -> std::io::error::Result<bool>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::group_absent(&self) -> std::io::error::Result<bool>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::guardian_alive(&self) -> std::io::error::Result<bool>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::input_directory(&self) -> std::io::error::Result<std::path::PathBuf>
-pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::owner(&self) -> &lean_toolchain::native_guardian::ownership::NativeProcessIdentity
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::kill(&mut self) -> std::io::error::Result<()>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::owner(&self) -> std::io::error::Result<&lean_toolchain::native_guardian::ownership::NativeProcessIdentity>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::request_stop(&self) -> std::io::error::Result<()>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::take_stderr(&mut self) -> core::option::Option<std::process::ChildStderr>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::take_stdin(&mut self) -> core::option::Option<std::process::ChildStdin>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::take_stdout(&mut self) -> core::option::Option<std::process::ChildStdout>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::try_wait(&mut self) -> std::io::error::Result<core::option::Option<std::process::ExitStatus>>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerNativeScopeLease
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerNativeScopeLease

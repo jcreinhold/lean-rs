@@ -338,12 +338,14 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
 /// Mark possible dispatch durably before invoking the spawn syscall.
 /// # Errors
 /// Refuses non-preparing state, another owner, or uncertain publication.
+#[doc(hidden)]
 pub fn dispatch_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
     transition_preparing(record, nonce, "preparing", "dispatching")
 }
 /// Retire dispatch only after the actual spawn syscall returned no child.
 /// # Errors
 /// Refuses a changed owner/state or failed durable publication.
+#[doc(hidden)]
 pub fn retire_unspawned_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
     transition_preparing(record, nonce, "dispatching", "preparing_closed")
 }
