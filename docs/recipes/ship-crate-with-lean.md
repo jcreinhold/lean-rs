@@ -17,20 +17,9 @@ The template's build script uses `PrivateLakeBootstrap` for the packaged demo an
 command calls Lean in process. The other two build the application-owned child and open a worker session. A shared
 project that cannot meet the private bootstrap requirements uses the configured shared-writer helper.
 
-The template uses repository path dependencies. A published consumer uses matching released versions:
-
-```toml
-[dependencies]
-lean-rs = "0.9"
-lean-rs-worker-parent = "0.9" # for worker applications
-lean-rs-worker-child = "0.9"  # for the app-owned child binary
-
-[build-dependencies]
-lean-toolchain = "0.9"
-```
-
-The snippets below describe the current checkout's build and loader APIs. Keep parent, child, and capability artifacts
-on compatible versions when packaging them together.
+The template depends on the workspace's matching `lean-rs`, `lean-rs-worker-parent`, `lean-rs-worker-child` and
+`lean-toolchain` crates by path. Its `Cargo.toml` also lists the dependencies for the application-owned artifact
+checks. Keep the parent, child, runtime and capability artifacts compatible when packaging them together.
 
 ## Build the capability
 
@@ -84,22 +73,20 @@ that trusted metadata.
 
 ## Open in process
 
+The template embeds the manifest and image selected by its build, verifies the expected module and dependency list,
+and writes the image bytes into an application-owned private directory. It uses the matching Lean runtime and
+passes custody of that directory to `TrustedWorkerCapability::load_snapshot`. The unsafe call admits exactly
+`ship_lean_demo_add` as `WorkerExportContract::U64Binary`. The resulting typed binding runs in the current process.
+[Complete in-process caller](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/main.rs)
+
 ```rust,ignore
-let runtime = lean_rs::LeanRuntime::init()?;
-let capability = lean_rs::LeanCapability::from_build_manifest(
-    runtime,
-    lean_rs::LeanBuiltCapability::manifest_path(
-        env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
-    ),
-)?;
-let add = capability.exported::<(u64, u64), u64>("my_app_add")?;
-let answer = add.call(40, 2)?;
+let answer = capability.bind_binary("ship_lean_demo_add")?.call(40, 2)?;
 ```
 
-`LeanCapability` loads the primary library and dependency bundle, initializes the module, and retains its trusted export
-signatures. A missing or mismatched signature fails before dispatch. `LeanCapabilityPreflight` checks artifacts,
-fingerprints, manifests, and initializer symbols for installer or doctor commands; the report uses stable loader codes
-and repair hints.
+For generic dispatch, `LeanCapability::from_build_manifest`, `LeanCapability::exported` and
+`LeanExported::call` each require the application's unsafe assertion. Preflight checks artifact metadata and symbol
+presence. The caller establishes that the actual image implements the declared ABI and remains live for every use.
+[Loader contract](../architecture/loading.md#native-ownership-in-010)
 
 Use a compile-time `env!` for paths emitted by this crate's build script. These are local build-artifact paths;
 relocating a prebuilt application requires packaging its libraries and a descriptor that resolves their installed
@@ -107,14 +94,10 @@ locations.
 
 ## Open in a worker
 
-Cargo does not install a dependency's binary for an application. Ship a child binary of your own:
-
-```rust,ignore
-// src/bin/my_app_lean_worker.rs
-fn main() -> std::process::ExitCode {
-    lean_rs_worker_child::run_worker_child_stdio()
-}
-```
+Ship an application-owned child. Its `WorkerAuthority` implementation checks the requested manifest bytes, images
+and initializer against the deployment it owns and admits the symbols it serves. The template installs that
+authority with `run_worker_child_with_authority`.
+[Worker entrypoint](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/bin/shipped_lean_crate_worker.rs)
 
 Point the builder at that binary and the same manifest:
 

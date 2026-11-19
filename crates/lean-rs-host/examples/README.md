@@ -3,11 +3,22 @@
 Build these from the workspace with `-p lean-rs-host`. They exercise same-process host services against `fixtures/lean`;
 long-running import-heavy applications should use the [production worker pattern](../../../docs/production-hosting.md).
 
-The embedding examples `theorem_query`, `proof_check`, `meta_query` and `progress` are library targets. Compile them with `cargo build -p lean-rs-host --example NAME`. Their entry functions accept a session from the embedding application. The kernel and elaboration examples also require the exact request attested for that session. The proof example revalidates returned evidence before displaying its summary. The progress example expects the application to import `LeanRsFixture.Handles`.
+## Migrating the six embedding examples
 
-## Setup
+These former executables now build as Rust libraries. Compile any of them with
+`cargo build -p lean-rs-host --example NAME`. Call the entrypoint from the application that admits the session or
+imports and owns the request.
 
-Build the fixture before running host examples:
+| Entrypoint | Supply from the application |
+| --- | --- |
+| `theorem_query::query` | A mutable admitted session. |
+| `proof_check::check` | The session and its attested kernel request. The example revalidates returned evidence. |
+| `meta_query::infer` | The session and its attested term. |
+| `progress::report_and_cancel` | A session importing `LeanRsFixture.Handles`. |
+| `process_module_query::run` | The session and an attested module-source request for the selector returned by `parse_query`. |
+| `import_residue_probe::measure` | The host capabilities, their ordered admitted import profiles and the session-drop choice. `parse_profiles` reads module names. |
+
+## Setup for runnable fixture examples
 
 ```sh
 (cd fixtures/lean && lake build)

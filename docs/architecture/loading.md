@@ -41,11 +41,38 @@ sessions apply the [read-custody protocol](worker-sessions.md#shared-artifact-re
 `LeanLibrary::open_globally`, direct dylib descriptors, and unchecked exports remain advanced paths whose callers take
 on the corresponding loader or ABI obligations.
 
+## Native ownership in 0.10
+
+In 0.9.9, a caller could open a library or manifest, bind a manifest-declared export, and call it from safe Rust.
+In 0.10, opening native code is `unsafe`. Loader constructors can run as soon as an image opens. Before loading,
+the application must establish that the primary image, dependencies, constructors and transitive initializers are
+safe for the actual runtime, including any registrations they leave behind. Generic export binding and invocation
+also require `unsafe`. The application checks the native signature, boxed layouts, ownership and callback protocol. A typed
+binding such as `TrustedWorkerCapability::bind_binary` lets later callers use the contract the application admitted.
+
+Ordinary `LeanLibrary` and `LeanCapability` handles own scoped mappings. Keep every required image mapped while a
+returned Lean value, callback or global registration can use its code or data. Trusted host and worker capabilities
+pin their admitted bundles until process exit. When loading a trusted worker snapshot, the SDK pins each configured
+initializer's image and all earlier explicit dependencies before attempting that initializer. A later failure can
+leave a registration live. Passing an already initialized bundle through `TrustedWorkerCapability::from_loaded`
+also retains its images if the export allowlist is rejected.
+
+If a call through `LeanLibrary::initialize_module` enters a native initializer and returns an error, the SDK keeps
+the image and one failure entry for that resolved initializer address until process exit. Another handle or symbol
+alias resolving to the same address gets the original error. A simultaneous call to an initializer already running
+gets a load error. The application still coordinates external and transitive initialization, including failures
+inside an initializer that calls another directly.
+
+Repeated pins of the same live loader handle share one retained mapping. Distinct pinned images and failed initializer
+addresses have no automatic limit or eviction. Process exit releases them. A pin keeps code and data addressable.
+The application separately owns artifact custody, including stable inputs for deferred imports and the time between
+verification and loading. A foreign unwind or abort has no in-process recovery guarantee.
+
 ## Worker bootstrap
 
-Applications ship an app-owned child calling `lean_rs_worker_child::run_worker_child_stdio`; dependency binaries are not
-automatically installed with a consuming application. `LeanWorkerChild` locates that binary and binds it to the matching
-Lean sysroot. The child's linked `libleanshared` and runtime stdlib oleans must come from the same toolchain.
+Applications loading native capabilities ship a child that calls `lean_rs_worker_child::run_worker_child_with_authority`
+with their own admission policy. `LeanWorkerChild` locates that binary and binds it to the matching Lean sysroot.
+The child's linked `libleanshared` and runtime stdlib oleans must come from the same toolchain.
 
 The capability builder opens the same manifest-backed artifact inside the child and hides pipes, framing, and bootstrap
 diagnostics. Typed child settings carry supported configuration. The low-level supervisor inherits the parent's

@@ -9,6 +9,10 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+- Repeated initialization through another handle now preserves the first native failure. Trusted worker snapshot
+  loads retain the images needed by earlier registrations when a later dependency or primary fails. See
+  [native ownership and retention](docs/architecture/loading.md#native-ownership-in-010).
+
 ## [0.10.0]
 
 ### lean-rs stack
@@ -26,13 +30,18 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - The new managed native-reader completion check requires the macOS atomic process-group census. Other platforms
   fail closed for that mode. Linux supports ordinary SDK operations. Managed-reader completion can report
   unsupported after payload execution on Linux, so callers cannot infer that the payload never ran.
-
+- Migrating native callers from 0.9.9 requires explicit unsafe admission for library, bundle and capability loading,
+  generic export binding and calls. Custom ABI implementations use `unsafe impl LeanAbi` and unsafe `from_c`.
+  The C representation is sealed. Native container elements require `LeanBoxedAbi`. See the
+  [safety contract](docs/architecture/safety.md) and the [loading guide](docs/architecture/loading.md#native-ownership-in-010).
 - Six host examples now build as libraries: `theorem_query`, `proof_check`, `meta_query`, `progress`,
   `process_module_query`, and `import_residue_probe`. Applications supply the admitted session, request, or
   ordered import profiles. See the [migration instructions](crates/lean-rs-host/examples/README.md).
 
 ### lean-toolchain
 
+- Exhaustive matches on `LinkDiagnostics` must handle the new `LakeWriterFailure { failure, .. }` variant.
+  It carries the shared writer's execution evidence when a build fails.
 - Retain source-entry and stable sibling project locks across materialization, owned Lake commands, cache updates and
   capability-manifest publication. Loan close-only descriptions to the configured helper while retaining caller copies.
 - Bound cancellation and command delivery, preserve typed stopped versus unknown execution evidence, and reap helpers

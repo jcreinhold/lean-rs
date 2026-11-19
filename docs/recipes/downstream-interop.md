@@ -4,16 +4,9 @@ Use `lean-rs` directly for trusted Lean extensions that call Rust before a Lean 
 Rust-to-Lean calls, prefer the manifest-backed [shipped-crate recipe](ship-crate-with-lean.md). For process isolation,
 timeouts, cycling, and typed rows, use the [worker capability runner](worker-capability-runner.md).
 
-Run the complete in-tree examples:
-
-```sh
-cargo run -p lean-rs --example interop_callback
-cargo run -p lean-rs --example string_streaming
-```
-
-The shared-source build helpers require a configured writer through `LEAN_HOST_MCP_WRITER_EXECUTABLE`; the examples do
-not configure it themselves. Both build the generic interop shim and
-[`fixtures/interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims), open their shared libraries, and call explicit Lean exports.
+The in-tree `interop_callback` and `string_streaming` examples open a prepared pair of images under their
+fixture's reader guards and image checks. Their Lean sources are the generic interop shim and the
+[consumer fixture](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims).
 The fixture's Lake dependency points at the repository's bundled shim copy; a published consumer should materialize the
 package from `lean-rs-interop-shims` as described in the
 [generic shim contract](../architecture/callbacks.md#generic-shim-package).
@@ -29,18 +22,23 @@ The callback examples use a dependency bundle so the shim symbols are visible wh
 
 ```rust,ignore
 let runtime = LeanRuntime::init()?;
-let bundle = LeanLibraryBundle::open(
-    runtime,
-    env!("MY_CAPABILITY_DYLIB"),
-    [LeanLibraryDependency::path(env!("LEAN_RS_INTEROP_SHIMS_DYLIB"))
-        .export_symbols_for_dependents()
-        .initializer("lean_rs_interop_shims", "LeanRsInterop")],
-)?;
+// SAFETY: the application holds the verified consumer and interop artifacts stable.
+// Both images, their constructors, initializer chains and symbol resolution are
+// compatible with this runtime. The application retains them for all native uses.
+let bundle = unsafe {
+    LeanLibraryBundle::open(
+        runtime,
+        env!("MY_CAPABILITY_DYLIB"),
+        [LeanLibraryDependency::path(env!("LEAN_RS_INTEROP_SHIMS_DYLIB"))
+            .export_symbols_for_dependents()
+            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+    )
+}?;
 let module = bundle.initialize_module("my_package", "MyCapability")?;
 ```
 
-Here the environment variables are compile-time outputs supplied by the consumer's build script. The full examples build
-the two targets directly and use the returned paths.
+Here the environment variables are compile-time outputs supplied by the consumer's build script. The full examples
+admit their fixture paths before opening the bundle.
 
 ## Call Lean
 
@@ -59,12 +57,13 @@ The low-level example resolves it with an explicit safety obligation:
 let add = unsafe {
     module.exported_unchecked::<(u64, u64), u64>("lean_rs_interop_consumer_add")
 }?;
-let answer = add.call(20, 22)?;
+// SAFETY: both scalar inputs and the result match the admitted function on this runtime thread.
+let answer = unsafe { add.call(20, 22) }?;
 ```
 
-Sealed ABI traits reject unsupported Rust representations at compile time; they cannot verify that a caller-chosen
-signature matches an arbitrary symbol. Use `CargoLeanCapability::export_signature` and `LeanCapability::exported` for
-manifest-checked dispatch when the crate owns that contract.
+The sealed C representations limit the slot types. The application establishes the actual symbol contract. Use
+`CargoLeanCapability::export_signature` and `LeanCapability::exported` for manifest-checked dispatch when the crate
+owns that contract.
 
 ## Receive progress callbacks
 
@@ -90,7 +89,8 @@ let callback = LeanCallbackHandle::<LeanProgressTick>::register(|event| {
     LeanCallbackFlow::Continue
 })?;
 let (handle, trampoline) = callback.abi_parts();
-let status = callback_loop.call(handle, trampoline, 4)?;
+// SAFETY: the matching registration and bundle remain live for the synchronous tick loop.
+let status = unsafe { callback_loop.call(handle, trampoline, 4) }?;
 ```
 
 Decode the returned byte with `LeanCallbackStatus::from_abi` and check `callback.last_error()` when reporting failures;
@@ -123,7 +123,8 @@ let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
     }
 })?;
 let (handle, trampoline) = callback.abi_parts();
-let status = stream.call(handle, trampoline)?;
+// SAFETY: the matching String registration and bundle remain live until this stream returns.
+let status = unsafe { stream.call(handle, trampoline) }?;
 ```
 
 `stream` is the fixture's `lean_rs_interop_consumer_jsonl_stream`, resolved as

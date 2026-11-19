@@ -9,134 +9,53 @@ you want sessions, `MetaM`, and kernel-checked evidence, add [`lean-rs-host`](ht
 
 ## Quick start
 
-Shared-source build helpers require `LEAN_HOST_MCP_WRITER_EXECUTABLE`; the in-tree examples and template do not
-configure that helper themselves. The
-[shipping recipe](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md) shows this
-prerequisite and the typed package-private bootstrap alternative.
-
-With the writer configured, run the shipped-crate template from the workspace:
+The shipped-crate template builds its own Lean source using the package-private Lake bootstrap. From the workspace,
+run the standalone consumer with the matching Lean toolchain selected:
 
 ```sh
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
 ```
 
-That template is the shortest executable path for a crate that owns Lean source. It uses `lean-toolchain` in `build.rs`
-and `LeanCapability` at runtime so application code does not hand-write Lake output paths or dylib env-var plumbing.
+The program prints `answer=42`. Its build script records the compiled `ShipLeanDemo` image, initializer and
+`UInt64 × UInt64 → UInt64` export. At runtime the application checks the captured manifest, stages its own image
+bytes in a private directory and admits that exact export under the matching runtime. The caller can then use
+`capability.bind_binary("ship_lean_demo_add")?.call(40, 2)?`.
+[Build script](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/build.rs) ·
+[Rust caller](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/main.rs)
 
-The minimum consumer is five pieces: a Lean module declaring an `@[export]`, a `lakefile.lean` that builds it into a
-shared library, a Rust `build.rs` that emits the link and rpath directives, a `Cargo.toml`, and a Rust caller.
+The Lean source defines the exported name and the types Rust must use:
 
-**`Cargo.toml`**:
-
-```toml
-[package]
-name = "my_app"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-lean-rs = "0.9"
-
-[build-dependencies]
-lean-toolchain = "0.9"
+```lean
+@[export ship_lean_demo_add]
+def add (a b : UInt64) : UInt64 := a + b
 ```
 
-**`build.rs`**—one helper covers link-search, link-lib, the runtime rpath, Lake build, Cargo rerun triggers, the
-compile-time manifest path, and trusted export signature metadata:
-
-```rust
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use lean_toolchain::{
-        LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
-        LeanExportSignature,
-    };
-
-    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
-        .package("my_app")
-        .module("MyCapability")
-        .export_signature(LeanExportSignature::function(
-            "my_app_add",
-            vec![
-                LeanExportArgAbi::new(LeanExportAbiRepr::U64, LeanExportOwnership::None),
-                LeanExportArgAbi::new(LeanExportAbiRepr::U64, LeanExportOwnership::None),
-            ],
-            LeanExportReturnAbi::new(
-                LeanExportAbiRepr::U64,
-                LeanExportOwnership::None,
-                LeanExportResultConvention::Pure,
-            ),
-        ))
-        .build()?;
-    Ok(())
-}
-```
-
-**`lean/lakefile.lean`**: a minimal Lake package emitting one shared library. Lake uses guillemets (`« »`) as its
-idiomatic quoting for package and library names; plain ASCII names also work.
+The Lake package makes `ShipLeanDemo` a shared target:
 
 ```lean
 import Lake
 open Lake DSL
 
-package «my_app»
+package «ship_lean_demo»
 
 @[default_target]
-lean_lib «MyCapability» where
+lean_lib «ShipLeanDemo» where
   defaultFacets := #[LeanLib.sharedFacet]
 ```
 
-**`lean/MyCapability.lean`**—one Rust-callable export:
+For the Cargo dependencies, Lake target and app-owned worker child, see the
+[shipping recipe](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
+For changes from the 0.9 loader API, see
+[native ownership in 0.10](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/loading.md#native-ownership-in-010).
 
-```lean
-@[export my_app_add]
-def add (a b : UInt64) : UInt64 := a + b
-```
+The `interop_callback` and `string_streaming` examples show synchronous Lean-to-Rust callbacks with an admitted
+fixture pair. For their artifact and callback lifetime requirements, see
+[downstream interop](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
+Worker applications use typed commands through `lean-rs-worker-parent` for live rows and process isolation.
 
-**`src/main.rs`**—open the build-script capability, dispatch typed:
-
-```rust
-use lean_rs::{LeanBuiltCapability, LeanCapability, LeanRuntime};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = LeanRuntime::init()?;
-    let capability = LeanCapability::from_build_manifest(
-        runtime,
-        LeanBuiltCapability::manifest_path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")),
-    )?;
-    let add = capability.exported::<(u64, u64), u64>("my_app_add")?;
-    println!("{}", add.call(40, 2)?);  // 42
-    Ok(())
-}
-```
-
-Build and run:
-
-```sh
-cargo run
-```
-
-`CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache, filename convention, trusted
-export signatures, and the artifact manifest handoff. `LeanCapability` reads that manifest and keeps the built path,
-dependency bundle, initializer names, and checked export metadata together at runtime. Use `build_lake_target`,
-`LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom interop.
-
-See the complete shipping recipe at
-[`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
-Worker applications use the same built capability descriptor with `lean-rs-worker-parent` and point `LeanWorkerChild` at
-an app-owned worker-child binary; the recipe shows that packaging path as well.
-
-For a complete advanced same-process example that also lets Lean call a Rust callback, run
-`cargo run -p lean-rs --example interop_callback` in the workspace and read
-[`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
-For a trusted same-process string callback example, run `cargo run -p lean-rs --example string_streaming` and read
-[the string callback recipe](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md#string-callbacks).
-Worker tools that need process isolation, live rows, diagnostics, terminal summaries, timeouts, or memory cycling should
-use `lean-rs-worker-parent` typed commands instead of exposing callback handles.
-
-`LeanModule::exported_unchecked` still requires the caller to establish the native ABI. The conversion traits constrain
-dispatch shape, but `LeanAbi` exposes hidden public conversion hooks and a public marker; see the
-[current safety gaps](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/safety.md) before
-extending that internal boundary.
+Generic export binding and calls require the application's unsafe assertion about the actual native code.
+Custom implementations of `LeanAbi` must uphold representation, ownership and runtime requirements in both
+directions. [Safety model](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/safety.md)
 
 ## See also
 
