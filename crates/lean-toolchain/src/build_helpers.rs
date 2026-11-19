@@ -2383,7 +2383,7 @@ mod tests {
     }
 
     fn populate_project(root: &Path, target: &str) {
-        fs::create_dir_all(&root).expect("create temp project");
+        fs::create_dir_all(root).expect("create temp project");
         write_file(
             &root.join("lakefile.lean"),
             &format!(
@@ -2863,7 +2863,7 @@ mod tests {
     fn generated_output_key_selects_only_derived_build_cache_and_manifest_paths() {
         let fixture = make_generated_output_project("selection", "MyCapability");
         let root = &fixture.0;
-        let builder = CargoLeanCapability::new(&root, "MyCapability")
+        let builder = CargoLeanCapability::new(root, "MyCapability")
             .package("my_pkg")
             .generated_output_key("lean-4.36.0");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
@@ -2886,7 +2886,7 @@ mod tests {
         assert!(!root.join(".lake/lean-rs-build-cache").exists());
         assert_eq!(builder.probe_ready().expect("selected ready probe"), Some(built));
         assert!(
-            CargoLeanCapability::new(&root, "MyCapability")
+            CargoLeanCapability::new(root, "MyCapability")
                 .package("my_pkg")
                 .probe_ready()
                 .expect("default probe")
@@ -2911,7 +2911,7 @@ mod tests {
             let fixture = make_generated_output_project(&format!("invalid-{}", key.len()), "MyCapability");
             let root = &fixture.0;
             let mut runner = FakeLake::new(FakeMode::SuccessModern);
-            let error = CargoLeanCapability::new(&root, "MyCapability")
+            let error = CargoLeanCapability::new(root, "MyCapability")
                 .generated_output_key(key)
                 .build_with_runner(&mut runner, CargoMetadata::Suppress)
                 .expect_err("invalid generated output key");
