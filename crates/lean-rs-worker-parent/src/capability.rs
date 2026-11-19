@@ -1878,6 +1878,10 @@ fn spawn_checked_worker(
         config = config.lifetime_directory(directory);
     }
     #[cfg(unix)]
+    if let Some(directory) = &worker_child.lifetime_socket_directory {
+        config = config.lifetime_socket_directory(directory);
+    }
+    #[cfg(unix)]
     if let Some(executable) = &worker_child.native_guardian_executable {
         config = config.native_guardian(executable);
     }
@@ -2019,6 +2023,8 @@ pub struct LeanWorkerChild {
     #[cfg(unix)]
     lifetime_directory: Option<PathBuf>,
     #[cfg(unix)]
+    lifetime_socket_directory: Option<PathBuf>,
+    #[cfg(unix)]
     native_guardian_executable: Option<PathBuf>,
     #[cfg(unix)]
     native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
@@ -2048,6 +2054,8 @@ impl LeanWorkerChild {
             #[cfg(unix)]
             lifetime_directory: None,
             #[cfg(unix)]
+            lifetime_socket_directory: None,
+            #[cfg(unix)]
             native_guardian_executable: None,
             #[cfg(unix)]
             native_capacity_slot: None,
@@ -2068,6 +2076,8 @@ impl LeanWorkerChild {
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
+            #[cfg(unix)]
+            lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
             #[cfg(unix)]
@@ -2095,6 +2105,8 @@ impl LeanWorkerChild {
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
+            #[cfg(unix)]
+            lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
             #[cfg(unix)]
@@ -2142,6 +2154,17 @@ impl LeanWorkerChild {
     #[must_use]
     pub fn lifetime_directory(mut self, directory: impl Into<PathBuf>) -> Self {
         self.lifetime_directory = Some(directory.into());
+        self
+    }
+
+    /// Select the private directory for the temporary parent socket.
+    ///
+    /// See [`LeanWorkerConfig::lifetime_socket_directory`] for path and
+    /// ownership requirements. Requires [`Self::lifetime_directory`].
+    #[cfg(unix)]
+    #[must_use]
+    pub fn lifetime_socket_directory(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.lifetime_socket_directory = Some(directory.into());
         self
     }
 

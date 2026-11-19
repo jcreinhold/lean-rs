@@ -286,6 +286,8 @@ pub struct LeanWorkerConfig {
     #[cfg(unix)]
     lifetime_directory: Option<PathBuf>,
     #[cfg(unix)]
+    lifetime_socket_directory: Option<PathBuf>,
+    #[cfg(unix)]
     native_guardian_executable: Option<PathBuf>,
     #[cfg(unix)]
     native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
@@ -311,6 +313,8 @@ impl LeanWorkerConfig {
             shared_artifact_reads: false,
             #[cfg(unix)]
             lifetime_directory: None,
+            #[cfg(unix)]
+            lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
             #[cfg(unix)]
@@ -356,6 +360,21 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn lifetime_directory(mut self, directory: impl Into<PathBuf>) -> Self {
         self.lifetime_directory = Some(directory.into());
+        self
+    }
+
+    /// Select an existing private directory for the transient parent socket.
+    ///
+    /// Requires an absolute canonical path owned by this user with mode 0700.
+    /// The full socket pathname must fit the platform limit. Invalid explicit
+    /// roots fail before ownership reservation or child launch, without fallback.
+    /// Without this option, the existing `/tmp` placement is unchanged.
+    /// Requires [`Self::lifetime_directory`]. A parent crash before connection
+    /// may leave a socket directory; this option does not add crash recovery.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn lifetime_socket_directory(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.lifetime_socket_directory = Some(directory.into());
         self
     }
 
@@ -1992,6 +2011,9 @@ impl LeanWorker {
         for (key, value) in &config.env {
             command.env(key, value);
         }
+        // This private handoff cannot be inherited or supplied through `.env()`.
+        // It is derived only from the reviewed lifeline root below.
+        command.env_remove("LEAN_RS_WORKER_ARTIFACT_IPC_ROOT");
         if config.check_loader_environment {
             crate::inherit_checked_native_loader_environment(&mut command).map_err(|error| {
                 SpawnFailure::no_child(LeanWorkerError::Setup {
@@ -2001,6 +2023,12 @@ impl LeanWorker {
         }
         if config.shared_artifact_reads {
             command.env("LEAN_RS_WORKER_SHARED_ARTIFACT_READS", "1");
+            #[cfg(unix)]
+            if config.native_guardian_executable.is_some()
+                && let Some(root) = &config.lifetime_socket_directory
+            {
+                command.env("LEAN_RS_WORKER_ARTIFACT_IPC_ROOT", root);
+            }
         }
 
         #[cfg(unix)]
@@ -2033,19 +2061,23 @@ impl LeanWorker {
             command.env(lean_toolchain::native_guardian::EXECUTABLE_ENV, executable);
         }
         #[cfg(unix)]
+        if config.lifetime_socket_directory.is_some() && config.lifetime_directory.is_none() {
+            return Err(SpawnFailure::no_child(LeanWorkerError::Setup {
+                message: "lifeline socket directory requires a durable lifetime directory".to_owned(),
+            }));
+        }
+        #[cfg(unix)]
         let mut lifetime = config
             .lifetime_directory
             .as_deref()
             .map(|directory| {
-                if config.native_guardian_executable.is_some() {
-                    crate::crash_ownership::ParentLifetime::prepare_guarded_with_slot(
-                        directory,
-                        config.startup_timeout.saturating_sub(spawn_started.elapsed()),
-                        config.native_capacity_slot.as_ref(),
-                    )
-                } else {
-                    crate::crash_ownership::ParentLifetime::prepare(directory)
-                }
+                crate::crash_ownership::ParentLifetime::prepare_with_socket_directory(
+                    directory,
+                    config.lifetime_socket_directory.as_deref(),
+                    config.native_guardian_executable.is_some(),
+                    config.startup_timeout.saturating_sub(spawn_started.elapsed()),
+                    config.native_capacity_slot.as_ref(),
+                )
             })
             .transpose()
             .map_err(|source| {

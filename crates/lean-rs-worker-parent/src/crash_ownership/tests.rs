@@ -377,3 +377,68 @@ pub(super) mod startup_faults;
 #[cfg(target_os = "macos")]
 #[path = "tests/startup_traces.rs"]
 mod startup_traces;
+
+#[test]
+fn explicit_relative_socket_root_fails_before_owner_creation() {
+    let owners = Path::new("unused-relative-owner-root");
+    let error = ParentLifetime::prepare_with_socket_directory(
+        owners,
+        Some(Path::new("relative")),
+        true,
+        Duration::from_secs(1),
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+#[ignore = "requires explicit private canonical short LEAN_RS_TEST_SOCKET_ROOT outside temporary storage"]
+fn explicit_socket_root_validation_and_cleanup() {
+    struct TestDirectory(PathBuf);
+    impl TestDirectory {
+        fn create(path: PathBuf) -> Self {
+            fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            // This test starts no children and owns only the directory it created.
+            let _removed = fs::remove_dir_all(&self.0);
+        }
+    }
+    let root = PathBuf::from(std::env::var_os("LEAN_RS_TEST_SOCKET_ROOT").expect("select private socket root"));
+    let socket = root.join("check.sock");
+    validate_socket_root(&root, &socket).unwrap();
+    let too_long = root.join("x".repeat(256));
+    assert!(validate_socket_root(&root, &too_long).is_err());
+    for guarded in [false, true] {
+        let owner_root = root.join(format!("owners-{}-{guarded}", std::process::id()));
+        let owned = TestDirectory::create(owner_root.clone());
+        let lifetime = ParentLifetime::prepare_with_socket_directory(
+            &owner_root,
+            Some(&root),
+            guarded,
+            Duration::from_secs(1),
+            None,
+        )
+        .unwrap();
+        let directory = lifetime.socket_directory.clone();
+        assert_eq!(directory.parent(), Some(root.as_path()));
+        assert!(directory.join("parent.sock").exists());
+        drop(lifetime);
+        assert!(!directory.exists());
+        drop(owned);
+        assert!(!owner_root.exists());
+    }
+    let public = root.join(format!("public-{}", std::process::id()));
+    let owned = TestDirectory::create(public.clone());
+    fs::set_permissions(&public, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        validate_socket_root(&public, &public.join("s")).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    drop(owned);
+    assert!(!public.exists());
+}

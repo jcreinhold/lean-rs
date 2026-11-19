@@ -7,7 +7,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 #[cfg(target_os = "linux")]
 use std::io::Read as _;
-use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -537,50 +537,7 @@ fn admit_slot(
 pub fn reserve_owner_record(root: &Path, nonce: &str, timeout: Duration) -> io::Result<PathBuf> {
     reserve_owner_record_with_slot(root, nonce, timeout, None)
 }
-/// Reserve bounded generation and actor capacity under the same admission lock.
-///
-/// Live groups keep their actor slot after server death. A successful passive
-/// whole-group absence observation releases capacity, never a proof outcome.
-/// A still-live guardian retains its recovery record without occupying that slot.
-/// Preparing records certify no possible spawn and may be collected after their
-/// exact parent dies. Dispatching records remain fenced without durable identity.
-/// Bootstrap records require group and guardian closure; Running preserves the
-/// separate payload-only compute occupancy policy.
-/// # Errors
-/// Returns bounded backpressure, invalid ownership, or durable-write errors.
-pub fn reserve_owner_record_with_slot(
-    root: &Path,
-    nonce: &str,
-    timeout: Duration,
-    slot: Option<&NativeCapacitySlot>,
-) -> io::Result<PathBuf> {
-    let until = deadline(timeout)?;
-    if !valid_nonce(nonce) {
-        return Err(invalid("native owner nonce invalid"));
-    }
-    if let Some(slot) = slot {
-        slot.validate()?;
-    }
-    let parent =
-        NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native parent identity absent"))?;
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(root)?;
-    validate_registry(root)?;
-    let mutex = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join(".admission.lock"))?;
-    loop {
-        if std::time::Instant::now() >= until {
-            return Err(expired());
-        }
-        match mutex.try_lock() {
-            Ok(()) => break,
-            Err(std::fs::TryLockError::WouldBlock) => thread::sleep(POLL),
-            Err(std::fs::TryLockError::Error(error)) => return Err(error),
-        }
-    }
+fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<Vec<Value>> {
     let mut occupied = Vec::new();
     let mut seen = 0_usize;
     for entry in fs::read_dir(root)? {
@@ -625,6 +582,83 @@ pub fn reserve_owner_record_with_slot(
             occupied.push(value);
         }
     }
+    Ok(occupied)
+}
+fn lock_admission(root: &Path, until: std::time::Instant, create: bool) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .create(create)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let mutex = options.open(root.join(".admission.lock"))?;
+    let metadata = mutex.metadata()?;
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != rustix::process::getuid().as_raw() {
+        return Err(invalid("native admission lock must be an owned regular file"));
+    }
+    loop {
+        if std::time::Instant::now() >= until {
+            return Err(expired());
+        }
+        match mutex.try_lock() {
+            Ok(()) => return Ok(mutex),
+            Err(std::fs::TryLockError::WouldBlock) => thread::sleep(POLL),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+    }
+}
+/// Collect only owner records whose existing custody predicate proves closure.
+///
+/// This acquires the same admission lock and runs the same bounded collector as
+/// generation reservation, but never creates a generation or signals a process.
+/// # Errors
+/// Returns busy while any record remains occupied, or propagates malformed,
+/// unknown, timed-out or failed durable-cleanup observations.
+#[doc(hidden)]
+pub fn collect_closed_owner_records(root: &Path, timeout: Duration) -> io::Result<()> {
+    let until = deadline(timeout)?;
+    validate_registry(root)?;
+    let _mutex = lock_admission(root, until, false)?;
+    let occupied = collect_records_locked(root, until)?;
+    File::open(root)?.sync_all()?;
+    if occupied.is_empty() {
+        Ok(())
+    } else {
+        Err(busy("native generation custody remains open"))
+    }
+}
+/// Reserve bounded generation and actor capacity under the same admission lock.
+///
+/// Live groups keep their actor slot after server death. A successful passive
+/// whole-group absence observation releases capacity, never a proof outcome.
+/// A still-live guardian retains its recovery record without occupying that slot.
+/// Preparing records certify no possible spawn and may be collected after their
+/// exact parent dies. Dispatching records remain fenced without durable identity.
+/// Bootstrap records require group and guardian closure; Running preserves the
+/// separate payload-only compute occupancy policy.
+/// # Errors
+/// Returns bounded backpressure, invalid ownership, or durable-write errors.
+pub fn reserve_owner_record_with_slot(
+    root: &Path,
+    nonce: &str,
+    timeout: Duration,
+    slot: Option<&NativeCapacitySlot>,
+) -> io::Result<PathBuf> {
+    let until = deadline(timeout)?;
+    if !valid_nonce(nonce) {
+        return Err(invalid("native owner nonce invalid"));
+    }
+    if let Some(slot) = slot {
+        slot.validate()?;
+    }
+    let parent =
+        NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native parent identity absent"))?;
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(root)?;
+    validate_registry(root)?;
+    let _mutex = lock_admission(root, until, true)?;
+    let occupied = collect_records_locked(root, until)?;
     if occupied.len() >= MAX_OWNER_RECORDS {
         return Err(busy("native generation capacity occupied"));
     }

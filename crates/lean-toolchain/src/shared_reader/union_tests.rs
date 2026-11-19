@@ -92,7 +92,7 @@ struct Fixture {
 }
 impl Fixture {
     fn new(mode: &str) -> io::Result<Self> {
-        let (directory, _) = SocketDirectory::new()?;
+        let (directory, _) = SocketDirectory::new(None)?;
         let mut keyed = ["one", "two"]
             .into_iter()
             .map(|name| {

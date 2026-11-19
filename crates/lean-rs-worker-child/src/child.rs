@@ -406,8 +406,28 @@ fn install_parent_death_signal() -> bool {
 )]
 fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(unix)]
+    let parent_socket = std::env::var_os("LEAN_RS_WORKER_PARENT_SOCKET").map(PathBuf::from);
+    #[cfg(unix)]
     let mut guardian = crate::parent_watchdog::install_parent_watchdog()?;
     let shared_reads = std::env::var_os("LEAN_RS_WORKER_SHARED_ARTIFACT_READS").is_some_and(|value| value == "1");
+    #[cfg(unix)]
+    let artifact_ipc_root = match std::env::var_os("LEAN_RS_WORKER_ARTIFACT_IPC_ROOT") {
+        Some(root) => {
+            let root = PathBuf::from(root);
+            let lifeline_root = parent_socket
+                .as_deref()
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+                .ok_or_else(|| std::io::Error::other("artifact IPC root requires a parent lifeline"))?;
+            if guardian.is_none() || root != lifeline_root {
+                return Err(
+                    std::io::Error::other("artifact IPC root differs from the guarded parent lifeline root").into(),
+                );
+            }
+            Some(root)
+        }
+        None => None,
+    };
     let prepared_host = if shared_reads {
         Some(crate::host_artifacts::from_environment()?)
     } else {
@@ -622,6 +642,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                                 Duration::from_secs(30),
                                 allow_wait,
                                 guardian.as_mut(),
+                                artifact_ipc_root.as_deref(),
                             )
                         });
                     let read = match read {

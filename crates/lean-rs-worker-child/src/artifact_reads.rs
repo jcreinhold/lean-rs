@@ -22,6 +22,7 @@ impl ArtifactReadScope {
         timeout: Duration,
         allow_wait: bool,
         guardian: Option<&mut GuardianHandle>,
+        ipc_root: Option<&Path>,
     ) -> io::Result<Self> {
         let guardian =
             guardian.ok_or_else(|| io::Error::other("actual native reads require independent guardian custody"))?;
@@ -49,14 +50,22 @@ impl ArtifactReadScope {
         // collector modes retain this operation's one original time budget.
         let remaining = timeout.saturating_sub(started.elapsed());
         let readers = if allow_wait {
-            SharedReader::acquire_union(helper, &domains, remaining, &|| false)?
+            match ipc_root {
+                Some(root) => SharedReader::acquire_union_with_ipc_root(helper, &domains, remaining, &|| false, root)?,
+                None => SharedReader::acquire_union(helper, &domains, remaining, &|| false)?,
+            }
         } else {
             // The guardian still owns the previous call's SH descriptions for
             // this generation. Waiting here would deadlock a demanded writer
             // against this already-admitted call. Typed contention is returned
             // before any inheritance or new guardian transfer, so the parent
             // can cycle the old generation before one fresh pre-body attempt.
-            SharedReader::try_acquire_union(helper, &domains, remaining, &|| false)?
+            match ipc_root {
+                Some(root) => {
+                    SharedReader::try_acquire_union_with_ipc_root(helper, &domains, remaining, &|| false, root)?
+                }
+                None => SharedReader::try_acquire_union(helper, &domains, remaining, &|| false)?,
+            }
         };
         let mut epochs = Vec::with_capacity(domains.len());
         for (reader, root) in readers.iter().zip(&domains) {

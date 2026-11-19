@@ -10,7 +10,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, IoSliceMut, Read};
 use std::mem::MaybeUninit;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -82,8 +82,29 @@ fn validate_lake_if_present(root: &Path) -> io::Result<()> {
 }
 
 struct SocketDirectory(PathBuf);
+fn validate_ipc_root(root: &Path) -> io::Result<()> {
+    if !root.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "shared reader IPC root must be canonical, owned and mode 0700",
+        ));
+    }
+    let metadata = fs::symlink_metadata(root)?;
+    if root.canonicalize()? != root
+        || !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o777 != 0o700
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "shared reader IPC root must be canonical, owned and mode 0700",
+        ));
+    }
+    SocketAddr::from_pathname(root.join("lean-read-000000000000000000000000/fd.sock"))?;
+    Ok(())
+}
 impl SocketDirectory {
-    fn new() -> io::Result<(Self, String)> {
+    fn new(ipc_root: Option<&Path>) -> io::Result<(Self, String)> {
         let mut bytes = [0_u8; 24];
         File::open("/dev/urandom")?.read_exact(&mut bytes)?;
         const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -98,10 +119,16 @@ impl SocketDirectory {
                     .ok_or_else(|| invalid("nonce encoding failed"))?,
             ));
         }
-        // Keep Unix socket paths below Darwin's short sockaddr_un limit.
-        let directory = Path::new("/tmp")
-            .canonicalize()?
-            .join(format!("lean-read-{}", &nonce[..24]));
+        let root = match ipc_root {
+            Some(root) => {
+                validate_ipc_root(root)?;
+                root.to_path_buf()
+            }
+            None => Path::new("/tmp").canonicalize()?,
+        };
+        let directory = root.join(format!("lean-read-{}", &nonce[..24]));
+        // Validate the platform pathname bound before creating any state or child.
+        SocketAddr::from_pathname(directory.join("fd.sock"))?;
         fs::DirBuilder::new().mode(0o700).create(&directory)?;
         Ok((Self(directory), nonce))
     }
@@ -435,7 +462,7 @@ impl SharedReader {
     /// lock identity, aliases, or a mismatched root/nonce/receipt. Failed pure
     /// helper cleanup may take at most another 100 milliseconds.
     pub fn acquire(helper: &Path, root: &Path, timeout: Duration) -> io::Result<Self> {
-        Self::acquire_until(helper, root, admission_deadline(timeout)?, &|| false, false)
+        Self::acquire_until(helper, root, admission_deadline(timeout)?, &|| false, false, None)
     }
 
     /// Acquire a complete fixed union, releasing every tentative descriptor
@@ -456,7 +483,29 @@ impl SharedReader {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Vec<Self>> {
-        Self::union_until(helper, roots, admission_deadline(timeout)?, cancelled, true)
+        Self::union_until(helper, roots, admission_deadline(timeout)?, cancelled, true, None)
+    }
+
+    /// Acquire a complete fixed union using one explicit private IPC root.
+    ///
+    /// # Errors
+    /// Rejects an invalid or overlong IPC root before union admission.
+    pub fn acquire_union_with_ipc_root(
+        helper: &Path,
+        roots: &[PathBuf],
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+        ipc_root: &Path,
+    ) -> io::Result<Vec<Self>> {
+        validate_ipc_root(ipc_root)?;
+        Self::union_until(
+            helper,
+            roots,
+            admission_deadline(timeout)?,
+            cancelled,
+            true,
+            Some(ipc_root),
+        )
     }
 
     /// Make one complete admission pass, releasing partial reads on failure.
@@ -473,7 +522,29 @@ impl SharedReader {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Vec<Self>> {
-        Self::union_until(helper, roots, admission_deadline(timeout)?, cancelled, false)
+        Self::union_until(helper, roots, admission_deadline(timeout)?, cancelled, false, None)
+    }
+
+    /// Make one complete admission pass using one explicit private IPC root.
+    ///
+    /// # Errors
+    /// Rejects an invalid or overlong IPC root before union admission.
+    pub fn try_acquire_union_with_ipc_root(
+        helper: &Path,
+        roots: &[PathBuf],
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+        ipc_root: &Path,
+    ) -> io::Result<Vec<Self>> {
+        validate_ipc_root(ipc_root)?;
+        Self::union_until(
+            helper,
+            roots,
+            admission_deadline(timeout)?,
+            cancelled,
+            false,
+            Some(ipc_root),
+        )
     }
     fn union_until(
         helper: &Path,
@@ -481,6 +552,7 @@ impl SharedReader {
         deadline: Instant,
         cancelled: &(impl Fn() -> bool + ?Sized),
         wait: bool,
+        ipc_root: Option<&Path>,
     ) -> io::Result<Vec<Self>> {
         check_admission(deadline, cancelled)?;
         let domains = union_domains(helper, roots)?;
@@ -491,7 +563,10 @@ impl SharedReader {
                 preflight(&domains)?; // All gates close before any helper spawn.
                 for (index, root, _) in &domains {
                     check_admission(deadline, cancelled)?;
-                    readers.push((*index, Self::acquire_until(helper, root, deadline, cancelled, true)?));
+                    readers.push((
+                        *index,
+                        Self::acquire_until(helper, root, deadline, cancelled, true, ipc_root)?,
+                    ));
                 }
                 Ok(())
             })();
@@ -516,11 +591,12 @@ impl SharedReader {
         deadline: Instant,
         cancelled: &(impl Fn() -> bool + ?Sized),
         report_contention: bool,
+        ipc_root: Option<&Path>,
     ) -> io::Result<Self> {
         check_admission(deadline, cancelled)?;
         validate_reader_root(helper_path, root)?;
         let lock = crate::shared_writer::project_lock_path(root)?;
-        let (directory, nonce) = SocketDirectory::new()?;
+        let (directory, nonce) = SocketDirectory::new(ipc_root)?;
         let listener = UnixListener::bind(directory.0.join("fd.sock"))?;
         listener.set_nonblocking(true)?;
         let mut command = Command::new(helper_path);
@@ -754,7 +830,7 @@ impl SharedReadProxy {
     /// # Errors
     /// Returns admission/receipt/identity errors within the supplied deadline.
     pub fn acquire(helper: &Path, root: &Path, timeout: Duration) -> io::Result<Self> {
-        Self::acquire_until(helper, root, admission_deadline(timeout)?, &|| false, false)
+        Self::acquire_until(helper, root, admission_deadline(timeout)?, &|| false, false, None)
     }
 
     /// Acquire a complete fixed parent-cache union under one admission budget.
@@ -772,6 +848,30 @@ impl SharedReadProxy {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Vec<Self>> {
+        Self::acquire_union_inner(helper, roots, timeout, cancelled, None)
+    }
+
+    /// Acquire a complete fixed parent-cache union using one explicit private IPC root.
+    ///
+    /// # Errors
+    /// Rejects an invalid or overlong IPC root before union admission.
+    pub fn acquire_union_with_ipc_root(
+        helper: &Path,
+        roots: &[PathBuf],
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+        ipc_root: &Path,
+    ) -> io::Result<Vec<Self>> {
+        validate_ipc_root(ipc_root)?;
+        Self::acquire_union_inner(helper, roots, timeout, cancelled, Some(ipc_root))
+    }
+    fn acquire_union_inner(
+        helper: &Path,
+        roots: &[PathBuf],
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+        ipc_root: Option<&Path>,
+    ) -> io::Result<Vec<Self>> {
         let deadline = admission_deadline(timeout)?;
         check_admission(deadline, cancelled)?;
         let domains = union_domains(helper, roots)?;
@@ -782,7 +882,10 @@ impl SharedReadProxy {
                 preflight(&domains)?;
                 for (index, root, _) in &domains {
                     check_admission(deadline, cancelled)?;
-                    proxies.push((*index, Self::acquire_until(helper, root, deadline, cancelled, true)?));
+                    proxies.push((
+                        *index,
+                        Self::acquire_until(helper, root, deadline, cancelled, true, ipc_root)?,
+                    ));
                 }
                 for (_, proxy) in &mut proxies {
                     proxy.validate()?;
@@ -832,11 +935,12 @@ impl SharedReadProxy {
         deadline: Instant,
         cancelled: &(impl Fn() -> bool + ?Sized),
         report_contention: bool,
+        ipc_root: Option<&Path>,
     ) -> io::Result<Self> {
         check_admission(deadline, cancelled)?;
         validate_reader_root(helper_path, root)?;
         let lock = crate::shared_writer::project_lock_path(root)?;
-        let (directory, nonce) = SocketDirectory::new()?;
+        let (directory, nonce) = SocketDirectory::new(ipc_root)?;
         let fifo = directory.0.join("control.fifo");
         mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).map_err(io::Error::from)?;
         let control = OpenOptions::new().read(true).write(true).open(&fifo)?;

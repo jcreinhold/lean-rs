@@ -608,6 +608,7 @@ pub fn lean_rs_worker_parent::LeanWorkerChild::env_override(self, impl core::con
 pub fn lean_rs_worker_parent::LeanWorkerChild::for_toolchain(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::lifetime_directory(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerChild::lifetime_socket_directory(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::native_capacity_slot(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, usize) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::native_guardian(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerChild::path(impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -639,6 +640,7 @@ pub fn lean_rs_worker_parent::LeanWorkerConfig::current_dir(self, impl core::con
 pub fn lean_rs_worker_parent::LeanWorkerConfig::env(self, impl core::convert::Into<std::ffi::os_str::OsString>, impl core::convert::Into<std::ffi::os_str::OsString>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::executable(&self) -> &std::path::Path
 pub fn lean_rs_worker_parent::LeanWorkerConfig::lifetime_directory(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerConfig::lifetime_socket_directory(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::max_frame_bytes(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::native_capacity_slot(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, usize) -> Self

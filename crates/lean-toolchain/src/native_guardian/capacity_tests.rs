@@ -2,6 +2,36 @@
 use super::*;
 use std::sync::{Arc, Barrier};
 
+struct CollectorFixture {
+    root: PathBuf,
+    registry: PathBuf,
+}
+impl CollectorFixture {
+    fn new() -> Self {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
+        let base = workspace.join("target/test-state");
+        fs::create_dir_all(&base).unwrap();
+        let root = base.join(format!(
+            "native-owner-collector-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let registry = root.join("owners");
+        fs::DirBuilder::new().mode(0o700).create(&registry).unwrap();
+        Self { root, registry }
+    }
+}
+impl Drop for CollectorFixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).unwrap();
+    }
+}
+
 fn slot(key: &str, scope: &str, limit: usize) -> NativeCapacitySlot {
     NativeCapacitySlot {
         key: key.to_owned(),
@@ -56,6 +86,79 @@ fn stopped(child: &mut Child) {
     child.kill().unwrap();
     child.wait().unwrap();
     assert!(!crate::process_group::group_present(child.id()).unwrap());
+}
+#[test]
+fn explicit_closed_collection_reuses_reservation_predicate_without_creating_a_generation() {
+    let fixture = CollectorFixture::new();
+    let record = reserve_owner_record(&fixture.registry, NONCE, Duration::from_secs(1)).unwrap();
+    retire_preparing_owner_record(&record, NONCE).unwrap();
+
+    collect_closed_owner_records(&fixture.registry, Duration::from_secs(1)).unwrap();
+
+    let names: Vec<_> = fs::read_dir(&fixture.registry)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, [".admission.lock"]);
+}
+#[test]
+fn explicit_closed_collection_retains_pending_preparation() {
+    let fixture = CollectorFixture::new();
+    let record = reserve_owner_record(&fixture.registry, NONCE, Duration::from_secs(1)).unwrap();
+
+    assert_eq!(
+        collect_closed_owner_records(&fixture.registry, Duration::from_secs(1))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    assert!(record.exists());
+
+    retire_preparing_owner_record(&record, NONCE).unwrap();
+    collect_closed_owner_records(&fixture.registry, Duration::from_secs(1)).unwrap();
+}
+#[test]
+fn explicit_closed_collection_retains_dispatching_without_a_process_probe() {
+    let fixture = CollectorFixture::new();
+    let record = reserve_owner_record(&fixture.registry, NONCE, Duration::from_secs(1)).unwrap();
+    dispatch_owner_record(&record, NONCE).unwrap();
+
+    assert_eq!(
+        collect_closed_owner_records(&fixture.registry, Duration::from_secs(1))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    assert_eq!(read_owner(&record).unwrap()["phase"], json!("dispatching"));
+}
+#[test]
+fn explicit_closed_collection_preserves_malformed_committed_record() {
+    let fixture = CollectorFixture::new();
+    let record = reserve_owner_record(&fixture.registry, NONCE, Duration::from_secs(1)).unwrap();
+    fs::write(&record, b"{malformed-committed").unwrap();
+
+    assert!(collect_closed_owner_records(&fixture.registry, Duration::from_secs(1)).is_err());
+    assert_eq!(fs::read(record).unwrap(), b"{malformed-committed");
+}
+#[test]
+fn explicit_closed_collection_times_out_behind_admission_lock_without_mutation() {
+    let fixture = CollectorFixture::new();
+    let record = reserve_owner_record(&fixture.registry, NONCE, Duration::from_secs(1)).unwrap();
+    retire_preparing_owner_record(&record, NONCE).unwrap();
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .open(fixture.registry.join(".admission.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+
+    assert_eq!(
+        collect_closed_owner_records(&fixture.registry, Duration::from_millis(10))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::TimedOut
+    );
+    assert!(record.exists());
 }
 #[test]
 fn one_actor_admits_two_scopes_without_admitting_a_second_actor_or_replacement() {

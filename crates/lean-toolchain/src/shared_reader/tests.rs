@@ -4,11 +4,96 @@ use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg}
 use serde_json::{Value, json};
 use std::io::{IoSlice, Write};
 use std::os::fd::AsFd as _;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static IPC_ROOT_NEXT: AtomicUsize = AtomicUsize::new(0);
+
+struct ExplicitIpcRoot(PathBuf);
+impl ExplicitIpcRoot {
+    fn new() -> io::Result<Self> {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .ok_or_else(|| invalid("workspace"))?;
+        let base = workspace.join("target/test-state");
+        fs::create_dir_all(&base)?;
+        let root = base.join(format!(
+            "r{:x}{:02x}",
+            std::process::id(),
+            IPC_ROOT_NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&root)?;
+        Ok(Self(root.canonicalize()?))
+    }
+}
+impl Drop for ExplicitIpcRoot {
+    fn drop(&mut self) {
+        let _removed = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn explicit_ipc_root_owns_and_cleans_shared_transport_directory() -> io::Result<()> {
+    let root = ExplicitIpcRoot::new()?;
+    let (directory, _) = SocketDirectory::new(Some(&root.0))?;
+    assert_eq!(directory.0.parent(), Some(root.0.as_path()));
+    assert!(directory.0.is_dir());
+    drop(directory);
+    assert!(fs::read_dir(&root.0)?.next().is_none());
+    Ok(())
+}
+
+#[test]
+fn explicit_ipc_root_refuses_invalid_paths_before_creating_transport_state() -> io::Result<()> {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let relative = SocketDirectory::new(Some(Path::new("relative-ipc-root")))
+        .err()
+        .ok_or_else(|| invalid("accepted relative IPC root"))?;
+    assert_eq!(relative.kind(), io::ErrorKind::InvalidInput);
+    assert!(relative.to_string().contains("canonical, owned and mode 0700"));
+    let root = ExplicitIpcRoot::new()?;
+    fs::set_permissions(&root.0, fs::Permissions::from_mode(0o755))?;
+    let mode = SocketDirectory::new(Some(&root.0))
+        .err()
+        .ok_or_else(|| invalid("accepted non-private IPC root"))?;
+    assert_eq!(mode.kind(), io::ErrorKind::InvalidInput);
+    assert!(mode.to_string().contains("canonical, owned and mode 0700"));
+    fs::set_permissions(&root.0, fs::Permissions::from_mode(0o700))?;
+    let alias = root.0.join("alias");
+    symlink(&root.0, &alias)?;
+    let aliased = SocketDirectory::new(Some(&alias))
+        .err()
+        .ok_or_else(|| invalid("accepted aliased IPC root"))?;
+    assert_eq!(aliased.kind(), io::ErrorKind::InvalidInput);
+    assert!(aliased.to_string().contains("canonical, owned and mode 0700"));
+    fs::remove_file(alias)?;
+    assert!(fs::read_dir(&root.0)?.next().is_none());
+    Ok(())
+}
+
+#[test]
+fn explicit_ipc_root_refuses_overlong_socket_path_without_state() -> io::Result<()> {
+    let root = ExplicitIpcRoot::new()?;
+    let long = root.0.join("x".repeat(96));
+    fs::DirBuilder::new().mode(0o700).create(&long)?;
+    let long = long.canonicalize()?;
+    assert_eq!(
+        SocketDirectory::new(Some(&long))
+            .err()
+            .ok_or_else(|| invalid("accepted overlong IPC root"))?
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert!(fs::read_dir(&long)?.next().is_none());
+    fs::remove_dir(long)?;
+    Ok(())
+}
 
 struct Fixture(SocketDirectory);
 impl Fixture {
     fn new() -> io::Result<Self> {
-        let (directory, _) = SocketDirectory::new()?;
+        let (directory, _) = SocketDirectory::new(None)?;
         fs::create_dir(directory.0.join(".lake"))?;
         Ok(Self(directory))
     }
@@ -246,7 +331,7 @@ fn real_writer_conflict_times_out_without_releasing_writer() -> io::Result<()> {
 
 #[test]
 fn delayed_proxy_helper_is_reaped_after_bounded_drop() -> io::Result<()> {
-    let (directory, _) = SocketDirectory::new()?;
+    let (directory, _) = SocketDirectory::new(None)?;
     let reaper = reserve_reaper()?;
     let child = Command::new("/bin/sleep").arg("0.3").spawn()?;
     let pid = rustix::process::Pid::from_child(&child);
@@ -350,7 +435,7 @@ fn real_thin_writer_controller_excludes_both_read_clients() -> io::Result<()> {
 
 #[test]
 fn cold_reader_roots_do_not_require_or_create_a_lake_directory() -> io::Result<()> {
-    let (directory, _) = SocketDirectory::new()?;
+    let (directory, _) = SocketDirectory::new(None)?;
     validate_lake_if_present(&directory.0)?;
     assert!(!directory.0.join(".lake").exists());
     fs::create_dir(directory.0.join(".lake"))?;
@@ -361,8 +446,8 @@ fn cold_reader_roots_do_not_require_or_create_a_lake_directory() -> io::Result<(
 
 #[test]
 fn existing_aliased_or_non_directory_lake_roots_are_rejected() -> io::Result<()> {
-    let (directory, _) = SocketDirectory::new()?;
-    let (other, _) = SocketDirectory::new()?;
+    let (directory, _) = SocketDirectory::new(None)?;
+    let (other, _) = SocketDirectory::new(None)?;
     let lake = directory.0.join(".lake");
     fs::write(&lake, b"not a directory")?;
     assert_eq!(

@@ -472,6 +472,16 @@ request the same group drain. Failure to signal or observe closure retains read 
 successful proof result. Managed payloads must not change process group or detach into another session. This is process
 lifecycle ownership, not a sandbox against arbitrary native code.
 
+Callers that cannot use the default transient socket location may also set `lifetime_socket_directory`. The selected
+directory must already be an absolute, canonical, private directory owned by the caller, and the complete socket path
+must fit the platform limit. An invalid explicit directory fails before durable ownership reservation or child launch;
+it never falls back to the default. The socket directory is temporary bootstrap state, not a second ownership record.
+
+Protected shared-artifact reads reuse that same explicit socket root. The parent removes any inherited artifact-root
+override, derives the child handoff from `lifetime_socket_directory`, and the guarded child requires it to match the
+parent lifeline root before Lean starts. Standalone host readiness accepts the root only as a command argument. When
+no explicit root is supplied, the existing shared-reader placement remains unchanged.
+
 A generation's single bounded `owner.json` moves from Preparing to Running before the guardian acknowledges runtime
 startup. Each acquired artifact SH descriptor is transferred to the guardian and its canonical lock domain is durably
 published before admission returns. The union is retained until that whole generation closes, including after logical
@@ -483,6 +493,8 @@ remain unavailable.
 
 Payload closure and record collection are separate. A Running v2 record stays until the whole payload group is absent
 and the exact guardian is no longer live: that guardian can retain SH descriptors after its payload has stopped.
+The bounded admission collector uses this same predicate under `.admission.lock`. Explicit fixture cleanup can invoke
+that collector without reserving a new generation; it returns pending or an error unless every record is removable.
 Collection retains the record and private inputs through that interval. Actor capacity ignores confirmed-closed
 payloads even while their guardian metadata remains, including before checking old slot keys or configured limits.
 The finite namespace limit still counts every retained record. Validation and observation errors propagate rather

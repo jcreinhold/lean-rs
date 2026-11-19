@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt as _, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -435,56 +435,76 @@ pub(crate) struct ParentLifetimeLease {
     deadline: Instant,
     running_published: bool,
 }
+// Validate before creating a socket or reserving durable ownership. The root is
+// caller-controlled; it must remain private and stable throughout preparation.
+fn validate_socket_root(root: &Path, socket: &Path) -> io::Result<()> {
+    if !root.is_absolute() || root.canonicalize()? != root {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "lifeline socket root must be absolute and canonical",
+        ));
+    }
+    let metadata = fs::symlink_metadata(root)?;
+    #[allow(
+        unsafe_code,
+        reason = "geteuid reads the current process identity without side effects"
+    )]
+    // SAFETY: geteuid takes no pointers and cannot invalidate Rust memory.
+    let uid = unsafe { libc::geteuid() };
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o777 != 0o700 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "lifeline socket root must be owned by this user with mode 0700",
+        ));
+    }
+    SocketAddr::from_pathname(socket)?;
+    Ok(())
+}
 impl ParentLifetime {
+    #[cfg(test)]
     pub(crate) fn prepare(root: &Path) -> io::Result<Self> {
-        Self::prepare_inner(root, false, Duration::from_secs(2), None)
+        Self::prepare_inner(root, false, Duration::from_secs(2), None, None)
     }
     #[cfg(test)]
     pub(crate) fn prepare_guarded(root: &Path, timeout: Duration) -> io::Result<Self> {
-        Self::prepare_inner(root, true, timeout, None)
+        Self::prepare_inner(root, true, timeout, None, None)
     }
     pub(crate) fn prepare_guarded_with_slot(
         root: &Path,
         timeout: Duration,
         slot: Option<&native_guardian::NativeCapacitySlot>,
     ) -> io::Result<Self> {
-        Self::prepare_inner(root, true, timeout, slot)
+        Self::prepare_inner(root, true, timeout, slot, None)
+    }
+    pub(crate) fn prepare_with_socket_directory(
+        root: &Path,
+        socket_root: Option<&Path>,
+        guarded: bool,
+        timeout: Duration,
+        slot: Option<&native_guardian::NativeCapacitySlot>,
+    ) -> io::Result<Self> {
+        Self::prepare_inner(root, guarded, timeout, slot, socket_root)
     }
     fn prepare_inner(
         root: &Path,
         guarded: bool,
         timeout: Duration,
         slot: Option<&native_guardian::NativeCapacitySlot>,
+        socket_root: Option<&Path>,
     ) -> io::Result<Self> {
         let started = Instant::now();
-        if guarded {
-            fs::DirBuilder::new().recursive(true).mode(0o700).create(root)?;
-        } else {
-            fs::create_dir_all(root)?;
-        }
         let mut random = [0_u8; 24];
         File::open("/dev/urandom")?.read_exact(&mut random)?;
         let mut nonce = String::with_capacity(48);
         for byte in random {
             write!(nonce, "{byte:02x}").map_err(io::Error::other)?;
         }
-        let directory = if guarded {
-            native_guardian::reserve_owner_record_with_slot(
-                root,
-                &nonce,
-                timeout.saturating_sub(started.elapsed()).min(Duration::from_secs(2)),
-                slot,
-            )?
-            .parent()
-            .ok_or_else(|| io::Error::other("owner directory missing"))?
-            .to_path_buf()
-        } else {
-            let directory = root.join(format!("worker-{nonce}"));
-            fs::create_dir(&directory)?;
-            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
-            directory
-        };
-        let socket_directory = PathBuf::from("/tmp").join(format!("lean-worker-{}", &nonce[..24]));
+        let socket_directory = socket_root
+            .unwrap_or_else(|| Path::new("/tmp"))
+            .join(format!("lean-worker-{}", &nonce[..24]));
+        if let Some(socket_root) = socket_root {
+            validate_socket_root(socket_root, &socket_directory.join("parent.sock"))?;
+        }
         #[cfg(test)]
         let socket_directory = lifecycle_tests::NEXT_SOCKET_DIRECTORY
             .take()
@@ -498,6 +518,26 @@ impl ParentLifetime {
             let listener = UnixListener::bind(socket_directory.join("parent.sock"))?;
             bound_socket = true;
             listener.set_nonblocking(true)?;
+            if guarded {
+                fs::DirBuilder::new().recursive(true).mode(0o700).create(root)?;
+            } else {
+                fs::create_dir_all(root)?;
+            }
+            let directory = if guarded {
+                native_guardian::reserve_owner_record_with_slot(
+                    root,
+                    &nonce,
+                    timeout.saturating_sub(started.elapsed()).min(Duration::from_secs(2)),
+                    slot,
+                )?
+                .parent()
+                .ok_or_else(|| io::Error::other("owner directory missing"))?
+                .to_path_buf()
+            } else {
+                let directory = root.join(format!("worker-{nonce}"));
+                fs::DirBuilder::new().mode(0o700).create(&directory)?;
+                directory
+            };
             Ok(Self {
                 listener,
                 directory: directory.clone(),
@@ -509,9 +549,7 @@ impl ParentLifetime {
                 dispatched: false,
             })
         })();
-        if initialized.is_err() && guarded {
-            let _record = fs::remove_file(directory.join("owner.json"));
-            let _directory = fs::remove_dir(&directory);
+        if initialized.is_err() {
             if bound_socket {
                 let _socket = fs::remove_file(socket_directory.join("parent.sock"));
             }
