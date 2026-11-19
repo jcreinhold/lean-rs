@@ -15,6 +15,286 @@ use std::{
     sync::OnceLock,
 };
 
+#[cfg(all(test, unix))]
+fn retained_image(path: &Path, dev: u64, ino: u64, digest: &str) -> fs::File {
+    use std::fmt::Write as _;
+    use std::io::Read as _;
+    use std::os::unix::fs::MetadataExt as _;
+    assert_eq!(path.canonicalize().expect("canonical native image"), path);
+    let named = fs::symlink_metadata(path).expect("named native image");
+    assert!(named.is_file() && named.len() <= 1024 * 1024 * 1024);
+    assert_eq!((named.dev(), named.ino()), (dev, ino));
+    let mut file = fs::File::open(path).expect("open selected image");
+    let before = file.metadata().expect("selected image metadata");
+    assert!(before.is_file() && before.len() == named.len());
+    assert_eq!((before.dev(), before.ino()), (dev, ino));
+    let mut hash = Sha256::new();
+    let mut bytes = [0; 16 * 1024];
+    let mut remaining = before.len();
+    loop {
+        let count = file.read(&mut bytes).expect("read selected image");
+        if count == 0 {
+            break;
+        }
+        remaining = remaining.checked_sub(count as u64).expect("selected image grew");
+        hash.update(bytes.get(..count).expect("read selected byte range"));
+    }
+    assert_eq!(remaining, 0, "selected image shrank");
+    let after = file.metadata().expect("held image metadata");
+    let identity = |m: &fs::Metadata| {
+        (
+            m.dev(),
+            m.ino(),
+            m.len(),
+            m.mtime(),
+            m.mtime_nsec(),
+            m.ctime(),
+            m.ctime_nsec(),
+        )
+    };
+    assert_eq!(identity(&before), identity(&after));
+    assert_eq!(
+        identity(&after),
+        identity(&path.metadata().expect("recheck named image"))
+    );
+    let mut actual = String::with_capacity(64);
+    for byte in hash.finalize() {
+        write!(actual, "{byte:02x}").expect("write image digest");
+    }
+    assert_eq!(actual, digest);
+    file
+}
+
+#[cfg(all(test, unix))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OrdinaryShims {
+    prefix: PathBuf,
+    manifest: PathBuf,
+    manifest_sha256: String,
+    roots: Vec<PathBuf>,
+    search_paths: Vec<PathBuf>,
+    images: [(PathBuf, u64, u64, String); 2],
+}
+
+#[cfg(all(test, unix))]
+struct OrdinaryFixture {
+    project: PathBuf,
+    project_image: PathBuf,
+    shims: Option<(OrdinaryShims, String)>,
+    // The job owns its private project. The bundled shim roots also hold
+    // normal shared locks, since SDK builds may use those same roots.
+    _files: Vec<fs::File>,
+}
+
+#[cfg(all(test, unix))]
+fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
+    use std::io::Read as _;
+    use std::os::unix::fs::MetadataExt as _;
+    let marker = "LEAN_RS_TEST_SCALAR_PRIVATE_JOB";
+    let compiled = option_env!("LEAN_RS_TEST_SCALAR_PRIVATE_JOB");
+    let runtime = std::env::var(marker).ok();
+    if compiled.is_none() && std::env::var_os(marker).is_none() {
+        return None;
+    }
+    assert_eq!(compiled, Some("1"));
+    assert_eq!(runtime.as_deref(), Some("1"));
+    static INSTANCE: OnceLock<OrdinaryFixture> = OnceLock::new();
+    Some(INSTANCE.get_or_init(|| {
+        let header = Path::new(lean_toolchain::LEAN_HEADER_PATH);
+        assert_eq!(
+            std::env::var_os("LEAN_SYSROOT").as_deref(),
+            header.ancestors().nth(3).map(Path::as_os_str)
+        );
+        assert!(std::env::var_os("LEAN_PATH").is_none());
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("canonical SDK checkout");
+        let (project, dev, ino): (PathBuf, u64, u64) =
+            serde_json::from_str(option_env!("LEAN_RS_TEST_SCALAR_FIXTURE").unwrap_or_default())
+                .expect("ordinary test requires the selected scalar fixture");
+        assert_eq!(project, checkout.join("fixtures/lean"));
+        assert_eq!(project.canonicalize().expect("canonical fixture"), project);
+        let metadata = project.metadata().expect("selected fixture metadata");
+        assert_eq!(metadata.mode() & 0o7777, 0o700);
+        assert_eq!(metadata.uid(), checkout.metadata().expect("checkout metadata").uid());
+        let extension = std::env::consts::DLL_EXTENSION;
+        let project_image = project.join(format!(
+            ".lake/build/lib/liblean__rs__fixture_LeanRsFixture.{extension}"
+        ));
+        let mut files = vec![retained_image(
+            &project_image,
+            dev,
+            ino,
+            option_env!("LEAN_RS_PROFILE_FIXTURE_SHA256").unwrap_or_default(),
+        )];
+
+        let shims = option_env!("LEAN_RS_TEST_ORDINARY_HOST_SHIMS").map(|selection| {
+            let shims: OrdinaryShims = serde_json::from_str(selection).expect("prepared host shim selection");
+            assert_eq!(
+                std::env::var_os("LEAN_SYSROOT").as_deref(),
+                Some(shims.prefix.as_os_str())
+            );
+            let workspace = checkout.join("crates/lean-rs-host/shims");
+            let host = workspace.join("lean-rs-host-shims");
+            let interop = workspace.join("lean-rs-interop-shims");
+            assert_eq!(shims.roots, [host.clone(), interop.clone()]);
+            let generated = ".lake/lean-rs-generated/lean-4.36.0";
+            let host_build = host.join(generated);
+            let interop_build = interop.join(generated);
+            assert_eq!(
+                shims.search_paths,
+                [interop_build.join("lib/lean"), host_build.join("lib/lean")]
+            );
+            assert_eq!(
+                shims.manifest.parent(),
+                Some(host_build.join("lean-rs-build-cache").as_path())
+            );
+            for (pin, path) in shims.images.iter().zip([
+                host_build.join(format!("lib/liblean__rs__host__shims_LeanRsHostShims.{extension}")),
+                interop_build.join(format!("lib/liblean__rs__interop__shims_LeanRsInterop.{extension}")),
+            ]) {
+                assert_eq!(pin.0, path);
+            }
+
+            let mut lock_paths = shims
+                .roots
+                .iter()
+                .map(|root| lean_toolchain::shared_writer::project_lock_path(root).expect("ordinary host lock domain"))
+                .collect::<Vec<_>>();
+            lock_paths.sort();
+            let intent = lean_toolchain::writer_demand::ReadAdmission::try_acquire(&lock_paths)
+                .expect("inspect ordinary host writer demand")
+                .expect("no competing host writer");
+            for path in lock_paths {
+                assert_eq!(path.canonicalize().expect("canonical lock"), path);
+                let lock = fs::File::open(&path).expect("open prepared host lock");
+                lock.try_lock_shared().expect("take prepared host read lock");
+                let opened = lock.metadata().expect("held host lock identity");
+                let named = fs::symlink_metadata(path).expect("named host lock identity");
+                assert!(opened.is_file() && opened.nlink() == 1 && named.is_file());
+                assert_eq!((opened.dev(), opened.ino()), (named.dev(), named.ino()));
+                assert!(
+                    lean_toolchain::shared_writer::previous_writer_stopped(&lock)
+                        .expect("prepared host writer closure")
+                );
+                files.push(lock);
+            }
+            drop(intent);
+            for (image, dev, ino, hash) in &shims.images {
+                files.push(retained_image(image, *dev, *ino, hash));
+            }
+            assert_eq!(
+                shims.manifest.canonicalize().expect("canonical shim manifest"),
+                shims.manifest
+            );
+            let mut bytes = Vec::new();
+            fs::File::open(&shims.manifest)
+                .expect("open prepared shim manifest")
+                .take(64 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .expect("bounded shim manifest");
+            assert!(bytes.len() <= 64 * 1024);
+            assert_eq!(hex_digest(&bytes), shims.manifest_sha256);
+            // The named SDK run already checked the exact manifest’s native
+            // dependencies and initializer order. The verified bytes are the
+            // same bytes passed to the loader.
+            (shims, String::from_utf8(bytes).expect("SDK manifest text"))
+        });
+        OrdinaryFixture {
+            project,
+            project_image,
+            shims,
+            _files: files,
+        }
+    }))
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_fixture_root() -> PathBuf {
+    #[cfg(all(test, unix))]
+    if let Some(fixture) = ordinary_fixture() {
+        return fixture.project.clone();
+    }
+    fixture_root()
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_project_library() -> lean_rs::module::LeanLibrary<'static> {
+    #[cfg(all(test, unix))]
+    if let Some(fixture) = ordinary_fixture() {
+        #[allow(
+            unsafe_code,
+            reason = "the private test job owns the exact source-built fixture through exit"
+        )]
+        // SAFETY: The trusted job built and selected this exact library and
+        // its runtime. All native images and retained input custody live to
+        // process exit, including after the returned library is dropped.
+        let load = || {
+            unsafe {
+                lean_rs::module::LeanLibrary::open(LeanRuntime::init().expect("paired runtime"), &fixture.project_image)
+            }
+            .expect("load selected project image")
+        };
+        static RETAINED: OnceLock<()> = OnceLock::new();
+        RETAINED.get_or_init(|| {
+            Box::leak(Box::new(load()));
+        });
+        return load();
+    }
+    project_library()
+}
+
+#[allow(dead_code, reason = "shared with separate strict test binaries")]
+pub(super) fn native_capabilities<'h>(
+    host: &'h LeanHost<'static>,
+) -> lean_rs::LeanResult<LeanCapabilities<'static, 'h>> {
+    #[cfg(all(test, unix))]
+    if let Some(fixture) = ordinary_fixture() {
+        let (shims, text) = fixture
+            .shims
+            .as_ref()
+            .ok_or_else(|| lean_rs::error::host_module_init("run the existing broken-import step to select shims"))?;
+        let prepared = LeanPreparedHostArtifacts::from_snapshot(
+            shims.manifest.clone(),
+            text.clone(),
+            shims.roots.clone(),
+            shims.search_paths.clone(),
+        )?;
+        let runtime = LeanRuntime::init()?;
+        #[allow(
+            unsafe_code,
+            reason = "the exact SDK shim ABI and images are verified under retained project locks"
+        )]
+        // SAFETY: The trusted job verified the SDK build and runtime before
+        // launch. We checked the actual manifest and both held shim images
+        // under existing read locks. The fixture retains custody until exit.
+        let loaded = unsafe {
+            LoadedHostArtifacts::load(
+                runtime,
+                shims.manifest.clone(),
+                text.as_bytes().to_vec(),
+                shims.roots.clone(),
+                shims.search_paths.clone(),
+                fixture,
+            )?
+        };
+        return LeanCapabilities::from_prepared_capability(
+            host,
+            &prepared,
+            loaded,
+            (
+                native_project_library(),
+                lean_rs::module::LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture"),
+            ),
+            "lean_rs_fixture",
+            "LeanRsFixture",
+        );
+    }
+    capabilities(host)
+}
+
 #[derive(Deserialize)]
 struct Record {
     scratch: PathBuf,

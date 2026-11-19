@@ -62,7 +62,7 @@ fn module_init_code_on_missing_lake_project() {
 
 #[test]
 fn module_init_code_on_missing_dylib() {
-    let host = fixture_host();
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
     // The lib_name must not match anything Lake built; the dylib path
     // dispatch in `LakeProject::capability_dylib` produces a name that
     // doesn't exist on disk, so `libloading::Library::new` fails—that
@@ -83,7 +83,7 @@ fn linking_code_on_invalid_lake_identifier() {
     // a space fails the `[A-Za-z_][A-Za-z0-9_]*` alphabet check in
     // `InitializerName::from_lake_names`, surfacing as a `Linking`
     // failure.
-    let library = fixture::project_library();
+    let library = fixture::native_project_library();
     let err = library
         .initialize_module("lean_rs_fixture", "Bad Module")
         .expect_err("invalid Lake module name must fail");
@@ -92,7 +92,7 @@ fn linking_code_on_invalid_lake_identifier() {
 
 #[test]
 fn linking_code_on_missing_initializer_symbol() {
-    let library = fixture::project_library();
+    let library = fixture::native_project_library();
     // The fixture has no module called `DefinitelyNotAModule`; the
     // mangled initializer symbol it asks for is absent, so
     // `lookup_initializer` raises `Linking` ("missing initializer

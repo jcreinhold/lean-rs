@@ -453,8 +453,8 @@ fn from_lake_project_missing_path_is_load_error() {
 
 #[test]
 fn load_capabilities_prepares_checked_host_shims() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("capability dylib loads + symbols resolve");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("capability dylib loads + symbols resolve");
     // Sanity: caps is move-constructed, no public observable state to
     // assert against. The follow-on tests prove checked shim bindings
     // actually dispatch correctly.
@@ -463,7 +463,7 @@ fn load_capabilities_prepares_checked_host_shims() {
 
 #[test]
 fn load_capabilities_missing_dylib_is_load_error() {
-    let host = fixture_host();
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
     let missing = host.project_library_path("does_not_exist", "NoSuchLib");
     assert!(!missing.exists());
     #[allow(unsafe_code, reason = "absent path under retained fixture custody")]

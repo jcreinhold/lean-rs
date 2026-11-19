@@ -719,7 +719,7 @@ def qualify(
     shutil.rmtree(root)
 
 
-def qualify_broken_import(release, profile):
+def qualify_broken_import(release, profile, *, emit_host_selection=False):
     """Run one ordinary SDK worker test, without the downstream host helper."""
     require(TARGET == TARGET.resolve(strict=True), "aliased SDK target")
     parent = TARGET / "metadata-qualification"
@@ -746,6 +746,7 @@ def qualify_broken_import(release, profile):
             cwd=cwd,
             env=env,
             check=True,
+            **({"stdout": sys.stderr} if emit_host_selection else {}),
         )
 
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
@@ -822,7 +823,33 @@ def qualify_broken_import(release, profile):
         and (closed.st_dev, closed.st_ino) == (owner.st_dev, owner.st_ino),
         "broken-import fixture directory changed",
     )
+    if emit_host_selection:
+        with record.open("rb") as stream:
+            data = stream.read(16 * 1024**2 + 1)
+        require(len(data) <= 16 * 1024**2, "broken-import record exceeds fixture bound")
+        require(hashlib.sha256(data).hexdigest() == env["LEAN_RS_METADATA_DEPLOYMENT_SHA256"],
+                "broken-import selection changed after verification")
+        selected = json.loads(data)
+        manifest = Path(selected["shim_manifest"])
+        for name, image in (("host_image", selected["host_image"]),
+                            ("interop_image", selected["interop_image"])):
+            require(Path(image).is_relative_to(SDK), f"invalid {name} selection")
+        image_pins = [[image, *selected["files"][image]]
+                      for image in (selected["host_image"], selected["interop_image"])]
+        host_selection = json.dumps(dict(
+            prefix=str(release), manifest=str(manifest),
+            manifest_sha256=hashlib.sha256(selected["shim_json"].encode()).hexdigest(),
+            roots=selected["shim_roots"], search_paths=selected["shim_paths"], images=image_pins,
+        ), separators=(",", ":"))
+        typed_descriptor = json.dumps(dict(
+            protocol=2, shim_manifest_path=str(manifest), shim_manifest_json=selected["shim_json"],
+            artifact_roots=selected["shim_roots"], shim_search_paths=selected["shim_paths"],
+        ), separators=(",", ":"))
+        require(len(typed_descriptor.encode()) <= 64 * 1024, "prepared shim descriptor exceeds wire bound")
     shutil.rmtree(state)
+    if emit_host_selection:
+        print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
+        print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)
 
 
 def main():
@@ -851,10 +878,12 @@ def main():
     commands.add_parser(
         "prepare", help="build and seal a new deployment, then print candidate hashes"
     )
-    commands.add_parser(
+    broken = commands.add_parser(
         "broken-import",
         help="run the private SDK broken-import fixture without a writer helper",
     )
+    broken.add_argument("--emit-host-selection", action="store_true",
+                        help="emit checked environment assignments for these prepared shims")
     run = commands.add_parser(
         "run", help="execute the selected tests against a reviewed deployment"
     )
@@ -903,7 +932,10 @@ def main():
         release = installed_lean_release(profile)
         if args.command == "broken-import":
             with ordinary_state_lock():
-                qualify_broken_import(release, profile)
+                if args.emit_host_selection:
+                    qualify_broken_import(release, profile, emit_host_selection=True)
+                else:
+                    qualify_broken_import(release, profile)
             return
         reviewed_writer(args.writer, args.writer_sha256)
         writer = args.writer.resolve(strict=True)
