@@ -50,6 +50,43 @@ cargo check --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-chi
 cargo check --profile profiling -p lean-rs-profiling --bins
 ```
 
+## Disposable Linux checks on Docker Desktop
+
+Run the link-free worker startup tests on Linux without a host toolchain or cache mount:
+
+```sh
+scripts/test_linux_docker.sh
+# ARM64 fallback when x86-64 emulation is unavailable or too slow:
+scripts/test_linux_docker.sh --platform linux/arm64
+# Other small link-free selections:
+scripts/test_linux_docker.sh --package lean-rs-abi --lib
+scripts/test_linux_docker.sh --filter missing_authentication
+```
+
+The default uses x86-64 emulation (`linux/amd64`) and runs
+`cargo test --locked -j1 -p lean-rs-worker-parent --test lifetime_bootstrap -- --test-threads=1`.
+It selects the local `desktop-linux` Docker Desktop context on macOS and rejects non-Unix-socket endpoints.
+Inherited Docker endpoint settings are cleared. It requires Docker Desktop and GNU `timeout` (`timeout` or `gtimeout`). The official
+`docker.io/library/rust:1.100.0-bookworm` image pins Rust 1.100.0 with rustup auto-install off.
+Cargo may download locked registry dependencies; no Lean install, header bypass, host Cargo cache or credentials
+are supplied. Only this checkout mounts at `/src`, read-only. A read-only container root and a disposable,
+executable 3 GiB `/lab` tmpfs hold Cargo, home and temporary output. A separate private 16 MiB, non-executable
+`/tmp` tmpfs holds real IPC sockets; no host `/tmp` mounts into the container. The container has 2 CPUs, 4 GiB memory,
+192 PIDs, no capabilities and no privilege escalation. Incremental compilation is off.
+
+The script requires 30 GiB free on the checkout's filesystem: a 25 GiB reserve plus 5 GiB headroom.
+Also check Docker Desktop's own storage if it uses another volume. The test has a six-minute timeout and
+Docker startup/pull/test together have an eight-minute timeout. Exit or interruption removes the named container;
+`--rm` also removes it when it exits. The Docker image remains cached. No logs or build outputs are saved on the host.
+A failed Docker connection can prevent cleanup; inspect Docker Desktop before retrying rather than start duplicates.
+
+The optional package selector allows only `lean-rs-abi`, `lean-rs-worker-protocol` and `lean-rs-worker-parent`;
+`--test`, `--lib` and `--filter` choose a bounded libtest run, not arbitrary Cargo arguments. Check the reported
+selected test count: a mistyped filter can select zero tests. These runs do not cover native Lean loading,
+writer helpers or managed-reader behavior, and do not replace broad nextest or Linux release gates.
+The default command passed all five startup tests on x86-64 Docker Desktop, including cleanup after a failed
+startup handshake. This local command does not use GitHub Actions.
+
 ## Tuning
 
 The workspace's [`.config/nextest.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.config/nextest.toml) caps concurrent test processes at **1**. The
