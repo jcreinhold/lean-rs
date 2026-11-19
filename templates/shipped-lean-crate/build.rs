@@ -87,15 +87,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sysroot = lean_toolchain::discover_toolchain(&Default::default())?
         .prefix
         .canonicalize()?;
+    let shim_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?;
     let builder = |root: &std::path::Path, package: &str, target: &str| -> Result<_, Box<dyn std::error::Error>> {
         let private = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(host, root)?;
-        Ok(lean_toolchain::CargoLeanCapability::new(root, target)
+        let mut builder = lean_toolchain::CargoLeanCapability::new(root, target)
             .package(package)
             .module(target)
             .lean_sysroot(&sysroot)
-            .private_bootstrap(private))
+            .private_bootstrap(private);
+        if let Some(key) = shim_output_key {
+            builder = builder.generated_output_key(key);
+        }
+        Ok(builder)
     };
-    builder(&interop, "lean_rs_interop_shims", "LeanRsInterop")?.build_quiet()?;
+    let interop_built = builder(&interop, "lean_rs_interop_shims", "LeanRsInterop")?.build_quiet()?;
     let mut host_builder = builder(&shim, "lean_rs_host_shims", "LeanRsHostShims")?;
     for sig in lean_toolchain::host_shim_abi::compiled_host_binding_signatures().into_values() {
         host_builder = host_builder.export_signature(sig);
@@ -105,14 +110,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut roots = shim_roots.clone();
     roots.push(lean_root.clone());
     let _readers = deployment::hold(&roots)?;
+    // Both shim search paths must name the outputs this build actually selected.
+    // The demo retains its standard Lake layout.
+    let import_path = |built: &lean_toolchain::BuiltLeanCapability| -> Result<_, Box<dyn std::error::Error>> {
+        Ok(built
+            .dylib_path()
+            .parent()
+            .ok_or("missing shim library directory")?
+            .join("lean")
+            .canonicalize()?)
+    };
     let mut record = deployment::Deployment {
         project: lean_root.canonicalize()?,
         sysroot,
         shim_manifest: built.manifest_path().canonicalize()?,
-        shim_paths: vec![
-            interop.join(".lake/build/lib/lean").canonicalize()?,
-            shim.join(".lake/build/lib/lean").canonicalize()?,
-        ],
+        shim_paths: vec![import_path(&interop_built)?, import_path(&built)?],
         shim_roots,
         files: Default::default(),
     };
