@@ -18,6 +18,9 @@ use lean_rs_worker_protocol::worker_exports::fixture_mul_signature;
 use lean_toolchain::CargoLeanCapability;
 use serde_json::json;
 
+#[path = "support/metadata_qualification.rs"]
+mod metadata_qualification;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -318,7 +321,7 @@ fn app_owned_worker_child_locator_accepts_explicit_binary() {
 
 #[test]
 fn builder_opens_worker_capability_and_validates_metadata() {
-    let mut capability = builder()
+    let mut capability = metadata_qualification::builder()
         .validate_metadata(
             "lean_rs_interop_consumer_worker_metadata",
             json!({"caller": "builder-test"}),
@@ -836,7 +839,7 @@ fn metadata_mismatch_is_reported_by_bootstrap_check() {
         lean_version: None,
         extra: None,
     };
-    let report = builder()
+    let report = metadata_qualification::builder()
         .expect_metadata(
             "lean_rs_interop_consumer_worker_metadata",
             json!({"caller": "builder-metadata-check"}),

@@ -91,6 +91,31 @@ Set a positive `LEAN_RS_NUM_THREADS` to select benchmark parallelism. For Lean's
 Cargo command with `LEAN_RS_NUM_THREADS=`; the current parser warns about the empty value and falls back. Merely unsetting
 the shell variable lets Cargo restore the configured value `1`.
 
+## Worker metadata qualification on macOS arm64
+
+`scripts/qualify_metadata.py` runs the two metadata cases in `capability_builder` with the reviewed Lean 4.36
+application worker and writer. Ordinary nextest builds keep their usual fixture. The named run embeds its selected
+deployment in an isolated test build. The worker admits the consumer, host-bundled interop and ordered imports
+under the application’s custody.
+
+Use Python 3.12 or later, the reviewed metadata source packet, its selected executable writer and a trusted local
+Lean 4.36.0 arm64 release and Rust toolchain. Use canonical absolute paths. Keep the private deployment, helper and
+release under exclusive application control throughout qualification. Preparation needs the SDK revision pinned in
+the script and the app’s locked Cargo dependencies available offline.
+
+```sh
+python3 scripts/qualify_metadata.py --packet "$PACKET" --writer "$WRITER" prepare --lean-release "$LEAN_RELEASE"
+python3 scripts/qualify_metadata.py --packet "$PACKET" --writer "$WRITER" run "$DEPLOYMENT" \
+  --worker-sha256 "$REVIEWED_WORKER_SHA256" --deployment-sha256 "$REVIEWED_DEPLOYMENT_SHA256"
+```
+
+Preparation prints its private directory and two candidate hashes, then stops before worker launch. Take the matching
+worker and deployment hashes for `run` from an independent review. A fresh build embeds local paths and file identities
+and needs its own review. The run checks the source packet, writer, linked worker, deployment record and release
+libraries before asking the worker for ready artifacts. It requires the returned descriptor to match the sealed record
+and runs the positive and mismatch selectors separately with one job. Evidence and owner records remain in the
+deployment. The source packet SHA-256 is `30f9897773b105a06c2cf5f7db845a2e70669b7bfa45ea318947ea99772605e0`.
+
 ## Native guardian service-loss regressions
 
 The macOS-only `lean-toolchain` guardian tests start an independent writer before killing the actual service, separately
