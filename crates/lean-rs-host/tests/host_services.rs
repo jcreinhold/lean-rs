@@ -2088,30 +2088,208 @@ fn session_process_module_query_returns_diagnostics_without_info_tree_payload() 
     );
 }
 
-#[test]
-fn command_message_capture_returns_check_and_print_axioms_output_as_diagnostics() {
-    use lean_rs_host::host::process::{
-        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
-        ModuleQuerySelector,
-    };
+enum ModuleBatchCase {
+    CommandMessages,
+    InvalidCommand,
+    MissingImport,
+    SmallMessageBudget,
+    ProofContext,
+    OutlineOrder,
+    ScanTargets,
+    ScanProofState,
+    OutlineWithDiagnostics,
+    SmallOutlineBudget,
+    ScanOutline,
+}
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_elaboration(&caps);
+impl ModuleBatchCase {
+    fn request(self) -> lean_rs::host_bridge::HostModuleBatch {
+        use lean_rs_host::host::process::{ModuleQueryOutputBudgets, ModuleQuerySelector};
 
-    let outcome = call_service!(
+        let (source, selectors, budgets) = match self {
+            Self::CommandMessages => (
+                "#check Nat.add\n#print axioms Nat.add_assoc\n",
+                vec![ModuleQuerySelector::Diagnostics {
+                    id: "messages".to_owned(),
+                }],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::InvalidCommand => (
+                "#check definitelyMissingCommandMessage\n",
+                vec![ModuleQuerySelector::Diagnostics {
+                    id: "messages".to_owned(),
+                }],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::MissingImport => (
+                "import LeanRsFixture.DoesNotExist\n\n#check symbolThatWouldFailIfBodyRan\n",
+                vec![ModuleQuerySelector::Diagnostics {
+                    id: "messages".to_owned(),
+                }],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::SmallMessageBudget => (
+                "#check Nat.add\n#check Nat.mul\n",
+                vec![ModuleQuerySelector::Diagnostics {
+                    id: "messages".to_owned(),
+                }],
+                ModuleQueryOutputBudgets {
+                    per_field_bytes: 1,
+                    total_bytes: 1024,
+                },
+            ),
+            Self::ProofContext => (
+                "theorem t (h : True) : True := by\n  exact h\n",
+                vec![
+                    ModuleQuerySelector::Diagnostics {
+                        id: "diagnostics".to_owned(),
+                    },
+                    ModuleQuerySelector::ProofState {
+                        id: "state".to_owned(),
+                        line: 2,
+                        column: 4,
+                    },
+                ],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::OutlineOrder => (
+                "\
+namespace Outer
+theorem first : True := by
+  trivial
+private theorem hidden : True := by
+  trivial
+def withBody (n : Nat) : Nat :=
+  n + 1
+end Outer
+",
+                vec![ModuleQuerySelector::DeclarationOutline {
+                    id: "outline".to_owned(),
+                }],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::ScanTargets => {
+                let selectors: Vec<ModuleQuerySelector> = [
+                    ("target-structure", "ScanForms.Point"),
+                    ("target-class", "ScanForms.Default"),
+                    ("target-multi", "ScanForms.multi"),
+                    ("target-theorem", "ScanForms.zeroOrSucc"),
+                    ("target-where", "ScanForms.origin"),
+                    ("target-instance", "ScanForms.namedDefault"),
+                ]
+                .into_iter()
+                .map(|(id, name)| ModuleQuerySelector::DeclarationTarget {
+                    id: id.to_owned(),
+                    name: Some(name.to_owned()),
+                    line: None,
+                    column: None,
+                })
+                .collect();
+                (SCAN_FORMS_SOURCE, selectors, ModuleQueryOutputBudgets::default())
+            }
+            Self::ScanProofState => (
+                SCAN_FORMS_SOURCE,
+                vec![
+                    ModuleQuerySelector::SurroundingDeclaration {
+                        id: "surrounding".to_owned(),
+                        line: 29,
+                        column: 7,
+                    },
+                    ModuleQuerySelector::ProofStateInDeclaration {
+                        id: "proof-state".to_owned(),
+                        declaration: "ScanForms.multiBy".to_owned(),
+                        position: lean_rs_host::host::process::ProofPositionSelector::Default,
+                        locals_raw: false,
+                    },
+                ],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::OutlineWithDiagnostics => (
+                "theorem ok : True := by\n  trivial\n#check missingName\n",
+                vec![
+                    ModuleQuerySelector::Diagnostics {
+                        id: "diagnostics".to_owned(),
+                    },
+                    ModuleQuerySelector::DeclarationOutline {
+                        id: "outline".to_owned(),
+                    },
+                ],
+                ModuleQueryOutputBudgets::default(),
+            ),
+            Self::SmallOutlineBudget => (
+                "theorem a : True := by\n  trivial\ntheorem b : True := by\n  trivial\n",
+                vec![ModuleQuerySelector::DeclarationOutline {
+                    id: "outline".to_owned(),
+                }],
+                ModuleQueryOutputBudgets {
+                    per_field_bytes: 128,
+                    total_bytes: 200,
+                },
+            ),
+            Self::ScanOutline => (
+                SCAN_FORMS_SOURCE,
+                vec![ModuleQuerySelector::DeclarationOutline {
+                    id: "outline".to_owned(),
+                }],
+                ModuleQueryOutputBudgets::default(),
+            ),
+        };
+        lean_rs::host_bridge::HostModuleBatch {
+            source: source.into(),
+            selectors,
+            budgets,
+        }
+    }
+}
+
+fn fixture_module_batch<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    case: ModuleBatchCase,
+) -> lean_rs::LeanResult<lean_rs_host::host::process::ModuleQueryBatchOutcome> {
+    let request = case.request();
+    if !fixture::native_fixture_selected() {
+        return strict_module_batch(caps, session, &request);
+    }
+    let paths = fixture::native_elaboration_paths(caps, session);
+    let (env, scope) = session.source_context();
+    #[allow(unsafe_code, reason = "only the fixed module batches in the held test fixture")]
+    // SAFETY: the closed cases fix the source, selectors and budgets, with
+    // default options in the exact retained native elaboration environment.
+    let admitted = unsafe {
+        caps.shim_capability()
+            .module_batch_scope(env, scope, paths, request, LeanElabOptions::new().source_options())
+    }?;
+    session.process_module_query_batch(&admitted, None)
+}
+
+fn strict_module_batch<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    request: &lean_rs::host_bridge::HostModuleBatch,
+) -> lean_rs::LeanResult<lean_rs_host::host::process::ModuleQueryBatchOutcome> {
+    call_service!(
         caps,
         session,
         process_module_query_batch,
-        "#check Nat.add\n#print axioms Nat.add_assoc\n",
-        &[ModuleQuerySelector::Diagnostics {
-            id: "messages".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets::default(),
+        &request.source,
+        &request.selectors,
+        &request.budgets,
         &LeanElabOptions::new(),
-        None,
+        None
     )
-    .expect("host stack reports no exception");
+}
+
+#[test]
+fn command_message_capture_returns_check_and_print_axioms_output_as_diagnostics() {
+    use lean_rs_host::host::process::{ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult};
+
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::CommandMessages)
+        .expect("host stack reports no exception");
 
     let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
         panic!("expected Ok command-message outcome, got {outcome:?}");
@@ -2145,28 +2323,14 @@ fn command_message_capture_returns_check_and_print_axioms_output_as_diagnostics(
 
 #[test]
 fn command_message_capture_invalid_command_returns_error_diagnostics() {
-    use lean_rs_host::host::process::{
-        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
-        ModuleQuerySelector,
-    };
+    use lean_rs_host::host::process::{ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        "#check definitelyMissingCommandMessage\n",
-        &[ModuleQuerySelector::Diagnostics {
-            id: "messages".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("invalid command is a normal diagnostics outcome");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::InvalidCommand)
+        .expect("invalid command is a normal diagnostics outcome");
 
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok diagnostics outcome for invalid command, got {outcome:?}");
@@ -2189,28 +2353,14 @@ fn command_message_capture_invalid_command_returns_error_diagnostics() {
 
 #[test]
 fn command_message_capture_missing_import_uses_module_query_missing_imports() {
-    use lean_rs_host::host::process::{
-        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
-        ModuleQuerySelector,
-    };
+    use lean_rs_host::host::process::{ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        "import LeanRsFixture.DoesNotExist\n\n#check symbolThatWouldFailIfBodyRan\n",
-        &[ModuleQuerySelector::Diagnostics {
-            id: "messages".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("missing import is a normal module-query outcome");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::MissingImport)
+        .expect("missing import is a normal module-query outcome");
 
     let ModuleQueryBatchOutcome::MissingImports {
         result,
@@ -2237,31 +2387,14 @@ fn command_message_capture_missing_import_uses_module_query_missing_imports() {
 
 #[test]
 fn command_message_capture_small_budget_truncates_later_messages() {
-    use lean_rs_host::host::process::{
-        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
-        ModuleQuerySelector,
-    };
+    use lean_rs_host::host::process::{ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult};
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        "#check Nat.add\n#check Nat.mul\n",
-        &[ModuleQuerySelector::Diagnostics {
-            id: "messages".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets {
-            per_field_bytes: 1,
-            total_bytes: 1024,
-        },
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("budgeted command-message query succeeds");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::SmallMessageBudget)
+        .expect("budgeted command-message query succeeds");
 
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok command-message outcome, got {outcome:?}");
@@ -2381,36 +2514,16 @@ fn session_process_module_query_goal_at_returns_selected_tactic_goals() {
 #[test]
 fn session_process_module_query_batch_returns_proof_context_in_one_dispatch() {
     use lean_rs_host::host::process::{
-        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
-        ModuleQuerySelector, ProofStateResult,
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ProofStateResult,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "theorem t (h : True) : True := by\n  exact h\n";
     let before = session.stats();
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        src,
-        &[
-            ModuleQuerySelector::Diagnostics {
-                id: "diagnostics".to_owned(),
-            },
-            ModuleQuerySelector::ProofState {
-                id: "state".to_owned(),
-                line: 2,
-                column: 4,
-            },
-        ],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::ProofContext)
+        .expect("host stack reports no exception");
     let after = session.stats();
 
     assert_eq!(after.ffi_calls, before.ffi_calls + 1);
@@ -2456,36 +2569,14 @@ fn session_process_module_query_batch_returns_proof_context_in_one_dispatch() {
 fn declaration_outline_returns_source_order_namespace_private_and_body_spans() {
     use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-        ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let source = "\
-namespace Outer
-theorem first : True := by
-  trivial
-private theorem hidden : True := by
-  trivial
-def withBody (n : Nat) : Nat :=
-  n + 1
-end Outer
-";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        source,
-        &[ModuleQuerySelector::DeclarationOutline {
-            id: "outline".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::OutlineOrder)
+        .expect("host stack reports no exception");
 
     let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
@@ -2565,29 +2656,49 @@ def multiBy : Nat \u{2192} Nat \u{2192} Nat
 end ScanForms
 ";
 
-/// Drive the declaration outline over `source` and return the rows.
-#[cfg(test)]
-fn outline_rows(source: &str) -> Vec<lean_rs_host::host::process::DeclarationTargetInfo> {
+#[derive(Clone, Copy)]
+enum OutlineFixture {
+    NativeIfSelected,
+    Strict,
+}
+
+/// Outline the fixed scan forms so both callers check the same rows.
+fn outline_rows(fixture: OutlineFixture) -> Vec<lean_rs_host::host::process::DeclarationTargetInfo> {
     use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-        ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_elaboration(&caps);
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        source,
-        &[ModuleQuerySelector::DeclarationOutline {
-            id: "outline".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
+    let native = matches!(fixture, OutlineFixture::NativeIfSelected);
+    let host = if native {
+        LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly")
+    } else {
+        fixture_host()
+    };
+    let caps = if native {
+        fixture::native_capabilities(&host)
+    } else {
+        fixture::capabilities(&host)
+    }
+    .expect("load caps");
+    let mut session = if native {
+        session_over_elaboration(&caps)
+    } else {
+        caps.session(
+            &service_requests::imports(
+                &caps,
+                &["LeanRsHostShims.Elaboration"],
+                LeanSessionImportProfile::default(),
+            ),
+            None,
+            None,
+        )
+        .expect("session imports cleanly")
+    };
+    let outcome = if native {
+        fixture_module_batch(&caps, &mut session, ModuleBatchCase::ScanOutline)
+    } else {
+        strict_module_batch(&caps, &mut session, &ModuleBatchCase::ScanOutline.request())
+    }
     .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
@@ -2608,7 +2719,7 @@ fn outline_rows(source: &str) -> Vec<lean_rs_host::host::process::DeclarationTar
 
 #[test]
 fn declaration_outline_covers_multi_clause_where_structure_class_and_anonymous_instance() {
-    let declarations = outline_rows(SCAN_FORMS_SOURCE);
+    let declarations = outline_rows(OutlineFixture::NativeIfSelected);
     let rows: Vec<(&str, &str)> = declarations
         .iter()
         .map(|declaration| (declaration.short_name.as_str(), declaration.declaration_kind.as_str()))
@@ -2659,39 +2770,13 @@ fn declaration_outline_covers_multi_clause_where_structure_class_and_anonymous_i
 fn declaration_target_resolves_the_new_scan_forms_by_name() {
     use lean_rs_host::host::process::{
         DeclarationTargetResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-        ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let selectors: Vec<ModuleQuerySelector> = [
-        ("target-structure", "ScanForms.Point"),
-        ("target-class", "ScanForms.Default"),
-        ("target-multi", "ScanForms.multi"),
-        ("target-theorem", "ScanForms.zeroOrSucc"),
-        ("target-where", "ScanForms.origin"),
-        ("target-instance", "ScanForms.namedDefault"),
-    ]
-    .into_iter()
-    .map(|(id, name)| ModuleQuerySelector::DeclarationTarget {
-        id: id.to_owned(),
-        name: Some(name.to_owned()),
-        line: None,
-        column: None,
-    })
-    .collect();
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        SCAN_FORMS_SOURCE,
-        &selectors,
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::ScanTargets)
+        .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-target outcome, got {outcome:?}");
     };
@@ -2765,7 +2850,7 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
     };
 
     // Phase 1: the outline reports the generated name the kernel recorded.
-    let declarations = outline_rows(SCAN_FORMS_SOURCE);
+    let declarations = outline_rows(OutlineFixture::Strict);
     let generated = &declarations
         .iter()
         .find(|declaration| declaration.declaration_name.contains("instDefaultPoint"))
@@ -2814,38 +2899,17 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
 #[test]
 fn surrounding_and_proof_state_work_inside_a_multi_clause_definition() {
     use lean_rs_host::host::process::{
-        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
-        ModuleQuerySelector, ProofStateResult, SurroundingDeclarationResult,
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ProofStateResult,
+        SurroundingDeclarationResult,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     // Line 29 is the `intro x` tactic inside the second equation clause of
     // `multiBy` (1-based): a tactic block nested in a multi-clause def.
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        SCAN_FORMS_SOURCE,
-        &[
-            ModuleQuerySelector::SurroundingDeclaration {
-                id: "surrounding".to_owned(),
-                line: 29,
-                column: 7,
-            },
-            ModuleQuerySelector::ProofStateInDeclaration {
-                id: "proof-state".to_owned(),
-                declaration: "ScanForms.multiBy".to_owned(),
-                position: lean_rs_host::host::process::ProofPositionSelector::Default,
-                locals_raw: false,
-            },
-        ],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::ScanProofState)
+        .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok outcome, got {outcome:?}");
     };
@@ -2885,31 +2949,14 @@ fn surrounding_and_proof_state_work_inside_a_multi_clause_definition() {
 fn declaration_outline_returns_rows_alongside_diagnostics() {
     use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-        ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        "theorem ok : True := by\n  trivial\n#check missingName\n",
-        &[
-            ModuleQuerySelector::Diagnostics {
-                id: "diagnostics".to_owned(),
-            },
-            ModuleQuerySelector::DeclarationOutline {
-                id: "outline".to_owned(),
-            },
-        ],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::OutlineWithDiagnostics)
+        .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
     };
@@ -2957,29 +3004,14 @@ fn declaration_outline_returns_rows_alongside_diagnostics() {
 fn declaration_outline_truncates_by_complete_rows_under_small_budget() {
     use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-        ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        "theorem a : True := by\n  trivial\ntheorem b : True := by\n  trivial\n",
-        &[ModuleQuerySelector::DeclarationOutline {
-            id: "outline".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets {
-            per_field_bytes: 128,
-            total_bytes: 200,
-        },
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::SmallOutlineBudget)
+        .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
     };
