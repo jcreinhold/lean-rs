@@ -62,10 +62,12 @@ pub fn generated_output_key_for_sysroot(sysroot: &Path) -> Result<Option<&'stati
     let bytes = fs::read(&info.header_path).map_err(|_| LinkDiagnostics::MissingHeader {
         path: info.header_path.clone(),
     })?;
-    let digest = Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    use std::fmt::Write as _;
+    let mut digest = String::new();
+    for byte in Sha256::digest(bytes) {
+        let formatted = write!(&mut digest, "{byte:02x}");
+        debug_assert!(formatted.is_ok(), "formatting into a String cannot fail");
+    }
     let Some(entry) = lean_rs_abi::supported_by_digest(&digest) else {
         return Err(LinkDiagnostics::UnsupportedToolchain {
             active: info.version,
