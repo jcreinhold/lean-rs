@@ -1,4 +1,4 @@
-"""Provision or qualify the reviewed macOS arm64 Lean 4.36 worker fixture."""
+"""Provision or qualify the reviewed ordinary Lean 4.36 worker fixture."""
 import argparse
 from contextlib import contextmanager
 import fcntl
@@ -27,6 +27,12 @@ STATE = TARGET / "metadata-qualification/ordinary"
 STATE_LOCK = TARGET / "metadata-qualification/.ordinary.lock"
 SOCKET_ROOT = TARGET / "ws"
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
+DARWIN_ARM64_PINS = {
+    "lean": "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e",
+    "lake": LAKE_SHA256,
+    "runtime": "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5",
+    "runtime_name": "libleanshared.dylib",
+}
 
 
 def require(condition, message):
@@ -73,7 +79,18 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def installed_lean_release():
+def verified_platform(system=None, machine=None):
+    system = platform.system() if system is None else system
+    machine = platform.machine() if machine is None else machine
+    if (system, machine) == ("Darwin", "arm64"):
+        return DARWIN_ARM64_PINS
+    if system == "Linux":
+        raise ValueError("Linux ordinary dispatch awaits verified Lean release, helper and worker artifact pins")
+    raise ValueError(f"unsupported metadata qualification platform: {system} {machine}")
+
+
+def installed_lean_release(profile=None):
+    profile = verified_platform() if profile is None else profile
     pin = (SDK / "lean-toolchain").read_text().strip()
     require(pin and "\n" not in pin, "expected one repository Lean toolchain pin")
     directory = pin.replace("/", "--").replace(":", "---")
@@ -86,10 +103,9 @@ def installed_lean_release():
     if inherited is not None:
         require(Path(inherited).expanduser().resolve(strict=True) == release,
                 "inherited LEAN_SYSROOT differs from the repository Lean toolchain pin")
-    check_file(release / "bin/lean", "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e")
-    check_file(release / "bin/lake", LAKE_SHA256)
-    check_file(release / "lib/lean/libleanshared.dylib",
-               "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5")
+    check_file(release / "bin/lean", profile["lean"])
+    check_file(release / "bin/lake", profile["lake"])
+    check_file(release / "lib/lean" / profile["runtime_name"], profile["runtime"])
     return release
 
 
@@ -255,10 +271,11 @@ def check_unavailable_typed_audit(events, before, verification):
 
 def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
             typed_session=False, disposable_clean=False, verification=False, unknown_declaration=False,
-            pool_validator_recovery=False, release=None, approved_control=None):
+            pool_validator_recovery=False, release=None, approved_control=None, profile=None):
     require(not (typed_session or disposable_clean or verification or unknown_declaration),
             "typed, verification and disposable-clean selectors are unavailable in the canonical ordinary runner")
-    release = installed_lean_release() if release is None else release
+    profile = verified_platform() if profile is None else profile
+    release = installed_lean_release(profile) if release is None else release
     space(TARGET)
     require(not pool_validator_recovery or (
         not typed_session and not disposable_clean and not verification and not unknown_declaration),
@@ -289,9 +306,10 @@ def qualify(root, writer, writer_sha256, approved_worker, approved_deployment,
     # toolchain before and after the smoke, and report any concurrent change as failure.
     check_installed_toolchain_pins(d, release)
     libdir = release / "lib/lean"
+    suffix = Path(profile["runtime_name"]).suffix
     sealed = {Path(name): pin for name, pin in d["files"].items()
-              if Path(name).parent == libdir and name.endswith(".dylib")}
-    require(libdir / "libleanshared.dylib" in sealed and set(libdir.glob("*.dylib")) == sealed.keys(),
+              if Path(name).parent == libdir and name.endswith(suffix)}
+    require(libdir / profile["runtime_name"] in sealed and set(libdir.glob(f"*{suffix}")) == sealed.keys(),
             "selected runtime library inventory changed")
     for image, (device, inode, sha256) in sealed.items():
         stat = image.stat()
@@ -392,8 +410,8 @@ def main():
             (args.command == "run" and args.unknown_declaration):
         parser.error("typed, verification and disposable-clean selectors are temporarily unavailable; ordinary metadata only")
     try:
-        require((sys.platform, platform.machine()) == ("darwin", "arm64"), "requires macOS arm64")
-        release = installed_lean_release()
+        profile = verified_platform()
+        release = installed_lean_release(profile)
         reviewed_writer(args.writer, args.writer_sha256)
         writer = args.writer.resolve(strict=True)
         typed = args.typed_session or args.disposable_clean or args.verify_declaration
@@ -405,7 +423,7 @@ def main():
                         typed, args.disposable_clean, args.verify_declaration,
                         unknown_declaration=args.unknown_declaration,
                         pool_validator_recovery=args.pool_validator_recovery, release=release,
-                        approved_control=args.control_sha256)
+                        approved_control=args.control_sha256, profile=profile)
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")
 

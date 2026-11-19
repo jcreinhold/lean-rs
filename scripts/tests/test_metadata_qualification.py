@@ -1,15 +1,22 @@
 """Pre-execution controls for the ordinary metadata qualification."""
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from scripts import qualify_metadata as qualification
+
+SEAL_PATH = qualification.APP / "seal.py"
+SEAL_SPEC = importlib.util.spec_from_file_location("metadata_qualification_seal", SEAL_PATH)
+seal = importlib.util.module_from_spec(SEAL_SPEC)
+SEAL_SPEC.loader.exec_module(seal)
 
 
 REAL_SPACE = qualification.space
@@ -227,6 +234,23 @@ class MetadataQualificationTest(unittest.TestCase):
                 qualification.installed_lean_release()
         self.launch.assert_not_called()
 
+    def test_linux_refuses_without_verified_primary_artifact_pins(self):
+        with self.assertRaisesRegex(ValueError, "awaits verified Lean release, helper and worker artifact pins"):
+            qualification.verified_platform("Linux", "x86_64")
+        self.launch.assert_not_called()
+
+    def test_linux_cli_refuses_before_state_lock_or_dispatch(self):
+        argv = ["qualify_metadata.py", "--writer", str(self.helper),
+                "--writer-sha256", qualification.digest(self.helper), "prepare"]
+        with patch.object(sys, "argv", argv), \
+                patch.object(qualification.platform, "system", return_value="Linux"), \
+                patch.object(qualification.platform, "machine", return_value="x86_64"), \
+                patch.object(qualification, "ordinary_state_lock") as state_lock, \
+                self.assertRaises(SystemExit):
+            qualification.main()
+        state_lock.assert_not_called()
+        self.launch.assert_not_called()
+
 
 class FixtureSourceTest(unittest.TestCase):
     def test_ordinary_checkout_keeps_tracked_fixture_sources(self):
@@ -236,3 +260,40 @@ class FixtureSourceTest(unittest.TestCase):
         # differ from the old tree, but must not lose any fixture inputs.
         tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "."], cwd=app)
         self.assertTrue(set(sources) <= {Path(os.fsdecode(name)) for name in tracked.split(b"\0") if name})
+
+
+class NativeImageInspectionTest(unittest.TestCase):
+    def test_platform_native_names_preserve_macos_and_select_elf(self):
+        self.assertEqual(seal.native_name("app", "Darwin"), "libapp.dylib")
+        self.assertEqual(seal.native_name("app", "Linux"), "libapp.so")
+
+    def test_elf_dynamic_accepts_only_selected_release_search_path(self):
+        release = self.target = Path("/opt/lean/lib/lean")
+        output = """
+ 0x0000000000000001 (NEEDED)             Shared library: [libleanshared.so]
+ 0x000000000000001d (RUNPATH)            Library runpath: [/opt/lean/lib/lean]
+"""
+        with patch.object(seal.subprocess, "check_output", return_value=output):
+            self.assertEqual(seal.elf_dynamic(Path("app.so"), release),
+                             (["libleanshared.so"], ["/opt/lean/lib/lean"]))
+
+    def test_elf_dynamic_rejects_unknown_dependency_or_search_path(self):
+        cases = [
+            " 0 (NEEDED) Shared library: [/outside/libbad.so]\n",
+            " 0 (NEEDED) Shared library: [libbad.so]\n",
+            " 0 (RUNPATH) Library runpath: [$ORIGIN]\n",
+            " 0 (RUNPATH) Library runpath: [/opt/lean/lib/lean:]\n",
+            " 0 (RPATH) Library rpath: [/opt/lean/lib/lean]\n"
+            " 0 (RUNPATH) Library runpath: [/opt/lean/lib/lean]\n",
+            " 0 (FILTER) Filter library: [libredirect.so]\n",
+        ]
+        for output in cases:
+            with self.subTest(output=output), patch.object(seal.subprocess, "check_output", return_value=output):
+                with self.assertRaises(AssertionError):
+                    seal.elf_dynamic(Path("app.so"), Path("/opt/lean/lib/lean"))
+
+    def test_elf_exports_do_not_treat_nondefault_version_as_bare(self):
+        output = "1 T bare\n2 T defaulted@@V1\n3 T hidden@V1\n"
+        with patch.object(seal.subprocess, "check_output", return_value=output):
+            self.assertEqual(seal.defined_exports(Path("app.so"), "Linux"),
+                             {"bare", "defaulted", "hidden@V1"})

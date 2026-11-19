@@ -11,6 +11,108 @@ use std::{
     path::{Path, PathBuf},
 };
 
+struct MappedImage {
+    path: PathBuf,
+    #[cfg(target_os = "linux")]
+    device: Option<(u32, u32)>,
+    #[cfg(target_os = "linux")]
+    inode: Option<u64>,
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_maps(maps: &[u8]) -> R<Vec<MappedImage>> {
+    let mut paths = BTreeMap::new();
+    for line in maps.split(|byte| *byte == b'\n') {
+        let mut cursor = 0;
+        let mut fields = Vec::with_capacity(5);
+        for _ in 0..5 {
+            while line.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+                cursor += 1;
+            }
+            let start = cursor;
+            while line.get(cursor).is_some_and(|byte| !byte.is_ascii_whitespace()) {
+                cursor += 1;
+            }
+            if start == cursor {
+                break;
+            }
+            fields.push(&line[start..cursor]);
+        }
+        if fields.len() != 5 {
+            continue;
+        }
+        while line.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        let raw_path = &line[cursor..];
+        if !raw_path.starts_with(b"/") {
+            continue;
+        }
+        // proc maps preserves ordinary spaces and tabs but renders a newline in a
+        // pathname as the ambiguous bytes `\012`. This fixture never selects such
+        // a path, so refuse it rather than guessing whether it was literal.
+        require(
+            !raw_path.windows(4).any(|part| part == b"\\012"),
+            "ambiguous mapped image path",
+        )?;
+        require(!raw_path.ends_with(b" (deleted)"), "mapped image was deleted")?;
+        let device = std::str::from_utf8(fields[3])
+            .map_err(|_| err("invalid mapped image device"))?
+            .split_once(':')
+            .ok_or_else(|| err("invalid mapped image device"))?;
+        let device = (
+            u32::from_str_radix(device.0, 16).map_err(|_| err("invalid mapped image device"))?,
+            u32::from_str_radix(device.1, 16).map_err(|_| err("invalid mapped image device"))?,
+        );
+        let inode = std::str::from_utf8(fields[4])
+            .map_err(|_| err("invalid mapped image inode"))?
+            .parse::<u64>()
+            .map_err(|_| err("invalid mapped image inode"))?;
+        require(inode != 0, "mapped file has no inode identity")?;
+        let path = PathBuf::from(std::ffi::OsStr::from_bytes(raw_path));
+        if let Some(previous) = paths.insert(path, (device, inode)) {
+            require(previous == (device, inode), "mapped path has conflicting identities")?;
+        }
+    }
+    Ok(paths
+        .into_iter()
+        .map(|(path, (device, inode))| MappedImage {
+            path,
+            device: Some(device),
+            inode: Some(inode),
+        })
+        .collect())
+}
+
+#[cfg(target_os = "linux")]
+fn mapped_images() -> R<Vec<MappedImage>> {
+    parse_linux_maps(&fs::read("/proc/self/maps")?)
+}
+
+#[cfg(target_os = "macos")]
+fn mapped_images() -> R<Vec<MappedImage>> {
+    let mut paths = BTreeSet::new();
+    // SAFETY: before this application loads its first native capability, Darwin supplies
+    // the current image count and NUL-terminated names. No application image is unloaded.
+    unsafe {
+        for i in 0..mach2::dyld::_dyld_image_count() {
+            let ptr = mach2::dyld::_dyld_get_image_name(i);
+            require(!ptr.is_null(), "missing dyld image name")?;
+            paths.insert(PathBuf::from(std::ffi::OsStr::from_bytes(
+                CStr::from_ptr(ptr).to_bytes(),
+            )));
+        }
+    }
+    Ok(paths.into_iter().map(|path| MappedImage { path }).collect())
+}
+
+fn runtime_image_names() -> (&'static str, &'static str, &'static str) {
+    #[cfg(target_os = "macos")]
+    return ("libleanshared.dylib", "libInit_shared.dylib", "libLake_shared.dylib");
+    #[cfg(target_os = "linux")]
+    return ("libleanshared.so", "libInit_shared.so", "libLake_shared.so");
+}
+
 pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
@@ -98,7 +200,10 @@ impl Record {
         )
     }
     fn check_content_file(&self, path: &Path) -> R<()> {
-        let digest = self.content_files.get(path).ok_or_else(|| err("unselected content file"))?;
+        let digest = self
+            .content_files
+            .get(path)
+            .ok_or_else(|| err("unselected content file"))?;
         require(path.canonicalize()? == path, "aliased deployment content file")?;
         let mut f = fs::File::open(path)?;
         require(f.metadata()?.is_file(), "deployment content path is not a file")?;
@@ -230,36 +335,53 @@ impl Held {
     }
     pub fn verify(&self) -> R<()> {
         let d = &self.record;
+        let unexpected_loader_selection = if cfg!(target_os = "macos") {
+            std::env::vars_os().any(|(key, _)| key.as_bytes().starts_with(b"DYLD_"))
+        } else {
+            std::env::vars_os().any(|(key, _)| key.as_bytes().starts_with(b"LD_"))
+                || std::env::var_os("GLIBC_TUNABLES").is_some()
+        };
         require(
             std::env::var_os("LEAN_SYSROOT").as_deref() == Some(d.sysroot.as_os_str())
                 && std::env::var_os("LEAN_PATH").is_none()
-                && !std::env::vars_os().any(|(key, _)| key.as_bytes().starts_with(b"DYLD_")),
+                && !unexpected_loader_selection,
             "unexpected runtime selection",
         )?;
         let libs = d.sysroot.join("lib/lean");
         let mut found = false;
-        // SAFETY: before this application loads its first native capability, Darwin supplies
-        // the current image count and NUL-terminated names. No application image is unloaded.
-        unsafe {
-            for i in 0..mach2::dyld::_dyld_image_count() {
-                let ptr = mach2::dyld::_dyld_get_image_name(i);
-                if ptr.is_null() {
-                    return Err(err("missing dyld image name"));
-                }
-                let path = Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(ptr).to_bytes()));
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                if name.starts_with("libleanshared") || name == "libInit_shared.dylib" || name == "libLake_shared.dylib"
-                {
+        let (lean, init, lake) = runtime_image_names();
+        for mapped in mapped_images()? {
+            let path = mapped.path;
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let is_runtime = name.starts_with("libleanshared") || name == init || name == lake;
+            let is_capability = name.contains("LeanRsInterop")
+                || name.contains("LeanRsHostShims")
+                || name.contains("LeanRsFixture")
+                || name.contains("lean__rs__interop__consumer");
+            if !is_runtime && !is_capability {
+                continue;
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let metadata = path.metadata()?;
+                if let (Some((major, minor)), Some(inode)) = (mapped.device, mapped.inode) {
                     require(
-                        path.canonicalize()? == libs.join(name.as_ref()),
-                        "unexpected mapped Lean runtime",
+                        rustix::fs::major(metadata.dev()) == major
+                            && rustix::fs::minor(metadata.dev()) == minor
+                            && metadata.ino() == inode,
+                        "mapped image path identity changed",
                     )?;
-                    found |= name == "libleanshared.dylib";
                 }
-                if name.contains("LeanRsInterop") || name.contains("LeanRsHostShims") || name.contains("LeanRsFixture")
-                {
-                    return Err(err("preloaded application capability"));
-                }
+            }
+            if is_runtime {
+                require(
+                    path.canonicalize()? == libs.join(name.as_ref()),
+                    "unexpected mapped Lean runtime",
+                )?;
+                found |= name == lean;
+            }
+            if is_capability {
+                return Err(err("preloaded application capability"));
             }
         }
         require(found, "selected libleanshared absent")?;
@@ -304,5 +426,34 @@ impl Held {
         self.check_interop_visibility(false)?;
         audit("verified-deployment");
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn proc_maps_preserves_device_inode_and_literal_path_bytes() {
+        let maps = b"1000-2000 r-xp 00000000 08:01 42 /opt/lean/lib/lean/libLake shared\\377.so\n";
+        let images = parse_linux_maps(maps).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].path, Path::new("/opt/lean/lib/lean/libLake shared\\377.so"));
+        assert_eq!(images[0].device, Some((8, 1)));
+        assert_eq!(images[0].inode, Some(42));
+    }
+
+    #[test]
+    fn proc_maps_rejects_deleted_or_conflicting_identity() {
+        let deleted = b"1000-2000 r-xp 0 08:01 42 /opt/lib.so (deleted)\n";
+        assert!(parse_linux_maps(deleted).is_err());
+        let conflicting = b"1000-2000 r-xp 0 08:01 42 /opt/lib.so\n2000-3000 r--p 0 08:01 43 /opt/lib.so\n";
+        assert!(parse_linux_maps(conflicting).is_err());
+    }
+
+    #[test]
+    fn proc_maps_refuses_ambiguous_newline_escape() {
+        let maps = b"1000-2000 r-xp 0 08:01 42 /opt/new\\012line.so\n";
+        assert!(parse_linux_maps(maps).is_err());
     }
 }

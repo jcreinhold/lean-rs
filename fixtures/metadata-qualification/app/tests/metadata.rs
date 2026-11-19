@@ -1,4 +1,6 @@
-#![cfg(feature = "admitted")]
+// Linux dispatch stays unavailable until its release, helper and worker inputs
+// have independently verified pins and the managed guardian route is qualified.
+#![cfg(all(feature = "admitted", target_os = "macos"))]
 use std::process::Command;
 
 fn check(mode: &str, expected: &str) {
@@ -10,11 +12,7 @@ fn check(mode: &str, expected: &str) {
         .env_remove("DYLD_LIBRARY_PATH")
         .output()
         .expect("start the private metadata application");
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     let message = String::from_utf8(result.stdout).expect("test output");
     assert!(message.contains(expected), "{message}");
 }
