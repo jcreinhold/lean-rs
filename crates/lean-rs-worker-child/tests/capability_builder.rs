@@ -497,7 +497,7 @@ fn a_host_handle_built_with_a_broken_import_still_fails_at_open() {
                 break;
             }
             remaining = remaining.checked_sub(count as u64).expect("selected worker grew");
-            digest.update(&chunk[..count]);
+            digest.update(chunk.get(..count).expect("bytes read fit the buffer"));
         }
         assert_eq!(remaining, 0, "selected worker shrank");
         assert_eq!(file.metadata().expect("final worker metadata").len(), opened.len());
