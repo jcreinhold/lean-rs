@@ -485,10 +485,18 @@ impl ParentLifetime {
             directory
         };
         let socket_directory = PathBuf::from("/tmp").join(format!("lean-worker-{}", &nonce[..24]));
+        #[cfg(test)]
+        let socket_directory = lifecycle_tests::NEXT_SOCKET_DIRECTORY
+            .take()
+            .unwrap_or(socket_directory);
+        let mut created_directory = false;
+        let mut bound_socket = false;
         let initialized = (|| {
-            fs::create_dir(&socket_directory)?;
+            fs::DirBuilder::new().mode(0o700).create(&socket_directory)?;
+            created_directory = true;
             fs::set_permissions(&socket_directory, fs::Permissions::from_mode(0o700))?;
             let listener = UnixListener::bind(socket_directory.join("parent.sock"))?;
+            bound_socket = true;
             listener.set_nonblocking(true)?;
             Ok(Self {
                 listener,
@@ -504,8 +512,12 @@ impl ParentLifetime {
         if initialized.is_err() && guarded {
             let _record = fs::remove_file(directory.join("owner.json"));
             let _directory = fs::remove_dir(&directory);
-            let _socket = fs::remove_file(socket_directory.join("parent.sock"));
-            let _socket_directory = fs::remove_dir(socket_directory);
+            if bound_socket {
+                let _socket = fs::remove_file(socket_directory.join("parent.sock"));
+            }
+            if created_directory {
+                let _socket_directory = fs::remove_dir(socket_directory);
+            }
         }
         initialized
     }

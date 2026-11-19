@@ -20,6 +20,65 @@ fn directory() -> PathBuf {
     path
 }
 
+thread_local! {
+    pub(super) static NEXT_SOCKET_DIRECTORY: std::cell::Cell<Option<PathBuf>> = const { std::cell::Cell::new(None) };
+}
+
+#[test]
+fn preparing_socket_collision_preserves_foreign_listener_and_releases_slot() {
+    use std::os::unix::fs::MetadataExt as _;
+    use std::os::unix::net::{UnixListener, UnixStream};
+    let root = directory().canonicalize().unwrap();
+    let registry = root.join("owners");
+    let timeout = Duration::from_secs(2);
+    let resident_slot = native_guardian::NativeCapacitySlot {
+        key: "resident".into(),
+        scope: "main".into(),
+        limit: 1,
+    };
+    let resident = LeanWorkerNativeScope::prepare(&registry, timeout, Some(&resident_slot)).unwrap();
+    let resident_record = resident.0.directory.join("owner.json");
+    let original = fs::read(&resident_record).unwrap();
+    let identity = |path: &Path| {
+        let m = fs::symlink_metadata(path).unwrap();
+        (m.dev(), m.ino())
+    };
+    let resident_identity = identity(&resident_record);
+    let foreign = root.join("foreign");
+    fs::create_dir(&foreign).unwrap();
+    let socket = foreign.join("parent.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let before = (identity(&foreign), identity(&socket));
+    let slot = native_guardian::NativeCapacitySlot {
+        key: "candidate".into(),
+        scope: "preparation".into(),
+        limit: 1,
+    };
+    NEXT_SOCKET_DIRECTORY.set(Some(foreign.clone()));
+    let error = LeanWorkerNativeScope::prepare(&registry, timeout, Some(&slot)).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::EEXIST));
+    assert_eq!((identity(&foreign), identity(&socket)), before);
+    let _client = UnixStream::connect(&socket).unwrap();
+    let _accepted = listener.accept().unwrap();
+    let generations = || {
+        fs::read_dir(&registry)
+            .unwrap()
+            .map(Result::unwrap)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(generations(), [resident.0.directory.clone()]);
+    let successor = LeanWorkerNativeScope::prepare(&registry, timeout, Some(&slot)).unwrap();
+    assert!(successor.0.directory.join("owner.json").is_file());
+    assert_eq!(identity(&resident_record), resident_identity);
+    assert_eq!(fs::read(&resident_record).unwrap(), original);
+    drop(successor);
+    drop(resident);
+    drop(listener);
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn wait_for(mut predicate: impl FnMut() -> bool) {
     let started = Instant::now();
     while !predicate() {
