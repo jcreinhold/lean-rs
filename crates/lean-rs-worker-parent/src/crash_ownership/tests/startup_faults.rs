@@ -321,7 +321,7 @@ fn publication_failure(running: bool) {
     assert_eq!(closed.generation_id, nonce);
     let guardian = closed.guardian.as_ref().unwrap();
     {
-        let authenticated = pending.custody.0.lock().unwrap();
+        let authenticated = pending.custody.state.lock().unwrap();
         let owner = authenticated.as_ref().unwrap().owner.clone();
         let authenticated_guardian = authenticated.as_ref().unwrap().guardian.clone();
         drop(authenticated);

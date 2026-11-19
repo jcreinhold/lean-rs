@@ -124,10 +124,12 @@ fn missing_authentication_never_releases_body_and_reaps_owned_child() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("worker parent lifeline startup failed"));
-    assert!(started.elapsed() < Duration::from_secs(2));
+    let elapsed = started.elapsed();
     assert!(!root.join("body").exists());
+    assert!(!root.join("configured").exists());
     assert_eq!(tracker.active_processes(), 0);
     fs::remove_dir_all(root).unwrap();
+    assert!(elapsed < Duration::from_secs(2), "startup and reap took {elapsed:?}");
 }
 
 #[test]

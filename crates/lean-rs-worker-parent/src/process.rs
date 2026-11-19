@@ -141,6 +141,15 @@ fn custody_closed(
         && lifetime.is_none_or(|l| matches!(l.retirement_closed(), Ok(true)))
 }
 
+#[cfg(unix)]
+fn custody_closed_after_direct_reap(
+    lifetime: Option<&crate::crash_ownership::ParentLifetimeLease>,
+    bootstrap: Option<&crate::crash_ownership::BootstrapCustody>,
+) -> bool {
+    bootstrap.is_none_or(|b| matches!(b.closed_after_direct_reap(), Ok(true)))
+        && lifetime.is_none_or(|l| matches!(l.retirement_closed(), Ok(true)))
+}
+
 #[derive(Debug)]
 struct PendingChild {
     child: OwnedProcess,
@@ -262,7 +271,7 @@ impl LeanWorkerProcessTracker {
                         let _stop = lifetime.request_stop();
                     }
                     #[cfg(unix)]
-                    if !custody_closed(owned.lifetime.as_ref(), owned.bootstrap.as_ref()) {
+                    if !custody_closed_after_direct_reap(owned.lifetime.as_ref(), owned.bootstrap.as_ref()) {
                         return true;
                     }
                     owned.exit.confirm(status);
@@ -563,7 +572,7 @@ impl OwnedChild {
                 let _stop = lifetime.request_stop();
             }
             #[cfg(unix)]
-            if !custody_closed(self.lifetime.as_ref(), self.bootstrap.as_ref()) {
+            if !custody_closed_after_direct_reap(self.lifetime.as_ref(), self.bootstrap.as_ref()) {
                 return Ok(None);
             }
             if let Some(status) = result {
@@ -620,10 +629,23 @@ mod tests {
     fn all_release_paths_share_unknown_bootstrap_fence() {
         let bootstrap = crate::crash_ownership::BootstrapCustody::default();
         assert!(!custody_closed(None, Some(&bootstrap)));
+        assert!(!custody_closed_after_direct_reap(None, Some(&bootstrap)));
         let deferred = bootstrap.clone();
         drop(bootstrap);
         assert!(!custody_closed(None, Some(&deferred)));
         assert!(custody_closed(None, None)); // Only genuinely unguarded direct children.
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_pre_auth_requires_direct_reap_not_unknown_wait() {
+        let bootstrap = crate::crash_ownership::BootstrapCustody::for_spawn(false);
+        assert!(!custody_closed(None, Some(&bootstrap)));
+        assert!(custody_closed_after_direct_reap(None, Some(&bootstrap)));
+        // The background reaper uses the same evidence distinction.
+        let deferred = bootstrap.clone();
+        assert!(!custody_closed(None, Some(&deferred)));
+        assert!(custody_closed_after_direct_reap(None, Some(&deferred)));
     }
 
     impl LeanWorkerProcessTracker {

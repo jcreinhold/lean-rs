@@ -380,7 +380,10 @@ impl LeanWorkerNativeScopeLease {
 
 /// Shared from before spawn through every cleanup path. Unknown is not absent.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct BootstrapCustody(Arc<Mutex<Option<AuthenticatedBootstrap>>>);
+pub(crate) struct BootstrapCustody {
+    state: Arc<Mutex<Option<AuthenticatedBootstrap>>>,
+    ordinary: bool,
+}
 #[derive(Debug)]
 struct AuthenticatedBootstrap {
     stream: UnixStream,
@@ -388,8 +391,28 @@ struct AuthenticatedBootstrap {
     guardian: Option<LeanWorkerOwnedProcess>,
 }
 impl BootstrapCustody {
+    pub(crate) fn for_spawn(guarded: bool) -> Self {
+        Self {
+            ordinary: !guarded,
+            ..Self::default()
+        }
+    }
+    /// Only an owned direct-child wait status permits the ordinary pre-HELLO case.
+    /// This does not establish group absence and must never handle ECHILD.
+    pub(crate) fn closed_after_direct_reap(&self) -> io::Result<bool> {
+        if self.ordinary
+            && self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        {
+            return Ok(true);
+        }
+        self.closed()
+    }
     pub(crate) fn closed(&self) -> io::Result<bool> {
-        let state = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some((owner, guardian)) = state
             .as_ref()
             .map(|state| (state.owner.clone(), state.guardian.clone()))
@@ -402,7 +425,7 @@ impl BootstrapCustody {
     }
     pub(crate) fn request_stop(&self) {
         if let Some(state) = self
-            .0
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
@@ -535,12 +558,12 @@ impl ParentLifetime {
             };
             Ok(Self {
                 listener,
-                directory: directory.clone(),
+                directory,
                 socket_directory: socket_directory.clone(),
                 nonce,
                 guarded,
                 capacity_slot: slot.cloned(),
-                custody: BootstrapCustody::default(),
+                custody: BootstrapCustody::for_spawn(guarded),
                 dispatched: false,
             })
         })();
@@ -638,14 +661,18 @@ impl ParentLifetime {
             })
             .transpose()?;
         // Install authenticated cleanup evidence before any fallible publication.
-        *self.custody.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(AuthenticatedBootstrap {
+        *self
+            .custody
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(AuthenticatedBootstrap {
             stream,
             owner: owner.clone(),
             guardian: guardian.clone(),
         });
         let stream = self
             .custody
-            .0
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
