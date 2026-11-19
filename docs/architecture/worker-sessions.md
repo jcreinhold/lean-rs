@@ -117,6 +117,16 @@ clears it before every new session open and shutdown/replacement attempt; old me
 generation. Inspection itself does not consume the request-cycle budget. An old worker that lacks this extension cannot
 satisfy an opted-in requirement and receives no body command through that session.
 
+A guarded worker can report `effective_import_roots` alongside `artifact_read_epochs`. The list preserves the order
+and duplicates observed during the active session’s import. Relative entries, including empty entries, use the
+worker’s import-time working directory. The worker omits the list if it cannot give absolute paths, if the shim
+did not observe the order, if there is no active read custody, or if the complete list exceeds the frame budget.
+Ordinary execution still works. Consumers using these facts for reuse must bind them to the same session and epochs
+and establish custody for the artifacts and shadowing prefixes they depend on.
+
+Older readers ignore this optional field. Older workers omit it. When updating a Rust struct literal for
+`LeanWorkerHostRuntimeMetadata`, add `effective_import_roots: None` for an unobserved order.
+
 An embedder may advertise its expected contract before opening a session. Actual loaded metadata exists only after a
 session has opened and must be bound to that owner/generation when projected into an execution receipt. It does not
 prove a submitted command ran, a child exited, or a proof succeeded.

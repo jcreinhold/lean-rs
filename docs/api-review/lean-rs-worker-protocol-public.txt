@@ -2230,6 +2230,7 @@ pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::artifact_read
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::checked_host_bindings: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::compiled_header_sha256: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::compiled_lean_version: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::effective_import_roots: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::runtime_lean_version: core::option::Option<alloc::string::String>
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
 pub fn lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata

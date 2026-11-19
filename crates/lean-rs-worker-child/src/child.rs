@@ -150,8 +150,43 @@ impl ProtocolWriter {
             .stdout
             .lock()
             .map_err(|_| ProtocolError::Io(std::io::Error::other("worker stdout mutex was poisoned")))?;
-        write_frame(&mut *stdout, message, cap)
+        write_worker_frame(&mut *stdout, message, cap)
     }
+}
+
+fn copy_import_roots_for_frame(roots: &[String], cap: u32) -> Option<Vec<String>> {
+    // Even before JSON escaping, each entry needs its bytes and two quotes.
+    // Discard obviously oversized orders before duplicating the anchor's storage.
+    let mut remaining = cap as usize;
+    for root in roots {
+        remaining = remaining.checked_sub(2)?.checked_sub(root.len())?;
+    }
+    Some(roots.to_vec())
+}
+
+/// Optional observations must fit as a whole. A size refusal from the codec
+/// happens before it writes the length prefix, so only one frame reaches the parent.
+fn write_worker_frame(writer: &mut impl std::io::Write, message: Message, cap: u32) -> Result<(), ProtocolError> {
+    let Message::Response(Response::HostRuntimeMetadata { mut metadata }) = message else {
+        return write_frame(writer, message, cap);
+    };
+    if let Some(roots) = metadata.effective_import_roots.take() {
+        let mut full = metadata.clone();
+        full.effective_import_roots = Some(roots);
+        match write_frame(
+            writer,
+            Message::Response(Response::HostRuntimeMetadata { metadata: full }),
+            cap,
+        ) {
+            Err(ProtocolError::FrameTooLarge { .. }) => {}
+            result => return result,
+        }
+    }
+    write_frame(
+        writer,
+        Message::Response(Response::HostRuntimeMetadata { metadata }),
+        cap,
+    )
 }
 
 fn write_response(writer: &ProtocolWriter, response: Response) -> Result<(), ProtocolError> {
@@ -767,6 +802,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                                     runtime_lean_version: actual.runtime_lean_version,
                                     checked_host_bindings,
                                     artifact_read_epochs: host_read.as_ref().map(|read| read.epochs().to_vec()),
+                                    effective_import_roots: host_read
+                                        .as_ref()
+                                        .and(state.observed_roots)
+                                        .and_then(|roots| copy_import_roots_for_frame(roots, writer.max_frame_bytes())),
                                 },
                             }
                         }
@@ -1116,7 +1155,7 @@ impl HostAnchor {
 }
 
 struct HostSessionState {
-    observed_roots: bool,
+    observed_roots: Option<&'static [String]>,
     capability: &'static lean_rs::module::TrustedHostCapability<'static>,
     /// Which open produced this session. Compared for equality to decide
     /// reuse, and folded into the module-query cache key so an answer is never
@@ -1339,8 +1378,8 @@ fn open_or_reuse_host_session(
     let current = host_session.as_ref().filter(|state| state.key == key);
     let parked_index = parked.iter().position(|state| state.key == key);
     let candidate = current.or_else(|| parked_index.and_then(|index| parked.get(index)));
-    let can_reuse = if let Some(state) = candidate.filter(|state| state.observed_roots)
-        && let Some(expected) = anchor.installed_roots.get()
+    let can_reuse = if let Some(state) = candidate
+        && let Some(expected) = state.observed_roots
     {
         match state.session.compare_import_roots(&scope, expected) {
             Ok(Some(true)) => true,
@@ -1615,10 +1654,7 @@ impl HostSessionState {
         else {
             return Ok(None);
         };
-        let observed_roots = roots.is_some();
-        if let Some(roots) = roots {
-            anchor.installed_roots.get_or_init(|| roots);
-        }
+        let observed_roots = roots.map(|roots| anchor.installed_roots.get_or_init(|| roots).as_slice());
         Ok(Some(Self {
             observed_roots,
             capability: anchor.capabilities.shim_capability(),
@@ -1629,7 +1665,7 @@ impl HostSessionState {
     }
 
     fn park_if_reusable(self, parked: &mut Vec<Self>) {
-        if self.observed_roots {
+        if self.observed_roots.is_some() {
             parked.push(self);
         } else {
             self.evict();
@@ -3855,6 +3891,41 @@ mod tests {
         LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerSessionImportProfile,
     };
+
+    #[test]
+    fn metadata_frame_omits_only_complete_order_when_over_budget() -> Result<(), Box<dyn std::error::Error>> {
+        use lean_rs_worker_protocol::protocol::{Message, Response, read_frame};
+        use lean_rs_worker_protocol::types::{LeanWorkerArtifactReadEpoch, LeanWorkerHostRuntimeMetadata};
+
+        let base = LeanWorkerHostRuntimeMetadata {
+            compiled_lean_version: "4.36.0".into(),
+            compiled_header_sha256: "a".repeat(64),
+            runtime_lean_version: Some("4.36.0".into()),
+            checked_host_bindings: Default::default(),
+            artifact_read_epochs: Some(vec![LeanWorkerArtifactReadEpoch {
+                project_root: "/fixture".into(),
+                epoch: "17".into(),
+            }]),
+            effective_import_roots: None,
+        };
+        let message = |metadata| Message::Response(Response::HostRuntimeMetadata { metadata });
+        let mut full = base.clone();
+        let roots = vec![r#"/fixture/a"b"#.into(); 3];
+        assert!(super::copy_import_roots_for_frame(&roots, 2).is_none());
+        full.effective_import_roots = super::copy_import_roots_for_frame(&roots, u32::MAX);
+        assert_eq!(full.effective_import_roots.as_ref(), Some(&roots));
+        let mut bytes = Vec::new();
+        super::write_worker_frame(&mut bytes, message(full.clone()), u32::MAX)?;
+        let exact_cap = u32::try_from(bytes.len() - 4)?;
+        for (cap, expected) in [(exact_cap, full.clone()), (exact_cap - 1, base)] {
+            bytes.clear();
+            super::write_worker_frame(&mut bytes, message(full.clone()), cap)?;
+            let mut received = bytes.as_slice();
+            assert_eq!(read_frame(&mut received, cap)?.message, message(expected));
+            assert!(received.is_empty());
+        }
+        Ok(())
+    }
 
     #[test]
     fn bootstrap_rejects_valid_authorization_for_another_manifest_snapshot() -> Result<(), Box<dyn std::error::Error>> {

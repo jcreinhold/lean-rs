@@ -1403,6 +1403,11 @@ pub struct LeanWorkerHostRuntimeMetadata {
     /// Actual read custody at session validation, absent in older/unconfigured workers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_read_epochs: Option<Vec<LeanWorkerArtifactReadEpoch>>,
+    /// Absolute roots in the order observed by this session's import, including duplicates.
+    /// Reported only with active read epochs and when the complete list fits the frame.
+    /// A root outside the admitted domains still needs independent artifact custody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_import_roots: Option<Vec<String>>,
     pub compiled_lean_version: String,
     pub compiled_header_sha256: String,
     pub runtime_lean_version: Option<String>,

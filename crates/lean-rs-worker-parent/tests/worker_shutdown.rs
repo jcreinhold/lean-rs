@@ -600,6 +600,7 @@ fn run_fake_child(mode: &str) {
                 }
                 let fingerprint = if mode == "host_metadata_bad" { "c" } else { "a" };
                 let metadata = LeanWorkerHostRuntimeMetadata {
+                    effective_import_roots: None,
                     artifact_read_epochs: mode.starts_with("host_read_").then(|| {
                         vec![lean_rs_worker_parent::LeanWorkerArtifactReadEpoch {
                             project_root: "/fake-metadata-project".to_owned(),
