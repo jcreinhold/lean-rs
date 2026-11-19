@@ -12,8 +12,8 @@ use crate::host_artifacts::SessionAdmission;
 
 use lean_rs::error::host_internal;
 use lean_rs::module::{
-    TrustedWorkerCapability, WorkerBinaryBinding, WorkerBindingFailure, WorkerStreamBinding, WorkerStringBinding,
-    WorkerUnitBinding,
+    TrustedHostImports, TrustedWorkerCapability, WorkerBinaryBinding, WorkerBindingFailure, WorkerStreamBinding,
+    WorkerStringBinding, WorkerUnitBinding,
 };
 use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
@@ -635,12 +635,15 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     )?;
                     continue;
                 }
-                if let Err(error) = ready_host_anchor(runtime, &mut anchors, &project_root, &mode, admission.as_ref()) {
-                    read_admission_failed = shared_reads;
-                    host_read = None;
-                    write_response(&writer, error_response(&error))?;
-                    continue;
-                }
+                let anchor = match ready_host_anchor(runtime, &mut anchors, &project_root, &mode, admission.as_ref()) {
+                    Ok(anchor) => anchor,
+                    Err(error) => {
+                        read_admission_failed = shared_reads;
+                        host_read = None;
+                        write_response(&writer, error_response(&error))?;
+                        continue;
+                    }
+                };
                 let header_bytes = host_session
                     .as_ref()
                     .and_then(|state| state.session.header_import_state().ok())
@@ -649,7 +652,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     && session_import_bytes.saturating_add(header_bytes) >= header_budget)
                     || (import_count_limit != 0 && session_imports >= import_count_limit);
                 let response = open_or_reuse_host_session(
-                    &anchors,
+                    anchor,
                     &mut host_session,
                     &mut parked,
                     session_pool_capacity,
@@ -1074,7 +1077,7 @@ fn missing_session_response() -> Response {
 /// Everything about an `OpenHostSession` request that determines which
 /// environment the resulting session holds.
 ///
-/// Equality *is* the reuse predicate, so the fields are the contract: a
+/// Once the admitted root order and extension epoch match, a
 /// different project or mode is a different anchor, a different import list is
 /// a different environment, and a different profile is a different set of
 /// modules behind the same list. `imports` is a `Vec`, not a set — import
@@ -1093,11 +1096,11 @@ struct HostSessionKey {
 /// Sessions are `'static` because the host and capabilities behind them are
 /// leaked; the child cannot free them, so the only defence against unbounded
 /// growth is to build at most one anchor per distinct `(project_root, mode)`
-/// and reuse it. `LeanHost` caches nothing from disk — it is `{ runtime,
-/// project }` and re-reads the Lake manifest on each import — so reuse across
-/// differing import sets is sound, and `session_with_profile` already takes
-/// `&self` for exactly that reason.
+/// and reuse it. Its first observed import fixes the root order for this anchor.
+/// The artifact readers and the application continue to own stability of the
+/// files and prefixes reached through that order.
 struct HostAnchor {
+    installed_roots: std::cell::OnceCell<Vec<String>>,
     project_root: String,
     mode: HostSessionMode,
     #[allow(dead_code, reason = "leaked host anchors the capability and session lifetimes")]
@@ -1113,6 +1116,7 @@ impl HostAnchor {
 }
 
 struct HostSessionState {
+    observed_roots: bool,
     capability: &'static lean_rs::module::TrustedHostCapability<'static>,
     /// Which open produced this session. Compared for equality to decide
     /// reuse, and folded into the module-query cache key so an answer is never
@@ -1312,7 +1316,7 @@ impl From<LeanError> for WorkerCallError {
 /// already handles, retrying on `worker_session_missing` — but `parked` survives
 /// it, so the retry may still land on a pooled key.
 fn open_or_reuse_host_session(
-    anchors: &[&'static HostAnchor],
+    anchor: &'static HostAnchor,
     host_session: &mut Option<HostSessionState>,
     parked: &mut Vec<HostSessionState>,
     capacity: usize,
@@ -1328,9 +1332,26 @@ fn open_or_reuse_host_session(
     // accounting therefore stays honest with no new wire signal.
     evict_stale_host_sessions(host_session, parked);
 
-    if let Some(state) = host_session.as_ref()
-        && state.key == key
+    let (profile, scope) = match anchor.import_scope(&key) {
+        Ok(request) => request,
+        Err(err) => return error_response(&err),
+    };
+    let current = host_session.as_ref().filter(|state| state.key == key);
+    let parked_index = parked.iter().position(|state| state.key == key);
+    let candidate = current.or_else(|| parked_index.and_then(|index| parked.get(index)));
+    let can_reuse = if let Some(state) = candidate.filter(|state| state.observed_roots)
+        && let Some(expected) = anchor.installed_roots.get()
     {
+        match state.session.compare_import_roots(&scope, expected) {
+            Ok(Some(true)) => true,
+            Ok(Some(false)) => return Response::HostArtifactEpochChanged,
+            Ok(None) => false,
+            Err(err) => return error_response(&err),
+        }
+    } else {
+        false
+    };
+    if can_reuse && let Some(state) = current {
         // Restated from the open that built this environment; `import_stats`
         // is computed once at import and stored, so it still describes it.
         return Response::HostSessionReused {
@@ -1342,10 +1363,10 @@ fn open_or_reuse_host_session(
     // the environment that built it does, which is sound only because `mode`
     // now joins the module-query cache key — two live sessions over the same
     // root, imports, and profile are otherwise indistinguishable to it.
-    if let Some(index) = parked.iter().position(|state| state.key == key) {
+    if can_reuse && let Some(index) = parked_index {
         let state = parked.remove(index);
         if let Some(outgoing) = host_session.take() {
-            parked.push(outgoing);
+            outgoing.park_if_reusable(parked);
         }
         let import_stats = worker_import_stats(state.session.import_stats());
         *host_session = Some(state);
@@ -1357,12 +1378,12 @@ fn open_or_reuse_host_session(
         return Response::HeaderImportRecycle;
     }
     if let Some(outgoing) = host_session.take() {
-        parked.push(outgoing);
+        outgoing.park_if_reusable(parked);
     }
     // `capacity` counts the session this call is about to make current, so the
     // pool may keep at most `capacity - 1`. Evicting from the front is LRU.
     while parked.len() >= capacity {
-        let mut evicted = parked.remove(0);
+        let evicted = parked.remove(0);
         // Lean's snapshot cache is process-global and clears all-or-nothing, so
         // this also discards entries belonging to sessions that are still live.
         // That costs recomputation and nothing else, and it is the only way to
@@ -1378,25 +1399,12 @@ fn open_or_reuse_host_session(
         // 9 GiB floor) roughly four imports fit in a generation and this loop
         // never runs; on a project importing 50 MB at a time it runs often, and
         // there both the discarded snapshots and the re-import are cheap.
-        drop(evicted.clear_module_snapshot_cache());
-        drop(evicted.session.clear_module_header_cache());
-        drop(evicted);
+        evicted.evict();
     }
 
-    let anchor = match anchors
-        .iter()
-        .find(|anchor| anchor.matches(&key.project_root, &key.mode))
-    {
-        Some(anchor) => *anchor,
-        None => {
-            return error_response(&host_internal(
-                "host anchor was not admitted before session import".to_owned(),
-            ));
-        }
-    };
-
-    match HostSessionState::open(anchor, key) {
-        Ok(state) => {
+    match HostSessionState::open(anchor, key, profile, &scope) {
+        Ok(None) => Response::HostArtifactEpochChanged,
+        Ok(Some(state)) => {
             let import_stats = worker_import_stats(state.session.import_stats());
             *host_session = Some(state);
             // The import that just completed is the only moment the extension
@@ -1559,6 +1567,7 @@ impl HostAnchor {
         let capabilities = &*Box::leak(Box::new(capabilities));
         let worker_capability = worker_capability.map(|image| &*Box::leak(Box::new(image)));
         Ok(Box::leak(Box::new(Self {
+            installed_roots: std::cell::OnceCell::new(),
             project_root: project_root.to_owned(),
             mode: mode.clone(),
             host,
@@ -1566,28 +1575,70 @@ impl HostAnchor {
             worker_capability,
         })))
     }
-}
 
-impl HostSessionState {
-    fn open(anchor: &'static HostAnchor, key: HostSessionKey) -> LeanResult<Self> {
-        let cap = anchor.capabilities.shim_capability();
+    fn import_scope(
+        &'static self,
+        key: &HostSessionKey,
+    ) -> LeanResult<(LeanSessionImportProfile, TrustedHostImports<'static, 'static>)> {
         let profile = host_import_profile(key.import_profile)?;
         let options = lean_rs_host::LeanImportProfileMode::FullSession(profile)
             .native_options(&lean_rs_host::LeanImportProfilerOptions::default());
-        let paths = anchor.capabilities.import_search_paths();
-        let scope = worker_authority()?.imports(cap, paths.clone(), key.imports.clone(), options)?;
+        let paths = self.capabilities.import_search_paths();
+        let scope = worker_authority()?.imports(
+            self.capabilities.shim_capability(),
+            paths.clone(),
+            key.imports.clone(),
+            options,
+        )?;
         if !scope.matches_request(&paths, &key.imports) {
             return Err(host_internal(
                 "worker authority returned different import names or ordered search paths",
             ));
         }
-        let session = anchor.capabilities.session_with_profile(&scope, profile, None, None)?;
-        Ok(Self {
-            capability: cap,
+        Ok((profile, scope))
+    }
+}
+
+impl HostSessionState {
+    fn open(
+        anchor: &'static HostAnchor,
+        key: HostSessionKey,
+        profile: LeanSessionImportProfile,
+        scope: &TrustedHostImports<'static, 'static>,
+    ) -> LeanResult<Option<Self>> {
+        let Some((session, roots)) = LeanSession::open_with_retained_roots(
+            anchor.capabilities,
+            scope,
+            profile,
+            anchor.installed_roots.get().map(Vec::as_slice),
+        )?
+        else {
+            return Ok(None);
+        };
+        let observed_roots = roots.is_some();
+        if let Some(roots) = roots {
+            anchor.installed_roots.get_or_init(|| roots);
+        }
+        Ok(Some(Self {
+            observed_roots,
+            capability: anchor.capabilities.shim_capability(),
             worker_bindings: anchor.worker_capability.map(WorkerCapabilityBindings::new),
             session,
             key,
-        })
+        }))
+    }
+
+    fn park_if_reusable(self, parked: &mut Vec<Self>) {
+        if self.observed_roots {
+            parked.push(self);
+        } else {
+            self.evict();
+        }
+    }
+
+    fn evict(mut self) {
+        drop(self.clear_module_snapshot_cache());
+        drop(self.session.clear_module_header_cache());
     }
 
     fn worker_bindings_for(
@@ -3839,7 +3890,7 @@ mod tests {
         }
     }
 
-    /// Equality on this key *is* the reuse predicate, so every field has to
+    /// Alongside matching roots and registry epoch, every key field has to
     /// participate: a key that ignored one would reuse an environment the
     /// request did not ask for, and every answer computed from it would be
     /// quietly wrong rather than merely stale.

@@ -3620,6 +3620,59 @@ fn cached_module_headers_match_cold_queries_after_edits() {
     assert_eq!(format!("{:?}", warm.items), format!("{:?}", cold.items));
 }
 
+#[test]
+fn session_import_observes_lean_root_order_before_reusing_a_profile() {
+    let project = TempLakeProject::new("import-root-order");
+    let dependency = project.path().join("dependency");
+    let inherited = project.path().join("inherited");
+    fs::create_dir(&dependency).expect("dependency root");
+    fs::create_dir(&inherited).expect("inherited root");
+    for (root, declaration) in [
+        (project.path(), "fromProjectRoot"),
+        (dependency.as_path(), "fromDependencyRoot"),
+    ] {
+        fs::write(
+            root.join("OrderSelection.lean"),
+            format!("module\npublic def {declaration} : Nat := 1\n"),
+        )
+        .expect("write module");
+        let build = Command::new("lean")
+            .args(["-o", "OrderSelection.olean", "OrderSelection.lean"])
+            .current_dir(root)
+            .env_remove("LEAN_PATH")
+            .output()
+            .expect("compile root selection module");
+        assert!(
+            build.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&build.stdout),
+            String::from_utf8_lossy(&build.stderr)
+        );
+    }
+
+    let shims = lean_rs_host::host::prepare_host_artifacts().expect("prepare bundled shims");
+    let shim_paths = shims.shim_search_paths();
+    let inherited_path =
+        std::env::join_paths(std::iter::once(inherited.as_path()).chain(shim_paths.iter().map(PathBuf::as_path)))
+            .expect("encode inherited path");
+    let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lean/session_import_paths.lean");
+    let run = Command::new("lean")
+        .arg("--run")
+        .arg(probe)
+        .arg(project.path())
+        .arg(dependency)
+        .args(shim_paths)
+        .env("LEAN_PATH", inherited_path)
+        .output()
+        .expect("run real Lean import");
+    assert!(
+        run.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
 /// Check reuse by object identity, not timing. Compile the private-state probe
 /// with the shim source so no test-only symbol enters the shipped library.
 #[test]

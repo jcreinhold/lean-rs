@@ -487,6 +487,23 @@ pub struct HostShimBindings<'lean, 'cap> {
     queries: DeclarationQueries<'lean, 'cap>,
     progress: ProgressQueries<'lean, 'cap>,
     session_import: LeanExported<'lean, 'cap, (Vec<String>, Vec<String>), LeanIo<HostEnvironment<'lean>>>,
+    import_paths: Option<
+        LeanExported<
+            'lean,
+            'cap,
+            (
+                Vec<String>,
+                Vec<String>,
+                bool,
+                u8,
+                bool,
+                Option<(bool, bool, String)>,
+                Option<Vec<String>>,
+                bool,
+            ),
+            LeanIo<(Option<HostEnvironment<'lean>>, Vec<String>)>,
+        >,
+    >,
     import_profile: LeanExported<
         'lean,
         'cap,
@@ -603,6 +620,16 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
                 queries: DeclarationQueries::resolve(capability, &mut receipts)?,
                 progress: ProgressQueries::resolve(capability, &mut receipts)?,
                 session_import: bind(capability, &mut receipts, "lean_rs_host_session_import")?,
+                import_paths: {
+                    const SYMBOL: &str = "lean_rs_host_session_import_paths_v1";
+                    optional_import_binding(bind(capability, &mut receipts, SYMBOL), || {
+                        capability
+                            .capability()
+                            .library()
+                            .resolve_function_symbol(SYMBOL)
+                            .is_ok()
+                    })?
+                },
                 import_profile: bind(capability, &mut receipts, "lean_rs_host_session_import_profile")?,
                 import_progress: bind(capability, &mut receipts, "lean_rs_host_session_import_progress")?,
                 import_profile_progress: bind(
@@ -634,6 +661,43 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
                 receipts,
             })
         }
+    }
+
+    /// Use the attested profile to import and observe its installed paths, or to
+    /// compare prospective paths without importing. Legacy shims return `None`.
+    ///
+    /// # Errors
+    /// Returns scope mismatch, native IO or result conversion errors.
+    #[doc(hidden)]
+    #[allow(unsafe_code, reason = "fixed optional import contract from the loaded host shim")]
+    pub fn session_import_paths_in(
+        &self,
+        _transaction: &mut HostImportTransaction,
+        scope: &TrustedHostImports<'lean, '_>,
+        expected: Option<&[String]>,
+        compare_only: bool,
+    ) -> LeanResult<Option<(Option<HostEnvironment<'lean>>, Vec<String>)>> {
+        let Some(call) = &self.import_paths else {
+            return Ok(None);
+        };
+        let (paths, imports) = scope.native_inputs(self.capability)?;
+        let options = scope.options();
+        // SAFETY: the attestation covers these exact inputs. The versioned export returns
+        // an owned Prod (Option Environment) (Array String) at the matching runtime.
+        unsafe {
+            call.call(
+                paths,
+                imports,
+                options.import_all,
+                options.level,
+                options.load_extensions,
+                (options != &crate::module::HostImportOptions::default())
+                    .then(|| (options.profiler, options.trace_profiler, options.trace_output.clone())),
+                expected.map(<[String]>::to_vec),
+                compare_only,
+            )
+        }
+        .map(Some)
     }
 
     /// Import modules and return a typed environment owned by the caller.
@@ -1097,6 +1161,18 @@ impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
 
 type Receipts = std::collections::BTreeMap<String, serde_json::Value>;
 
+/// Only a manifest and image that both predate this export qualify for fallback.
+fn optional_import_binding<T>(
+    checked: Result<T, LeanCheckedExportError>,
+    image_has_symbol: impl FnOnce() -> bool,
+) -> Result<Option<T>, LeanCheckedExportError> {
+    match checked {
+        Ok(binding) => Ok(Some(binding)),
+        Err(LeanCheckedExportError::MissingSignatureMetadata { .. }) if !image_has_symbol() => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// # Safety
 /// The caller must pair this exact symbol with its complete native types.
 #[allow(
@@ -1122,4 +1198,32 @@ where
         signature.to_json(),
     );
     Ok(binding)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LeanCheckedExportError, optional_import_binding};
+
+    #[test]
+    fn optional_import_binding_requires_a_matched_manifest_and_image() {
+        let symbol = "lean_rs_host_session_import_paths_v1";
+        assert!(matches!(optional_import_binding(Ok(()), || true), Ok(Some(()))));
+        let missing_metadata = || LeanCheckedExportError::MissingSignatureMetadata { symbol: symbol.into() };
+        assert!(matches!(
+            optional_import_binding::<()>(Err(missing_metadata()), || false),
+            Ok(None)
+        ));
+        assert!(matches!(
+            optional_import_binding::<()>(Err(missing_metadata()), || true),
+            Err(LeanCheckedExportError::MissingSignatureMetadata { .. })
+        ));
+        let advertised = LeanCheckedExportError::MissingSymbol {
+            symbol: symbol.into(),
+            source: crate::LeanError::symbol_lookup(symbol),
+        };
+        assert!(matches!(
+            optional_import_binding::<()>(Err(advertised), || false),
+            Err(LeanCheckedExportError::MissingSymbol { .. })
+        ));
+    }
 }

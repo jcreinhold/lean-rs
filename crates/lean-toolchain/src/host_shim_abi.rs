@@ -23,6 +23,8 @@ macro_rules! host_shim_exports {
                 => [(Vec<String>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory session_import_profile => "lean_rs_host_session_import_profile"
                 => [(Vec<String>, Vec<String>, bool, u8, bool, bool, bool, String)] => [LeanIo<Obj<'lean>>];
+            optional session_import_paths_v1 => "lean_rs_host_session_import_paths_v1"
+                => [(Vec<String>, Vec<String>, bool, u8, bool, Option<(bool, bool, String)>, Option<Vec<String>>, bool)] => [LeanIo<Obj<'lean>>];
             mandatory session_import_profile_progress => "lean_rs_host_session_import_profile_progress"
                 => [(Vec<String>, Vec<String>, bool, u8, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory env_import_stats => "lean_rs_host_env_import_stats"

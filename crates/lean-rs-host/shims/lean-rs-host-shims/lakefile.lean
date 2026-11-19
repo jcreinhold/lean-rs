@@ -7,7 +7,7 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
   ⟨`pp.unicode.fun, true⟩,
 ]
 
-/-! Bundled Lake package shipping the 28 mandatory + 6 optional
+/-! Bundled Lake package shipping the mandatory and optional
     `lean_rs_host_*` `@[export]` Lean shims that the `lean-rs-host` Rust
     crate loads at runtime.
 

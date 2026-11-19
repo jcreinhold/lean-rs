@@ -5,9 +5,8 @@ import LeanRsInterop.Callback
 /-! Capability category: session-scoped environment queries. The Rust
     `LeanSession` looks up these environment `@[export]` symbols by name at
     `LeanCapabilities::load_capabilities` time and dispatches every query
-    through the cached addresses. Path-layout knowledge (where the
-    `.olean` files live for `Lean.importModules`) stays on the Rust side
-    — the import shim only receives a ready-made search-path string. -/
+    through the cached addresses. Rust supplies the project and shim roots.
+    Lean adds the inherited and builtin roots when preparing the import. -/
 
 namespace LeanRsFixture.Environment
 
@@ -255,9 +254,17 @@ private def mkImportOptions (profiler traceProfiler : Bool) (traceProfilerOutput
   else
     opts.set `trace.profiler.output traceProfilerOutput
 
+private def withHostSearchPath {α : Type} (sysroot : System.FilePath) (explicit : Lean.SearchPath)
+    (usePaths : Lean.SearchPath → IO α) : IO α := do
+  let paths := explicit ++ (← Lean.addSearchPathFromEnv (← Lean.getBuiltinSearchPath sysroot))
+  usePaths paths
+
+-- Keep the path used by warm comparisons definitionally equal to Lean's import setup.
+example (sysroot : System.FilePath) (explicit : Lean.SearchPath) :
+    withHostSearchPath sysroot explicit Lean.searchPathRef.set = Lean.initSearchPath sysroot explicit := rfl
+
 private def initHostSearchPath (searchPaths : Array String) : IO Unit := do
-  let sysroot ← Lean.findSysroot
-  Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
+  withHostSearchPath (← Lean.findSysroot) (searchPaths.toList.map System.FilePath.mk) Lean.searchPathRef.set
 
 /-- The retained identity object is allocated once per SDK import attestation. -/
 initialize sourceCacheScope : IO.Ref (String × Array String) ← IO.mkRef ("", #[])
@@ -269,12 +276,41 @@ def restoreSourceSearchPath (paths : Array String) (identity : String) : IO Unit
   sourceCacheScope.set (identity, paths)
   Lean.searchPathRef.set (paths.toList.map System.FilePath.mk)
 
-private def runSessionImport (searchPaths : Array String) (importNames : Array String)
+private def importAtInstalledPaths (importNames : Array String)
     (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
-  initHostSearchPath searchPaths
   let imports := importNames.map fun n => { module := n.toName, importAll := importAll : Import }
   unsafe Lean.enableInitializersExecution
   Lean.importModules imports opts 0 (loadExts := loadExts) (level := level)
+
+private def runSessionImport (searchPaths : Array String) (importNames : Array String)
+    (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
+  initHostSearchPath searchPaths
+  importAtInstalledPaths importNames importAll loadExts level opts
+
+/-- Observe the path used by this import. A comparison or a known mismatch
+    returns before installing paths or looking up a module. -/
+@[export lean_rs_host_session_import_paths_v1]
+def sessionImportPathsV1 (searchPaths importNames : Array String) (importAll : Bool)
+    (levelCode : UInt8) (loadExts : Bool) (profilerOptions : Option (Bool × Bool × String))
+    (expected : Option (Array String)) (compareOnly : Bool) : IO (Option Environment × Array String) := do
+  let some level := importLevelFromCode? levelCode |
+    throw <| IO.userError s!"unsupported Lean import profiling level code: {levelCode}"
+  withHostSearchPath (← Lean.findSysroot) (searchPaths.toList.map System.FilePath.mk) fun paths => do
+    -- Bind relative paths to the import's working directory without resolving
+    -- symlinks. If cwd is unavailable the raw paths still allow a fresh import.
+    let observed ← if paths.all (·.isAbsolute) then pure paths else
+      match ← IO.currentDir.toBaseIO with
+      | .ok cwd => pure <| paths.map fun p => if p.isAbsolute then p else cwd / p
+      | .error _ => pure paths
+    let roots := observed.toArray.map (·.toString)
+    if compareOnly || (observed.all (·.isAbsolute) && expected.any (· != roots)) then
+      return (none, roots)
+    Lean.searchPathRef.set paths
+    let opts := match profilerOptions with
+      | none => Options.empty
+      | some (profiler, traceProfiler, output) => mkImportOptions profiler traceProfiler output
+    let env ← importAtInstalledPaths importNames importAll loadExts level opts
+    return (some env, roots)
 
 @[export lean_rs_host_env_import_stats]
 def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) : IO ImportStats := do

@@ -363,7 +363,7 @@ pub fn ready_host_artifacts() -> LeanResult<Option<LeanPreparedHostArtifacts>> {
     crate::host::lake::ready_artifacts(host_shim_export_signatures())
 }
 
-fn reject_same_process_cargo_test_session_import() -> LeanResult<()> {
+pub(super) fn reject_same_process_cargo_test_session_import() -> LeanResult<()> {
     if !same_process_cargo_test_import_guard_active() {
         return Ok(());
     }

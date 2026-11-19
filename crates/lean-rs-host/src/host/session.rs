@@ -18,7 +18,8 @@
 //!
 //! | C symbol                                               | Mandatory? | Lean signature                                                                                                                                                       |
 //! | ------------------------------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-//! | `lean_rs_host_session_import`                          | yes        | `String -> Array String -> IO Environment`                                                                                                                           |
+//! | `lean_rs_host_session_import`                          | yes        | `Array String -> Array String -> IO Environment`                                                                                                                           |
+//! | `lean_rs_host_session_import_paths_v1`                 | optional   | Profiled import or comparison returning `IO (Option Environment × Array String)` |
 //! | `lean_rs_host_session_import_progress`                 | yes        | `Array String -> Array String -> USize -> USize -> IO (Except UInt8 Environment)`                                                                                    |
 //! | `lean_rs_host_session_import_profile`                  | yes        | `Array String -> Array String -> Bool -> UInt8 -> Bool -> Bool -> Bool -> String -> IO Environment`                                                                 |
 //! | `lean_rs_host_session_import_profile_progress`         | yes        | `Array String -> Array String -> Bool -> UInt8 -> USize -> USize -> IO (Except UInt8 Environment)`                                                                  |
@@ -535,6 +536,16 @@ pub struct HeaderImportState {
     pub recycle_requested: bool,
 }
 
+#[derive(Clone, Copy)]
+enum SessionImport<'a> {
+    Ordinary(Option<&'a dyn LeanProgressSink>),
+    ObserveRoots(Option<&'a [String]>),
+}
+
+fn comparable_roots(roots: &[String]) -> bool {
+    roots.iter().all(|path| std::path::Path::new(path).is_absolute())
+}
+
 impl<'lean, 'c> LeanSession<'lean, 'c> {
     pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> Vec<String> {
         let project = capabilities.host().project();
@@ -555,9 +566,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Import the named modules into a fresh Lean environment and wrap
     /// it as a session.
     ///
-    /// The Lean-side `lean_rs_host_session_import` receives the Lake
-    /// project root (so it can `Lean.initSearchPath` the `.olean`
-    /// directory) and the module-name list, and returns the resulting
+    /// The Lean-side `lean_rs_host_session_import` receives the ordered
+    /// project, dependency and shim roots and the module names. It adds
+    /// the inherited and builtin roots and returns the resulting
     /// environment. Failures surface as
     /// [`lean_rs::LeanError::LeanException`] with the message Lean produced.
     pub(crate) fn import(
@@ -608,6 +619,68 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         profiler: &LeanImportProfilerOptions,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<Self> {
+        Self::import_with_roots(capabilities, scope, mode, profiler, SessionImport::Ordinary(progress))?
+            .map(|(session, _)| session)
+            .ok_or_else(|| conversion_error("fresh session import returned no environment"))
+    }
+
+    /// Import and return the effective roots observed under this admission. A
+    /// known mismatch returns no session. Legacy shims can import without roots.
+    ///
+    /// # Errors
+    /// Returns admission, native import and conversion errors.
+    #[doc(hidden)]
+    pub fn open_with_retained_roots(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        scope: &TrustedHostImports<'lean, 'c>,
+        profile: LeanSessionImportProfile,
+        expected: Option<&[String]>,
+    ) -> LeanResult<Option<(Self, Option<Vec<String>>)>> {
+        super::capabilities::reject_same_process_cargo_test_session_import()?;
+        Self::import_with_roots(
+            capabilities,
+            scope,
+            LeanImportProfileMode::FullSession(profile),
+            &LeanImportProfilerOptions::default(),
+            SessionImport::ObserveRoots(expected),
+        )
+    }
+
+    /// Compare the prospective order for this profile with the order retained
+    /// by the worker at import. Returns `None` when an order is unavailable.
+    ///
+    /// # Errors
+    /// Returns errors for a different import profile, capability or native failure.
+    #[doc(hidden)]
+    pub fn compare_import_roots(
+        &self,
+        scope: &TrustedHostImports<'lean, 'c>,
+        expected: &[String],
+    ) -> LeanResult<Option<bool>> {
+        if scope.imports() != self.imports.imports() || scope.options() != self.imports.options() {
+            return Err(conversion_error(
+                "root comparison requires the imported names and options",
+            ));
+        }
+        with_host_import_transaction(|transaction| {
+            match self
+                .shims
+                .session_import_paths_in(transaction, scope, Some(expected), true)?
+            {
+                Some((None, roots)) => Ok(comparable_roots(&roots).then(|| roots == expected)),
+                Some((Some(_), _)) => Err(conversion_error("root comparison imported an environment")),
+                None => Ok(None),
+            }
+        })
+    }
+
+    fn import_with_roots(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        scope: &TrustedHostImports<'lean, 'c>,
+        mode: LeanImportProfileMode,
+        profiler: &LeanImportProfilerOptions,
+        request: SessionImport<'_>,
+    ) -> LeanResult<Option<(Self, Option<Vec<String>>)>> {
         let _span = tracing::info_span!(target: "lean_rs", "lean_rs.host.session.import",
             profile = mode.label(), imports_len = scope.imports().len())
         .entered();
@@ -620,12 +693,23 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let shims = HostShimBindings::resolve(capabilities.shim_capability())
             .map_err(|err| lean_rs::__host_internals::host_module_init(err.to_string()))?;
         with_host_import_transaction(|transaction| {
-            let environment = if let Some(sink) = progress {
-                let total = Some(u64::try_from(scope.imports().len()).unwrap_or(u64::MAX));
-                let bridge = ProgressBridge::new(sink, "import", total)?;
-                shims.session_import_progress_in(transaction, scope, bridge.callback())?
-            } else {
-                shims.session_import_in(transaction, scope)?
+            let (environment, roots) = match request {
+                SessionImport::Ordinary(Some(sink)) => {
+                    let total = Some(u64::try_from(scope.imports().len()).unwrap_or(u64::MAX));
+                    let bridge = ProgressBridge::new(sink, "import", total)?;
+                    (
+                        shims.session_import_progress_in(transaction, scope, bridge.callback())?,
+                        None,
+                    )
+                }
+                SessionImport::ObserveRoots(expected) => {
+                    match shims.session_import_paths_in(transaction, scope, expected, false)? {
+                        Some((Some(env), roots)) => (env, comparable_roots(&roots).then_some(roots)),
+                        Some((None, _)) => return Ok(None),
+                        None => (shims.session_import_in(transaction, scope)?, None),
+                    }
+                }
+                SessionImport::Ordinary(None) => (shims.session_import_in(transaction, scope)?, None),
             };
             let import_stats = LeanImportStats::try_from_lean(shims.import_stats(
                 &environment,
@@ -633,15 +717,18 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 mode.load_exts(),
             )?)?;
             let extension_registry_epoch = shims.registry_epoch_in(transaction)?;
-            Ok(Self {
-                capabilities,
-                shims,
-                imports: scope.clone(),
-                environment,
-                import_stats,
-                extension_registry_epoch,
-                stats: Cell::new(SessionStats::default()),
-            })
+            Ok(Some((
+                Self {
+                    capabilities,
+                    shims,
+                    imports: scope.clone(),
+                    environment,
+                    import_stats,
+                    extension_registry_epoch,
+                    stats: Cell::new(SessionStats::default()),
+                },
+                roots,
+            )))
         })
     }
 
