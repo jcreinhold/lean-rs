@@ -105,7 +105,7 @@ fn main() {
                         "cargo:warning=lean-toolchain: missing fixture artifact {}; LAKE_FIXTURE_DIGEST is zero",
                         path.display()
                     );
-                    return ("0".repeat(64), Vec::new());
+                    return ("0".repeat(64), inputs);
                 }
                 let bytes = fs::read(path)
                     .unwrap_or_else(|err| panic!("lean-toolchain: cannot read {}: {err}", path.display()));
@@ -151,7 +151,10 @@ fn main() {
     .unwrap_or_else(|err| panic!("lean-toolchain: cannot write {}: {err}", metadata_path.display()));
 
     for (path, _) in &inputs {
-        println!("cargo:rerun-if-changed={}", path.display());
+        // Watch the nearest existing directory until Lake creates the input.
+        // Watching a missing path directly would make Cargo rebuild on every run.
+        let watched = path.ancestors().find(|ancestor| ancestor.exists()).unwrap_or(path);
+        println!("cargo:rerun-if-changed={}", watched.display());
     }
     if Path::new(&toolchain.header_path).is_file() {
         println!("cargo:rerun-if-changed={}", toolchain.header_path);
