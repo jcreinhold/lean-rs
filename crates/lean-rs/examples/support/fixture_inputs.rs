@@ -70,7 +70,7 @@ pub(super) fn open_selected(path: &Path, device: u64, inode: u64, expected: &str
         return Err(io::Error::other("selected initializer input identity changed"));
     }
     let mut digest = Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
+    let mut buffer = [0u8; 16 * 1024];
     let mut remaining = before.len();
     loop {
         let count = file.read(&mut buffer)?;
