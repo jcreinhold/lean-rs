@@ -428,6 +428,8 @@ impl<'lean> TrustedWorkerCapability<'lean> {
     }
 
     /// Load the exact worker manifest bytes and retain the verified custody guard.
+    /// Before attempting each initializer, retain its image and earlier explicit
+    /// dependencies through process exit, including if a later load fails.
     ///
     /// # Safety
     ///
@@ -452,8 +454,9 @@ impl<'lean> TrustedWorkerCapability<'lean> {
     ) -> LeanResult<Self> {
         with_validated_contracts(contracts, |contracts| {
             // SAFETY: caller holds custody for these actual images and attests the validated symbol contracts.
-            let capability = unsafe { LeanCapability::from_manifest_snapshot(runtime, &path, &bytes) }?;
-            capability.pin_for_process();
+            let capability = unsafe {
+                LeanCapability::load_snapshot(runtime, &path, &bytes, super::bundle::BundleLifetime::Process)
+            }?;
             Ok(Self {
                 capability,
                 contracts,

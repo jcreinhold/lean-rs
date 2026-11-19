@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::bundle::BundleLifetime;
 use super::preflight::{CapabilityManifest, LeanRuntimePreflight, manifest_error_to_lean_error, report_into_error};
 use super::{
     DecodeCallResult, LeanArgs, LeanExported, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule,
@@ -173,22 +174,28 @@ impl<'lean> LeanCapability<'lean> {
         manifest_path: &Path,
         bytes: &[u8],
     ) -> LeanResult<Self> {
+        // SAFETY: the caller attests the actual images and retains normal ownership.
+        unsafe { Self::load_snapshot(runtime, manifest_path, bytes, BundleLifetime::Scoped) }
+    }
+
+    /// # Safety
+    /// The actual images and manifest custody must satisfy [`Self::from_manifest_snapshot`].
+    pub(super) unsafe fn load_snapshot(
+        runtime: &'lean LeanRuntime,
+        manifest_path: &Path,
+        bytes: &[u8],
+        lifetime: BundleLifetime,
+    ) -> LeanResult<Self> {
         let manifest = CapabilityManifest::from_bytes(manifest_path, bytes).map_err(manifest_error_to_lean_error)?;
         let report = LeanRuntimePreflight::check_manifest(manifest_path, &manifest);
         if !report.is_ok() {
             return Err(report_into_error(report));
         }
-        // SAFETY: the caller established native trust for the primary artifact and dependencies.
-        unsafe {
-            Self::open_with_dependencies_and_exports(
-                runtime,
-                manifest.primary_dylib,
-                manifest.package,
-                manifest.module,
-                manifest.dependencies,
-                manifest.exports,
-            )
-        }
+        // SAFETY: the caller attests this snapshot's native images and initialization contract.
+        let bundle = unsafe {
+            LeanLibraryBundle::open_with_lifetime(runtime, manifest.primary_dylib, manifest.dependencies, lifetime)
+        }?;
+        Self::from_bundle(bundle, manifest.package, manifest.module, manifest.exports)
     }
 
     /// Open and initialize a build-script produced Lean capability from a
@@ -285,6 +292,15 @@ impl<'lean> LeanCapability<'lean> {
         let module = module.into();
         // SAFETY: the caller established the complete loaded artifact/dependency contract.
         let bundle = unsafe { LeanLibraryBundle::open(runtime, dylib_path, dependencies) }?;
+        Self::from_bundle(bundle, package, module, export_signatures)
+    }
+
+    fn from_bundle(
+        bundle: LeanLibraryBundle<'lean>,
+        package: String,
+        module: String,
+        export_signatures: impl IntoIterator<Item = LeanExportSignature>,
+    ) -> LeanResult<Self> {
         let _module = bundle.initialize_module(&package, &module)?;
         let export_signatures = export_signatures
             .into_iter()

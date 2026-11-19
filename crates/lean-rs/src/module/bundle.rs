@@ -18,6 +18,14 @@ use crate::runtime::LeanRuntime;
 // `libleanshared`. Re-exported here for callers using the historical paths.
 pub use lean_toolchain::{LeanLibraryDependency, LeanModuleInitializer};
 
+/// Ownership of explicit native images when a configured initializer may publish
+/// callbacks or data into the runtime.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BundleLifetime {
+    Scoped,
+    Process,
+}
+
 /// A primary Lean capability plus its dependent Lean dylibs.
 ///
 /// The primary library is dropped before dependency libraries so imported
@@ -54,6 +62,33 @@ impl<'lean> LeanLibraryBundle<'lean> {
         primary_path: impl AsRef<Path>,
         dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
     ) -> LeanResult<Self> {
+        // SAFETY: this preserves the caller's native contract and handle-scoped ownership.
+        unsafe { Self::open_with_lifetime(runtime, primary_path, dependencies, BundleLifetime::Scoped) }
+    }
+
+    /// # Safety
+    /// The caller must uphold [`Self::open`]'s native execution and loader obligations
+    /// for the primary and every dependency. Retention only keeps their mappings live.
+    #[allow(unsafe_code, reason = "caller attests the actual native images and initializers")]
+    pub(super) unsafe fn open_with_lifetime(
+        runtime: &'lean LeanRuntime,
+        primary_path: impl AsRef<Path>,
+        dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
+        lifetime: BundleLifetime,
+    ) -> LeanResult<Self> {
+        // A native registration may use any earlier explicit dependency, including
+        // a globally visible helper which is absent from the registrar's load commands.
+        let mut pinned_count = 0;
+        let mut retain_inputs = |dependencies: &[LeanLibrary<'lean>], current: &LeanLibrary<'lean>| {
+            if lifetime == BundleLifetime::Process {
+                for library in dependencies.iter().skip(pinned_count) {
+                    library.pin_for_process();
+                }
+                current.pin_for_process();
+                // The current image follows the already-open dependency slice.
+                pinned_count = dependencies.len().saturating_add(1);
+            }
+        };
         let mut opened_dependencies = Vec::new();
         for dependency in dependencies {
             // SAFETY: the caller's trust assertion covers every actual loaded
@@ -66,6 +101,7 @@ impl<'lean> LeanLibraryBundle<'lean> {
                 }
             };
             if let Some(initializer) = dependency.into_module_initializer() {
+                retain_inputs(&opened_dependencies, &library);
                 let _module = library.initialize_module(initializer.package_name(), initializer.module_name())?;
             }
             opened_dependencies.push(library);
@@ -73,6 +109,7 @@ impl<'lean> LeanLibraryBundle<'lean> {
 
         // SAFETY: the caller established the primary artifact's native contract.
         let primary = unsafe { LeanLibrary::open(runtime, primary_path) }?;
+        retain_inputs(&opened_dependencies, &primary);
         Ok(Self {
             primary,
             dependencies: opened_dependencies,

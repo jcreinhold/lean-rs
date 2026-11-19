@@ -31,10 +31,10 @@
 // smallest scope that compiles.
 #![allow(unsafe_code)]
 
-use std::collections::{BTreeMap, HashSet, btree_map::Entry};
+use std::collections::{BTreeMap, HashMap, HashSet, btree_map::Entry};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use lean_rs_sys::lean_object;
 use object::{Object, ObjectSection, ObjectSymbol, SectionKind, SymbolSection};
@@ -75,6 +75,8 @@ pub struct LeanLibrary<'lean> {
     /// [`open`]: Self::open
     globals: HashSet<String>,
 }
+
+static PINNED: LazyLock<Mutex<HashMap<usize, Arc<libloading::Library>>>> = LazyLock::new(Mutex::default);
 
 /// Obtain the native handle identity while preserving the original loader reference.
 #[allow(unsafe_code, reason = "round-trip the same owned platform handle without closing it")]
@@ -299,13 +301,19 @@ impl<'lean> LeanLibrary<'lean> {
     pub(crate) fn pin_for_process(&self) {
         // A retained native loader reference keeps its handle unique until process exit.
         // Reopening the same image can create new Rust Library wrappers around that handle.
-        static PINNED: std::sync::Mutex<Option<std::collections::HashMap<usize, std::sync::Arc<libloading::Library>>>> =
-            std::sync::Mutex::new(None);
-        let mut pinned = PINNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        pinned
-            .get_or_insert_with(Default::default)
+        PINNED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(self.loader_identity)
             .or_insert_with(|| Arc::clone(&self.library));
+    }
+
+    #[cfg(all(test, unix))]
+    pub(super) fn is_pinned_for_process(&self) -> bool {
+        PINNED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&self.loader_identity)
     }
 
     /// On-disk path the library was opened from. Used only for
