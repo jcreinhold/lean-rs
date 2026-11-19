@@ -627,9 +627,7 @@ fn imports_for_fixture<'lean, 'c>(
     } else {
         None
     };
-    #[cfg(not(all(test, unix)))]
-    let ordinary_paths: Option<Vec<String>> = None;
-    let roots = ordinary_paths.unwrap_or_else(|| {
+    let strict_paths = || {
         for name in names {
             let relative = PathBuf::from(name.replace('.', "/")).with_extension("olean");
             assert!(
@@ -638,9 +636,14 @@ fn imports_for_fixture<'lean, 'c>(
             );
         }
         approved_graph(caps, names, &options, "session")
-    });
+    };
+    #[cfg(all(test, unix))]
+    let roots = ordinary_paths.unwrap_or_else(strict_paths);
     #[cfg(not(all(test, unix)))]
-    let _ = ordinary;
+    let roots = {
+        let _ = ordinary;
+        strict_paths()
+    };
     #[allow(
         unsafe_code,
         reason = "two fixed source-reviewed imports in the admitted ordered fixture and release closure"
@@ -911,12 +914,13 @@ fn term_batch_for<'lean, 'c>(
     } else {
         None
     };
-    #[cfg(not(all(test, unix)))]
-    let ordinary_paths: Option<Vec<String>> = {
-        let _ = ordinary;
-        None
-    };
+    #[cfg(all(test, unix))]
     let paths = ordinary_paths.unwrap_or_else(resolution);
+    #[cfg(not(all(test, unix)))]
+    let paths = {
+        let _ = ordinary;
+        resolution()
+    };
     #[allow(
         unsafe_code,
         reason = "exact source-reviewed test batches in the admitted fixture environment"
