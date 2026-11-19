@@ -289,8 +289,22 @@ members = [
             "CARGO_TERM_COLOR": os.environ.get("CARGO_TERM_COLOR", "always"),
         }
 
-        if "CARGO_BUILD_JOBS" in os.environ:
-            env["CARGO_BUILD_JOBS"] = os.environ["CARGO_BUILD_JOBS"]
+        # Keep registry access on machines that need a proxy, without inheriting
+        # Lean paths or loader settings that would invalidate this check.
+        for name in (
+            "CARGO_BUILD_JOBS",
+            "CARGO_HTTP_PROXY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        ):
+            if name in os.environ:
+                env[name] = os.environ[name]
 
         for crate in CRATES:
             subprocess.run(
