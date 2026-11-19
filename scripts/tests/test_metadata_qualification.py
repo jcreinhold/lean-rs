@@ -580,7 +580,15 @@ class MetadataQualificationTest(unittest.TestCase):
         selection = nextest[-1]
         self.assertIn("binary(=typed_session)", selection)
         self.assertIn("binary(=session_reuse)", selection)
-        self.assertEqual(selection.count("test(="), 25)
+        self.assertEqual(selection.count("test(="), 33)
+        self.assertIn(
+            "test(=process_module_query_batch_isolates_snapshots_by_session_imports)",
+            selection,
+        )
+        self.assertNotIn(
+            "test(=process_module_query_batch_changed_session_imports_rebuilds)",
+            selection,
+        )
         remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
         self.assertEqual(
             remaining,

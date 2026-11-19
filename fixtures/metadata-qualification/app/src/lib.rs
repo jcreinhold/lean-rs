@@ -261,6 +261,7 @@ impl Record {
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
             && [
                 &["LeanRsHostShims.Elaboration"][..],
+                &["LeanRsHostShims.Elaboration", "Lean"][..],
                 &["LeanRsFixture.Scalars"][..],
                 &["LeanRsFixture.Scalars", "LeanRsFixture.Strings"][..],
                 &["LeanRsFixture.Strings", "LeanRsFixture.Scalars"][..],

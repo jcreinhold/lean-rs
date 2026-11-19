@@ -2530,27 +2530,31 @@ fn process_module_query_batch_clear_evicts_snapshot() {
     assert_ne!(batch_facts(&after_clear).cache_status, LeanWorkerModuleCacheStatus::Hit);
 }
 
-/// A changed import set must never be answered from the previous
-/// environment's snapshot.
-///
-/// This used to read `Miss`, because switching imports dropped the old session
-/// and cleared the whole snapshot cache with it. The child now pools sessions,
-/// so the previous entry for this file is still there and the answer is
-/// `Rebuilt` — the key rejected it and it was recomputed. That is the same
-/// contract with better evidence: `Miss` could not distinguish "the key was
-/// respected" from "the cache happened to be empty".
+/// A snapshot belongs to its imported environment. Changing the imports
+/// misses even for the same file and source. Returning to the first imports
+/// must still hit, so a cache clear or worker restart cannot pass this check.
 #[test]
-fn process_module_query_batch_changed_session_imports_rebuilds() {
+fn process_module_query_batch_isolates_snapshots_by_session_imports() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new().file_label("/cache/imports.lean");
     let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
+    let pid = worker.__child_pid_for_test().expect("worker has a child PID");
     let source = "theorem t (h : True) : True := by\n  exact h\n";
     let selectors = cache_probe_selectors();
-    {
-        let mut session = worker
-            .open_session(&elaboration_session_config(), None, None)
-            .expect("worker session opens");
-        session
+    let original = elaboration_session_config();
+    let changed = LeanWorkerSessionConfig::new(
+        fixture_root(),
+        "lean_rs_fixture",
+        "LeanRsFixture",
+        ["LeanRsHostShims.Elaboration", "Lean"],
+    );
+    for (config, status) in [
+        (&original, LeanWorkerModuleCacheStatus::Miss),
+        (&changed, LeanWorkerModuleCacheStatus::Miss),
+        (&original, LeanWorkerModuleCacheStatus::Hit),
+    ] {
+        let mut session = worker.open_session(config, None, None).expect("worker session opens");
+        let outcome = session
             .process_module_query_batch(
                 source,
                 &selectors,
@@ -2559,29 +2563,13 @@ fn process_module_query_batch_changed_session_imports_rebuilds() {
                 None,
                 None,
             )
-            .expect("first session batch succeeds");
+            .expect("batch succeeds");
+        assert_batch_has_state(&outcome);
+        assert_eq!(batch_facts(&outcome).cache_status, status);
+        assert_eq!(worker.__child_pid_for_test(), Some(pid));
     }
-
-    let changed_imports = LeanWorkerSessionConfig::new(
-        fixture_root(),
-        "lean_rs_fixture",
-        "LeanRsFixture",
-        ["LeanRsHostShims.Elaboration", "Lean"],
-    );
-    let mut session = worker
-        .open_session(&changed_imports, None, None)
-        .expect("worker session with changed imports opens");
-    let outcome = session
-        .process_module_query_batch(
-            source,
-            &selectors,
-            &LeanWorkerOutputBudgets::default(),
-            &opts,
-            None,
-            None,
-        )
-        .expect("changed-import batch succeeds");
-    assert_eq!(batch_facts(&outcome).cache_status, LeanWorkerModuleCacheStatus::Rebuilt);
+    assert_eq!(worker.stats().restarts, 0);
+    assert!(worker.shutdown().expect("worker terminates").exit.success);
 }
 
 #[test]

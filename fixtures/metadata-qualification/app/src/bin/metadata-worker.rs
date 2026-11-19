@@ -3,7 +3,7 @@ use lean_rs::host_bridge::{
     TrustedHostKernelRequest, TrustedHostTerm, TrustedModuleSource,
     module_requests::{
         DeclarationVerificationBatchRequest, DeclarationVerificationRequest,
-        DeclarationVerificationTarget, ModuleQueryOutputBudgets, ProofAttemptRequest, SorryPolicy,
+        DeclarationVerificationTarget, ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, SorryPolicy,
     },
 };
 use lean_rs::module::{
@@ -249,11 +249,72 @@ impl WorkerAuthority for MetadataApp {
     }
     fn cached<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: HostCachedModuleBatch,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: HostCachedModuleBatch,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, HostCachedModuleBatch>> {
-        Err(denied())
+        const BASE: &str = "theorem t (h : True) : True := by\n  exact h\n";
+        const CHANGED: &str = "theorem t (h : True) : True := by\n  trivial\n";
+        const EXTENDED: &str = "theorem t (h : True) : True := by\n  exact h\n\ntheorem u : 1 = 1 := by\n  rfl\n";
+        const SHIFTED: &str = "theorem s : 2 = 2 := by\n  rfl\n\ntheorem t (h : True) : True := by\n  exact h\n";
+        let d = &self.deployment()?.record;
+        if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
+            || d.broken_import || !d.typed_session || d.verification
+            || !options.namespace.is_empty() || options.options_json != "{}"
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || request.batch.budgets != ModuleQueryOutputBudgets::default()
+            || *session.imports.options() != HostImportOptions::default()
+        {
+            return Err(denied());
+        }
+        let source = request.batch.source.as_str();
+        let (line, entries, ttl, bytes) = match (options.file.as_str(), source) {
+            ("/cache/reuse.lean" | "/cache/clear.lean" | "/cache/imports.lean", BASE)
+                | ("/cache/rebuild.lean", BASE | CHANGED)
+                | ("/cache/incremental.lean", BASE | EXTENDED) => (2, "4", "300000", "67108864"),
+            ("/cache/incremental.lean" | "/cache/incremental-cold.lean", SHIFTED) => (5, "4", "300000", "67108864"),
+            ("/cache/ttl.lean", BASE) => (2, "4", "1", "67108864"),
+            ("/cache/entry-a.lean" | "/cache/entry-b.lean", BASE) => (2, "1", "300000", "67108864"),
+            ("/cache/tiny.lean", BASE) => (2, "4", "300000", "1"),
+            _ => return Err(denied()),
+        };
+        let names = session.imports.imports();
+        let ordinary = names == ["LeanRsHostShims.Elaboration"];
+        let changed = options.file == "/cache/imports.lean"
+            && names == ["LeanRsHostShims.Elaboration", "Lean"];
+        let paths = d.import_roots.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
+        if (!ordinary && !changed) || !session.imports.matches_request(&paths, names)
+            || request.batch.selectors != [ModuleQuerySelector::ProofState {
+                id: "state".to_owned(), line, column: 4,
+            }]
+        {
+            return Err(denied());
+        }
+        // The trusted SDK computes the cache key; it is not an artifact grant.
+        // Bound its wire shape and each case's actual cache limits without copying
+        // the production key algorithm that these tests exercise.
+        if request.policy.len() > 256 {
+            return Err(denied());
+        }
+        let fields = request.policy.split('\n').collect::<Vec<_>>();
+        let [file, key, max_entries, ttl_millis, max_bytes] = fields.as_slice() else {
+            return Err(denied());
+        };
+        if *file != options.file || key.len() != 64
+            || !key.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || *max_entries != entries || *ttl_millis != ttl || *max_bytes != bytes
+        {
+            return Err(denied());
+        }
+        // SAFETY: grant_source checked the actual retained capability, environment
+        // and complete observed roots. Held protects all sealed imports and images.
+        // Only the fixed sources, projections and limits above enter this frontend.
+        unsafe {
+            session.capability.cached_module_batch_scope(
+                session.environment, session.imports, d.verification_roots(), request, options,
+            )
+        }
     }
     fn proof<'cap>(
         &self,

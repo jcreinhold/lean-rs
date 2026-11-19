@@ -50,6 +50,14 @@ ORDINARY_TYPED_TESTS = (
     "describe_bulk_preserves_input_length_with_missing_slots",
     "oversized_terminal_response_is_request_error_not_child_death",
     "inspect_declaration_pretty_and_raw_rendering_differ",
+    "process_module_query_batch_reuses_snapshot_for_same_file_content",
+    "process_module_query_batch_rebuilds_when_content_changes",
+    "process_module_query_batch_incremental_rebuild_matches_a_cold_build",
+    "process_module_query_batch_clear_evicts_snapshot",
+    "process_module_query_batch_isolates_snapshots_by_session_imports",
+    "process_module_query_batch_ttl_evicts_idle_snapshot",
+    "process_module_query_batch_entry_limit_evicts_old_entries",
+    "process_module_query_batch_tiny_cache_still_returns_correct_query",
 )
 ORDINARY_SESSION_REUSE_TESTS = (
     "reopening_an_identical_session_does_not_import_again",
