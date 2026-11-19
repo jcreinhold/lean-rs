@@ -612,7 +612,7 @@ fn imports_for_fixture<'lean, 'c>(
             | "LeanRsHostShims.InfoTree"
             | "LeanRsFixture.Meta"
             | "LeanRsFixtureLateExtension"]
-            | ["LeanRsFixture.Handles", "LeanRsHostShims.Meta"]
+            | ["LeanRsFixture.Handles" | "LeanRsFixture.Meta", "LeanRsHostShims.Meta"]
     ));
     assert!(
         profile == lean_rs_host::LeanSessionImportProfile::Private
@@ -809,6 +809,67 @@ pub(super) fn term<'lean, 'c>(
     }
     .expect("attest fixture term")
 }
+#[allow(dead_code, reason = "host services only")]
+pub(super) fn native_meta_term<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    session: &lean_rs_host::LeanSession<'lean, '_>,
+    source: &str,
+) -> lean_rs::host_bridge::TrustedHostTerm<'lean, 'c> {
+    const MODULES: &[&str] = &["LeanRsFixture.Meta", "LeanRsHostShims.Meta"];
+    assert!(matches!(
+        source,
+        "Nat"
+            | "Bool"
+            | "LeanRsFixture.Meta.ReducibleNatAlias"
+            | "LeanRsFixture.Meta.IrreducibleNatAlias"
+            | "(Nat.succ 0 : Nat)"
+    ));
+    let (env, imports) = session.source_context();
+    assert!(imports.matches_request(
+        &caps.import_search_paths(),
+        &MODULES.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>()
+    ));
+    assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
+    let paths = native_source_paths(caps, MODULES).expect("ordinary Meta fixture selected");
+    #[allow(unsafe_code, reason = "five fixed terms in the held test fixture")]
+    // SAFETY: the fixed terms use the exact loaded Meta environment, native
+    // roots under held readers, and the default elaborator with no expected type.
+    unsafe {
+        caps.shim_capability().term_scope(
+            env,
+            imports,
+            paths,
+            source.to_owned(),
+            None,
+            lean_rs_host::LeanElabOptions::new().source_options(),
+        )
+    }
+    .expect("attest fixed Meta term")
+}
+
+fn native_source_paths(caps: &LeanCapabilities<'_, '_>, modules: &[&str]) -> Option<Vec<String>> {
+    #[cfg(all(test, unix))]
+    {
+        native_import_paths(caps, modules).map(|mut paths| {
+            paths.push(
+                Path::new(lean_toolchain::LEAN_HEADER_PATH)
+                    .ancestors()
+                    .nth(3)
+                    .expect("build-selected Lean prefix")
+                    .join("lib/lean")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            paths
+        })
+    }
+    #[cfg(not(all(test, unix)))]
+    {
+        let _ = (caps, modules);
+        None
+    }
+}
+
 #[allow(
     dead_code,
     reason = "this fixture entry is shared by separate test and profiling binaries"
@@ -897,30 +958,10 @@ fn term_batch_for<'lean, 'c>(
     let (env, imports) = session.source_context();
     assert!(imports.matches_request(&caps.import_search_paths(), &["LeanRsHostShims.Elaboration".into()]));
     assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
-    #[cfg(all(test, unix))]
-    let ordinary_paths = if ordinary {
-        native_import_paths(caps, &["LeanRsHostShims.Elaboration"]).map(|mut paths| {
-            paths.push(
-                Path::new(lean_toolchain::LEAN_HEADER_PATH)
-                    .ancestors()
-                    .nth(3)
-                    .expect("build-selected Lean prefix")
-                    .join("lib/lean")
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-            paths
-        })
-    } else {
-        None
-    };
-    #[cfg(all(test, unix))]
-    let paths = ordinary_paths.unwrap_or_else(resolution);
-    #[cfg(not(all(test, unix)))]
-    let paths = {
-        let _ = ordinary;
-        resolution()
-    };
+    let paths = ordinary
+        .then(|| native_source_paths(caps, &["LeanRsHostShims.Elaboration"]))
+        .flatten()
+        .unwrap_or_else(resolution);
     #[allow(
         unsafe_code,
         reason = "exact source-reviewed test batches in the admitted fixture environment"

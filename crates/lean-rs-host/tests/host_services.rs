@@ -1674,19 +1674,61 @@ fn session_over_meta<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 
     .expect("session imports cleanly")
 }
 
+fn native_meta_session<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    if !fixture::native_fixture_selected() {
+        return session_over_meta(caps);
+    }
+    caps.session(
+        &fixture::native_imports_for(
+            caps,
+            &["LeanRsFixture.Meta", "LeanRsHostShims.Meta"],
+            LeanSessionImportProfile::default(),
+        ),
+        None,
+        None,
+    )
+    .expect("session imports cleanly")
+}
+
 fn meta_expr<'lean>(
     caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
     session: &mut LeanSession<'lean, '_>,
     fixture: &str,
 ) -> lean_rs::LeanExpr<'lean> {
-    let source = match fixture {
-        "lean_rs_fixture_meta_expr_nat" => "Nat".to_owned(),
-        "lean_rs_fixture_meta_expr_bool" => "Bool".to_owned(),
-        "lean_rs_fixture_meta_expr_reducible_nat_alias" => "LeanRsFixture.Meta.ReducibleNatAlias".to_owned(),
-        "lean_rs_fixture_meta_expr_irreducible_nat_alias" => "LeanRsFixture.Meta.IrreducibleNatAlias".to_owned(),
+    let source = meta_source(fixture);
+    call_service!(caps, session, elaborate, source, None, &LeanElabOptions::new(), None)
+        .expect("fixture expression elaboration reports no exception")
+        .expect("fixture expression elaborates")
+}
+
+fn meta_source(fixture: &str) -> &'static str {
+    match fixture {
+        "lean_rs_fixture_meta_expr_nat" => "Nat",
+        "lean_rs_fixture_meta_expr_bool" => "Bool",
+        "lean_rs_fixture_meta_expr_reducible_nat_alias" => "LeanRsFixture.Meta.ReducibleNatAlias",
+        "lean_rs_fixture_meta_expr_irreducible_nat_alias" => "LeanRsFixture.Meta.IrreducibleNatAlias",
         other => panic!("unknown meta fixture expression export {other}"),
-    };
-    call_service!(caps, session, elaborate, &source, None, &LeanElabOptions::new(), None)
+    }
+}
+
+fn native_meta_elaborate<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    source: &str,
+) -> lean_rs::LeanResult<Result<lean_rs::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>> {
+    if !fixture::native_fixture_selected() {
+        return call_service!(caps, session, elaborate, source, None, &LeanElabOptions::new(), None);
+    }
+    let term = fixture::native_meta_term(caps, session, source);
+    session.elaborate(&term, None)
+}
+
+fn native_meta_expr<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    fixture: &str,
+) -> lean_rs::LeanExpr<'lean> {
+    native_meta_elaborate(caps, session, meta_source(fixture))
         .expect("fixture expression elaboration reports no exception")
         .expect("fixture expression elaborates")
 }
@@ -1733,9 +1775,9 @@ fn meta_registry_exposes_five_pinned_services() {
 
 #[test]
 fn meta_infer_type_returns_ok_for_nat_type() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
     // The type of `Nat.zero` is `Nat`; inferring its type yields `Type`.
     // Using a Lean-produced Expr keeps the test honest—Rust never
@@ -1765,9 +1807,9 @@ fn meta_infer_type_returns_ok_for_nat_type() {
 
 #[test]
 fn meta_whnf_returns_ok_for_nat_type() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
     let expr = session
         .declaration_type("Nat.zero", None)
@@ -1795,9 +1837,9 @@ fn meta_heartbeat_burn_yields_timeout_status() {
     // trips on the very first iteration; the test completes in well
     // under a millisecond. No threshold asserted (per the project's
     // "no performance claim without numbers" rule).
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
     // Any Expr will do—heartbeat_burn ignores its argument.
     let expr = session
@@ -1833,21 +1875,13 @@ fn meta_heartbeat_burn_yields_timeout_status() {
 
 #[test]
 fn meta_pp_expr_renders_elaborated_expr() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let expr = call_service!(
-        caps,
-        session,
-        elaborate,
-        "(Nat.succ 0 : Nat)",
-        None,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception")
-    .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let expr = native_meta_elaborate(&caps, &mut session, "(Nat.succ 0 : Nat)")
+        .expect("host stack reports no exception")
+        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
     let outcome = session
         .run_meta(&pp_expr(), expr, &LeanMetaOptions::new(), None)
         .expect("host stack reports no exception");
@@ -1877,21 +1911,13 @@ fn meta_pp_expr_honours_heartbeat_budget() {
     // `heartbeat_limit(1)` the first internal check trips and the
     // outcome must classify as `TimeoutOrHeartbeat`—never `Ok`,
     // never a panic.
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let expr = call_service!(
-        caps,
-        session,
-        elaborate,
-        "(Nat.succ 0 : Nat)",
-        None,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception")
-    .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let expr = native_meta_elaborate(&caps, &mut session, "(Nat.succ 0 : Nat)")
+        .expect("host stack reports no exception")
+        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
     let opts = LeanMetaOptions::new().heartbeat_limit(1);
     let outcome = session
         .run_meta(&pp_expr(), expr, &opts, None)
@@ -1905,12 +1931,12 @@ fn meta_pp_expr_honours_heartbeat_budget() {
 
 #[test]
 fn meta_is_def_eq_reducible_alias_matches_nat() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_reducible_nat_alias");
-    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_reducible_nat_alias");
+    let rhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1924,12 +1950,12 @@ fn meta_is_def_eq_reducible_alias_matches_nat() {
 
 #[test]
 fn meta_is_def_eq_distinguishes_nat_and_bool() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
-    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_bool");
+    let lhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let rhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_bool");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1943,12 +1969,12 @@ fn meta_is_def_eq_distinguishes_nat_and_bool() {
 
 #[test]
 fn meta_is_def_eq_default_does_not_unfold_irreducible_alias() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
-    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
+    let rhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1962,12 +1988,12 @@ fn meta_is_def_eq_default_does_not_unfold_irreducible_alias() {
 
 #[test]
 fn meta_is_def_eq_all_unfolds_irreducible_alias() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
-    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
+    let rhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1981,12 +2007,12 @@ fn meta_is_def_eq_all_unfolds_irreducible_alias() {
 
 #[test]
 fn meta_is_def_eq_pre_cancelled_token_returns_cancelled() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let mut session = session_over_meta(&caps);
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = native_meta_session(&caps);
 
-    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
-    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let rhs = native_meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let before = session.stats();
     let token = LeanCancellationToken::new();
     token.cancel();
