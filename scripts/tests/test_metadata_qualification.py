@@ -480,12 +480,51 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
         run.assert_called_once()
 
+    def test_linux_broken_import_selects_official_pins_only_for_named_profile(self):
+        pins = qualification.verified_platform("Linux", "x86_64", broken_import=True)
+        self.assertEqual(
+            pins["lean"],
+            "db7f559d05795e7af52e42bc966c90240a39dcb9712161c54c97afa546e20c00",
+        )
+        self.assertEqual(
+            pins["lake"],
+            "42678ccbc2605e2f892540dc7236e009fdd1224e823d104dfd72725d2f1a52d2",
+        )
+        self.assertEqual(
+            pins["runtime"],
+            "e2c403b411497bbc325d0a26bf57ba0132271750bf6d84e32cd61a9db4777252",
+        )
+        self.assertEqual(pins["runtime_name"], "libleanshared.so")
+        self.assertEqual(pins["nextest_runner"], "/usr/bin/env -u LD_LIBRARY_PATH")
+        with self.assertRaisesRegex(ValueError, "Linux ordinary dispatch awaits"):
+            qualification.verified_platform("Linux", "x86_64")
+        self.launch.assert_not_called()
+
+    def test_linux_broken_import_command_passes_selected_profile(self):
+        with (
+            patch.object(sys, "argv", ["qualify_metadata.py", "broken-import"]),
+            patch.object(qualification.platform, "system", return_value="Linux"),
+            patch.object(qualification.platform, "machine", return_value="x86_64"),
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                qualification, "installed_lean_release", return_value=self.target
+            ) as release,
+            patch.object(qualification, "ordinary_state_lock"),
+            patch.object(qualification, "qualify_broken_import") as run,
+        ):
+            qualification.main()
+        release.assert_called_once_with(qualification.LINUX_X86_64_BROKEN_IMPORT_PINS)
+        run.assert_called_once_with(
+            self.target, qualification.LINUX_X86_64_BROKEN_IMPORT_PINS
+        )
+        self.launch.assert_not_called()
+
     def test_broken_import_refuses_platform_before_creating_state(self):
         argv = ["qualify_metadata.py", "broken-import"]
         with (
             patch.object(sys, "argv", argv),
             patch.object(qualification.platform, "system", return_value="Linux"),
-            patch.object(qualification.platform, "machine", return_value="x86_64"),
+            patch.object(qualification.platform, "machine", return_value="aarch64"),
             patch.dict(os.environ, {}, clear=True),
             patch("sys.stderr", new_callable=io.StringIO) as error,
             patch.object(qualification, "ordinary_state_lock") as state_lock,

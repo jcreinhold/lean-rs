@@ -45,6 +45,14 @@ LINUX_X86_64_NEXTEST_RUNNER = {
     "nextest_runner": "/usr/bin/env -u LD_LIBRARY_PATH",
 }
 
+LINUX_X86_64_BROKEN_IMPORT_PINS = {
+    "lean": "db7f559d05795e7af52e42bc966c90240a39dcb9712161c54c97afa546e20c00",
+    "lake": "42678ccbc2605e2f892540dc7236e009fdd1224e823d104dfd72725d2f1a52d2",
+    "runtime": "e2c403b411497bbc325d0a26bf57ba0132271750bf6d84e32cd61a9db4777252",
+    "runtime_name": "libleanshared.so",
+    **LINUX_X86_64_NEXTEST_RUNNER,
+}
+
 
 def require(condition, message):
     if not condition:
@@ -96,11 +104,13 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def verified_platform(system=None, machine=None):
+def verified_platform(system=None, machine=None, *, broken_import=False):
     system = platform.system() if system is None else system
     machine = platform.machine() if machine is None else machine
     if (system, machine) == ("Darwin", "arm64"):
         return DARWIN_ARM64_PINS
+    if (system, machine) == ("Linux", "x86_64") and broken_import:
+        return LINUX_X86_64_BROKEN_IMPORT_PINS
     if system == "Linux":
         raise ValueError(
             "Linux ordinary dispatch awaits verified Lean release, helper and worker artifact pins"
@@ -889,7 +899,7 @@ def main():
         )
     try:
         refuse_inherited_loader_overrides()
-        profile = verified_platform()
+        profile = verified_platform(broken_import=args.command == "broken-import")
         release = installed_lean_release(profile)
         if args.command == "broken-import":
             with ordinary_state_lock():

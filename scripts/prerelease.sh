@@ -483,6 +483,20 @@ else
 	SKIPPED+=("actionlint workflows")
 fi
 
+run_broken_import() {
+	if [[ "$OS_KIND" == "Darwin" ]]; then
+		command -v gtimeout >/dev/null || { log_err "GNU gtimeout is required"; return 1; }
+	else
+		command -v timeout >/dev/null || { log_err "GNU timeout is required"; return 1; }
+	fi
+	cargo fetch --locked --manifest-path "$REPO_ROOT/fixtures/metadata-qualification/app/Cargo.toml" &&
+		env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import
+}
+
+if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
+	run_gate "Required standalone broken-import check" run_broken_import
+fi
+
 # nextest on Linux preloads libgcc_s.so.1 — Lean's `libleanshared.so`
 # statically links its own libstdc++ + `_Unwind_*` symbols, which shadow
 # glibc's libgcc_s when the dylib is dlopened. Rust panic unwinding
@@ -515,7 +529,11 @@ run_nextest() {
 		# anyway — those are the real leak gate.
 		env_args+=("LEAN_RS_LEAK_LOOP_ITERS=4")
 	fi
-	"${env_args[@]}" cargo nextest run --workspace --profile ci
+	if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
+		"${env_args[@]}" cargo nextest run --workspace --profile ci -E 'not (package(=lean-rs-worker-child) & binary(=capability_builder) & test(=a_host_handle_built_with_a_broken_import_still_fails_at_open))'
+	else
+		"${env_args[@]}" cargo nextest run --workspace --profile ci
+	fi
 }
 
 run_gate "cargo nextest run --workspace --profile ci" \
