@@ -186,7 +186,8 @@ jobs:
           cargo fetch --locked --manifest-path fixtures/metadata-qualification/app/Cargo.toml
           # Remove only the library path injected by this workflow's Lake setup.
           # The qualifier still refuses inherited preloads and other loader overrides.
-          env -u LD_LIBRARY_PATH python3 scripts/qualify_metadata.py broken-import
+          selection=$(env -u LD_LIBRARY_PATH python3 scripts/qualify_metadata.py broken-import --emit-host-selection)
+          printf '%s\n' "$selection" | grep '^LEAN_RS_TEST_ORDINARY_HOST_SHIMS=' >> "$GITHUB_ENV"
 
       # Two Linux-specific overrides for the panic-handling tests in
       # `error::tests` and `runtime::*::tests`:

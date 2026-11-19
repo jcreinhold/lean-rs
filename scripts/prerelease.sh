@@ -489,8 +489,12 @@ run_broken_import() {
 	else
 		command -v timeout >/dev/null || { log_err "GNU timeout is required"; return 1; }
 	fi
-	cargo fetch --locked --manifest-path "$REPO_ROOT/fixtures/metadata-qualification/app/Cargo.toml" &&
-		env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import
+	cargo fetch --locked --manifest-path "$REPO_ROOT/fixtures/metadata-qualification/app/Cargo.toml" || return
+	local selection
+	selection=$(env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import --emit-host-selection) || return
+	LEAN_RS_TEST_ORDINARY_HOST_SHIMS=$(printf '%s\n' "$selection" | sed -n 's/^LEAN_RS_TEST_ORDINARY_HOST_SHIMS=//p')
+	[[ -n "$LEAN_RS_TEST_ORDINARY_HOST_SHIMS" ]] || { log_err "Missing selected SDK host shims"; return 1; }
+	export LEAN_RS_TEST_ORDINARY_HOST_SHIMS
 }
 
 if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
