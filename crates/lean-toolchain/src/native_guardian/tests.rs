@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const ROOT_ENV: &str = "LEAN_NATIVE_GUARDIAN_TEST_ROOT";
 const NONCE: &str = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef";
 const LIMIT: Duration = Duration::from_secs(7);
+const GUARDIAN_RESCUE: &str = "guardian-fixture-deadline";
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 #[path = "service_loss_regressions.rs"]
@@ -127,6 +128,7 @@ fn fixture_command(root: &Path, name: &str) -> Command {
     command
         .args(["--exact", name, "--nocapture"])
         .env(ROOT_ENV, root)
+        .env(OWNERS_DIRECTORY_ENV, root.join("owners"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -150,6 +152,7 @@ impl Generation {
         let socket = root.join("parent.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
+        ownership::dispatch_owner_record(&record, NONCE).unwrap();
         let worker = fixture_command(root, "native_guardian::tests::fixture_worker")
             .spawn()
             .unwrap();
@@ -176,13 +179,12 @@ impl Generation {
         assert_eq!(guardian.pid, guardian.process_group);
         assert_ne!(guardian.process_group, process.process_group);
         let server = NativeProcessIdentity::capture(std::process::id()).unwrap().unwrap();
-        persist_owner(
-            &record,
-            &json!({"version":2,"scope":"inherited-process-group-v2",
-            "phase":"running","generation_id":NONCE,"parent":server,"process":process,
-            "guardian":guardian,"protected_domains":[],"capacity_slot":slot}),
-        )
-        .unwrap();
+        let mut value = json!({"version":2,"scope":"inherited-process-group-v2",
+            "phase":"bootstrap","generation_id":NONCE,"parent":server,"process":process,
+            "guardian":guardian,"protected_domains":[],"capacity_slot":slot});
+        ownership::publish_startup_owner(&record, &value, "dispatching", Duration::from_secs(2)).unwrap();
+        value["phase"] = json!("running");
+        ownership::publish_startup_owner(&record, &value, "bootstrap", Duration::from_secs(2)).unwrap();
         write_frame(
             &mut parent,
             &json!({"state":"durable-owner-ready","nonce":NONCE,"record":record}),
@@ -221,6 +223,7 @@ impl Generation {
             !crate::process_group::group_present(self.worker.id()).unwrap()
         });
         wait_until_within(Duration::from_secs(2), || !self.guardian.is_live().unwrap());
+        assert!(!self.root.join(GUARDIAN_RESCUE).exists());
         let before = heartbeat(&self.root);
         thread::sleep(Duration::from_millis(30));
         assert_eq!(heartbeat(&self.root), before);
@@ -253,6 +256,14 @@ fn fixture_guardian() {
     let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
         return;
     };
+    let watched = root.clone();
+    thread::spawn(move || {
+        // The private payload expires after at most six seconds. If startup
+        // fails before binding a record, bound the fixture guardian's drain.
+        thread::sleep(Duration::from_secs(15));
+        let _saved = fs::write(watched.join(GUARDIAN_RESCUE), b"failed fixture cleanup");
+        std::process::exit(92);
+    });
     let result = if root.join("service-loss-watchdog").exists() {
         service_loss_regressions::guardian_fixture(&root)
     } else {
