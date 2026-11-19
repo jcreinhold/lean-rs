@@ -10,14 +10,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sysroot =
         PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
     let prepared = lean_rs_host::host::prepare_host_artifacts()?;
-    let built = CargoLeanCapability::new(&project, "LeanRsInteropConsumer")
-        .package("lean_rs_interop_consumer")
-        .module("LeanRsInteropConsumer")
+    let typed_session = match env::args().skip(1).collect::<Vec<_>>().as_slice() {
+        [] => false,
+        [mode] if mode == "--typed-session" => true,
+        _ => return Err("expected no arguments or --typed-session".into()),
+    };
+    let builder = if typed_session {
+        CargoLeanCapability::new(&project, "LeanRsFixture")
+            .package("lean_rs_fixture")
+            .module("LeanRsFixture")
+    } else {
+        CargoLeanCapability::new(&project, "LeanRsInteropConsumer")
+            .package("lean_rs_interop_consumer")
+            .module("LeanRsInteropConsumer")
+            .export_signature(metadata_signature(
+                "lean_rs_interop_consumer_worker_metadata",
+            ))
+    };
+    let built = builder
         .lean_sysroot(&sysroot)
         .lean_num_threads(1)
-        .export_signature(metadata_signature(
-            "lean_rs_interop_consumer_worker_metadata",
-        ))
         .build_quiet()?;
     let roots = lean_toolchain::shared_writer::project_artifact_root_union(&[
         project.clone(),
@@ -44,7 +56,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let consumer: serde_json::Value = serde_json::from_slice(&fs::read(built.manifest_path())?)?;
     let expected = metadata_signature("lean_rs_interop_consumer_worker_metadata");
-    if consumer["exports"] != serde_json::json!([expected.to_json()]) {
+    let exports = if typed_session {
+        serde_json::json!([])
+    } else {
+        serde_json::json!([expected.to_json()])
+    };
+    if consumer["exports"] != exports {
         return Err("incorrect metadata ABI".into());
     }
     let host: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
@@ -57,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("host shim does not implement the build-selected SDK ABI".into());
     }
-    let record = serde_json::json!({"project":project,"sysroot":sysroot,"consumer_manifest":built.manifest_path(),"consumer_image":built.dylib_path(),
+    let record = serde_json::json!({"typed_session":typed_session,"project":project,"sysroot":sysroot,"consumer_manifest":built.manifest_path(),"consumer_image":built.dylib_path(),
         "shim_manifest":shim.manifest_path(),"shim_json":shim.manifest_json(),"shim_roots":shim.artifact_roots(),
         "shim_paths":shim.shim_search_paths(),"roots":roots,
         "consumer_json":fs::read_to_string(built.manifest_path())?});

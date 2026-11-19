@@ -46,7 +46,7 @@ impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
-        if path != d.consumer_manifest {
+        if d.typed_session || path != d.consumer_manifest {
             return Err(denied());
         }
         Ok(WorkerManifestRead::new(
@@ -63,7 +63,7 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
         let held = self.deployment()?;
         let d = &held.record;
-        if path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
+        if d.typed_session || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
         audit("authorize-consumer-load");
@@ -95,13 +95,14 @@ impl WorkerAuthority for MetadataApp {
             audit("refused prepared host descriptor");
             return Err(denied());
         }
-        held.check_interop_visibility(true).map_err(ioerr)?;
-        audit("verified-global-interop-initializer");
+        if !d.typed_session {
+            held.check_interop_visibility(true).map_err(ioerr)?;
+        }
         audit("authorize-host-load");
         // SAFETY: the build-selected SDK supplied its own compiled shim and full generated ABI.
         // Admission checked both manifests, the common interop image and all image bytes
         // under the retained deployment guard. This worker uses the pinned private release.
-        unsafe {
+        let shim = unsafe {
             LoadedHostArtifacts::load(
                 runtime,
                 p.manifest_path().into(),
@@ -109,8 +110,11 @@ impl WorkerAuthority for MetadataApp {
                 d.shim_roots.clone(),
                 d.shim_paths.clone(),
                 held.clone(),
-            )
-        }
+            )?
+        };
+        held.check_interop_visibility(true).map_err(ioerr)?;
+        audit("verified-global-interop-initializer");
+        Ok(shim)
     }
     fn imports<'cap>(
         &self,
@@ -126,19 +130,35 @@ impl WorkerAuthority for MetadataApp {
         held.record
             .check_order(&paths, &names, &options)
             .map_err(ioerr)?;
-        audit("authorize-Callback-import");
-        // SAFETY: the checked scope is exactly Callback with the audited profile and ordered
+        audit(if held.record.typed_session {
+            "authorize-Handles-SourceRanges-import"
+        } else {
+            "authorize-Callback-import"
+        });
+        // SAFETY: the checked scope has the sealed fixture’s exact names, audited profile and ordered
         // deployment roots. The retained guard covers each actual imported file and shadowing
         // prefix. No external inherited search path or plugin participates.
         Ok(unsafe { cap.import_scope_with_options(paths, names, options) })
     }
     fn project(
         &self,
-        _: &'static LeanRuntime,
-        _: &Path,
-        _: &LeanModuleInitializer,
+        runtime: &'static LeanRuntime,
+        path: &Path,
+        requested: &LeanModuleInitializer,
     ) -> LeanResult<(LeanLibrary<'static>, LeanModuleInitializer)> {
-        Err(denied())
+        let held = self.deployment()?;
+        let expected = LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture");
+        if !held.record.typed_session
+            || path != held.record.consumer_image
+            || requested != &expected
+        {
+            return Err(denied());
+        }
+        audit("authorize-LeanRsFixture-load");
+        // SAFETY: Held verified the reviewed release, fixture image, linked dependencies and
+        // roll-up initializer under the deployment locks retained for the worker lifetime.
+        let library = unsafe { LeanLibrary::open(runtime, path) }?;
+        Ok((library, expected))
     }
     fn term<'cap>(
         &self,

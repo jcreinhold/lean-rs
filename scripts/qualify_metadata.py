@@ -1,4 +1,4 @@
-"""Provision or qualify the reviewed macOS arm64 Lean 4.36 metadata fixture."""
+"""Provision or qualify the reviewed macOS arm64 Lean 4.36 worker fixture."""
 import argparse
 import hashlib
 import io
@@ -14,8 +14,10 @@ import tempfile
 
 SDK = Path(__file__).resolve().parents[1]
 FIXTURE_SDK = "945792112a180bd9e3a90194159e0c9c158cde2d"
-PACKET = "30f9897773b105a06c2cf5f7db845a2e70669b7bfa45ea318947ea99772605e0"
-WRITER = "be59b60cccc490ac29b802a2760686c983a3d0ca95dd14a1cbefb264a3f3ae92"
+APP_TREE = "9a37c723ce30cce1f8a63c5206a377b5e7632d7b"
+# Metadata deployments sealed before the typed policy used this revision of the same app.
+ORIGINAL_APP_TREE = "ee1bf0cecda10560c7b58b33ea679188f87fea9c"
+TYPED_SDK = "9914894988ec3bfd123f1d10b407c066eb7c6888"
 TESTS = ("builder_opens_worker_capability_and_validates_metadata",
          "metadata_mismatch_is_reported_by_bootstrap_check")
 
@@ -35,6 +37,43 @@ def check_file(path, approved):
     require(digest(path) == approved, f"SHA-256 mismatch: {path}")
 
 
+def fixture_sources(tree):
+    git = ["/usr/bin/git", "--no-replace-objects", "-C", SDK]
+    entries = subprocess.check_output([*git, "ls-tree", "-rz", tree])
+    sources = {}
+    for entry in entries.rstrip(b"\0").split(b"\0"):
+        header, name = entry.split(b"\t", 1)
+        mode, kind, oid = header.split()
+        require((mode, kind) == (b"100644", b"blob"), "expected regular fixture source files")
+        sources[Path(os.fsdecode(name))] = subprocess.check_output([*git, "cat-file", "blob", oid])
+    require(Path("Cargo.toml") in sources, "missing fixture app in pinned Git tree")
+    return sources
+
+
+def reviewed_writer(path, approved):
+    require(path == path.resolve(strict=True) and path.is_file() and os.access(path, os.X_OK),
+            f"expected a canonical executable writer: {path}")
+    data = path.read_bytes()
+    require(hashlib.sha256(data).hexdigest() == approved, f"SHA-256 mismatch: {path}")
+    return data
+
+
+def private_writer(directory, data, approved):
+    helper = directory / "lean-host-mcp"
+    if not helper.exists():
+        with tempfile.TemporaryDirectory(dir=directory) as scratch:
+            staged = Path(scratch) / "writer"
+            staged.write_bytes(data)
+            staged.chmod(0o500)
+            try:
+                os.link(staged, helper)
+            except FileExistsError:
+                pass  # Another run published its copy first. Check it below.
+    check_file(helper, approved)
+    require(os.access(helper, os.X_OK), f"private writer is not executable: {helper}")
+    return helper
+
+
 def space(path):
     require(shutil.disk_usage(path).free >= 25 * 2**30, f"less than 25 GiB free on {path}")
 
@@ -52,35 +91,45 @@ def environment(root, helper, target):
         LEAN_RS_WORKER_OWNERS_DIRECTORY=str(root / "owners"))
 
 
-def provision(packet, helper, release):
+def provision(writer, writer_sha256, release, typed_session=False):
     space(Path(tempfile.gettempdir()))
     root = Path(tempfile.mkdtemp(prefix="lean-t0-metadata-")).resolve(strict=True)
     print(f"Private deployment: {root}", flush=True)
-    with tarfile.open(fileobj=io.BytesIO(packet)) as archive:
-        archive.extractall(root, members=[m for m in archive if m.name.startswith("./app/")], filter="data")
-    tree = subprocess.check_output(["/usr/bin/git", "-C", SDK, "archive", FIXTURE_SDK])
+    helper = private_writer(root, writer, writer_sha256)
+    app = root / "app"
+    for name, data in fixture_sources(APP_TREE).items():
+        path = app / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    tree = subprocess.check_output(["/usr/bin/git", "--no-replace-objects", "-C", SDK, "archive", TYPED_SDK if typed_session else FIXTURE_SDK])
     sdk = root / "sdk"
     sdk.mkdir()
     with tarfile.open(fileobj=io.BytesIO(tree)) as archive:
         archive.extractall(sdk, filter="data")
     subprocess.run(["/bin/cp", "-cR", release, root / "release"], check=True)
     (root / "owners").mkdir(mode=0o700)
-    app = root / "app"
     project = app / "lean"
-    project.mkdir()
-    source = sdk / "fixtures/interop-shims"
-    shutil.copytree(source / "LeanRsInteropConsumer", project / "LeanRsInteropConsumer")
-    for name in ("LeanRsInteropConsumer.lean", "lean-toolchain"):
-        shutil.copyfile(source / name, project / name)
-    dependency = "../../crates/lean-rs/shims/lean-rs-interop-shims"
-    lakefile = (source / "lakefile.lean").read_text()
-    require(lakefile.count(dependency) == 1, "unexpected fixture Lake dependency")
-    (project / "lakefile.lean").write_text(lakefile.replace(
-        dependency, str(sdk / "crates/lean-rs-host/shims/lean-rs-interop-shims")))
+    if typed_session:
+        # The SDK archive supplies tracked sources only. Build and seal in their final location.
+        shutil.copytree(sdk / "fixtures/lean", project)
+        require(not (project / ".lake").exists(), "expected a cold LeanRsFixture project")
+        preparation = []
+    else:
+        project.mkdir()
+        source = sdk / "fixtures/interop-shims"
+        shutil.copytree(source / "LeanRsInteropConsumer", project / "LeanRsInteropConsumer")
+        for name in ("LeanRsInteropConsumer.lean", "lean-toolchain"):
+            shutil.copyfile(source / name, project / name)
+        dependency = "../../crates/lean-rs/shims/lean-rs-interop-shims"
+        lakefile = (source / "lakefile.lean").read_text()
+        require(lakefile.count(dependency) == 1, "unexpected fixture Lake dependency")
+        (project / "lakefile.lean").write_text(lakefile.replace(
+            dependency, str(sdk / "crates/lean-rs-host/shims/lean-rs-interop-shims")))
+        preparation = [(project, ["lake", "update"])]
     env = environment(root, helper, root / "target")
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
-    for cwd, cmd in [(project, ["lake", "update"]), (app, [*cargo, "--bin", "prepare"]),
-                     (app, [root / "target/debug/prepare"]),
+    prepare = [root / "target/debug/prepare"] + (["--typed-session"] if typed_session else [])
+    for cwd, cmd in preparation + [(app, [*cargo, "--bin", "prepare"]), (app, prepare),
                      (app, [*cargo, "--features", "admitted", "--bin", "metadata-worker"])]:
         space(root)
         subprocess.run(cmd, cwd=cwd, env=env, check=True)
@@ -89,7 +138,7 @@ def provision(packet, helper, release):
         print(f"{digest(path)}  {path}")
 
 
-def qualify(root, helper, packet, approved_worker, approved_deployment):
+def qualify(root, writer, writer_sha256, approved_worker, approved_deployment, typed_session=False):
     space(root)
     require(root == root.resolve(strict=True) and root.stat().st_uid == os.getuid()
             and root.stat().st_mode & 0o077 == 0, "expected a private owned deployment directory")
@@ -97,14 +146,13 @@ def qualify(root, helper, packet, approved_worker, approved_deployment):
     record = root / "app/deployment.json"
     check_file(worker, approved_worker)
     check_file(record, approved_deployment)
-    # Compare the inputs that built and sealed this application with the selected
-    # source packet. The independently approved binary hash binds the linked output.
-    with tarfile.open(fileobj=io.BytesIO(packet)) as archive:
-        for name in ("Cargo.toml", "Cargo.lock", "build.rs", "seal.py", "src/lib.rs",
-                     "src/bin/prepare.rs", "src/bin/metadata-worker.rs"):
-            with archive.extractfile(f"./app/{name}") as original:
-                require((root / "app" / name).read_bytes() == original.read(), f"fixture source mismatch: {name}")
     d = json.loads(record.read_bytes())
+    require(d.get("typed_session", False) is typed_session, "deployment belongs to a different fixture policy")
+    tree = APP_TREE if "typed_session" in d else ORIGINAL_APP_TREE
+    for name, expected_source in fixture_sources(tree).items():
+        path = root / "app" / name
+        require(path == path.resolve(strict=True) and path.read_bytes() == expected_source,
+                f"fixture source differs from pinned Git tree: {name}")
     require(d["sysroot"] == str(root / "release") and d["project"] == str(root / "app/lean"),
             "deployment record belongs to a different application or release")
     # dyld runs before the app can check its own record. Recheck the private
@@ -123,49 +171,68 @@ def qualify(root, helper, packet, approved_worker, approved_deployment):
             and manifest.read_bytes() == d["consumer_json"].encode(), "consumer manifest differs from review")
     owners = root / "owners"
     require(owners == owners.resolve(strict=True) and owners.is_dir(), "missing deployment ownership registry")
+    helper = private_writer(root, writer, writer_sha256)
     env = environment(root, helper, root / "selector-target")
     # Only the independently approved worker can be executed, even for a read-only probe.
     ready = subprocess.check_output([worker, "--lean-rs-ready-host-artifacts"], cwd=root, env=env)
     expected = dict(protocol=1, shim_manifest_path=d["shim_manifest"], shim_manifest_json=d["shim_json"],
                     artifact_roots=d["shim_roots"], shim_search_paths=d["shim_paths"])
     require(json.loads(ready) == expected, "readiness descriptor differs from the reviewed deployment")
-    env["LEAN_RS_TEST_QUALIFIED_METADATA"] = json.dumps(dict(
-        worker=str(worker), worker_sha256=approved_worker, helper=str(helper), helper_sha256=WRITER,
-        owners=str(owners), sysroot=d["sysroot"], manifest=str(manifest), prepared=expected))
+    if typed_session:
+        variable, target = "LEAN_RS_TEST_QUALIFIED_TYPED_SESSION", "typed_session"
+        tests = ("describe_returns_row_for_known_declaration",)
+        selection = {"fixture": d["project"]}
+    else:
+        variable, target, tests = "LEAN_RS_TEST_QUALIFIED_METADATA", "capability_builder", TESTS
+        selection = {"manifest": str(manifest)}
+    env[variable] = json.dumps(dict(
+        worker=str(worker), worker_sha256=approved_worker, helper=str(helper), helper_sha256=writer_sha256,
+        owners=str(owners), sysroot=d["sysroot"], prepared=expected, **selection))
     env["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"] = "/usr/bin/env -u DYLD_FALLBACK_LIBRARY_PATH -u DYLD_LIBRARY_PATH"
     space(root)
-    for name in TESTS:
+    if typed_session:
+        events = root / "app/native-events.log"
+        before = events.read_bytes() if events.exists() else b""
+    for name in tests:
         subprocess.run(["cargo", "nextest", "run", "--locked", "--offline", "-j1", "--no-tests", "fail",
-                        "-p", "lean-rs-worker-child", "--test", "capability_builder", "-E", f"test(={name})"],
+                        "-p", "lean-rs-worker-child", "--test", target, "-E", f"test(={name})"],
                        cwd=SDK, env=env, check=True)
+    if typed_session:
+        after = events.read_bytes()
+        require(after.startswith(before), "native fixture event history changed")
+        grants = [line.split(" ", 1) for line in after[len(before):].decode().splitlines()]
+        require(grants and len({pid for pid, _ in grants}) == 1, "expected a single fresh fixture worker")
+        names = [event for _, event in grants]
+        required = ["verified-deployment", "authorize-host-load", "verified-global-interop-initializer",
+                    "authorize-LeanRsFixture-load", "authorize-Handles-SourceRanges-import"]
+        require(names[:len(required)] == required, f"unexpected fixture admission order: {names}")
     space(root)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument("--writer", type=Path, required=True)
+    parser.add_argument("--writer-sha256", required=True, help="independently reviewed digest of this local helper")
+    parser.add_argument("--typed-session", action="store_true", help="qualify the fixed LeanRsFixture Nat.add selector")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="build and seal a new deployment, then print candidate hashes")
     prepare.add_argument("--lean-release", type=Path, required=True)
-    run = commands.add_parser("run", help="execute the two original selectors against a reviewed deployment")
+    run = commands.add_parser("run", help="execute the selected tests against a reviewed deployment")
     run.add_argument("deployment", type=Path)
     run.add_argument("--worker-sha256", required=True)
     run.add_argument("--deployment-sha256", required=True)
     args = parser.parse_args()
     try:
         require((sys.platform, platform.machine()) == ("darwin", "arm64"), "requires macOS arm64")
-        packet = args.packet.read_bytes()
-        require(hashlib.sha256(packet).hexdigest() == PACKET, "source packet SHA-256 mismatch")
-        check_file(args.writer, WRITER)
+        writer = reviewed_writer(args.writer, args.writer_sha256)
         if args.command == "prepare":
             release = args.lean_release.resolve(strict=True)
             check_file(release / "bin/lean", "a4c5d3dfc1672faf014e59bd17724035259ff0d22a4ffbdf5a75e142f564817e")
             check_file(release / "bin/lake", "a0e516de0ba03a26cb90c80f06666022ef9de3f0943f8b26e9b902d229b43ebe")
             check_file(release / "lib/lean/libleanshared.dylib", "9fa4e429820684b59ff37740ca77744a2cd6de70e6e963ef0904760c6921aed5")
-            provision(packet, args.writer, release)
+            provision(writer, args.writer_sha256, release, args.typed_session)
         else:
-            qualify(args.deployment, args.writer, packet, args.worker_sha256, args.deployment_sha256)
+            qualify(args.deployment, writer, args.writer_sha256, args.worker_sha256, args.deployment_sha256, args.typed_session)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as error:
         parser.exit(1, f"metadata qualification failed: {error}\n")
 

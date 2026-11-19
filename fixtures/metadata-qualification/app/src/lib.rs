@@ -22,6 +22,7 @@ fn require(ok: bool, detail: &str) -> R<()> {
 }
 #[derive(Deserialize)]
 pub struct Record {
+    pub typed_session: bool,
     pub consumer_image: PathBuf,
     pub consumer_manifest: PathBuf,
     pub consumer_json: String,
@@ -84,8 +85,13 @@ impl Record {
         names: &[String],
         options: &lean_rs::module::HostImportOptions,
     ) -> R<()> {
+        let expected: &[&str] = if self.typed_session {
+            &["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"]
+        } else {
+            &[MODULE]
+        };
         require(
-            names == [MODULE] && *options == Default::default(),
+            names == expected && *options == Default::default(),
             "wrong module or import profile",
         )?;
         require(
@@ -210,7 +216,10 @@ impl Held {
                     )?;
                     found |= name == "libleanshared.dylib";
                 }
-                if name.contains("LeanRsInterop") || name.contains("LeanRsHostShims") {
+                if name.contains("LeanRsInterop")
+                    || name.contains("LeanRsHostShims")
+                    || name.contains("LeanRsFixture")
+                {
                     return Err(err("preloaded application capability"));
                 }
             }

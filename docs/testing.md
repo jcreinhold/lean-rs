@@ -91,30 +91,30 @@ Set a positive `LEAN_RS_NUM_THREADS` to select benchmark parallelism. For Lean's
 Cargo command with `LEAN_RS_NUM_THREADS=`; the current parser warns about the empty value and falls back. Merely unsetting
 the shell variable lets Cargo restore the configured value `1`.
 
-## Worker metadata qualification on macOS arm64
+## Worker fixture qualification on macOS arm64
 
-`scripts/qualify_metadata.py` runs the two metadata cases in `capability_builder` with the reviewed Lean 4.36
-application worker and writer. Ordinary nextest builds keep their usual fixture. The named run embeds its selected
-deployment in an isolated test build. The worker admits the consumer, host-bundled interop and ordered imports
-under the application’s custody.
+The named runner builds the tracked application in `fixtures/metadata-qualification/app` from a pinned Git tree.
+Its default mode runs the original metadata positive and mismatch selectors in `capability_builder`. Add
+`--typed-session` before both subcommands to qualify the original `typed_session` assertion for `Nat.add`.
+The typed deployment admits the fixed `LeanRsFixture` project and its ordered `Handles` and `SourceRanges` imports.
+Ordinary nextest builds retain their usual fixture setup.
 
-Use Python 3.12 or later, the reviewed metadata source packet, its selected executable writer and a trusted local
-Lean 4.36.0 arm64 release and Rust toolchain. Use canonical absolute paths. Keep the private deployment, helper and
-release under exclusive application control throughout qualification. Preparation needs the SDK revision pinned in
-the script and the app’s locked Cargo dependencies available offline.
+Use a Git checkout, Python 3.12 or later, a trusted Rust toolchain, and the local Lean 4.36.0 arm64 release. Select
+the executable writer for this platform and obtain its SHA-256 from an independent local review. Use canonical
+absolute paths and keep the private deployment and release stable through preparation and execution.
 
 ```sh
-python3 scripts/qualify_metadata.py --packet "$PACKET" --writer "$WRITER" prepare --lean-release "$LEAN_RELEASE"
-python3 scripts/qualify_metadata.py --packet "$PACKET" --writer "$WRITER" run "$DEPLOYMENT" \
-  --worker-sha256 "$REVIEWED_WORKER_SHA256" --deployment-sha256 "$REVIEWED_DEPLOYMENT_SHA256"
+python3 scripts/qualify_metadata.py --writer "$WRITER" --writer-sha256 "$REVIEWED_WRITER_SHA256" \
+  prepare --lean-release "$LEAN_RELEASE"
+python3 scripts/qualify_metadata.py --writer "$WRITER" --writer-sha256 "$REVIEWED_WRITER_SHA256" \
+  run "$DEPLOYMENT" --worker-sha256 "$REVIEWED_WORKER_SHA256" --deployment-sha256 "$REVIEWED_DEPLOYMENT_SHA256"
 ```
 
-Preparation prints its private directory and two candidate hashes, then stops before worker launch. Take the matching
-worker and deployment hashes for `run` from an independent review. A fresh build embeds local paths and file identities
-and needs its own review. The run checks the source packet, writer, linked worker, deployment record and release
-libraries before asking the worker for ready artifacts. It requires the returned descriptor to match the sealed record
-and runs the positive and mismatch selectors separately with one job. Evidence and owner records remain in the
-deployment. The source packet SHA-256 is `30f9897773b105a06c2cf5f7db845a2e70669b7bfa45ea318947ea99772605e0`.
+Preparation saves a verified copy of the writer and prints the private directory and two candidate hashes before
+worker launch. Each build embeds local paths and file identities. Have its worker and deployment reviewed before
+passing those hashes to `run`. The runner checks the deployed app sources, writer, worker, record, and selected
+runtime before readiness. The ready descriptor must match the sealed record. The original reviewed metadata
+deployments use the earlier pinned Git tree of the same app. Evidence and owner records remain in the deployment.
 
 ## Native guardian service-loss regressions
 

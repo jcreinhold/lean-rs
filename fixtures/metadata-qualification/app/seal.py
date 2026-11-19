@@ -11,7 +11,10 @@ out=lambda p:p/'.lake/build/lib'
 image=lambda p,name:out(p)/('lib'+name+'.dylib')
 di=image(dep,'lean__rs__interop__shims_LeanRsInterop')
 hi=image(host,'lean__rs__host__shims_LeanRsHostShims')
-ci=image(project,'lean__rs__interop__consumer_LeanRsInteropConsumer')
+typed = rec['typed_session']
+package, module = ('lean_rs_fixture','LeanRsFixture') if typed else ('lean_rs_interop_consumer','LeanRsInteropConsumer')
+stem = package.replace('_','__') + '_' + module
+ci=image(project,stem)
 shims=[out(dep)/'lean',out(host)/'lean']
 assert Path(rec['consumer_image'])==ci and Path(rec['sysroot'])==release
 assert list(map(Path,rec['shim_paths']))==shims
@@ -34,20 +37,28 @@ for manifest in ['consumer','shim']:
     assert path.read_text()==rec[manifest+'_json']
     pin(path)
     v=json.loads(path.read_text())
-    p,m,i=(('lean_rs_interop_consumer','LeanRsInteropConsumer',ci) if manifest=='consumer' else ('lean_rs_host_shims','LeanRsHostShims',hi))
+    p,m,i=((package,module,ci) if manifest=='consumer' else ('lean_rs_host_shims','LeanRsHostShims',hi))
     assert (v['package'],v['module'],v['primary_dylib'])==(p,m,str(i))
-    assert v['dependencies']==[{'name':'lean_rs_interop_shims','dylib_path':str(di),'export_symbols_for_dependents':True,'initializer':{'package':'lean_rs_interop_shims','module':'LeanRsInterop'}}]
+    assert v['dependencies']==([] if typed and manifest=='consumer' else [{'name':'lean_rs_interop_shims','dylib_path':str(di),'export_symbols_for_dependents':True,'initializer':{'package':'lean_rs_interop_shims','module':'LeanRsInterop'}}])
     assert v['build_toolchain']['sysroot']==str(release) and v['toolchain_fingerprint']['lean_version']=='4.36.0'
     assert v['toolchain_fingerprint']['header_sha256']=='dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4'
-for f, syms in [(di,['_initialize_lean__rs__interop__shims_LeanRsInterop']), (hi,['_initialize_lean__rs__host__shims_LeanRsHostShims']), (ci,['_initialize_lean__rs__interop__consumer_LeanRsInteropConsumer','_lean_rs_interop_consumer_worker_metadata'])]:
+project_symbols = ['_initialize_' + stem]
+if not typed: project_symbols.append('_lean_rs_interop_consumer_worker_metadata')
+for f, syms in [(di,['_initialize_lean__rs__interop__shims_LeanRsInterop']), (hi,['_initialize_lean__rs__host__shims_LeanRsHostShims']), (ci,project_symbols)]:
     pin(f)
     exports={line.split()[-1] for line in subprocess.check_output(['/usr/bin/nm','-gU',f],text=True).splitlines() if line.strip()}
     assert set(syms)<=exports
     deps=[line.split(' (compatibility')[0].strip() for line in subprocess.check_output(['/usr/bin/otool','-L',f],text=True).splitlines()[2:]]
     assert all(p.startswith('/usr/lib/') or p in ('@rpath/libLake_shared.dylib','@rpath/libleanshared.dylib') for p in deps),deps
 for root in (dep,host,project): pin(root/'lake-manifest.json')
-newdir=json.loads((project/'lake-manifest.json').read_text())['packages'][0]['dir']
-assert (project/newdir).resolve()==dep
+packages=json.loads((project/'lake-manifest.json').read_text())['packages']
+if typed:
+    assert packages==[]
+    project_deps=[]
+else:
+    newdir=packages[0]['dir']
+    assert (project/newdir).resolve()==dep
+    project_deps=[project/newdir/'.lake/build/lib/lean']
 # Both built packages must actually select the same source package.
 assert (host/json.loads((host/'lake-manifest.json').read_text())['packages'][0]['dir']).resolve()==dep
 for f in [release/'include/lean/lean.h',release/'bin/lean']: pin(f)
@@ -57,11 +68,13 @@ for r in [out(project)/'lean',*shims,release/'lib/lean']: tree(r)
 for prefix in ['Init','Lean','Lake','Std']:
     for r in [out(project)/'lean',*shims]:
         assert not (r/prefix).exists() and not (r/(prefix+'.olean')).exists()
-for root,module in [(out(project)/'lean','LeanRsInteropConsumer/Callback'),(shims[0],'LeanRsInterop')]:
-    assert (root/(module+'.olean')).is_file()
+modules = ['LeanRsFixture/Handles','LeanRsFixture/SourceRanges'] if typed else ['LeanRsInteropConsumer/Callback']
+for module in modules:
+    assert (out(project)/'lean'/(module+'.olean')).is_file()
+assert (shims[0]/'LeanRsInterop.olean').is_file()
 assert not (out(project)/'lean'/'LeanRsInterop').exists() and not (out(project)/'lean'/'LeanRsInterop.olean').exists()
 rec.update(files=filepins,directories=sorted(directories),interop_image=str(di),host_image=str(hi),
-           import_roots=list(map(str,[out(project)/'lean',project/newdir/'.lake/build/lib/lean',*shims])))
+           import_roots=list(map(str,[out(project)/'lean',*project_deps,*shims])))
 rec['ordered_directory_ids']=[(Path(root).stat().st_dev,Path(root).stat().st_ino) for root in rec['import_roots']]
 (a/'deployment.json').write_text(json.dumps(rec,separators=(',',':'),sort_keys=True))
 print('sealed native images, registration order and checked exports:',ci,di,hi,'files',len(filepins),'directories',len(directories),flush=True)
