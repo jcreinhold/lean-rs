@@ -476,12 +476,17 @@ fn root_death_is_detected_while_a_descendant_keeps_the_control_endpoint() {
 
 #[test]
 fn independent_guardian_closes_scope_after_actual_server_sigkill() {
-    service_loss_regressions::assert_service_loss(false);
+    service_loss_regressions::assert_service_loss(service_loss_regressions::Freeze::None);
 }
 
 #[test]
 fn independent_guardian_closes_frozen_worker_after_actual_server_sigkill() {
-    service_loss_regressions::assert_service_loss(true);
+    service_loss_regressions::assert_service_loss(service_loss_regressions::Freeze::Worker);
+}
+
+#[test]
+fn stopped_service_keeps_custody_until_actual_service_death() {
+    service_loss_regressions::assert_service_loss(service_loss_regressions::Freeze::Service);
 }
 
 #[test]
@@ -511,6 +516,11 @@ fn guardian_failure_releases_fd_but_durable_domain_fences_actual_ex_writer() {
     generation.kill_root();
     // No guardian remains to stop the leaf. Its bounded self-expiry is the only
     // cleanup here; do not signal a serialized PGID after losing its pin.
+    assert!(crate::process_group::group_present(generation.worker.id()).unwrap());
+    assert!(
+        !protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (metadata.dev(), metadata.ino())).unwrap(),
+        "losing both the root and guardian must leave the live leaf fenced"
+    );
     wait_until(|| !crate::process_group::group_present(generation.worker.id()).unwrap());
     let observed = contender.finish();
     assert!(

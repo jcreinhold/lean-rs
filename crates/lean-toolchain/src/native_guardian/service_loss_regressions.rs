@@ -186,7 +186,14 @@ fn stopped(process: &NativeProcessIdentity) -> bool {
     info.pbi_status == libc::SSTOP && NativeProcessIdentity::capture(process.pid).unwrap().as_ref() == Some(process)
 }
 
-pub(super) fn assert_service_loss(freeze_worker: bool) {
+#[derive(Clone, Copy)]
+pub(super) enum Freeze {
+    None,
+    Worker,
+    Service,
+}
+
+pub(super) fn assert_service_loss(freeze: Freeze) {
     let fixture = Fixture::new();
     fs::write(fixture.root.join("service-loss-watchdog"), b"test-only deadline").unwrap();
     let errors = File::create(fixture.root.join("server.stderr")).unwrap();
@@ -203,17 +210,34 @@ pub(super) fn assert_service_loss(freeze_worker: bool) {
     let process = NativeProcessIdentity::capture(worker).unwrap().unwrap();
     let guardian: NativeProcessIdentity = serde_json::from_value(field(&info, "guardian").clone()).unwrap();
     let contender = Contender::start(&fixture, worker);
-    if freeze_worker {
+    let frozen = match freeze {
+        Freeze::None => None,
+        Freeze::Worker => Some(process),
+        Freeze::Service => Some(NativeProcessIdentity::capture(server.0.id()).unwrap().unwrap()),
+    };
+    if let Some(frozen) = &frozen {
         assert!(server.0.try_wait().unwrap().is_none());
-        // Test fault only, while the live SDK service retains this worker's
-        // actual Child. No worker PID is signalled after service death.
+        // The controller owns the service Child, and the live service owns the
+        // worker Child. Neither PID is signalled after its owner is lost.
+        assert_eq!(
+            NativeProcessIdentity::capture(frozen.pid).unwrap().as_ref(),
+            Some(frozen)
+        );
         rustix::process::kill_process(
-            rustix::process::Pid::from_raw(i32::try_from(worker).unwrap()).unwrap(),
+            rustix::process::Pid::from_raw(i32::try_from(frozen.pid).unwrap()).unwrap(),
             rustix::process::Signal::STOP,
         )
         .unwrap();
-        wait_until(|| stopped(&process));
-        fs::write(fixture.root.join("worker-stopped"), b"exact stopped state").unwrap();
+        wait_until(|| stopped(frozen));
+        assert!(guardian.is_live().unwrap());
+        assert!(crate::process_group::group_present(worker).unwrap());
+        assert!(!fixture.root.join("contender-acquired.json").exists());
+        if matches!(freeze, Freeze::Service) {
+            let before = fixture.heartbeat();
+            wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
+            assert!(stopped(frozen));
+            assert!(!fixture.root.join("contender-acquired.json").exists());
+        }
     }
     server.0.kill().unwrap();
     assert_eq!(server.wait().signal(), Some(libc::SIGKILL));
