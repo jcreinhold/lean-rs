@@ -857,8 +857,6 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
             "--locked",
             "--offline",
             "-j1",
-            "--test-threads",
-            "1",
             "--no-tests",
             "fail",
             "--retries",

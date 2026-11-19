@@ -572,7 +572,8 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertEqual(build_env["LEAN_RS_METADATA_ORDINARY_TYPED"], "1")
         self.assertNotIn("LEAN_RS_METADATA_BROKEN_IMPORT", build_env)
         self.assertNotIn("LEAN_RS_TEST_BROKEN_IMPORT", run_env)
-        self.assertEqual(nextest[nextest.index("--test-threads") + 1], "1")
+        self.assertEqual(nextest.count("-j1"), 1)
+        self.assertNotIn("--test-threads", nextest)
         self.assertEqual(nextest[nextest.index("--retries") + 1], "0")
         self.assertEqual(
             json.loads(run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"])["prepared"],

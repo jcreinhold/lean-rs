@@ -525,6 +525,10 @@ fi
 # cost of wall time (~5 min vs ~1.5 min). The pre-release pass is not
 # run often enough for the parallelism to matter.
 run_nextest() {
+	if [[ "$LEAN_VERSION" == "4.36.0" && -z "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
+		log_err "Worker test setup failed; workspace tests did not start"
+		return 1
+	fi
 	local env_args=(env RUST_BACKTRACE=0)
 	if [[ "$OS_KIND" == "Linux" ]]; then
 		env_args+=("LD_PRELOAD=libgcc_s.so.1")
