@@ -255,8 +255,18 @@ impl Record {
         } else {
             &[MODULE]
         };
+        let reuse_imports = self.typed_session
+            && !self.broken_import
+            && !self.verification
+            && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
+            && [
+                &["LeanRsHostShims.Elaboration"][..],
+                &["LeanRsFixture.Scalars"][..],
+                &["LeanRsFixture.Scalars", "LeanRsFixture.Strings"][..],
+                &["LeanRsFixture.Strings", "LeanRsFixture.Scalars"][..],
+            ].iter().any(|allowed| names == *allowed);
         require(
-            names == expected && *options == Default::default(),
+            (names == expected || reuse_imports) && *options == Default::default(),
             "wrong module or import profile",
         )?;
         require(

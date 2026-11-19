@@ -151,7 +151,11 @@ impl WorkerAuthority for MetadataApp {
         held.record.check_order(&paths, &names, &options).map_err(ioerr)?;
         if !held.record.broken_import {
             audit(if held.record.typed_session {
-                "authorize-Handles-SourceRanges-import"
+                if names == ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"] {
+                    "authorize-Handles-SourceRanges-import"
+                } else {
+                    "authorize-checked-typed-import"
+                }
             } else {
                 "authorize-Callback-import"
             });
@@ -191,6 +195,11 @@ impl WorkerAuthority for MetadataApp {
         let d = &self.deployment()?.record;
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import || !d.typed_session || d.verification
+            || !session.imports.matches_request(
+                &d.import_roots.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+                &["LeanRsFixture.Handles".to_owned(), "LeanRsFixture.SourceRanges".to_owned()],
+            )
+            || *session.imports.options() != HostImportOptions::default()
             || request != "(Nat.succ 0 : Nat)"
             || !options.namespace.is_empty()
             || options.file != "<elaborate>"

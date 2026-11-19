@@ -30,6 +30,10 @@ use lean_rs_worker_parent::{
     LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerRestartPolicy, LeanWorkerSessionConfig,
 };
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+use ordinary_typed_selection::ordinary_typed_selection;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -44,10 +48,16 @@ fn workspace_root() -> PathBuf {
 }
 
 fn fixture_root() -> PathBuf {
+    if let Some(selected) = ordinary_typed_selection() {
+        return selected.fixture.clone();
+    }
     workspace_root().join("fixtures").join("lean")
 }
 
 fn ensure_fixture_built() {
+    if ordinary_typed_selection().is_some() {
+        return;
+    }
     lean_toolchain::build_lake_target_quiet(&fixture_root(), "LeanRsFixture").expect("fixture Lake target builds");
 }
 
@@ -57,6 +67,9 @@ fn ensure_fixture_built() {
 /// `initialize` block after `lean_io_mark_end_initialization`, where
 /// `registerEnvExtension` throws. See the module docstring in the fixture.
 fn ensure_late_extension_fixture_built() {
+    if ordinary_typed_selection().is_some() {
+        return;
+    }
     ensure_fixture_built();
     lean_toolchain::build_lake_target_quiet(&fixture_root(), "LeanRsFixtureLateExtension")
         .expect("late-extension Lake target builds");
@@ -65,7 +78,9 @@ fn ensure_late_extension_fixture_built() {
 /// The RSS guard is disabled so the snapshot-cache assertions describe reuse
 /// rather than whatever this machine's memory happens to be.
 fn worker_config() -> LeanWorkerConfig {
-    LeanWorkerConfig::new(worker_binary()).env("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", "0")
+    ordinary_typed_selection::worker_config()
+        .unwrap_or_else(|| LeanWorkerConfig::new(worker_binary()))
+        .env("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", "0")
 }
 
 fn elaboration_session_config() -> LeanWorkerSessionConfig {
