@@ -675,8 +675,22 @@ fn exact_native_recovery_intent_has_one_winner() {
             .count(),
         1
     );
-    let recorded: NativeProcessIdentity =
-        serde_json::from_value(read_owner(&record).unwrap()["recovery_claim"].clone()).unwrap();
+    let claimed = read_owner(&record).unwrap();
+    assert_eq!(claimed["version"], 3);
+    assert_eq!(claimed["scope"], "inherited-process-group-v3");
+    let recorded: NativeProcessIdentity = serde_json::from_value(claimed["recovery_claim"].clone()).unwrap();
+    let mut malformed = claimed.clone();
+    malformed["unexpected_authority"] = json!(true);
+    persist_owner(&record, &malformed).unwrap();
+    assert!(protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (0, 0)).is_err());
+    let mut unversioned = claimed.clone();
+    unversioned["version"] = json!(2);
+    unversioned["scope"] = json!("inherited-process-group-v2");
+    persist_owner(&record, &unversioned).unwrap();
+    assert!(protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (0, 0)).is_err());
+    persist_owner(&record, &claimed).unwrap();
+    collect_closed_owner_records(&fixture.registry, budget).unwrap();
+    assert!(!record.exists());
     assert_eq!(
         recorded,
         NativeProcessIdentity::capture(std::process::id()).unwrap().unwrap()

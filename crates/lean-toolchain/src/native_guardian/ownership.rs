@@ -158,15 +158,34 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     let version = field(value, "version")
         .as_u64()
         .ok_or_else(|| invalid("native owner version missing"))?;
-    if !matches!(version, 1 | 2)
+    if !matches!(version, 1..=3)
         || field(value, "scope").as_str() != Some(format!("inherited-process-group-v{version}").as_str())
         || !field(value, "generation_id").as_str().is_some_and(valid_nonce)
     {
         return Err(invalid("invalid native owner header"));
     }
+    if value.as_object().is_none_or(|record| {
+        record.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "version"
+                    | "scope"
+                    | "phase"
+                    | "generation_id"
+                    | "parent"
+                    | "process"
+                    | "guardian"
+                    | "protected_domains"
+                    | "capacity_slot"
+                    | "recovery_claim"
+            )
+        })
+    }) {
+        return Err(invalid("unknown native owner field"));
+    }
     checked_identity(field(value, "parent"))?;
     if let Some(slot) = value.get("capacity_slot").filter(|value| !value.is_null()) {
-        if version != 2 {
+        if version == 1 {
             return Err(invalid("legacy native owner cannot bind an actor slot"));
         }
         serde_json::from_value::<NativeCapacitySlot>(slot.clone())
@@ -174,11 +193,15 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             .validate()?;
     }
     let phase = field(value, "phase");
-    if !field(value, "recovery_claim").is_null() {
-        if version != 2 || phase != "running" {
+    // A claim changes the registry schema. Older SDKs reject version 3
+    // before interpreting the record as an ordinary unclaimed generation.
+    if version == 3 {
+        if phase != "running" {
             return Err(invalid("native recovery claim requires a running guarded owner"));
         }
         checked_identity(field(value, "recovery_claim"))?;
+    } else if value.get("recovery_claim").is_some() {
+        return Err(invalid("native recovery claim requires owner version 3"));
     }
     if phase == "preparing" || phase == "preparing_closed" || phase == "dispatching" {
         if version != 2
@@ -202,7 +225,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     if process.pid <= 1 || process.pid != process.session || process.pid != process.process_group {
         return Err(invalid("invalid native owner scope"));
     }
-    if version == 2 {
+    if version != 1 {
         let guardian = checked_identity(field(value, "guardian"))?;
         let pins_root_session = guardian.session == process.pid;
         let has_own_group = guardian.process_group == guardian.pid && guardian.pid != process.pid;
@@ -210,7 +233,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             return Err(invalid("invalid native guardian scope"));
         }
     }
-    if version == 2 || value.get("protected_domains").is_some() {
+    if version != 1 || value.get("protected_domains").is_some() {
         let domains: Vec<super::NativeReadDomain> =
             serde_json::from_value(field(value, "protected_domains").clone()).map_err(io::Error::other)?;
         if domains.len() > super::MAX_READ_DOMAINS {
@@ -254,7 +277,7 @@ pub(super) fn record_can_be_removed(value: &Value) -> io::Result<bool> {
     if !payload_closed(value)? {
         return Ok(false);
     }
-    if field(value, "version") == 2
+    if field(value, "version") != 1
         && matches!(
             field(value, "phase").as_str(),
             Some("running" | "bootstrap" | "bootstrap_closed")
@@ -346,13 +369,13 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     )?;
     let mut value = read_owner(record)?;
     validate_owner_header(&value)?;
-    if field(&value, "version") != 2
+    if field(&value, "version") == 1
         || field(&value, "phase") != "running"
         || checked_identity(field(&value, "process"))? != *expected
     {
         return Err(invalid("native recovery scope changed"));
     }
-    if !field(&value, "recovery_claim").is_null()
+    if field(&value, "version") == 3
         || checked_identity(field(&value, "parent"))?.is_live()?
         || checked_identity(field(&value, "guardian"))?.is_live()?
     {
@@ -363,10 +386,12 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     }
     let claimant =
         NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native recoverer absent"))?;
-    value
+    let owner = value
         .as_object_mut()
-        .ok_or_else(|| invalid("native owner object missing"))?
-        .insert("recovery_claim".to_owned(), json!(claimant));
+        .ok_or_else(|| invalid("native owner object missing"))?;
+    owner.insert("version".to_owned(), json!(3));
+    owner.insert("scope".to_owned(), json!("inherited-process-group-v3"));
+    owner.insert("recovery_claim".to_owned(), json!(claimant));
     super::persist_owner_at(record, &value, "recovery-write")
 }
 

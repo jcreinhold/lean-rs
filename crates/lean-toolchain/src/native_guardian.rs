@@ -836,9 +836,6 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
             Err(error) => return Err(error),
         };
         let version = field(&value, "version").as_u64();
-        if !matches!(version, Some(1 | 2)) {
-            return Err(invalid("unknown native owner record version"));
-        }
         // A raw EX candidate cannot replace the registry's custody check.
         // A fully closed scope needs no access to its former artifact paths.
         if ownership::record_can_be_removed(&value)? || field(&value, "phase") == "preparing" {

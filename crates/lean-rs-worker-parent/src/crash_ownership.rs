@@ -98,10 +98,12 @@ fn write_before_deadline(stream: &mut UnixStream, mut bytes: &[u8], deadline: In
 fn running() -> String {
     "running".to_owned()
 }
-/// Durable evidence for one generation, published before runtime startup.
+/// Durable startup evidence for one generation. This snapshot accepts legacy
+/// and guarded startup records. Recovery records use a private registry format.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeanWorkerOwnedGeneration {
+    #[serde(deserialize_with = "deserialize_snapshot_version")]
     pub version: u32,
     pub scope: String,
     pub generation_id: String,
@@ -115,9 +117,16 @@ pub struct LeanWorkerOwnedGeneration {
     pub protected_domains: Vec<NativeReadDomain>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capacity_slot: Option<native_guardian::NativeCapacitySlot>,
-    #[doc(hidden)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recovery_claim: Option<LeanWorkerOwnedProcess>,
+}
+
+fn deserialize_snapshot_version<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let version = u32::deserialize(deserializer)?;
+    match version {
+        1 | 2 => Ok(version),
+        _ => Err(serde::de::Error::custom(
+            "unsupported native generation snapshot version",
+        )),
+    }
 }
 
 /// Link-free lifetime admission for an external native process group.
@@ -702,7 +711,6 @@ impl ParentLifetime {
             guardian,
             protected_domains: Vec::new(),
             capacity_slot: self.capacity_slot.clone(),
-            recovery_claim: None,
         };
         let record = self.directory.join("owner.json");
         if self.guarded {

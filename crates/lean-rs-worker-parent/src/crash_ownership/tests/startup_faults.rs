@@ -96,7 +96,6 @@ fn partial_ack_fails_after_positive_wire_write() {
         guardian: Some(identity.clone()),
         protected_domains: Vec::new(),
         capacity_slot: None,
-        recovery_claim: None,
     };
     // This synthetic admitted lease isolates ACK framing, not admission or OS custody.
     let mut lease = ParentLifetimeLease {
@@ -381,4 +380,25 @@ fn publication_failure(running: bool) {
         .unwrap();
         drop(successor);
     }
+}
+
+#[test]
+fn startup_snapshot_rejects_private_recovery_format() {
+    let identity = LeanWorkerOwnedProcess::capture(std::process::id()).unwrap().unwrap();
+    let mut snapshot = serde_json::json!({
+        "version": 2,
+        "scope": "inherited-process-group-v2",
+        "generation_id": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef",
+        "parent": identity,
+        "process": identity,
+        "guardian": identity,
+    });
+    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot.clone()).is_ok());
+    snapshot["version"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot.clone()).is_ok());
+    snapshot["version"] = serde_json::json!(3);
+    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot.clone()).is_err());
+    snapshot["version"] = serde_json::json!(2);
+    snapshot["unknown_authority"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot).is_err());
 }

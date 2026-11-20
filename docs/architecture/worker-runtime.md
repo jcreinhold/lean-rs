@@ -553,6 +553,7 @@ If another waiter has revoked the actual parent's wait authority (`ECHILD`), con
 resource capacity without supplying any exit-status receipt. Other wait errors retain the actual child for retry.
 The SDK can persist a first recovery intent in a guarded Running owner record after the exact original service and
 guardian are non-live and the original worker anchor still matches. The admission lock serializes competing claims.
+Claimed records use registry version 3, which older registry readers refuse. Startup snapshots keep their original format.
 A committed intent carries no signal, descriptor, or launch authority. Replacing a dead claimant and recovering an
 interrupted intent publication require further recovery transitions.
 
