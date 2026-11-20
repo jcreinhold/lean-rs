@@ -37,6 +37,7 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          "$HOME/.elan/bin/elan" toolchain install "leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Export LEAN_SYSROOT
@@ -86,6 +87,7 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          "$HOME/.elan/bin/elan" toolchain install "leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Export LEAN_SYSROOT
@@ -130,6 +132,7 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          "$HOME/.elan/bin/elan" toolchain install "leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Export LEAN_SYSROOT

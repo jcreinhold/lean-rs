@@ -4,11 +4,24 @@ set -euo pipefail
 
 version=${1:?expected a Lean release version}
 pin="leanprover/lean4:v$version"
-# The sweep skips absent releases but treats a broken installed release as a failure.
-installed=$(elan toolchain list)
-if ! awk -v pin="$pin" '$1 == pin { found = 1 } END { exit !found }' <<< "$installed"; then
-	printf 'Lean toolchain is not installed: %s\n' "$pin" >&2
-	exit 3
+# Elan can provision a missing release even for 'run' without '--install'.
+# Use its offline inventory for the local no-install policy. An unreadable or
+# broken installation is an error; only an absent pin is skippable by the sweep.
+inventory=$(elan dump-state --no-net)
+installed=$(python3 -c '
+import json, sys
+pin = sys.argv[1]
+for entry in json.load(sys.stdin)["toolchains"]["installed"]:
+    if entry["resolved_name"] == pin:
+        print(entry["path"])
+        break
+else:
+    print(f"Lean toolchain is not installed: {pin}", file=sys.stderr)
+    sys.exit(3)
+' "$pin" <<< "$inventory")
+if [[ "$installed" != /* || ! -x "$installed/bin/lean" ]]; then
+	printf 'Invalid installed Lean executable for %s: %s/bin/lean\n' "$pin" "$installed" >&2
+	exit 1
 fi
 prefix=$(elan run "$pin" lean --print-prefix)
 if [[ "$prefix" != /* || "$prefix" == *$'\n'* || ! -x "$prefix/bin/lean" ]]; then

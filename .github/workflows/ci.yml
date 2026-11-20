@@ -116,6 +116,7 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
+          "$HOME/.elan/bin/elan" toolchain install "leanprover/lean4:v${{ matrix.lean_version }}"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Export LEAN_SYSROOT
