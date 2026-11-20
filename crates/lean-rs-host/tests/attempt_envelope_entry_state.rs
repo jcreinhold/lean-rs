@@ -23,8 +23,20 @@ use lean_rs_host::{
 };
 
 fn attempt_session<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixed_fixture::imports(caps, "LeanRsHostShims.Elaboration"), None, None)
-        .expect("session imports the bundled elaboration shims")
+    caps.session(
+        &fixed_fixture::native_imports(caps, "LeanRsHostShims.Elaboration"),
+        None,
+        None,
+    )
+    .expect("session imports the bundled elaboration shims")
+}
+
+fn resolution(caps: &LeanCapabilities<'_, '_>, session: &LeanSession<'_, '_>) -> Vec<String> {
+    if fixed_fixture::native_fixture_selected() {
+        fixed_fixture::native_elaboration_paths(caps, session)
+    } else {
+        fixed_fixture::resolution()
+    }
 }
 
 /// Three-tactic proof where the pre-tactic state, post-tactic state, and local
@@ -39,10 +51,10 @@ theorem t : ∀ n : Nat, n + 0 = n := by
 ";
 
 fn attempt(source: &str, position: ProofPositionSelector, candidates: Vec<ProofCandidate>) -> ProofAttemptOutcome {
-    let root = fixed_fixture::fixture_root();
+    let root = fixed_fixture::native_fixture_root();
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
     let host = LeanHost::from_lake_project(runtime, root).expect("host opens cleanly");
-    let caps = fixed_fixture::capabilities(&host).expect("load caps");
+    let caps = fixed_fixture::native_capabilities(&host).expect("load caps");
     let mut session = attempt_session(&caps);
     assert_eq!(source, SOURCE);
     let [candidate] = candidates.as_slice() else {
@@ -71,7 +83,7 @@ fn attempt(source: &str, position: ProofPositionSelector, candidates: Vec<ProofC
         caps.shim_capability().proof_attempt_scope(
             env,
             imports,
-            fixed_fixture::resolution(),
+            resolution(&caps, &session),
             request,
             LeanElabOptions::new().source_options(),
         )
@@ -83,10 +95,10 @@ fn attempt(source: &str, position: ProofPositionSelector, candidates: Vec<ProofC
 }
 
 fn proof_state_at(source: &str, position: ProofPositionSelector) -> ProofStateInfo {
-    let root = fixed_fixture::fixture_root();
+    let root = fixed_fixture::native_fixture_root();
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
     let host = LeanHost::from_lake_project(runtime, root).expect("host opens cleanly");
-    let caps = fixed_fixture::capabilities(&host).expect("load caps");
+    let caps = fixed_fixture::native_capabilities(&host).expect("load caps");
     let mut session = attempt_session(&caps);
     assert_eq!(source, SOURCE);
     assert!(matches!(
@@ -112,7 +124,7 @@ fn proof_state_at(source: &str, position: ProofPositionSelector) -> ProofStateIn
         caps.shim_capability().module_batch_scope(
             env,
             imports,
-            fixed_fixture::resolution(),
+            resolution(&caps, &session),
             batch,
             LeanElabOptions::new().source_options(),
         )
