@@ -116,8 +116,10 @@ jobs:
           (cd fixtures/interop-shims && lake build)
           if [ "$RUNNER_OS" = "Linux" ]; then
             lean_lib_paths="$GITHUB_WORKSPACE/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib"
-            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
-            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+            if [ "${{ matrix.lean_version }}" != "4.36.0" ]; then
+              lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
+              lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+            fi
             lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/lean/.lake/build/lib"
             lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
             echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
@@ -313,8 +315,10 @@ jobs:
           (cd fixtures/interop-shims && lake build)
           if [ "$RUNNER_OS" = "Linux" ]; then
             lean_lib_paths="$GITHUB_WORKSPACE/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib"
-            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
-            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+            if [ "${{ env.LEAN_VERSION_HEAD }}" != "4.36.0" ]; then
+              lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
+              lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+            fi
             lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/lean/.lake/build/lib"
             lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
             echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"

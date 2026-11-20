@@ -311,10 +311,15 @@ if [[ ! -d "$SYSROOT" ]]; then
 fi
 export LEAN_SYSROOT="$SYSROOT"
 
-LAKE_LIB_DIRS=(
-	"$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib"
-	"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
-	"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+LAKE_LIB_DIRS=("$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib")
+# In 4.36.0 the bundled host shims use keyed outputs loaded by manifest path.
+if [[ "$LEAN_VERSION" != "4.36.0" ]]; then
+	LAKE_LIB_DIRS+=(
+		"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
+		"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+	)
+fi
+LAKE_LIB_DIRS+=(
 	"$REPO_ROOT/fixtures/lean/.lake/build/lib"
 	"$REPO_ROOT/fixtures/interop-shims/.lake/build/lib"
 )
