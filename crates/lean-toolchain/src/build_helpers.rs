@@ -449,6 +449,19 @@ impl CargoLeanCapability {
     /// # Errors
     /// Returns malformed project, source traversal, toolchain or manifest errors.
     pub fn probe_ready(&self) -> Result<Option<BuiltLeanCapability>, LinkDiagnostics> {
+        self.probe_ready_inner(false)
+    }
+
+    /// Probe without treating unreadable or malformed cache records as cold.
+    ///
+    /// # Errors
+    /// Returns cache I/O, decoding or project validation errors.
+    #[doc(hidden)]
+    pub fn probe_ready_strict(&self) -> Result<Option<BuiltLeanCapability>, LinkDiagnostics> {
+        self.probe_ready_inner(true)
+    }
+
+    fn probe_ready_inner(&self, strict: bool) -> Result<Option<BuiltLeanCapability>, LinkDiagnostics> {
         let root = match self.project_root.canonicalize() {
             Ok(root) => root,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -493,10 +506,26 @@ impl CargoLeanCapability {
             validate_generated_output_file(&root, &self.target_name, &dylib_path)?;
             validate_generated_output_file(&root, &self.target_name, &manifest_path)?;
         }
-        if !fs::read_to_string(&cache).is_ok_and(|cached| cached == key) {
-            return Ok(None);
+        match fs::read_to_string(&cache) {
+            Ok(cached) if cached == key => {}
+            Err(error) if strict && error.kind() != io::ErrorKind::NotFound => {
+                return Err(self.probe_error(&error));
+            }
+            _ => return Ok(None),
         }
-        if !dylib_path.is_file() {
+        if strict {
+            match fs::metadata(&dylib_path) {
+                Ok(metadata) if metadata.is_file() => {}
+                Ok(_) => {
+                    return Err(self.probe_error(&io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "cache image is not a regular file",
+                    )));
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(self.probe_error(&error)),
+            }
+        } else if !dylib_path.is_file() {
             return Ok(None);
         }
         // Explicit discovery consults only the supplied sysroot, never PATH,
@@ -531,6 +560,7 @@ impl CargoLeanCapability {
         let actual: serde_json::Value = match fs::read(&manifest_path) {
             Ok(bytes) => match serde_json::from_slice(&bytes) {
                 Ok(value) => value,
+                Err(error) if strict => return Err(self.probe_error(&io::Error::from(error))),
                 Err(_) => return Ok(None),
             },
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -595,6 +625,19 @@ impl CargoLeanCapability {
         let mut runner = RealLakeRunner {
             lock_timeout: Some(timeout),
             cancelled: Some(&cancelled),
+            ..RealLakeRunner::default()
+        };
+        self.build_with_runner(&mut runner, CargoMetadata::Suppress)
+    }
+
+    /// Admit the writer without waiting, but keep the normal helper startup budget.
+    ///
+    /// # Errors
+    /// Returns admission, helper, build or publication errors.
+    #[doc(hidden)]
+    pub fn build_quiet_with_immediate_admission(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        let mut runner = RealLakeRunner {
+            immediate_admission: true,
             ..RealLakeRunner::default()
         };
         self.build_with_runner(&mut runner, CargoMetadata::Suppress)
@@ -844,6 +887,7 @@ struct RealLakeRunner<'a> {
     borrowed: Option<&'a mut crate::shared_writer::SharedWriter>,
     cancelled: Option<&'a dyn Fn() -> bool>,
     lock_timeout: Option<std::time::Duration>,
+    immediate_admission: bool,
     private_locks: Vec<crate::writer_lock::WriterLock>,
 }
 
@@ -880,18 +924,22 @@ impl LakeRunner for RealLakeRunner<'_> {
             .clone()
             .or_else(|| env::var_os(crate::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).map(PathBuf::from))
         {
-            self.writer = Some(crate::shared_writer::SharedWriter::open_cancellable(
-                &executable,
-                &root,
-                timeout,
-                cancelled,
-            )?);
+            self.writer = Some(if self.immediate_admission {
+                crate::shared_writer::SharedWriter::open_immediately(&executable, &root, timeout, cancelled)?
+            } else {
+                crate::shared_writer::SharedWriter::open_cancellable(&executable, &root, timeout, cancelled)?
+            });
         } else if options
             .private_bootstrap
             .as_ref()
             .is_some_and(|mode| mode.project_root() == root)
         {
-            let (locks, roots) = crate::writer_lock::WriterLock::acquire_projects(&root, &[], timeout, cancelled)?;
+            let lock_timeout = if self.immediate_admission {
+                std::time::Duration::ZERO
+            } else {
+                timeout
+            };
+            let (locks, roots) = crate::writer_lock::WriterLock::acquire_projects(&root, &[], lock_timeout, cancelled)?;
             if options
                 .private_bootstrap
                 .as_ref()
@@ -2830,7 +2878,7 @@ mod tests {
     fn ready_probe_preserves_cache_files_and_rejects_missing_or_changed_inputs() {
         let root = make_project("ready-probe", "MyCapability");
         let builder = CargoLeanCapability::new(&root, "MyCapability").package("my_pkg");
-        assert!(builder.probe_ready().expect("cold read probe").is_none());
+        assert!(builder.probe_ready_strict().expect("cold read probe").is_none());
         assert!(!super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()).exists());
         let built = builder
             .clone()
@@ -2841,7 +2889,10 @@ mod tests {
             .expect("manifest metadata")
             .modified()
             .expect("mtime");
-        assert_eq!(builder.probe_ready().expect("warm read probe"), Some(built.clone()));
+        assert_eq!(
+            builder.probe_ready_strict().expect("warm read probe"),
+            Some(built.clone())
+        );
         assert_eq!(
             fs::read(built.manifest_path()).expect("unchanged manifest"),
             manifest_before
@@ -2853,12 +2904,15 @@ mod tests {
                 .expect("mtime"),
             modified_before
         );
+        fs::write(built.manifest_path(), b"{").expect("malformed disposable manifest");
+        assert!(builder.probe_ready_strict().is_err());
+        assert!(builder.probe_ready().expect("managed-compatible probe").is_none());
         fs::write(built.manifest_path(), b"{}").expect("corrupt public ABI metadata");
         assert!(builder.probe_ready().expect("mismatching manifest").is_none());
         assert_eq!(fs::read(built.manifest_path()).expect("not republished"), b"{}");
         fs::write(built.manifest_path(), manifest_before).expect("restore exact metadata");
         write_file(&root.join("New.lean"), "def newSource := 1");
-        assert!(builder.probe_ready().expect("source set changed").is_none());
+        assert!(builder.probe_ready_strict().expect("source set changed").is_none());
         fs::remove_file(super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()))
             .expect("remove cache key");
         assert!(builder.probe_ready().expect("missing cache").is_none());

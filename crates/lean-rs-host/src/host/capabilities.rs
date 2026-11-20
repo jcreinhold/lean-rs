@@ -496,6 +496,32 @@ pub fn ready_host_artifacts_for_generated_output_with_ipc_root(
     crate::host::lake::ready_artifacts(host_shim_export_signatures(), Some(ipc_root), &selection)
 }
 
+/// Capture ready bundled outputs under local read locks. This is not load authority.
+///
+/// # Errors
+/// Refuses busy writers or invalid coordination state. No writer runs here.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn ready_host_artifacts_locally() -> LeanResult<Option<LeanPreparedHostArtifacts>> {
+    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
+    crate::host::lake::ready_artifacts_locally(host_shim_export_signatures(), &selection)
+}
+
+/// Prepare the default bundled output without waiting for writer admission.
+///
+/// # Errors
+/// Returns busy admission, helper, build or snapshot errors.
+#[doc(hidden)]
+pub fn prepare_host_artifacts_without_lock_wait() -> LeanResult<LeanPreparedHostArtifacts> {
+    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
+    let built = crate::host::lake::LakeProject::shim_capability_with_admission(
+        host_shim_export_signatures(),
+        &selection,
+        true,
+    )?;
+    crate::host::lake::prepared_artifacts(&built, selection.key())
+}
+
 pub(super) fn reject_same_process_cargo_test_session_import() -> LeanResult<()> {
     if !same_process_cargo_test_import_guard_active() {
         return Ok(());

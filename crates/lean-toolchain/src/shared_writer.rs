@@ -259,6 +259,69 @@ pub fn project_lock_path(root: &Path) -> io::Result<PathBuf> {
     Ok(parent.join(name))
 }
 
+/// Retained shared custody of the complete project artifact union.
+#[cfg(unix)]
+#[derive(Debug)]
+#[doc(hidden)]
+#[must_use = "retain custody across the readiness probe and its handoff"]
+pub struct LocalArtifactRead {
+    files: Vec<(PathBuf, File)>,
+}
+
+#[cfg(unix)]
+impl LocalArtifactRead {
+    /// Try one read admission without waiting, writing or spawning helpers.
+    ///
+    /// # Errors
+    /// Returns `WouldBlock` for contention and other errors for invalid
+    /// lock files or an unavailable record.
+    pub fn try_acquire(roots: &[PathBuf]) -> io::Result<Self> {
+        use crate::writer_demand::{ReadAdmission, open_read_only_lock};
+        use crate::writer_lock::validate_artifact_lock;
+        let mut paths = roots
+            .iter()
+            .map(|root| project_lock_path(root))
+            .collect::<io::Result<Vec<_>>>()?;
+        paths.sort();
+        paths.dedup();
+        let busy = || io::Error::new(io::ErrorKind::WouldBlock, "artifact reader admission is busy");
+        let admission = ReadAdmission::try_acquire_existing(&paths)?.ok_or_else(busy)?;
+        let mut files = Vec::with_capacity(paths.len());
+        for path in paths {
+            let file = open_read_only_lock(&path)?;
+            validate_artifact_lock(&file, &path, None)?;
+            match fs4::FileExt::try_lock_shared(&file) {
+                Ok(()) => {}
+                Err(fs4::TryLockError::WouldBlock) => return Err(busy()),
+                Err(fs4::TryLockError::Error(error)) => return Err(error),
+            }
+            validate_artifact_lock(&file, &path, None)?;
+            files.push((path, file));
+        }
+        drop(admission);
+        let guard = Self { files };
+        guard.validate()?;
+        Ok(guard)
+    }
+
+    /// Check every retained descriptor against its named lock and prior writer.
+    ///
+    /// # Errors
+    /// Returns invalid lock, uncertain writer closure or filesystem errors.
+    pub fn validate(&self) -> io::Result<()> {
+        for (path, file) in &self.files {
+            crate::writer_lock::validate_artifact_lock(file, path, None)?;
+            if !previous_writer_stopped(file)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "previous artifact writer has not stopped",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn canonical_project_root(root: &Path) -> io::Result<PathBuf> {
     match root.canonicalize() {
         Ok(root) => Ok(root),
@@ -624,6 +687,26 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
+        Self::open_with_admission_timeout(executable, root, prepared_roots, timeout, timeout, cancelled)
+    }
+
+    pub(crate) fn open_immediately(
+        executable: &Path,
+        root: &Path,
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+    ) -> io::Result<Self> {
+        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, cancelled)
+    }
+
+    fn open_with_admission_timeout(
+        executable: &Path,
+        root: &Path,
+        prepared_roots: &[PathBuf],
+        timeout: Duration,
+        lock_timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+    ) -> io::Result<Self> {
         (|| {
             let started = Instant::now();
             let root = canonical_project_root(root)?;
@@ -637,7 +720,7 @@ impl SharedWriter {
             if workspaces.len() > crate::write_domains::MAX_ROOTS {
                 return Err(invalid("writer workspace list exceeds thirty-two roots"));
             }
-            let (guards, roots) = WriterLock::acquire_projects(&root, &workspaces, timeout, cancelled)?;
+            let (guards, roots) = WriterLock::acquire_projects(&root, &workspaces, lock_timeout, cancelled)?;
             let references: Vec<_> = guards.iter().collect();
             Self::open_with_locks_and_workspaces(
                 executable,

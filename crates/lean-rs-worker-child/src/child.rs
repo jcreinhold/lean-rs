@@ -1605,6 +1605,18 @@ fn load_worker_snapshot(
     authorize(path, bytes)?.load_for(runtime, path, bytes)
 }
 
+fn prepare_ordinary_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
+    #[cfg(unix)]
+    {
+        match lean_rs_host::host::ready_host_artifacts_locally()? {
+            Some(prepared) => Ok(prepared),
+            None => lean_rs_host::host::prepare_host_artifacts_without_lock_wait(),
+        }
+    }
+    #[cfg(not(unix))]
+    lean_rs_host::host::prepare_host_artifacts()
+}
+
 impl HostAnchor {
     #[allow(
         clippy::wildcard_enum_match_arm,
@@ -1624,14 +1636,14 @@ impl HostAnchor {
             HostSessionMode::ShimsOnly => None,
             _ => return Err(host_internal("unsupported host session loading mode")),
         };
-        // Fallback preparation may take exclusive shim locks even on a cache hit.
         // Prepare before the first grant and never rebuild under earlier grants.
-        // Managed admission carries its own descriptor; native load order below
-        // and the per-anchor authority checks are unchanged.
+        // The ordinary ready probe releases its read locks before calling the
+        // application, which must independently verify and hold custody. Managed
+        // admission carries its own descriptor and its load order is unchanged.
         let prepared = match (admission, fallback_prepared) {
             (Some(admission), _) => &admission.prepared,
             (None, Some(prepared)) => prepared,
-            (None, missing) => missing.insert(lean_rs_host::host::prepare_host_artifacts()?),
+            (None, missing) => missing.insert(prepare_ordinary_host_artifacts()?),
         };
         let load = |path: &Path, bytes: &[u8]| {
             load_worker_snapshot(runtime, path, bytes, |p, b| authority.worker(runtime, p, b))

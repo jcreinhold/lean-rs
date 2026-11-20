@@ -68,6 +68,46 @@ impl Drop for Fixture {
         let _cleanup = fs::remove_dir_all(&self.directory);
     }
 }
+#[test]
+fn local_artifact_reader_distinguishes_artifact_and_private_demand_modes() {
+    let fixture = Fixture::new();
+    for path in &fixture.paths {
+        fs::write(path, []).expect("empty artifact lock");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644)).expect("standard artifact mode");
+        let _gate = open(&demand_path(path).expect("stable demand path")).expect("private demand lock");
+    }
+    let reader = crate::shared_writer::LocalArtifactRead::try_acquire(&fixture.roots)
+        .expect("standard artifact mode is readable under private demand gates");
+    reader.validate().expect("retained artifact identities");
+    drop(reader);
+
+    let demand = demand_path(&fixture.paths[0]).expect("first demand path");
+    fs::set_permissions(&demand, fs::Permissions::from_mode(0o644)).expect("nonprivate disposable demand gate");
+    let error = crate::shared_writer::LocalArtifactRead::try_acquire(&fixture.roots)
+        .expect_err("nonprivate demand gate must still refuse");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn immediate_writer_refuses_readers_then_admits_after_release() {
+    let fixture = Fixture::new();
+    fixture.project_graph();
+    let (writer, roots) =
+        crate::writer_lock::WriterLock::acquire_projects(&fixture.roots[0], &[], Duration::ZERO, &|| false)
+            .expect("create disposable artifact and demand locks");
+    drop(writer);
+    let reader = crate::shared_writer::LocalArtifactRead::try_acquire(&roots).expect("hold shared artifact union");
+    let refusal = crate::writer_lock::WriterLock::acquire_projects(&fixture.roots[0], &[], Duration::ZERO, &|| false);
+    assert!(matches!(refusal, Err(error) if error.kind() == io::ErrorKind::TimedOut));
+    reader.validate().expect("contending writer changed no reader custody");
+    drop(reader);
+    let (writer, fresh_roots) =
+        crate::writer_lock::WriterLock::acquire_projects(&fixture.roots[0], &[], Duration::ZERO, &|| false)
+            .expect("fresh immediate writer now owns the union");
+    assert_eq!(fresh_roots, roots);
+    assert_eq!(writer.len(), roots.len());
+}
+
 struct Process {
     child: Child,
     lines: Receiver<String>,

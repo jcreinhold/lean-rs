@@ -58,27 +58,34 @@ impl LockTarget {
             let anchored = self
                 .anchor
                 .as_ref()
-                .ok_or_else(|| io::Error::other("writer lock anchor missing"))?
-                .metadata()?;
-            let opened = file.metadata()?;
-            let named = std::fs::symlink_metadata(&self.path)?;
-            if !opened.is_file()
-                || opened.nlink() != 1
-                || !named.is_file()
-                || named.nlink() != 1
-                || (opened.dev(), opened.ino()) != (named.dev(), named.ino())
-                || (opened.dev(), opened.ino()) != (anchored.dev(), anchored.ino())
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "writer lock inode identity changed",
-                ));
-            }
+                .ok_or_else(|| io::Error::other("writer lock anchor missing"))?;
+            validate_artifact_lock(file, &self.path, Some(anchored))?;
         }
         #[cfg(not(unix))]
         let _ = file;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn validate_artifact_lock(file: &File, path: &Path, anchor: Option<&File>) -> io::Result<()> {
+    let opened = file.metadata()?;
+    let named = std::fs::symlink_metadata(path)?;
+    let identity = |metadata: &std::fs::Metadata| (metadata.dev(), metadata.ino());
+    let anchored = anchor.map(File::metadata).transpose()?;
+    if !opened.is_file()
+        || opened.nlink() != 1
+        || !named.is_file()
+        || named.nlink() != 1
+        || identity(&opened) != identity(&named)
+        || anchored.is_some_and(|anchor| identity(&opened) != identity(&anchor))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "writer lock inode identity changed",
+        ));
+    }
+    Ok(())
 }
 
 impl WriterLock {

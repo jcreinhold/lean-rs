@@ -100,10 +100,21 @@ impl ReadAdmission {
     /// Returns `WouldBlock` for another transient reader gate, or invalid
     /// path/inode and other lock errors rather than treating them idle.
     pub fn try_acquire(lock_paths: &[PathBuf]) -> io::Result<Option<Self>> {
+        Self::try_acquire_with(lock_paths, open)
+    }
+
+    pub(crate) fn try_acquire_existing(lock_paths: &[PathBuf]) -> io::Result<Option<Self>> {
+        Self::try_acquire_with(lock_paths, open_existing)
+    }
+
+    fn try_acquire_with(
+        lock_paths: &[PathBuf],
+        open_gate: impl Fn(&Path) -> io::Result<File>,
+    ) -> io::Result<Option<Self>> {
         let paths = demand_paths(lock_paths)?;
         let mut files = Vec::with_capacity(paths.len());
         for path in paths {
-            let file = open(&path)?;
+            let file = open_gate(&path)?;
             match fs4::FileExt::try_lock(&file) {
                 Ok(()) => {
                     validate(&file, &path)?;
@@ -189,6 +200,20 @@ fn open(path: &Path) -> io::Result<File> {
     )?);
     validate(&file, path)?;
     Ok(file)
+}
+fn open_existing(path: &Path) -> io::Result<File> {
+    let file = open_read_only_lock(path)?;
+    validate(&file, path)?;
+    Ok(file)
+}
+
+pub(crate) fn open_read_only_lock(path: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags};
+    Ok(File::from(rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )?))
 }
 fn validate(file: &File, path: &Path) -> io::Result<()> {
     let opened = file.metadata()?;

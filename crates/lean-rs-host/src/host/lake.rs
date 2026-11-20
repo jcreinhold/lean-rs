@@ -201,6 +201,14 @@ impl LakeProject {
         export_signatures: Vec<LeanExportSignature>,
         selection: &ShimOutputSelection,
     ) -> LeanResult<BuiltLeanCapability> {
+        Self::shim_capability_with_admission(export_signatures, selection, false)
+    }
+
+    pub(crate) fn shim_capability_with_admission(
+        export_signatures: Vec<LeanExportSignature>,
+        selection: &ShimOutputSelection,
+        immediate: bool,
+    ) -> LeanResult<BuiltLeanCapability> {
         // Both independently runnable packages need their own validity keys.
         // The host target can rebuild the path dependency, so its writer graph
         // also includes the interop domain rather than nesting another writer.
@@ -208,13 +216,15 @@ impl LakeProject {
         let bootstrap =
             lean_toolchain::shared_writer::PrivateLakeBootstrap::new(Path::new(env!("CARGO_MANIFEST_DIR")), &root)
                 .map_err(artifact_error)?;
-        drop(
-            interop_capability_builder(&root, selection)
-                .private_bootstrap(bootstrap)
-                .build_quiet()
-                .map_err(|error| artifact_error(std::io::Error::other(error)))?,
-        );
-        build_bundled_capability(&bundled_host_shims_root(), SHIM_LIB_NAME, export_signatures, selection)
+        let interop = interop_capability_builder(&root, selection).private_bootstrap(bootstrap);
+        drop(build_shim(interop, immediate).map_err(|error| artifact_error(std::io::Error::other(error)))?);
+        build_bundled_capability(
+            &bundled_host_shims_root(),
+            SHIM_LIB_NAME,
+            export_signatures,
+            selection,
+            immediate,
+        )
     }
 }
 
@@ -274,21 +284,39 @@ fn build_bundled_capability(
     target_name: &str,
     export_signatures: Vec<LeanExportSignature>,
     selection: &ShimOutputSelection,
+    immediate: bool,
 ) -> LeanResult<BuiltLeanCapability> {
-    let _guard = BUNDLED_SHIM_BUILD_LOCK.lock().map_err(|_| {
-        lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
-    })?;
+    let _guard = if immediate {
+        BUNDLED_SHIM_BUILD_LOCK.try_lock().map_err(|error| {
+            lean_rs::__host_internals::host_module_init(format!("bundled lean-rs shim build lock: {error}"))
+        })?
+    } else {
+        BUNDLED_SHIM_BUILD_LOCK.lock().map_err(|_| {
+            lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
+        })?
+    };
     let bootstrap =
         lean_toolchain::shared_writer::PrivateLakeBootstrap::new(Path::new(env!("CARGO_MANIFEST_DIR")), project_root)
             .map_err(|error| lean_rs::__host_internals::host_module_init(error.to_string()))?;
     let builder = bundled_capability_builder(project_root, target_name, export_signatures, selection)
         .private_bootstrap(bootstrap);
-    builder.build_quiet().map_err(|diagnostic| {
+    build_shim(builder, immediate).map_err(|diagnostic| {
         lean_rs::__host_internals::host_module_init(format!(
             "could not build bundled lean-rs shim target `{target_name}` under {}: {diagnostic}",
             project_root.display()
         ))
     })
+}
+
+fn build_shim(
+    builder: lean_toolchain::CargoLeanCapability,
+    immediate: bool,
+) -> Result<BuiltLeanCapability, lean_toolchain::LinkDiagnostics> {
+    if immediate {
+        builder.build_quiet_with_immediate_admission()
+    } else {
+        builder.build_quiet()
+    }
 }
 
 fn bundled_capability_builder(
@@ -388,22 +416,80 @@ pub(crate) fn ready_artifacts(
     }
     .map_err(artifact_error)?;
     validate_ready_artifact_domains(&workspaces, &roots)?;
-    if interop_capability_builder(&interop_root, selection)
-        .probe_ready()
-        .map_err(|error| artifact_error(std::io::Error::other(error)))?
-        .is_none()
-    {
+    if !interop_ready(&interop_root, selection, false)? {
         return Ok(None);
     }
-    let builder = bundled_capability_builder(&host_root, SHIM_LIB_NAME, signatures, selection);
-    let result = builder
-        .probe_ready()
-        .map_err(|error| artifact_error(std::io::Error::other(error)))?
-        .map(|built| prepared_artifacts(&built, selection.key()))
-        .transpose()?;
+    let result = probe_ready_artifacts(&host_root, signatures, selection, false)?;
     for reader in &mut readers {
         reader.validate().map_err(artifact_error)?;
     }
+    validate_ready_artifact_domains(&workspaces, &roots)?;
+    Ok(result)
+}
+
+#[cfg(unix)]
+fn interop_ready(interop_root: &Path, selection: &ShimOutputSelection, strict: bool) -> LeanResult<bool> {
+    probe_builder(&interop_capability_builder(interop_root, selection), strict)
+        .map(|result| result.is_some())
+        .map_err(|error| artifact_error(std::io::Error::other(error)))
+}
+
+#[cfg(unix)]
+fn probe_ready_artifacts(
+    host_root: &Path,
+    signatures: Vec<LeanExportSignature>,
+    selection: &ShimOutputSelection,
+    strict: bool,
+) -> LeanResult<Option<super::LeanPreparedHostArtifacts>> {
+    let builder = bundled_capability_builder(host_root, SHIM_LIB_NAME, signatures, selection);
+    probe_builder(&builder, strict)
+        .map_err(|error| artifact_error(std::io::Error::other(error)))?
+        .map(|built| prepared_artifacts(&built, selection.key()))
+        .transpose()
+}
+
+#[cfg(unix)]
+fn probe_builder(
+    builder: &lean_toolchain::CargoLeanCapability,
+    strict: bool,
+) -> Result<Option<BuiltLeanCapability>, lean_toolchain::LinkDiagnostics> {
+    if strict {
+        builder.probe_ready_strict()
+    } else {
+        builder.probe_ready()
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn ready_artifacts_locally(
+    signatures: Vec<LeanExportSignature>,
+    selection: &ShimOutputSelection,
+) -> LeanResult<Option<super::LeanPreparedHostArtifacts>> {
+    let host_root = bundled_host_shims_root();
+    let interop_root = bundled_interop_shims_root();
+    let workspaces = [host_root.clone(), interop_root.clone()];
+    let roots = lean_toolchain::shared_writer::project_artifact_root_union(&workspaces).map_err(artifact_error)?;
+    for root in &roots {
+        match fs::symlink_metadata(root.join(".lake")) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(artifact_error(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid .lake directory during ready check",
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(artifact_error(error)),
+        }
+    }
+    let readers = lean_toolchain::shared_writer::LocalArtifactRead::try_acquire(&roots).map_err(artifact_error)?;
+    validate_ready_artifact_domains(&workspaces, &roots)?;
+    let result = if interop_ready(&interop_root, selection, true)? {
+        probe_ready_artifacts(&host_root, signatures, selection, true)?
+    } else {
+        None
+    };
+    readers.validate().map_err(artifact_error)?;
     validate_ready_artifact_domains(&workspaces, &roots)?;
     Ok(result)
 }
