@@ -679,6 +679,38 @@ class MetadataQualificationTest(unittest.TestCase):
             "attempt_proof_ten_candidates_returns_ordered_rows",
             "attempt_proof_global_output_budget_returns_partial_not_attempted_rows",
         )
+        batch_cases = (
+            (
+                "typed_session",
+                "process_module_query_batch_returns_diagnostics_and_proof_state_through_worker",
+            ),
+            (
+                "typed_session",
+                "declaration_outline_batch_selector_returns_source_order_rows_through_worker",
+            ),
+            (
+                "typed_session",
+                "proof_state_in_declaration_renders_locals_pretty_by_default_and_raw_on_opt_out",
+            ),
+            (
+                "typed_session",
+                "proof_state_unresolved_after_text_returns_boundary_candidates_through_worker",
+            ),
+            (
+                "typed_session",
+                "proof_state_boundary_candidates_report_truncation_through_worker",
+            ),
+            ("typed_session", "proof_state_entry_selector_renders_pristine_entry_goal"),
+            (
+                "typed_session",
+                "module_query_on_incomplete_closure_skips_body_elaboration",
+            ),
+            ("session_reuse", "the_snapshot_cache_survives_a_reuse"),
+            (
+                "session_reuse",
+                "a_pooled_sibling_in_another_mode_never_answers_from_the_wrong_environment",
+            ),
+        )
         audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
@@ -687,6 +719,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 f"(binary(=typed_session) & (test(={name})))"
                 for name in (*meta_cases, *module_query_cases, *proof_cases)
             ),
+            *(f"(binary(={target}) & (test(={name})))" for target, name in batch_cases),
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)

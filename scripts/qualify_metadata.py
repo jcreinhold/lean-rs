@@ -162,10 +162,54 @@ ORDINARY_PROOF_TESTS = (
         ((1, 1),),
     ),
 )
+ORDINARY_BATCH_TESTS = (
+    (
+        "typed_session",
+        "process_module_query_batch_returns_diagnostics_and_proof_state_through_worker",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "declaration_outline_batch_selector_returns_source_order_rows_through_worker",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "proof_state_in_declaration_renders_locals_pretty_by_default_and_raw_on_opt_out",
+        ((1, 2),),
+    ),
+    (
+        "typed_session",
+        "proof_state_unresolved_after_text_returns_boundary_candidates_through_worker",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "proof_state_boundary_candidates_report_truncation_through_worker",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "proof_state_entry_selector_renders_pristine_entry_goal",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "module_query_on_incomplete_closure_skips_body_elaboration",
+        ((1, 1),),
+    ),
+    ("session_reuse", "the_snapshot_cache_survives_a_reuse", ((1, 2),)),
+    (
+        "session_reuse",
+        "a_pooled_sibling_in_another_mode_never_answers_from_the_wrong_environment",
+        ((1, 3),),
+    ),
+)
 JSON_GRANT = b"authorize-consumer-load"
 META_TERM_GRANT = b"authorize-fixed-meta-term"
 MODULE_QUERY_GRANT = b"authorize-fixed-module-query"
 PROOF_GRANT = b"authorize-fixed-proof-attempt"
+BATCH_GRANT = b"authorize-fixed-module-batch"
 ORDINARY_AUDITED_TESTS = tuple(
     (target, name, counts, event)
     for cases, event in (
@@ -173,6 +217,7 @@ ORDINARY_AUDITED_TESTS = tuple(
         (ORDINARY_META_TESTS, META_TERM_GRANT),
         (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
         (ORDINARY_PROOF_TESTS, PROOF_GRANT),
+        (ORDINARY_BATCH_TESTS, BATCH_GRANT),
     )
     for target, name, counts in cases
 )
@@ -931,6 +976,7 @@ def check_typed_children_closed(
         META_TERM_GRANT: [],
         MODULE_QUERY_GRANT: [],
         PROOF_GRANT: [],
+        BATCH_GRANT: [],
     }
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)

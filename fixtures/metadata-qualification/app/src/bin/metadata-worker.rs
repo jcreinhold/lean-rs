@@ -124,6 +124,130 @@ fn matches_fixed_proof(file: &str, request: &ProofAttemptRequest) -> bool {
         _ => false,
     }
 }
+struct FixedBatchPolicy {
+    limits: [&'static str; 3],
+    audit: bool,
+}
+
+fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -> Option<FixedBatchPolicy> {
+    use ModuleQuerySelector::{
+        DeclarationOutline, DeclarationTarget, Diagnostics, ProofState, ProofStateInDeclaration, References,
+    };
+    use ProofPositionSelector::{AfterText, Default as First, Entry};
+
+    const BASE: &str = "theorem t (h : True) : True := by\n  exact h\n";
+    const CHANGED: &str = "theorem t (h : True) : True := by\n  trivial\n";
+    const EXTENDED: &str = "theorem t (h : True) : True := by\n  exact h\n\ntheorem u : 1 = 1 := by\n  rfl\n";
+    const SHIFTED: &str = "theorem s : 2 = 2 := by\n  rfl\n\ntheorem t (h : True) : True := by\n  exact h\n";
+    const OUTLINE: &str = "namespace WorkerOutline\ntheorem first : True := by\n  trivial\ndef second (n : Nat) : Nat :=\n  n + 1\nend WorkerOutline\n";
+    const LOCALS: &str = "theorem t (n : Nat) (h : n + 0 = n) : n + 0 = n := by\n  exact h\n";
+    const TRIVIAL: &str = "theorem t : True := by\n  trivial\n";
+    const PRISTINE: &str = "theorem t : ∀ (p : Prop), p → p := by\n  intro p hp\n  exact hp\n";
+    const INCOMPLETE: &str = "import LeanRsFixture.DoesNotExist\n\ntheorem present : True := totallyUndefinedSymbol\n";
+    const DEFAULT_LIMITS: [&str; 3] = ["4", "300000", "67108864"];
+
+    let source = batch.source.as_str();
+    let selectors = batch.selectors.as_slice();
+    let ordinary = imports == ["LeanRsHostShims.Elaboration"];
+    let cache_imports = file == "/cache/imports.lean" && imports == ["LeanRsHostShims.Elaboration", "Lean"];
+    if !ordinary && !cache_imports {
+        return None;
+    }
+    let state_at = |line| matches!(selectors, [ProofState { id, line: at, column: 4 }] if id == "state" && *at == line);
+    let missing_tactic = |name| {
+        matches!(
+            selectors,
+            [ProofStateInDeclaration {
+                id,
+                declaration,
+                position: AfterText { text, occurrence: None },
+                locals_raw: false,
+            }] if id == "state" && declaration == name && text == "missing tactic"
+        )
+    };
+    let (limits, audit) = match (file, source, selectors) {
+        ("/cache/reuse.lean" | "/cache/clear.lean" | "/cache/imports.lean", BASE, _)
+        | ("/cache/rebuild.lean", BASE | CHANGED, _)
+        | ("/cache/incremental.lean", BASE | EXTENDED, _)
+            if state_at(2) =>
+        {
+            (DEFAULT_LIMITS, false)
+        }
+        ("/cache/incremental.lean" | "/cache/incremental-cold.lean", SHIFTED, _) if state_at(5) => {
+            (DEFAULT_LIMITS, false)
+        }
+        ("/cache/ttl.lean", BASE, _) if state_at(2) => (["4", "1", "67108864"], false),
+        ("/cache/entry-a.lean" | "/cache/entry-b.lean", BASE, _) if state_at(2) => (["1", "300000", "67108864"], false),
+        ("/cache/tiny.lean", BASE, _) if state_at(2) => (["4", "300000", "1"], false),
+
+        ("/reuse/cache.lean" | "/shared/cache.lean", BASE, _) if state_at(2) => (DEFAULT_LIMITS, true),
+        (
+            "<elaborate>",
+            BASE,
+            [
+                Diagnostics { id: diagnostics },
+                ProofState {
+                    id: state,
+                    line: 2,
+                    column: 4,
+                },
+                DeclarationTarget {
+                    id: target,
+                    name: Some(name),
+                    line: None,
+                    column: None,
+                },
+            ],
+        ) if diagnostics == "diagnostics" && state == "state" && target == "target" && name == "t" => {
+            (DEFAULT_LIMITS, true)
+        }
+        ("<elaborate>", OUTLINE, [DeclarationOutline { id }]) if id == "outline" => (DEFAULT_LIMITS, true),
+        (
+            "<elaborate>",
+            LOCALS,
+            [
+                ProofStateInDeclaration {
+                    id,
+                    declaration,
+                    position: First,
+                    locals_raw: _,
+                },
+            ],
+        ) if id == "state" && declaration == "t" => (DEFAULT_LIMITS, true),
+        ("<elaborate>", TRIVIAL, _) if missing_tactic("t") => (DEFAULT_LIMITS, true),
+        ("<elaborate>", _, _) if missing_tactic("many") && matches_boundary_fixture(source) => (DEFAULT_LIMITS, true),
+        (
+            "<elaborate>",
+            PRISTINE,
+            [
+                ProofStateInDeclaration {
+                    id,
+                    declaration,
+                    position: Entry,
+                    locals_raw: false,
+                },
+            ],
+        ) if id == "entry" && declaration == "t" => (DEFAULT_LIMITS, true),
+        ("/scan/incomplete-closure.lean", INCOMPLETE, [Diagnostics { id: diagnostics }, References { id, name }])
+            if diagnostics == "diagnostics" && id == "refs" && name == "present" =>
+        {
+            (DEFAULT_LIMITS, true)
+        }
+        _ => return None,
+    };
+    Some(FixedBatchPolicy { limits, audit })
+}
+
+fn matches_boundary_fixture(source: &str) -> bool {
+    let mut lines = source.split_inclusive('\n');
+    lines.next() == Some("theorem many : True := by\n")
+        && (0..40).all(|index| {
+            let exact = format!("  have h{index} : True := by trivial\n");
+            lines.next() == Some(exact.as_str())
+        })
+        && lines.next() == Some("  trivial\n")
+        && lines.next().is_none()
+}
 impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
@@ -401,14 +525,13 @@ impl WorkerAuthority for MetadataApp {
         request: HostCachedModuleBatch,
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, HostCachedModuleBatch>> {
-        const BASE: &str = "theorem t (h : True) : True := by\n  exact h\n";
-        const CHANGED: &str = "theorem t (h : True) : True := by\n  trivial\n";
-        const EXTENDED: &str = "theorem t (h : True) : True := by\n  exact h\n\ntheorem u : 1 = 1 := by\n  rfl\n";
-        const SHIFTED: &str = "theorem s : 2 = 2 := by\n  rfl\n\ntheorem t (h : True) : True := by\n  exact h\n";
         let d = &self.deployment()?.record;
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
-            || d.broken_import || !d.typed_session || d.verification
-            || !options.namespace.is_empty() || options.options_json != "{}"
+            || d.broken_import
+            || !d.typed_session
+            || d.verification
+            || !options.namespace.is_empty()
+            || options.options_json != "{}"
             || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
             || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
             || request.batch.budgets != ModuleQueryOutputBudgets::default()
@@ -416,27 +539,15 @@ impl WorkerAuthority for MetadataApp {
         {
             return Err(denied());
         }
-        let source = request.batch.source.as_str();
-        let (line, entries, ttl, bytes) = match (options.file.as_str(), source) {
-            ("/cache/reuse.lean" | "/cache/clear.lean" | "/cache/imports.lean", BASE)
-                | ("/cache/rebuild.lean", BASE | CHANGED)
-                | ("/cache/incremental.lean", BASE | EXTENDED) => (2, "4", "300000", "67108864"),
-            ("/cache/incremental.lean" | "/cache/incremental-cold.lean", SHIFTED) => (5, "4", "300000", "67108864"),
-            ("/cache/ttl.lean", BASE) => (2, "4", "1", "67108864"),
-            ("/cache/entry-a.lean" | "/cache/entry-b.lean", BASE) => (2, "1", "300000", "67108864"),
-            ("/cache/tiny.lean", BASE) => (2, "4", "300000", "1"),
-            _ => return Err(denied()),
-        };
         let names = session.imports.imports();
-        let ordinary = names == ["LeanRsHostShims.Elaboration"];
-        let changed = options.file == "/cache/imports.lean"
-            && names == ["LeanRsHostShims.Elaboration", "Lean"];
-        let paths = d.import_roots.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
-        if (!ordinary && !changed) || !session.imports.matches_request(&paths, names)
-            || request.batch.selectors != [ModuleQuerySelector::ProofState {
-                id: "state".to_owned(), line, column: 4,
-            }]
-        {
+        let fixed = fixed_batch_policy(&options.file, &request.batch, names).ok_or_else(denied)?;
+        let [entries, ttl, bytes] = fixed.limits;
+        let paths = d
+            .import_roots
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if !session.imports.matches_request(&paths, names) {
             return Err(denied());
         }
         // The trusted SDK computes the cache key; it is not an artifact grant.
@@ -449,20 +560,33 @@ impl WorkerAuthority for MetadataApp {
         let [file, key, max_entries, ttl_millis, max_bytes] = fields.as_slice() else {
             return Err(denied());
         };
-        if *file != options.file || key.len() != 64
-            || !key.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-            || *max_entries != entries || *ttl_millis != ttl || *max_bytes != bytes
+        if *file != options.file
+            || key.len() != 64
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || *max_entries != entries
+            || *ttl_millis != ttl
+            || *max_bytes != bytes
         {
             return Err(denied());
         }
         // SAFETY: grant_source checked the actual retained capability, environment
         // and complete observed roots. Held protects all sealed imports and images.
         // Only the fixed sources, projections and limits above enter this frontend.
-        unsafe {
+        let grant = unsafe {
             session.capability.cached_module_batch_scope(
-                session.environment, session.imports, d.verification_roots(), request, options,
-            )
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                options,
+            )?
+        };
+        if fixed.audit {
+            audit("authorize-fixed-module-batch");
         }
+        Ok(grant)
     }
     fn proof<'cap>(
         &self,

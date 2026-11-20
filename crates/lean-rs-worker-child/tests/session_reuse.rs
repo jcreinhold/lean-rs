@@ -251,12 +251,12 @@ fn switching_back_to_a_pooled_import_set_does_not_reimport() {
 /// Two live environments must never answer for one another.
 ///
 /// This is what stopped being covered for free when the pool removed the
-/// unconditional clear on every switch: with both sessions alive and the same
-/// file queried under each, only the module-query cache key separates them.
+/// unconditional clear on every switch: both sessions can keep a snapshot for
+/// the same file, but lookup must stay within the current environment.
 ///
-/// The two here differ **only** in [`HostSessionMode`] — same project, same
-/// imports, same profile — which is the case `mode` was added to the key for.
-/// Without it the second probe hits and answers from the first environment.
+/// The two sessions differ **only** in [`HostSessionMode`] — same project, same
+/// imports, same profile. The first query in each scope is a miss; returning
+/// to the first scope must still hit its own snapshot.
 #[test]
 fn a_pooled_sibling_in_another_mode_never_answers_from_the_wrong_environment() {
     ensure_fixture_built();
@@ -270,8 +270,8 @@ fn a_pooled_sibling_in_another_mode_never_answers_from_the_wrong_environment() {
     );
     assert_eq!(
         probe_cache(&mut worker, &shims_only, "/shared/cache.lean"),
-        LeanWorkerModuleCacheStatus::Rebuilt,
-        "the same file under a different session mode must be recomputed, not served from the sibling's snapshot"
+        LeanWorkerModuleCacheStatus::Miss,
+        "a fresh session mode has no snapshot in its own scope"
     );
     // Each environment keeps its own entry for the file, so going back is that
     // session's own hit rather than the sibling's answer.
