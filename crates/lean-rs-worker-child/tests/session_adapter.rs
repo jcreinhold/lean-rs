@@ -314,7 +314,11 @@ fn elaboration_and_kernel_adapter_match_status_shape() {
     }
     .expect("fixture capability loads");
     let imports = if selected {
-        fixture::native_imports_for(&caps, &["LeanRsHostShims.Elaboration"], Default::default())
+        fixture::native_imports_for(
+            &caps,
+            &["LeanRsHostShims.Elaboration"],
+            lean_rs_host::LeanSessionImportProfile::default(),
+        )
     } else {
         fixture::imports(&caps, "LeanRsHostShims.Elaboration")
     };
