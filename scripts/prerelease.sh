@@ -240,10 +240,17 @@ Linux | Darwin) ;;
 	;;
 esac
 
+# Select the release before changing any checkout pins.
+if ! LEAN_SYSROOT=$("$REPO_ROOT/scripts/lean-release-prefix.sh" "$LEAN_VERSION"); then
+	log_err "could not select Lean ${LEAN_VERSION}; install it with: elan toolchain install leanprover/lean4:v${LEAN_VERSION}"
+	exit 2
+fi
+export LEAN_SYSROOT
+
 # -- toolchain pinning ------------------------------------------------------
 
 # The Lake packages embed the toolchain version in their lean-toolchain
-# files; the host Rust build picks LEAN_SYSROOT off the elan layout. We
+# files; the host Rust build picks LEAN_SYSROOT from the selected release. We
 # pin every relevant file to the target version, then restore on exit
 # so an interrupted run does not leave the tree in a half-pinned state.
 TOOLCHAIN_FILES=(
@@ -308,15 +315,6 @@ for path in "${TOOLCHAIN_FILES[@]}"; do
 done
 
 # -- LEAN_SYSROOT + LD_LIBRARY_PATH ----------------------------------------
-
-ELAN_HOME="${ELAN_HOME:-$HOME/.elan}"
-SYSROOT="$ELAN_HOME/toolchains/leanprover--lean4---v${LEAN_VERSION}"
-if [[ ! -d "$SYSROOT" ]]; then
-	log_err "Lean ${LEAN_VERSION} toolchain not installed at $SYSROOT"
-	log_err "install it with: elan toolchain install leanprover/lean4:v${LEAN_VERSION}"
-	exit 2
-fi
-export LEAN_SYSROOT="$SYSROOT"
 
 LAKE_LIB_DIRS=("$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib")
 # In 4.36.0 the bundled host shims use keyed outputs loaded by manifest path.

@@ -58,7 +58,8 @@ jobs:
         # header digest. The negative cases fail to compile before any link
         # step, so no `libleanshared` runtime is needed.
         run: |
-          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+          prefix=$(scripts/lean-release-prefix.sh "${{ env.LEAN_VERSION_HEAD }}")
+          printf 'LEAN_SYSROOT=%s\n' "$prefix" >> "$GITHUB_ENV"
 
       - name: Build Lean fixture
         # The `lean-rs` / `lean-rs-host` snapshot suites pull in

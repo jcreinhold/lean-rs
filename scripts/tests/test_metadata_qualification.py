@@ -297,12 +297,18 @@ class MetadataQualificationTest(unittest.TestCase):
         sdk.mkdir(exist_ok=True)
         (sdk / "lean-toolchain").write_text("leanprover/lean4:v4.36.0\n")
         elan = self.target / "elan"
-        release = elan / "toolchains/leanprover--lean4---v4.36.0"
+        release = elan / "toolchains/selected-release"
         release.mkdir(parents=True)
         with (
             patch.object(qualification, "SDK", sdk),
             patch.dict(os.environ, {"ELAN_HOME": str(elan)}, clear=True),
             patch.object(qualification, "check_file") as check,
+            patch.object(
+                subprocess, "check_output", side_effect=[
+                    str(release / "bin/lean"), str(release),
+                    str(release / "bin/lean"), str(release / "bin/lean"),
+                ],
+            ) as resolve,
         ):
             self.assertEqual(qualification.installed_lean_release(), release)
             self.assertEqual(
@@ -311,6 +317,13 @@ class MetadataQualificationTest(unittest.TestCase):
                     release / "bin/lean",
                     release / "bin/lake",
                     release / "lib/lean/libleanshared.dylib",
+                ],
+            )
+            self.assertEqual(
+                [call.args[0] for call in resolve.call_args_list],
+                [
+                    ["elan", "run", "leanprover/lean4:v4.36.0", "elan", "which", "lean"],
+                    [sdk / "scripts/lean-release-prefix.sh", "4.36.0"],
                 ],
             )
             with (

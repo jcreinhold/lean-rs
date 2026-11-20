@@ -109,9 +109,7 @@ RUN /root/.cargo/bin/cargo install --locked --version 0.52.0 cargo-public-api
 # Other workspace tools the verify job uses.
 RUN /root/.cargo/bin/cargo install --locked cargo-nextest cargo-fuzz
 
-# elan + the pinned Lean toolchain. The toolchain landing dir
-# (`/root/.elan/toolchains/leanprover--lean4---v${LEAN_VERSION}`) is
-# what `scripts/prerelease.sh` resolves `LEAN_SYSROOT` against.
+# Install the pinned Lean toolchain for the native prerelease gates.
 RUN curl --proto '=https' --tlsv1.2 -sSf \
         https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
     | sh -s -- -y --default-toolchain "leanprover/lean4:v${LEAN_VERSION}"

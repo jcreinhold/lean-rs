@@ -141,12 +141,12 @@ rebuild_lake_packages() {
 }
 
 run_one_version() {
-	local version="$1"
+	local version="$1" sysroot="$2"
 	printf '\n=== Lean %s ===\n' "$version"
 	write_pins "$version"
 	rebuild_lake_packages
 	(cd "$REPO_ROOT" && cargo clean >/dev/null 2>&1 || true)
-	LEAN_SYSROOT="$HOME/.elan/toolchains/leanprover--lean4---v${version}" \
+	LEAN_SYSROOT="$sysroot" \
 		cargo nextest run --workspace --no-fail-fast
 }
 
@@ -179,15 +179,16 @@ declare -a FAILED=()
 declare -a PASSED=()
 
 for version in "${VERSIONS[@]}"; do
-	sysroot="$HOME/.elan/toolchains/leanprover--lean4---v${version}"
-	if [ ! -d "$sysroot" ]; then
+	if sysroot=$("$REPO_ROOT/scripts/lean-release-prefix.sh" "$version"); then
+		if run_one_version "$version" "$sysroot"; then
+			PASSED+=("$version")
+		else
+			FAILED+=("$version")
+		fi
+	elif [[ $? == 3 ]]; then
 		# Backticks here are literal — the hint renders as inline code to the reader.
 		# shellcheck disable=SC2016
 		printf '\n=== Lean %s SKIPPED (run `elan toolchain install leanprover/lean4:v%s`) ===\n' "$version" "$version"
-		continue
-	fi
-	if run_one_version "$version"; then
-		PASSED+=("$version")
 	else
 		FAILED+=("$version")
 	fi

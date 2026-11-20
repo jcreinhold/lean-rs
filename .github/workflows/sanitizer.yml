@@ -41,7 +41,8 @@ jobs:
 
       - name: Export LEAN_SYSROOT
         run: |
-          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+          prefix=$(scripts/lean-release-prefix.sh "${{ env.LEAN_VERSION_HEAD }}")
+          printf 'LEAN_SYSROOT=%s\n' "$prefix" >> "$GITHUB_ENV"
 
       - name: Build Lake packages
         run: |
@@ -93,7 +94,8 @@ jobs:
         # and no `LD_LIBRARY_PATH` are needed—the `leanshared` link directive is
         # ignored under Miri.
         run: |
-          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+          prefix=$(scripts/lean-release-prefix.sh "${{ env.LEAN_VERSION_HEAD }}")
+          printf 'LEAN_SYSROOT=%s\n' "$prefix" >> "$GITHUB_ENV"
 
       - name: cargo miri setup
         run: cargo +nightly miri setup
@@ -132,7 +134,8 @@ jobs:
 
       - name: Export LEAN_SYSROOT
         run: |
-          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+          prefix=$(scripts/lean-release-prefix.sh "${{ env.LEAN_VERSION_HEAD }}")
+          printf 'LEAN_SYSROOT=%s\n' "$prefix" >> "$GITHUB_ENV"
 
       - name: Build Lake packages
         run: |

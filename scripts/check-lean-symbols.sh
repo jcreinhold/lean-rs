@@ -19,8 +19,8 @@ fi
 
 CANDIDATE=$1
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-TOOLCHAIN_ROOT="${ELAN_HOME:-$HOME/.elan}/toolchains"
-LIB_DIR="$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/lib/lean"
+prefix=$("$REPO_ROOT/scripts/lean-release-prefix.sh" "$CANDIDATE")
+LIB_DIR="$prefix/lib/lean"
 
 case "$(uname -s)" in
 Darwin) LIB="$LIB_DIR/libleanshared.dylib" ;;

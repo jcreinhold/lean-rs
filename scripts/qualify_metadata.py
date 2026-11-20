@@ -595,10 +595,16 @@ def installed_lean_release(profile=None):
     profile = verified_platform() if profile is None else profile
     pin = (SDK / "lean-toolchain").read_text().strip()
     require(pin and "\n" not in pin, "expected one repository Lean toolchain pin")
-    directory = pin.replace("/", "--").replace(":", "---")
+    version = pin.removeprefix("leanprover/lean4:v")
+    require(version and version != pin, "expected a named Lean release")
+    # Check the selected binaries before asking the Lean executable for its prefix.
+    binary = Path(
+        subprocess.check_output(["elan", "run", pin, "elan", "which", "lean"], text=True).rstrip("\n")
+    )
+    release = binary.parent.parent.resolve(strict=True)
+    require(binary == release / "bin/lean", "unexpected Elan-selected Lean binary")
     elan_home = Path(os.environ.get("ELAN_HOME", Path.home() / ".elan")).expanduser()
     toolchains = elan_home / "toolchains"
-    release = (toolchains / directory).resolve(strict=True)
     require(
         release.parent == toolchains.resolve(strict=True),
         "repository Lean toolchain did not resolve inside the installed Elan toolchains directory",
@@ -612,6 +618,10 @@ def installed_lean_release(profile=None):
     check_file(release / "bin/lean", profile["lean"])
     check_file(release / "bin/lake", profile["lake"])
     check_file(release / "lib/lean" / profile["runtime_name"], profile["runtime"])
+    prefix = subprocess.check_output(
+        [SDK / "scripts/lean-release-prefix.sh", version], text=True
+    ).rstrip("\n")
+    require(Path(prefix) == release, "reported Lean prefix differs from the verified release")
     return release
 
 

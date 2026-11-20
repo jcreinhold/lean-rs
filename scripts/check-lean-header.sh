@@ -19,7 +19,9 @@ fi
 
 EXISTING=$1
 CANDIDATE=$2
-TOOLCHAIN_ROOT="${ELAN_HOME:-$HOME/.elan}/toolchains"
+here=$(cd "$(dirname "$0")" && pwd)
+existing_prefix=$("$here/lean-release-prefix.sh" "$EXISTING")
+candidate_prefix=$("$here/lean-release-prefix.sh" "$CANDIDATE")
 EXTRACT='/^typedef struct[^{]*\{/{p=1} p{print} /^} lean_external_object;/{found=1; exit} END{if (!p || !found) exit 1}'
 
 EXISTING_DECLS=$(mktemp)
@@ -30,6 +32,6 @@ trap 'rm -f "$EXISTING_DECLS" "$CANDIDATE_DECLS"' EXIT
 # at the first struct definition, including named or anonymous typedefs,
 # so neither header nor constructor fields are skipped. Extract before
 # diff so an absent block fails closed.
-awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$EXISTING/include/lean/lean.h" >"$EXISTING_DECLS"
-awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/include/lean/lean.h" >"$CANDIDATE_DECLS"
+awk "$EXTRACT" "$existing_prefix/include/lean/lean.h" >"$EXISTING_DECLS"
+awk "$EXTRACT" "$candidate_prefix/include/lean/lean.h" >"$CANDIDATE_DECLS"
 diff "$EXISTING_DECLS" "$CANDIDATE_DECLS"
