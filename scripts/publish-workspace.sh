@@ -43,6 +43,7 @@ order=(
   lean-rs-abi
   lean-rs-sys
   lean-toolchain
+  lean-rs-writer
   lean-rs-interop-shims
   lean-rs
   lean-rs-host
