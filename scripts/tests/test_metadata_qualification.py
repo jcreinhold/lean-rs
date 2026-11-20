@@ -536,7 +536,7 @@ class MetadataQualificationTest(unittest.TestCase):
                         stream.write(f"{pid} worker-started\n")
                         count = (
                             grants
-                            if event == qualification.META_TERM_GRANT
+                            if event != qualification.JSON_GRANT
                             else int(index < grants)
                         )
                         if count:
@@ -662,11 +662,20 @@ class MetadataQualificationTest(unittest.TestCase):
             "whnf_reduces_known_term",
             "is_def_eq_recognises_equal_terms",
         )
+        module_query_cases = (
+            "process_module_query_returns_diagnostics_through_worker",
+            "process_module_query_diagnostics_keep_original_source_coordinates",
+            "process_module_query_returns_cursor_type_and_goal_through_worker",
+            "process_module_query_references_through_worker",
+        )
         audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
             *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
-            *(f"(binary(=typed_session) & (test(={name})))" for name in meta_cases),
+            *(
+                f"(binary(=typed_session) & (test(={name})))"
+                for name in (*meta_cases, *module_query_cases)
+            ),
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)
@@ -732,6 +741,25 @@ class MetadataQualificationTest(unittest.TestCase):
                 case=case,
                 expected_counts=((1, 2),),
                 grant_event=qualification.META_TERM_GRANT,
+            )
+        probe.assert_not_called()
+
+    def test_module_query_audit_refuses_an_unexpected_term_grant(self):
+        audit = (
+            b"51 worker-started\n51 verified-deployment\n"
+            b"51 authorize-fixed-module-query\n51 authorize-fixed-meta-term\n"
+        )
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(
+                ValueError, "wrong started worker / authorize-fixed-module-query counts"
+            ),
+        ):
+            qualification.check_typed_children_closed(
+                audit,
+                case="process_module_query_returns_diagnostics_through_worker",
+                expected_counts=((1, 1),),
+                grant_event=qualification.MODULE_QUERY_GRANT,
             )
         probe.assert_not_called()
 

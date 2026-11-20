@@ -2,8 +2,8 @@ use lean_rs::host_bridge::{
     HostCachedModuleBatch, HostModuleBatch, HostModuleQuery, HostSourceOptions,
     TrustedHostKernelRequest, TrustedHostTerm, TrustedModuleSource,
     module_requests::{
-        DeclarationVerificationBatchRequest, DeclarationVerificationRequest,
-        DeclarationVerificationTarget, ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, SorryPolicy,
+        DeclarationVerificationBatchRequest, DeclarationVerificationRequest, DeclarationVerificationTarget,
+        ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, SorryPolicy,
     },
 };
 use lean_rs::module::{
@@ -266,11 +266,63 @@ impl WorkerAuthority for MetadataApp {
     }
     fn query<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: HostModuleQuery,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: HostModuleQuery,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, HostModuleQuery>> {
-        Err(denied())
+        let d = &self.deployment()?.record;
+        let exact_request = match (request.source.as_str(), &request.query, options.file.as_str()) {
+            ("import Lean\n\ntheorem ok : True := by trivial\n", ModuleQuery::Diagnostics, "<elaborate>")
+            | (
+                "theorem bad : True := by\n  exact missingIdentifier\n",
+                ModuleQuery::Diagnostics,
+                "/diagnostics/original.lean",
+            )
+            | (
+                "def x := 1\ntheorem t : x = 1 := by rfl\n",
+                ModuleQuery::TypeAt { line: 2, column: 13 },
+                "<elaborate>",
+            )
+            | ("theorem t : True := by\n  trivial\n", ModuleQuery::GoalAt { line: 2, column: 4 }, "<elaborate>") => {
+                true
+            }
+            ("def x := 1\n#check x\n", ModuleQuery::References { name }, "<elaborate>") => name == "x",
+            _ => false,
+        };
+        if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
+            || d.broken_import
+            || !d.typed_session
+            || d.verification
+            || !exact_request
+            || !session.imports.matches_request(
+                &d.import_roots
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>(),
+                &["LeanRsHostShims.Elaboration".to_owned()],
+            )
+            || *session.imports.options() != HostImportOptions::default()
+            || !options.namespace.is_empty()
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || options.options_json != "{}"
+        {
+            return Err(denied());
+        }
+        // SAFETY: grant_source checked the complete search path and ruled out plugins.
+        // Held retains the sealed images and imports. Only the five exact combinations
+        // above may run in the fixed Elaboration scope, with unchanged resource limits.
+        let grant = unsafe {
+            session.capability.module_query_scope(
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                options,
+            )?
+        };
+        audit("authorize-fixed-module-query");
+        Ok(grant)
     }
     fn batch<'cap>(
         &self,

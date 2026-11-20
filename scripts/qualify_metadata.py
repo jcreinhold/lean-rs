@@ -105,17 +105,35 @@ ORDINARY_META_TESTS = (
     ("typed_session", "whnf_reduces_known_term", ((1, 1),)),
     ("typed_session", "is_def_eq_recognises_equal_terms", ((1, 2),)),
 )
+ORDINARY_MODULE_QUERY_TESTS = (
+    (
+        "typed_session",
+        "process_module_query_returns_diagnostics_through_worker",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "process_module_query_diagnostics_keep_original_source_coordinates",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "process_module_query_returns_cursor_type_and_goal_through_worker",
+        ((1, 2),),
+    ),
+    ("typed_session", "process_module_query_references_through_worker", ((1, 1),)),
+)
 JSON_GRANT = b"authorize-consumer-load"
 META_TERM_GRANT = b"authorize-fixed-meta-term"
-ORDINARY_AUDITED_TESTS = (
-    *(
-        (target, name, counts, JSON_GRANT)
-        for target, name, counts in ORDINARY_JSON_TESTS
-    ),
-    *(
-        (target, name, counts, META_TERM_GRANT)
-        for target, name, counts in ORDINARY_META_TESTS
-    ),
+MODULE_QUERY_GRANT = b"authorize-fixed-module-query"
+ORDINARY_AUDITED_TESTS = tuple(
+    (target, name, counts, event)
+    for cases, event in (
+        (ORDINARY_JSON_TESTS, JSON_GRANT),
+        (ORDINARY_META_TESTS, META_TERM_GRANT),
+        (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
+    )
+    for target, name, counts in cases
 )
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
@@ -867,7 +885,7 @@ def check_typed_children_closed(
     started = []
     admitted = set()
     workers = set()
-    grants = {JSON_GRANT: [], META_TERM_GRANT: []}
+    grants = {JSON_GRANT: [], META_TERM_GRANT: [], MODULE_QUERY_GRANT: []}
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
