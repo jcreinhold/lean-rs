@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.1]
+
+- Ordinary application-owned workers can open explicitly prepared host shims using
+  `LEAN_RS_PREPARED_HOST_ARTIFACTS`. An invalid or stale descriptor fails before startup. The application still owns
+  native loading, ordered import admission, and custody of the prepared files. Worker protocol 13 is unchanged.
+- Install the standalone shared Lake artifact helper with `cargo install --locked lean-rs-writer --version 0.10.1`.
+  Pass its absolute path to `writer_executable` or set `LEAN_HOST_MCP_WRITER_EXECUTABLE`. Applications can use the
+  SDK writer for shared builds without installing an MCP server.
+
 ## [0.10.0]
 
 ### lean-rs stack
