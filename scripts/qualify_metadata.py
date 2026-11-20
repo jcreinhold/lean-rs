@@ -125,6 +125,21 @@ ORDINARY_META_TESTS = (
     ("typed_session", "whnf_reduces_known_term", ((1, 1),)),
     ("typed_session", "is_def_eq_recognises_equal_terms", ((1, 2),)),
 )
+ADAPTER_IMPORT_GRANT = b"authorize-adapter-handles"
+ORDINARY_ADAPTER_TESTS = (
+    (
+        "session_adapter",
+        "declaration_bulk_adapter_matches_in_process_session",
+        ((1, 1),),
+    ),
+    ("session_adapter", "progress_events_cross_worker_boundary_in_order", ((1, 1),)),
+    (
+        "session_adapter",
+        "parent_can_cancel_long_worker_request_at_progress_boundary",
+        ((2, 1),),
+    ),
+)
+ORDINARY_ADAPTER_CASES = frozenset(name for _, name, _ in ORDINARY_ADAPTER_TESTS)
 ORDINARY_MODULE_SYNTAX_CASE = (
     "process_module_query_handles_module_system_header_through_worker"
 )
@@ -366,6 +381,7 @@ ORDINARY_AUDITED_TESTS = (
         for cases, event in (
             (ORDINARY_JSON_TESTS, JSON_GRANT),
             (ORDINARY_META_TESTS, META_TERM_GRANT),
+            (ORDINARY_ADAPTER_TESTS, ADAPTER_IMPORT_GRANT),
             (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
             (ORDINARY_PROOF_TESTS, PROOF_GRANT),
             (ORDINARY_BATCH_TESTS, BATCH_GRANT),
@@ -1444,6 +1460,51 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
     remove_owned_state(state, owner)
 
 
+def ordinary_host_shim_selection(release, selected):
+    image_pins = []
+    for name in ("host_image", "interop_image"):
+        image = selected[name]
+        require(Path(image).is_relative_to(SDK), f"invalid {name} selection")
+        image_pins.append([image, *selected["files"][image]])
+    return json.dumps(
+        {
+            "prefix": str(release),
+            "manifest": selected["shim_manifest"],
+            "manifest_sha256": hashlib.sha256(
+                selected["shim_json"].encode()
+            ).hexdigest(),
+            "roots": selected["shim_roots"],
+            "search_paths": selected["shim_paths"],
+            "images": image_pins,
+        },
+        separators=(",", ":"),
+    ), image_pins
+
+
+def adapter_host_inputs(release, record, pinned_digest):
+    with record.open("rb") as stream:
+        data = stream.read(16 * 1024**2 + 1)
+    require(len(data) <= 16 * 1024**2, "typed record exceeds fixture bound")
+    require(hashlib.sha256(data).hexdigest() == pinned_digest, "typed record changed")
+    selected = json.loads(data)
+    fixture = SDK / "fixtures/lean"
+    require(Path(selected["project"]) == fixture, "adapter selects a different project")
+    native = "dylib" if platform.system() == "Darwin" else "so"
+    image = fixture / ".lake/build/lib" / f"liblean__rs__fixture_LeanRsFixture.{native}"
+    require(
+        Path(selected["consumer_image"]) == image,
+        "adapter selects a different fixture image",
+    )
+    dev, ino, digest = selected["files"][str(image)]
+    shims, _ = ordinary_host_shim_selection(release, selected)
+    return {
+        "LEAN_RS_TEST_SCALAR_PRIVATE_JOB": "1",
+        "LEAN_RS_TEST_SCALAR_FIXTURE": json.dumps([str(fixture), dev, ino]),
+        "LEAN_RS_PROFILE_FIXTURE_SHA256": digest,
+        "LEAN_RS_TEST_ORDINARY_HOST_SHIMS": shims,
+    }
+
+
 def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     state = parent / "typed-session"
     state.mkdir(mode=0o700)
@@ -1491,6 +1552,10 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
         len(selection.encode()) <= 64 * 1024, "typed selection exceeds launch limit"
     )
     env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"] = selection
+    # These direct-host pins are compiled into the parity test and checked at runtime.
+    env.update(
+        adapter_host_inputs(release, record, env["LEAN_RS_METADATA_DEPLOYMENT_SHA256"])
+    )
     select_nextest_runner(env, profile)
 
     def nextest(*targets, selection):
@@ -1528,7 +1593,10 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
             env["LEAN_RS_TEST_STALENESS_PROFILE"] = "1"
         if name == ORDINARY_MODULE_SYNTAX_CASE:
             env["LEAN_RS_TEST_MODULE_SYNTAX_CASE"] = name
+        if name in ORDINARY_ADAPTER_CASES:
+            env["LEAN_RS_TEST_ADAPTER_CASE"] = name
         nextest(target, selection=scoped_tests(target, (name,)))
+        env.pop("LEAN_RS_TEST_ADAPTER_CASE", None)
         env.pop("LEAN_RS_TEST_MODULE_SYNTAX_CASE", None)
         env.pop("LEAN_RS_TEST_WIDE_REUSE_CASE", None)
         env.pop("LEAN_RS_TEST_STALENESS_PROFILE", None)
@@ -1707,28 +1775,7 @@ def qualify_broken_import(
         )
         selected = json.loads(data)
         manifest = Path(selected["shim_manifest"])
-        for name, image in (
-            ("host_image", selected["host_image"]),
-            ("interop_image", selected["interop_image"]),
-        ):
-            require(Path(image).is_relative_to(SDK), f"invalid {name} selection")
-        image_pins = [
-            [image, *selected["files"][image]]
-            for image in (selected["host_image"], selected["interop_image"])
-        ]
-        host_selection = json.dumps(
-            {
-                "prefix": str(release),
-                "manifest": str(manifest),
-                "manifest_sha256": hashlib.sha256(
-                    selected["shim_json"].encode()
-                ).hexdigest(),
-                "roots": selected["shim_roots"],
-                "search_paths": selected["shim_paths"],
-                "images": image_pins,
-            },
-            separators=(",", ":"),
-        )
+        host_selection, image_pins = ordinary_host_shim_selection(release, selected)
         typed_descriptor = json.dumps(
             {
                 "protocol": 2,

@@ -552,6 +552,8 @@ impl WorkerAuthority for MetadataApp {
         held.record.check_order(&paths, &names, &options).map_err(ioerr)?;
         if let Some(event) = held.record.host_builder_import_event(&names) {
             audit(event);
+        } else if held.record.adapter_handles_case() {
+            audit("authorize-adapter-handles");
         } else if !held.record.broken_import {
             audit(if held.record.typed_session {
                 if names == ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"] {

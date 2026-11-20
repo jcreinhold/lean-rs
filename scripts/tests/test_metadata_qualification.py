@@ -501,7 +501,22 @@ class MetadataQualificationTest(unittest.TestCase):
             if command[-1] == "--broken-import":
                 (broken / "deployment.json").write_text(json.dumps(record))
             elif command[-1] == "--typed-session":
-                (typed / "deployment.json").write_text("{}")
+                fixture = self.sdk / "fixtures/lean"
+                native = (
+                    "dylib" if qualification.platform.system() == "Darwin" else "so"
+                )
+                image = str(
+                    fixture
+                    / ".lake/build/lib"
+                    / f"liblean__rs__fixture_LeanRsFixture.{native}"
+                )
+                typed_record = {
+                    **record,
+                    "project": str(fixture),
+                    "consumer_image": image,
+                    "files": {**record["files"], image: [5, 6, "fixture-digest"]},
+                }
+                (typed / "deployment.json").write_text(json.dumps(typed_record))
                 (typed / "worker-json-capability.json").write_text("{}")
             elif (
                 "nextest" in command
@@ -538,7 +553,10 @@ class MetadataQualificationTest(unittest.TestCase):
                             name
                         ):
                             granted = (event,) * per_worker[index]
-                        elif event == qualification.JSON_GRANT:
+                        elif event in (
+                            qualification.JSON_GRANT,
+                            qualification.ADAPTER_IMPORT_GRANT,
+                        ):
                             granted = (event,) if index < grants else ()
                         else:
                             granted = qualification.ORDINARY_MIXED_GRANTS.get(
@@ -673,6 +691,11 @@ class MetadataQualificationTest(unittest.TestCase):
             "whnf_reduces_known_term",
             "is_def_eq_recognises_equal_terms",
         )
+        adapter_cases = (
+            "declaration_bulk_adapter_matches_in_process_session",
+            "progress_events_cross_worker_boundary_in_order",
+            "parent_can_cancel_long_worker_request_at_progress_boundary",
+        )
         module_query_cases = (
             "process_module_query_handles_module_system_header_through_worker",
             "process_module_query_returns_diagnostics_through_worker",
@@ -755,9 +778,14 @@ class MetadataQualificationTest(unittest.TestCase):
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
             *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
+            *(f"(binary(=typed_session) & (test(={name})))" for name in meta_cases),
+            *(
+                f"(binary(=session_adapter) & (test(={name})))"
+                for name in adapter_cases
+            ),
             *(
                 f"(binary(=typed_session) & (test(={name})))"
-                for name in (*meta_cases, *module_query_cases, *proof_cases)
+                for name in (*module_query_cases, *proof_cases)
             ),
             *(f"(binary(={target}) & (test(={name})))" for target, name in batch_cases),
             *(
@@ -804,6 +832,25 @@ class MetadataQualificationTest(unittest.TestCase):
                 module_syntax
                 if cmd[-1] == f"(binary(=typed_session) & (test(={module_syntax})))"
                 else None,
+            )
+            expected_adapter = next(
+                (
+                    name
+                    for name in adapter_cases
+                    if cmd[-1] == f"(binary(=session_adapter) & (test(={name})))"
+                ),
+                None,
+            )
+            self.assertEqual(
+                case_env.get("LEAN_RS_TEST_ADAPTER_CASE"), expected_adapter
+            )
+            self.assertEqual(case_env["LEAN_RS_TEST_SCALAR_PRIVATE_JOB"], "1")
+            self.assertEqual(
+                json.loads(case_env["LEAN_RS_TEST_SCALAR_FIXTURE"]),
+                [str(self.sdk / "fixtures/lean"), 5, 6],
+            )
+            self.assertEqual(
+                case_env["LEAN_RS_PROFILE_FIXTURE_SHA256"], "fixture-digest"
             )
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
@@ -947,6 +994,33 @@ class MetadataQualificationTest(unittest.TestCase):
                 case="process_module_query_returns_diagnostics_through_worker",
                 expected_counts=((1, 1),),
                 grant_event=qualification.MODULE_QUERY_GRANT,
+            )
+        probe.assert_not_called()
+
+    def test_cancelled_adapter_requires_ready_only_replacement(self):
+        name = "parent_can_cancel_long_worker_request_at_progress_boundary"
+        grant = qualification.ADAPTER_IMPORT_GRANT
+        audit = (
+            b"51 worker-started\n51 verified-deployment\n51 "
+            + grant
+            + b"\n52 worker-started\n"
+        )
+        with patch.object(
+            qualification.os, "kill", side_effect=ProcessLookupError
+        ) as probe:
+            qualification.check_typed_children_closed(
+                audit, case=name, expected_counts=((2, 1),), grant_event=grant
+            )
+        self.assertEqual(probe.call_count, 2)
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(ValueError, "wrong started worker"),
+        ):
+            qualification.check_typed_children_closed(
+                audit + b"52 verified-deployment\n52 " + grant + b"\n",
+                case=name,
+                expected_counts=((2, 1),),
+                grant_event=grant,
             )
         probe.assert_not_called()
 

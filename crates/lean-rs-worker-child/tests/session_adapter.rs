@@ -3,6 +3,12 @@
 #[path = "../../lean-rs-host/tests/support/fixed_fixture.rs"]
 mod fixture;
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+#[path = "support/ordinary_typed_worker.rs"]
+mod ordinary_typed_worker;
+use ordinary_typed_selection::ordinary_typed_selection;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,7 +19,8 @@ use lean_rs::LeanRuntime;
 use lean_rs_host::{EvidenceStatus, LeanHost};
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerElabOptions,
-    LeanWorkerError, LeanWorkerKernelStatus, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerSessionConfig,
+    LeanWorkerError, LeanWorkerKernelStatus, LeanWorkerProcessTracker, LeanWorkerProgressEvent, LeanWorkerProgressSink,
+    LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -44,11 +51,30 @@ fn worker_config() -> LeanWorkerConfig {
 
 fn handles_session_config() -> LeanWorkerSessionConfig {
     LeanWorkerSessionConfig::new(
-        fixture_root(),
+        ordinary_typed_selection().map_or_else(fixture_root, |selected| selected.fixture.clone()),
         "lean_rs_fixture",
         "LeanRsFixture",
         ["LeanRsFixture.Handles"],
     )
+}
+
+fn declaration_worker() -> (LeanWorker, Option<LeanWorkerProcessTracker>) {
+    if let Some(config) = ordinary_typed_worker::worker_config() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let worker = LeanWorker::spawn(&config.process_tracker(tracker.clone())).expect("selected worker starts");
+        (worker, Some(tracker))
+    } else {
+        ensure_fixture_built();
+        (LeanWorker::spawn(&worker_config()).expect("worker starts"), None)
+    }
+}
+
+fn stop_selected_worker(worker: LeanWorker, tracker: Option<LeanWorkerProcessTracker>) {
+    if let Some(tracker) = tracker {
+        let exit = worker.shutdown().expect("selected worker terminates").exit;
+        assert!(exit.success, "selected worker must shut down cleanly");
+        assert_eq!(tracker.active_processes(), 0, "all selected workers must be reaped");
+    }
 }
 
 fn elaboration_session_config() -> LeanWorkerSessionConfig {
@@ -149,7 +175,6 @@ impl LeanWorkerProgressSink for CancelOnFirstProgress<'_> {
 
 #[test]
 fn declaration_bulk_adapter_matches_in_process_session() {
-    ensure_fixture_built();
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",
         "LeanRsFixture.Handles.nameMkStr",
@@ -157,11 +182,32 @@ fn declaration_bulk_adapter_matches_in_process_session() {
         "This.Name.Does.Not.Exist",
     ];
 
-    let host = direct_host();
-    let caps = fixture::capabilities(&host).expect("fixture capability loads");
-    let mut direct = caps
-        .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
-        .expect("direct session opens");
+    let (mut worker, tracker) = declaration_worker();
+    let host = if let Some(selected) = ordinary_typed_selection() {
+        assert!(
+            fixture::native_fixture_selected(),
+            "parity requires the held direct-host fixture"
+        );
+        let root = fixture::native_fixture_root();
+        assert_eq!(root, selected.fixture, "direct and worker fixtures differ");
+        LeanHost::from_lake_project(runtime(), root).expect("host opens selected fixture")
+    } else {
+        direct_host()
+    };
+    let (caps, native) = if tracker.is_some() {
+        (
+            fixture::native_capabilities(&host).expect("selected capability loads"),
+            true,
+        )
+    } else {
+        (fixture::capabilities(&host).expect("fixture capability loads"), false)
+    };
+    let imports = if native {
+        fixture::native_imports(&caps, "LeanRsFixture.Handles")
+    } else {
+        fixture::imports(&caps, "LeanRsFixture.Handles")
+    };
+    let mut direct = caps.session(&imports, None, None).expect("direct session opens");
     let direct_kinds = direct
         .declaration_kind_bulk(&names, None, None)
         .expect("direct kind bulk succeeds");
@@ -169,7 +215,6 @@ fn declaration_bulk_adapter_matches_in_process_session() {
         .declaration_name_bulk(&names, None, None)
         .expect("direct name bulk succeeds");
 
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let mut session = worker
         .open_session(&handles_session_config(), None, None)
         .expect("worker session opens");
@@ -182,6 +227,7 @@ fn declaration_bulk_adapter_matches_in_process_session() {
 
     assert_eq!(worker_kinds, direct_kinds);
     assert_eq!(worker_names, direct_names);
+    stop_selected_worker(worker, tracker);
 }
 
 #[test]
@@ -271,14 +317,13 @@ fn elaboration_and_kernel_adapter_match_status_shape() {
 
 #[test]
 fn progress_events_cross_worker_boundary_in_order() {
-    ensure_fixture_built();
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",
         "LeanRsFixture.Handles.nameMkStr",
         "LeanRsFixture.Handles.exprConstNat",
     ];
     let sink = RecordingSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let (mut worker, tracker) = declaration_worker();
     let mut session = worker
         .open_session(&handles_session_config(), None, None)
         .expect("worker session opens");
@@ -295,18 +340,18 @@ fn progress_events_cross_worker_boundary_in_order() {
         assert_eq!(event.current, u64::try_from(idx + 1).expect("idx fits u64"));
         assert_eq!(event.total, Some(names.len() as u64));
     }
+    stop_selected_worker(worker, tracker);
 }
 
 #[test]
 fn parent_can_cancel_long_worker_request_at_progress_boundary() {
-    ensure_fixture_built();
     let token = LeanWorkerCancellationToken::new();
     let sink = CancelOnFirstProgress {
         token: &token,
         events: Mutex::new(Vec::new()),
     };
     let names = vec!["LeanRsFixture.Handles.nameAnonymous"; 20_000];
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let (mut worker, tracker) = declaration_worker();
     let mut session = worker
         .open_session(&handles_session_config(), None, None)
         .expect("worker session opens");
@@ -323,4 +368,5 @@ fn parent_can_cancel_long_worker_request_at_progress_boundary() {
         !sink.events.lock().expect("progress lock is not poisoned").is_empty(),
         "cancellation happens after at least one worker progress event",
     );
+    stop_selected_worker(worker, tracker);
 }
