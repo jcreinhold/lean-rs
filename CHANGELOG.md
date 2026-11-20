@@ -9,14 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
-- Repeated initialization through another handle now preserves the first native failure. Trusted worker snapshot
-  loads retain the images needed by earlier registrations when a later dependency or primary fails. See
-  [native ownership and retention](docs/architecture/loading.md#native-ownership-in-010).
-
 ## [0.10.0]
 
 ### lean-rs stack
 
+- Repeated initialization through another handle preserves the first native failure. Trusted worker snapshot loads
+  retain images needed by earlier registrations when a later dependency or the main library fails. See
+  [native ownership and retention](docs/architecture/loading.md#native-ownership-in-010).
+- `LeanWorkerPlannedBatch::capability_builder_with_manifest` uses a prebuilt capability from the same Lake project,
+  package, and target without restating the plan's imports, restart policy, or metadata checks. Keep the manifest,
+  library, and dependencies unchanged while workers or the pool can use them. Use a new manifest path for a replacement.
 - Bind stopped-operation evidence to the actual request and worker generation. Preserve confirmed termination when
   replacement startup fails, and distinguish a stopped check without a result from unresolved execution.
 - Add opt-in durable native generation ownership and an independent guardian that retains artifact read custody until
