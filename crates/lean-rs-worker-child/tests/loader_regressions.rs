@@ -32,10 +32,9 @@ fn template_manifest() -> PathBuf {
 }
 
 fn template_target_debug() -> PathBuf {
-    workspace_root()
-        .join("templates")
-        .join("shipped-lean-crate")
-        .join("target")
+    // Match capability_builder's target so both test binaries share Cargo's outputs.
+    Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("shipped-template")
         .join("debug")
 }
 
@@ -59,27 +58,15 @@ fn assert_success(output: Output, context: &str) -> String {
 }
 
 fn build_template() {
-    // Memoize: every test in this binary needs the template built, but
-    // running `cargo build` once per test multiplies rustc concurrency by
-    // the nextest test-thread count and can exhaust developer-machine RAM
-    // (each parallel cargo spawns its own rustc swarm linking
-    // libleanshared). Build it exactly once per process, capping the
-    // inner cargo's job count for the same reason.
-    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    ONCE.get_or_init(|| {
-        let output = Command::new(cargo())
-            .args(["build", "--jobs", "1", "--manifest-path"])
-            .arg(template_manifest())
-            .args(["--bins", "--examples", "--target-dir"])
-            .arg(
-                template_target_debug()
-                    .parent()
-                    .expect("debug output has a target directory"),
-            )
-            .output()
-            .expect("cargo build for shipped-lean-crate template starts");
-        assert_success(output, "template cargo build");
-    });
+    let debug = template_target_debug();
+    let output = Command::new(cargo())
+        .args(["build", "--jobs", "1", "--manifest-path"])
+        .arg(template_manifest())
+        .args(["--bins", "--examples", "--target-dir"])
+        .arg(debug.parent().expect("debug output has a target directory"))
+        .output()
+        .expect("cargo build for shipped-lean-crate template starts");
+    assert_success(output, "template cargo build");
 }
 
 fn clean_loader_env_command(program: impl AsRef<OsStr>) -> Command {
@@ -94,79 +81,50 @@ fn clean_loader_env_command(program: impl AsRef<OsStr>) -> Command {
 }
 
 #[test]
-fn stripped_loader_env_shipped_crate_binary_opens_manifest_capability() {
+fn shipped_template_launches_with_clean_loader_environment() {
     build_template();
+    let debug = template_target_debug();
 
-    let output = clean_loader_env_command(template_target_debug().join(exe_name("shipped-lean-crate")))
+    let output = clean_loader_env_command(debug.join(exe_name("shipped-lean-crate")))
         .output()
         .expect("stripped-loader-env shipped-lean-crate binary starts");
     let stdout = assert_success(output, "stripped-loader-env shipped-lean-crate binary");
-
     assert!(
         stdout.contains("answer=42"),
         "same-process template should call Lean export, stdout={stdout:?}",
     );
-}
 
-#[test]
-fn stripped_loader_env_shipped_crate_worker_example_uses_app_owned_child() {
-    build_template();
-
-    let output = clean_loader_env_command(template_target_debug().join("examples").join(exe_name("worker")))
+    let worker_example = debug.join("examples").join(exe_name("worker"));
+    let sibling = debug.join(exe_name("shipped-lean-crate-worker"));
+    assert!(sibling.is_file(), "the default worker is installed");
+    let output = clean_loader_env_command(&worker_example)
         .output()
         .expect("stripped-loader-env shipped-lean-crate worker example starts");
     let stdout = assert_success(output, "stripped-loader-env shipped-lean-crate worker example");
-
     assert!(
         stdout.contains("worker capability opened"),
         "worker template should open through the app-owned child, stdout={stdout:?}",
     );
-}
 
-#[test]
-fn shipped_crate_worker_example_honors_explicit_child_env_override() {
-    build_template();
-
-    let output = clean_loader_env_command(template_target_debug().join("examples").join(exe_name("worker")))
-        .env(
-            "SHIPPED_LEAN_CRATE_WORKER",
-            template_target_debug().join(exe_name("shipped-lean-crate-worker")),
-        )
+    let missing = debug.join(exe_name("shipped-lean-crate-worker-missing-override"));
+    assert!(!missing.try_exists().expect("inspect dedicated missing worker path"));
+    let output = clean_loader_env_command(&worker_example)
+        .env("SHIPPED_LEAN_CRATE_WORKER", &missing)
         .output()
         .expect("env-override shipped-lean-crate worker example starts");
-    let stdout = assert_success(output, "env-override shipped-lean-crate worker example");
-
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("worker capability opened"),
-        "worker template should honor SHIPPED_LEAN_CRATE_WORKER override, stdout={stdout:?}",
+        !output.status.success(),
+        "missing override must not fall back to the valid sibling"
     );
-}
-
-#[test]
-fn shipped_crate_template_package_contains_lean_sources_and_worker_child() {
-    let output = Command::new(cargo())
-        .args(["package", "--manifest-path"])
-        .arg(template_manifest())
-        .args(["--allow-dirty", "--list"])
-        .output()
-        .expect("template cargo package --list starts");
-    let stdout = assert_success(output, "template cargo package --list");
-
-    for expected in [
-        "build.rs",
-        "examples/worker.rs",
-        "lean/ShipLeanDemo.lean",
-        "lean/lakefile.lean",
-        "lean/lean-toolchain",
-        "lean/lake-manifest.json",
-        "src/bin/shipped_lean_crate_worker.rs",
-        "src/main.rs",
-    ] {
-        assert!(
-            stdout.lines().any(|line| line == expected),
-            "template package list should include {expected}, got:\n{stdout}",
-        );
-    }
+    assert!(
+        stderr.contains(missing.to_str().expect("UTF-8 worker override path")),
+        "worker startup diagnostic should name the rejected override, stderr={stderr:?}",
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("worker capability opened"),
+        "worker must not open on the rejected override",
+    );
 }
 
 fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {

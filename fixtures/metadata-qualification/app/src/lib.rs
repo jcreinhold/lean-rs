@@ -185,6 +185,30 @@ pub struct Record {
     content_files: BTreeMap<PathBuf, String>,
     directories: BTreeSet<PathBuf>,
 }
+const VERIFY_BUFFER_SIZE: usize = 128 * 1024;
+
+fn matches_file_digest(file: &mut fs::File, expected: &str, buffer: &mut [u8]) -> R<bool> {
+    let mut hash = Sha256::new();
+    loop {
+        let read = file.read(buffer)?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+    }
+    let digest = hash.finalize();
+    fn lowercase_hex(nibble: u8) -> u8 {
+        match nibble {
+            0..=9 => b'0' + nibble,
+            _ => b'a' + (nibble - 10),
+        }
+    }
+    Ok(digest
+        .iter()
+        .flat_map(|byte| [lowercase_hex(byte >> 4), lowercase_hex(byte & 0x0f)])
+        .eq(expected.bytes()))
+}
+
 impl Record {
     pub fn selected() -> Self {
         let path = Path::new(
@@ -217,35 +241,22 @@ impl Record {
         }))
         .unwrap()
     }
-    fn check_file(&self, path: &Path) -> R<()> {
+    fn check_file(&self, path: &Path, buffer: Option<&mut [u8]>) -> R<()> {
         let (dev, ino, digest) = self.files.get(path).ok_or_else(|| err("unselected file"))?;
         require(path.canonicalize()? == path, "aliased deployment file")?;
         let mut f = fs::File::open(path)?;
         let meta = f.metadata()?;
-        require(
-            meta.is_file() && (*dev, *ino) == (meta.dev(), meta.ino()),
-            &format!("wrong file identity {}", path.display()),
-        )?;
-        let mut hash = Sha256::new();
-        let mut buf = vec![0; 128 * 1024];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            hash.update(&buf[..n]);
+        if !meta.is_file() || (*dev, *ino) != (meta.dev(), meta.ino()) {
+            return Err(err(format!("wrong file identity {}", path.display())));
         }
-        require(
-            &hash
-                .finalize()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-                == digest,
-            &format!("wrong file digest {}", path.display()),
-        )
+        if let Some(buffer) = buffer
+            && !matches_file_digest(&mut f, digest, buffer)?
+        {
+            return Err(err(format!("wrong file digest {}", path.display())));
+        }
+        Ok(())
     }
-    fn check_content_file(&self, path: &Path) -> R<()> {
+    fn check_content_file(&self, path: &Path, buffer: &mut [u8]) -> R<()> {
         let digest = self
             .content_files
             .get(path)
@@ -253,21 +264,10 @@ impl Record {
         require(path.canonicalize()? == path, "aliased deployment content file")?;
         let mut f = fs::File::open(path)?;
         require(f.metadata()?.is_file(), "deployment content path is not a file")?;
-        let mut hash = Sha256::new();
-        let mut buf = vec![0; 128 * 1024];
-        loop {
-            let read = f.read(&mut buf)?;
-            if read == 0 {
-                break;
-            }
-            hash.update(&buf[..read]);
-        }
-        let actual = hash
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        require(actual == digest.as_str(), "deployment content file changed")
+        require(
+            matches_file_digest(&mut f, digest, buffer)?,
+            "deployment content file changed",
+        )
     }
     pub fn verification_roots(&self) -> Vec<String> {
         self.import_roots
@@ -572,6 +572,7 @@ impl Held {
     pub fn check_optional_whnf_images(&self) -> R<()> {
         require(self.record.optional_whnf, "wrong optional WHNF deployment")?;
         let images = mapped_images()?;
+        let mut buffer = vec![0; VERIFY_BUFFER_SIZE];
         for expected in [&self.record.host_image, &self.record.consumer_image] {
             let image = images
                 .iter()
@@ -586,13 +587,18 @@ impl Held {
                     "optional WHNF mapped image identity changed",
                 )?;
             }
-            self.record.check_file(&image.path)?;
+            self.record.check_file(&image.path, Some(&mut buffer))?;
         }
         Ok(())
     }
 
     pub fn verify(&self) -> R<()> {
         let d = &self.record;
+        let bookended = match option_env!("LEAN_RS_METADATA_BOOKENDED_RELEASE") {
+            None => false,
+            Some("1") if !d.verification && (d.broken_import || d.typed_session || d.scalar_entry) => true,
+            Some(_) => return Err(err("installed Lean bookends require an ordinary SDK fixture")),
+        };
         let unexpected_loader_selection = if cfg!(target_os = "macos") {
             std::env::vars_os().any(|(key, _)| key.as_bytes().starts_with(b"DYLD_"))
         } else {
@@ -606,6 +612,7 @@ impl Held {
             "unexpected runtime selection",
         )?;
         let libs = d.sysroot.join("lib/lean");
+        require(libs.canonicalize()? == libs, "aliased installed Lean library root")?;
         let mut found = false;
         let (lean, init, lake) = runtime_image_names();
         for mapped in mapped_images()? {
@@ -657,10 +664,12 @@ impl Held {
         )?;
         for (path, id) in d.import_roots.iter().zip(&d.ordered_directory_ids) {
             let dir = fs::symlink_metadata(path)?;
-            require(
-                dir.is_dir() && (dir.dev(), dir.ino()) == *id,
-                &format!("wrong ordered import directory identity {}", path.display()),
-            )?;
+            if !dir.is_dir() || (dir.dev(), dir.ino()) != *id {
+                return Err(err(format!(
+                    "wrong ordered import directory identity {}",
+                    path.display()
+                )));
+            }
         }
         if d.legacy_interop {
             let provider = d
@@ -672,16 +681,46 @@ impl Held {
                 "ordinary Lake import root would shadow the pinned provider",
             )?;
         }
-        d.check_file(&d.interop_image)?;
-        if !d.broken_import {
-            d.check_file(&d.consumer_image)?;
+        let mut buffer = vec![0; VERIFY_BUFFER_SIZE];
+        let mut checked = BTreeSet::new();
+        for path in [
+            Some(&d.interop_image),
+            (!d.broken_import).then_some(&d.consumer_image),
+            Some(&d.host_image),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if checked.insert(path) {
+                d.check_file(path, Some(&mut buffer))?;
+            }
         }
-        d.check_file(&d.host_image)?;
         for path in d.files.keys() {
-            d.check_file(path)?;
+            if !checked.contains(path) {
+                // Only module/library-tree payload checks move to the ordinary run's
+                // bookends. Path, file identity, native images and fixture bytes are
+                // still verified under each process's existing custody.
+                let installed_payload = path.starts_with(&libs)
+                    && path.file_name().is_some_and(|name| {
+                        let name = name.as_bytes();
+                        [
+                            b".olean".as_slice(),
+                            b".olean.private",
+                            b".olean.server",
+                            b".ir",
+                            b".ir.sig",
+                            b".ilean",
+                            b".a",
+                        ]
+                        .iter()
+                        .any(|suffix| name.ends_with(suffix))
+                    });
+                let defer_hash = bookended && installed_payload;
+                d.check_file(path, (!defer_hash).then_some(buffer.as_mut_slice()))?;
+            }
         }
         for path in d.content_files.keys() {
-            d.check_content_file(path)?;
+            d.check_content_file(path, &mut buffer)?;
         }
         for dir in &d.directories {
             require(dir.canonicalize()? == *dir && dir.is_dir(), "import directory changed")?;

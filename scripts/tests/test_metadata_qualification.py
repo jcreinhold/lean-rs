@@ -687,7 +687,7 @@ class MetadataQualificationTest(unittest.TestCase):
         selection = nextest[-1]
         self.assertIn("binary(=typed_session)", selection)
         self.assertIn("binary(=session_reuse)", selection)
-        self.assertEqual(selection.count("test(="), 33)
+        self.assertEqual(selection.count("test(="), 23)
         self.assertIn(
             "test(=process_module_query_batch_isolates_snapshots_by_session_imports)",
             selection,
@@ -1299,6 +1299,7 @@ class MetadataQualificationTest(unittest.TestCase):
         self.launch.assert_not_called()
 
     def test_linux_broken_import_command_passes_selected_profile(self):
+        (self.target / "lib/lean").mkdir(parents=True)
         with (
             patch.object(sys, "argv", ["qualify_metadata.py", "broken-import"]),
             patch.object(qualification.platform, "system", return_value="Linux"),
@@ -1313,8 +1314,51 @@ class MetadataQualificationTest(unittest.TestCase):
             qualification.main()
         release.assert_called_once_with(qualification.LINUX_X86_64_BROKEN_IMPORT_PINS)
         run.assert_called_once_with(
-            self.target, qualification.LINUX_X86_64_BROKEN_IMPORT_PINS
+            self.target,
+            qualification.LINUX_X86_64_BROKEN_IMPORT_PINS,
+            emit_host_selection=False,
+            run_typed=False,
+            run_stream=False,
+            bookended_release=True,
         )
+        self.launch.assert_not_called()
+
+    def test_ordinary_bookends_refuse_same_size_release_change_before_selection(self):
+        lib = self.target / "lib/lean"
+        lib.mkdir(parents=True)
+        module = lib / "Nat.olean"
+        module.write_bytes(b"good")
+        original_inode = module.stat().st_ino
+
+        def run(*_args, **kwargs):
+            self.assertTrue(kwargs["bookended_release"])
+            self.assertTrue(kwargs["emit_host_selection"])
+            module.write_bytes(b"evil")
+            print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=must-not-be-published")
+
+        argv = ["qualify_metadata.py", "broken-import", "--emit-host-selection"]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(
+                qualification,
+                "verified_platform",
+                return_value=qualification.DARWIN_ARM64_PINS,
+            ),
+            patch.object(
+                qualification, "installed_lean_release", return_value=self.target
+            ),
+            patch.object(qualification, "ordinary_state_lock"),
+            patch.object(qualification, "qualify_broken_import", side_effect=run),
+            patch("sys.stdout", new_callable=io.StringIO) as output,
+            patch("sys.stderr", new_callable=io.StringIO) as error,
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            qualification.main()
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertEqual(module.stat().st_ino, original_inode)
+        self.assertEqual(module.stat().st_size, 4)
+        self.assertEqual(output.getvalue(), "")
+        self.assertIn("installed Lean library tree changed", error.getvalue())
         self.launch.assert_not_called()
 
     def test_broken_import_refuses_platform_before_creating_state(self):

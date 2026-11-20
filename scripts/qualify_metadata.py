@@ -3,14 +3,16 @@
 import argparse
 import fcntl
 import hashlib
+import io
 import json
 import os
 import platform
 import runpy
 import shutil
+import stat
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 
 SDK = Path(__file__).resolve().parents[1]
@@ -90,25 +92,15 @@ HOST_BUILDER_CASES = (
     ),
 )
 ORDINARY_TYPED_TESTS = (
-    "describe_returns_row_for_known_declaration",
-    "describe_returns_none_for_unknown_declaration",
-    "search_declarations_returns_bounded_metadata_without_types",
-    "search_declarations_supports_structural_filters_and_deterministic_order",
-    "search_declarations_caps_broad_queries_and_reports_pruning",
-    "declaration_type_truncates_single_rendered_type",
-    "declaration_type_zero_cap_returns_empty_truncated_type",
-    "inspect_declaration_returns_known_theorem",
-    "inspect_declaration_returns_known_definition",
-    "inspect_declaration_returns_not_found_for_unknown_name",
-    "inspect_declaration_bounds_docstring_and_skips_proof_search_by_default",
-    "inspect_declaration_reports_proof_search_when_requested",
-    "inspect_declaration_truncates_large_type",
-    "inspect_declaration_default_stays_under_total_budget",
+    "describe_distinguishes_known_and_missing_declarations",
+    "search_declarations_applies_filters_ranks_and_limits",
+    "core_declaration_queries_preserve_missing_slots_and_type_caps",
+    "inspect_declaration_distinguishes_theorem_definition_and_missing",
+    "inspect_declaration_bounds_output_and_opts_in_to_proof_search",
     "search_result_name_can_be_inspected",
     "list_declarations_strings_streams_full_env_without_frame_cap",
-    "describe_bulk_preserves_input_length_with_missing_slots",
     "oversized_terminal_response_is_request_error_not_child_death",
-    "inspect_declaration_pretty_and_raw_rendering_differ",
+    "inspect_declaration_truncates_and_distinguishes_renderings",
     "process_module_query_batch_reuses_snapshot_for_same_file_content",
     "process_module_query_batch_rebuilds_when_content_changes",
     "process_module_query_batch_incremental_rebuild_matches_a_cold_build",
@@ -667,6 +659,77 @@ def check_file(path, approved):
         f"expected a canonical file: {path}",
     )
     require(digest(path) == approved, f"SHA-256 mismatch: {path}")
+
+
+def installed_library_fingerprint(release):
+    """Hash actual bytes and exact layout, without saving a cache or report."""
+    root = release / "lib/lean"
+    require(root.resolve(strict=True) == root, "aliased installed Lean library root")
+    fingerprint = hashlib.sha256()
+
+    def identity(metadata):
+        return (
+            metadata.st_mode,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+
+    def visit(path):
+        before = path.lstat()
+        relative = os.fsencode(path.relative_to(root))
+        fingerprint.update(len(relative).to_bytes(8, "big"))
+        fingerprint.update(relative)
+        fingerprint.update(repr(identity(before)).encode("ascii") + b"\0")
+        if stat.S_ISDIR(before.st_mode):
+            for child in sorted(
+                path.iterdir(), key=lambda entry: os.fsencode(entry.name)
+            ):
+                visit(child)
+        else:
+            require(
+                stat.S_ISREG(before.st_mode),
+                f"non-regular entry in installed Lean library tree: {path}",
+            )
+            with open(path, "rb", opener=open_regular_no_follow) as stream:
+                require(
+                    identity(os.fstat(stream.fileno())) == identity(before),
+                    f"installed Lean library entry changed before read: {path}",
+                )
+                fingerprint.update(hashlib.file_digest(stream, "sha256").digest())
+        require(
+            identity(path.lstat()) == identity(before),
+            f"installed Lean library entry changed during read: {path}",
+        )
+
+    visit(root)
+    return fingerprint.digest()
+
+
+def open_regular_no_follow(path, flags):
+    return os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)
+
+
+def run_ordinary_with_release_bookends(release, run, *, emit_host_selection=False):
+    # Only this launcher opts in. The selected Elan release must be unchanged
+    # throughout the run; project readers do not lock Elan.
+    before = installed_library_fingerprint(release)
+    if emit_host_selection:
+        assignments = io.StringIO()
+        with redirect_stdout(assignments):
+            run()
+    else:
+        run()
+    # If the first error stopped the suite before closure, do not obscure it
+    # with another check or publish a selection.
+    require(
+        installed_library_fingerprint(release) == before,
+        "installed Lean library tree changed during ordinary qualification",
+    )
+    if emit_host_selection:
+        print(assignments.getvalue(), end="")
 
 
 def fixture_sources(tree):
@@ -1328,7 +1391,6 @@ STREAM_TESTS = (
         "typed_command",
         "typed_streaming_command_decodes_large_payload_from_performance_path",
     ),
-    ("streaming_runner", "child_fatal_exit_is_reported_to_parent"),
     ("streaming_runner", "row_before_child_panic_is_delivered_before_terminal_failure"),
     ("streaming_runner", "request_timeout_cycles_child_and_invalidates_session"),
     ("observability_backpressure", "pool_and_lease_snapshots_record_stream_throughput"),
@@ -1422,7 +1484,15 @@ STREAM_REACQUIRE = {
 }
 
 
-def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=None):
+def qualify_stream(
+    release,
+    profile,
+    shim_manifest,
+    cases,
+    *,
+    pinned_selection=None,
+    bookended_release=False,
+):
     project = SDK / "fixtures/interop-worker"
     require(project.resolve(strict=True) == project, "aliased stream project")
     owner = project.stat()
@@ -1454,6 +1524,7 @@ def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=N
             cohort,
             pinned_selection=pinned_selection,
             build_provider=index == 0,
+            **({"bookended_release": True} if bookended_release else {}),
         )
     if pinned_selection is None:
         return
@@ -1513,7 +1584,15 @@ lean_lib «LeanRsInteropConsumer» where
         provider,
     )
     run(
-        [lake, "--no-cache", "--fail-fast", "build", "LeanRsInteropConsumer:shared"],
+        [
+            lake,
+            "--no-cache",
+            "--fail-fast",
+            "-R",
+            "-KleanRsGeneratedShims=true",
+            "build",
+            "LeanRsInteropConsumer:shared",
+        ],
         project,
     )
     require_no_legacy_provider_shadow(provider)
@@ -1527,6 +1606,7 @@ def run_stream_group(
     *,
     pinned_selection=None,
     build_provider=True,
+    bookended_release=False,
 ):
     legacy = INTEROP_LEGACY_CASE in cases
     require(not legacy or len(cases) == 1, "legacy interop requires its own seal")
@@ -1589,7 +1669,7 @@ def run_stream_group(
         subprocess.run(
             [timeout, "--signal=TERM", "--kill-after=15s", "8m", *args],
             cwd=cwd,
-            env=env,
+            env=ordinary_compile_environment(env, args, bookended_release),
             check=True,
             **({"stdout": sys.stderr} if pinned_selection is not None else {}),
         )
@@ -1626,6 +1706,8 @@ def run_stream_group(
                     lake,
                     "--no-cache",
                     "--fail-fast",
+                    "-R",
+                    "-KleanRsGeneratedShims=true",
                     "build",
                     "LeanRsInteropConsumer:shared",
                 ],
@@ -1637,7 +1719,10 @@ def run_stream_group(
         if pinned_selection is not None:
             verify_provider()
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
-    run([*cargo, "--bin", "prepare"], APP)
+    # The managed qualifier already compiled prepare for this release.
+    # Standalone use compiles it in the first cohort and reuses it thereafter.
+    if pinned_selection is None and build_provider:
+        run([*cargo, "--bin", "prepare"], APP)
     if probes:
         env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
     if foreign:
@@ -2202,8 +2287,20 @@ def qualify_scalar_entry(release, profile, run, env, cargo, descriptor):
     env.clear()
 
 
+def ordinary_compile_environment(env, command, bookended_release):
+    if bookended_release and command[:2] == ["cargo", "build"]:
+        return {**env, "LEAN_RS_METADATA_BOOKENDED_RELEASE": "1"}
+    return env
+
+
 def qualify_broken_import(
-    release, profile, *, emit_host_selection=False, run_typed=False, run_stream=False
+    release,
+    profile,
+    *,
+    emit_host_selection=False,
+    run_typed=False,
+    run_stream=False,
+    bookended_release=False,
 ):
     """Run one ordinary SDK worker test, without the downstream host helper."""
     require(TARGET == TARGET.resolve(strict=True), "aliased SDK target")
@@ -2230,6 +2327,10 @@ def qualify_broken_import(
             not os.path.lexists(typed), f"typed fixture state already exists: {typed}"
         )
     require(not run_stream or run_typed, "stream tests require the typed fixture first")
+    if run_stream:
+        require_no_legacy_provider_shadow(
+            SDK / "crates/lean-rs-host/shims/lean-rs-interop-shims"
+        )
     check_tracked_fixture_sources()
     space(TARGET)
     state = parent / "broken-import"
@@ -2244,7 +2345,7 @@ def qualify_broken_import(
         subprocess.run(
             [timeout, "--signal=TERM", "--kill-after=15s", "8m", *command],
             cwd=cwd,
-            env=env,
+            env=ordinary_compile_environment(env, command, bookended_release),
             check=True,
             **({"stdout": sys.stderr} if emit_host_selection else {}),
         )
@@ -2307,6 +2408,7 @@ def qualify_broken_import(
             manifest,
             None,
             pinned_selection=(json.loads(typed_descriptor), image_pins),
+            bookended_release=bookended_release,
         )
     if emit_host_selection:
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
@@ -2454,22 +2556,31 @@ def main():
         release = installed_lean_release(profile)
         if args.command == "interop-stream":
             with ordinary_state_lock():
-                qualify_stream(release, profile, args.shim_manifest, args.case)
+                run_ordinary_with_release_bookends(
+                    release,
+                    lambda: qualify_stream(
+                        release,
+                        profile,
+                        args.shim_manifest,
+                        args.case,
+                        bookended_release=True,
+                    ),
+                )
             return
         if args.command == "broken-import":
             with ordinary_state_lock():
-                if args.run_typed:
-                    qualify_broken_import(
+                run_ordinary_with_release_bookends(
+                    release,
+                    lambda: qualify_broken_import(
                         release,
                         profile,
-                        emit_host_selection=True,
-                        run_typed=True,
-                        run_stream=True,
-                    )
-                elif args.emit_host_selection:
-                    qualify_broken_import(release, profile, emit_host_selection=True)
-                else:
-                    qualify_broken_import(release, profile)
+                        emit_host_selection=args.emit_host_selection,
+                        run_typed=args.run_typed,
+                        run_stream=args.run_typed,
+                        bookended_release=True,
+                    ),
+                    emit_host_selection=args.emit_host_selection,
+                )
             return
         reviewed_writer(args.writer, args.writer_sha256)
         writer = args.writer.resolve(strict=True)

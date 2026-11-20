@@ -6,6 +6,7 @@ fn main() {
         "LEAN_RS_METADATA_DEPLOYMENT_RECORD",
         "LEAN_RS_METADATA_DEPLOYMENT_SHA256",
         "LEAN_RS_METADATA_AUDIT_PATH",
+        "LEAN_RS_METADATA_BOOKENDED_RELEASE",
     ] {
         println!("cargo:rerun-if-env-changed={name}");
         if let Ok(value) = std::env::var(name) {

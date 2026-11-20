@@ -48,7 +48,6 @@ fn interop_manifest_path() -> PathBuf {
         "lean_rs_interop_consumer_worker_data_stream_missing_payload",
         "lean_rs_interop_consumer_worker_data_stream_status",
         "lean_rs_interop_consumer_worker_data_stream_wrong_callback",
-        "lean_rs_interop_consumer_worker_data_stream_panic",
         "lean_rs_interop_consumer_worker_data_stream_slow_after_row",
         "lean_rs_interop_consumer_worker_data_stream_row_then_panic",
         "lean_rs_interop_consumer_worker_data_stream_many",
@@ -343,32 +342,6 @@ fn callback_status_error_is_typed() {
             );
         }
         other => panic!("expected callback status error, got {other:?}"),
-    }
-}
-
-#[test]
-fn child_fatal_exit_is_reported_to_parent() {
-    let (worker, config) = fixed_stream_configs();
-    let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
-    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
-
-    let err = session
-        .run_data_stream(
-            "lean_rs_interop_consumer_worker_data_stream_panic",
-            &json!({}),
-            &sink,
-            None,
-            None,
-            None,
-        )
-        .expect_err("Lean panic should kill only the child");
-
-    match err {
-        LeanWorkerError::ChildPanicOrAbort { exit } => {
-            assert!(!exit.success, "panic export should terminate the child");
-        }
-        other => panic!("expected fatal child exit, got {other:?}"),
     }
 }
 

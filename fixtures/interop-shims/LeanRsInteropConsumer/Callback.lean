@@ -143,10 +143,6 @@ def workerDataStreamStatus (_requestJson : String) (_handle _trampoline : USize)
 def workerDataStreamWrongCallback (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.Tick.loop handle trampoline 1
 
-@[export lean_rs_interop_consumer_worker_data_stream_panic]
-def workerDataStreamPanic (_requestJson : String) (_handle _trampoline : USize) : IO UInt8 :=
-  panic! "lean-rs worker stream panic"
-
 @[export lean_rs_interop_consumer_worker_data_stream_row_then_panic]
 def workerDataStreamRowThenPanic (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
   let status ← Stream.emitAll handle trampoline

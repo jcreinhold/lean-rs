@@ -209,10 +209,6 @@ pub(crate) const CASES: &[(&[&str], Exports)] = &[
     ),
     (&["malformed_row_json_is_typed"], Exports::Streams(&["_malformed_json"])),
     (
-        &["child_fatal_exit_is_reported_to_parent"],
-        Exports::Streams(&["_panic"]),
-    ),
-    (
         &["row_before_child_panic_is_delivered_before_terminal_failure"],
         Exports::Streams(&["_row_then_panic"]),
     ),

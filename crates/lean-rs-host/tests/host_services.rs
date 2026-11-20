@@ -844,7 +844,7 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
 }
 
 #[test]
-fn derived_cheap_inspection_skips_proof_search_indexes() {
+fn derived_declaration_work_tracks_requested_fields() {
     const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
     let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
     let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
@@ -872,20 +872,7 @@ fn derived_cheap_inspection_skips_proof_search_indexes() {
         "simp is proof-search-derived and must not be reported by default: {:?}",
         declaration.attributes
     );
-}
 
-#[test]
-fn derived_proof_search_inspection_reports_explicit_work() {
-    const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
-    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
-    let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
-    let mut session = caps
-        .session(
-            &fixture_service_imports(&caps, "LeanRsFixture.SourceRanges"),
-            None,
-            None,
-        )
-        .expect("fixture session opens");
     let mut request = DeclarationInspectionRequest::new(DECL);
     request.fields.proof_search = true;
 
@@ -903,22 +890,8 @@ fn derived_proof_search_inspection_reports_explicit_work() {
     assert_eq!(declaration.derived_work.proof_search_fact_collections, 1);
     assert_eq!(declaration.derived_work.simp_extension_lookups, 1);
     assert!(declaration.attributes.iter().any(|attr| attr == "simp"));
-}
 
-#[test]
-fn derived_statement_rendering_and_search_source_work_are_reported() {
-    const DECL: &str = "LeanRsFixture.SourceRanges.knownTheorem";
-    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
-    let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
-    let mut session = caps
-        .session(
-            &fixture_service_imports(&caps, "LeanRsFixture.SourceRanges"),
-            None,
-            None,
-        )
-        .expect("fixture session opens");
-
-    let mut raw_request = DeclarationInspectionRequest::new(DECL);
+    let mut raw_request = DeclarationInspectionRequest::new("LeanRsFixture.SourceRanges.knownTheorem");
     raw_request.fields = DeclarationInspectionFields {
         source: false,
         statement: true,
@@ -1228,11 +1201,10 @@ fn fixture_kernel_check<'lean>(
             | "theorem :="
             | "#check Nat"
             | "theorem lean_rs_recheck : 1 + 1 = 2 := rfl"
-            | "theorem lean_rs_summary : 1 + 1 = 2 := rfl"
     ));
     let paths = fixture::native_elaboration_paths(caps, session);
     let (env, scope) = session.source_context();
-    #[allow(unsafe_code, reason = "six fixed commands in the held test fixture")]
+    #[allow(unsafe_code, reason = "five fixed commands in the held test fixture")]
     // SAFETY: the fixed command uses the held elaboration environment and
     // default kernel request options, with no other source.
     let request = unsafe {
@@ -1434,7 +1406,7 @@ fn kernel_check_unsupported_on_non_declaration() {
 }
 
 #[test]
-fn check_evidence_revalidates_checked_evidence() {
+fn checked_evidence_revalidates_and_retains_summary() {
     let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
     let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
@@ -1469,29 +1441,13 @@ fn check_evidence_revalidates_checked_evidence() {
         EvidenceStatus::Checked,
         "re-validation is idempotent against an unchanged environment"
     );
-}
-
-#[test]
-fn summarize_evidence_exposes_declaration_name() {
-    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
-    let caps = fixture::native_capabilities(&host).expect("load caps");
-    let mut session = session_over_elaboration(&caps);
-
-    let outcome = fixture_kernel_check(&caps, &mut session, "theorem lean_rs_summary : 1 + 1 = 2 := rfl")
-        .expect("host stack reports no exception");
-    let evidence = match outcome {
-        LeanKernelOutcome::Checked(evidence) => evidence,
-        LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
-            panic!("expected Checked variant");
-        }
-    };
 
     let summary = session
         .summarize_evidence(&evidence, None)
         .expect("summary routes through the host stack cleanly");
     assert_eq!(
         summary.declaration_name(),
-        "lean_rs_summary",
+        "lean_rs_recheck",
         "summary must expose the declared name verbatim"
     );
     assert_eq!(summary.kind(), "theorem", "summary must classify the kind as `theorem`");

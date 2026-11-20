@@ -133,20 +133,6 @@ fn query_declarations_bulk_errors_on_missing_name() {
     }
 }
 
-#[test]
-fn query_declarations_bulk_empty_input_is_no_op() {
-    let host = fixture_host();
-    let caps = fixture::native_capabilities(&host).expect("load caps");
-    let mut session = session_over_handles(&caps);
-
-    let baseline = session.stats();
-    let decls = session
-        .query_declarations_bulk(&[], None, None)
-        .expect("empty input returns empty vec");
-    assert!(decls.is_empty(), "empty input yields empty output");
-    assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
-}
-
 // -- declaration_*_bulk -------------------------------------------------
 
 #[test]
@@ -271,6 +257,11 @@ fn declaration_bulk_empty_inputs_are_no_ops() {
     let mut session = session_over_handles(&caps);
 
     let baseline = session.stats();
+    let decls = session
+        .query_declarations_bulk(&[], None, None)
+        .expect("empty input returns empty vec");
+    assert!(decls.is_empty(), "empty input yields empty output");
+    assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
     assert!(
         session
             .declaration_type_bulk(&[], None, None)
