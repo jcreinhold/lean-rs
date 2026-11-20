@@ -463,6 +463,7 @@ impl WorkerAuthority for MetadataApp {
             let audit_kind = match exports {
                 stream_cases::Exports::Metadata => "metadata",
                 stream_cases::Exports::MalformedJson => "json",
+                stream_cases::Exports::Shape(_, _) => "shape",
                 stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => "stream",
             };
             let mut contracts = Vec::new();

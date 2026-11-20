@@ -10,6 +10,7 @@ pub(crate) enum Exports {
     Metadata,
     MalformedJson,
     StreamAndJson(&'static str),
+    Shape(&'static [&'static str], &'static [&'static str]),
 }
 
 impl Exports {
@@ -34,11 +35,42 @@ impl Exports {
                     false,
                 ),
             ],
+            Self::Shape(unary, streams) => unary
+                .iter()
+                .map(|suffix| {
+                    (
+                        json_command_signature(format!("lean_rs_interop_consumer_worker_shape_{suffix}")),
+                        false,
+                    )
+                })
+                .chain(streams.iter().map(|suffix| {
+                    (
+                        streaming_command_signature(format!("lean_rs_interop_consumer_worker_shape_{suffix}")),
+                        true,
+                    )
+                }))
+                .collect(),
         }
     }
 }
 
 pub(crate) const CASES: &[(&[&str], Exports)] = &[
+    (
+        &["metadata_doctor_and_version_use_generic_capability_shapes"],
+        Exports::Shape(&["metadata", "doctor", "version"], &[]),
+    ),
+    (
+        &["streaming_commands_use_builder_and_typed_facade"],
+        Exports::Shape(&[], &["extract", "features", "index", "probe"]),
+    ),
+    (
+        &["timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes"],
+        Exports::Shape(&[], &["timeout_after_row", "extract", "panic_after_row"]),
+    ),
+    (
+        &["worker_cycle_leaves_shape_fixture_usable"],
+        Exports::Shape(&["version"], &[]),
+    ),
     (&["typed_json_command_decode_error_is_typed"], Exports::MalformedJson),
     (
         &["child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker"],

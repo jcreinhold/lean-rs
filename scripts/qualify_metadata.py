@@ -353,7 +353,20 @@ ORDINARY_WIDE_REUSE_CASES = frozenset(
         "a_reused_session_carries_no_state_from_the_previous_one",
     }
 )
+SDK_SHAPE_GRANTS_BY_WORKER = {
+    "metadata_doctor_and_version_use_generic_capability_shapes": (1,),
+    "streaming_commands_use_builder_and_typed_facade": (1, 1, 1, 1),
+    "timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes": (
+        1,
+        0,
+        1,
+        0,
+        1,
+    ),
+    "worker_cycle_leaves_shape_fixture_usable": (1, 1),
+}
 ORDINARY_GRANTS_BY_WORKER = {
+    **SDK_SHAPE_GRANTS_BY_WORKER,
     "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker": (1, 1),
     "cancellation_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
     "timeout_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
@@ -1261,7 +1274,11 @@ INTEROP_METADATA_TESTS = (
     ("pool", "metadata_mismatch_is_typed"),
 )
 INTEROP_METADATA_CASES = frozenset(name for _, name in INTEROP_METADATA_TESTS)
-INTEROP_TESTS = (*STREAM_TESTS, *INTEROP_METADATA_TESTS)
+INTEROP_TESTS = (
+    *STREAM_TESTS,
+    *INTEROP_METADATA_TESTS,
+    *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
+)
 
 
 STREAM_READY_REPLACEMENT = {
@@ -1439,14 +1456,18 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             ],
             SDK,
         )
-        if name in INTEROP_METADATA_CASES:
+        if name in SDK_SHAPE_GRANTS_BY_WORKER:
+            grant_kind = "shape"
+        elif name in INTEROP_METADATA_CASES:
             grant_kind = "metadata"
         elif name == "typed_json_command_decode_error_is_typed":
             grant_kind = "json"
         else:
             grant_kind = "stream"
         counts = (1, 1)
-        if name in STREAM_READY_REPLACEMENT:
+        if shape_grants := SDK_SHAPE_GRANTS_BY_WORKER.get(name):
+            counts = (len(shape_grants), sum(shape_grants))
+        elif name in STREAM_READY_REPLACEMENT:
             counts = (2, 1)
         elif name in STREAM_REACQUIRE:
             counts = (2, 2)
