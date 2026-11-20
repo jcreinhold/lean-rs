@@ -12,7 +12,8 @@ The standalone callback fixture keeps its own dependency and build directory. -/
 package «lean_rs_interop_consumer» where
   buildDir := workerBuildDir
 
-require «lean_rs_interop_shims» from "../../crates/lean-rs-host/shims/lean-rs-interop-shims"
+require «lean_rs_interop_shims» from "../../crates/lean-rs-host/shims/lean-rs-interop-shims" with
+  (Lean.mkNameMap String).insert `leanRsGeneratedShims "true"
 
 @[default_target]
 lean_lib «LeanRsInteropConsumer» where

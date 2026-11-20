@@ -132,7 +132,11 @@ rebuild_lake_packages() {
 	done
 	rm -rf "$TEMPLATE_DIR/.lake" "$REPO_ROOT/templates/shipped-lean-crate/target"
 	for pkg in "${LAKE_PACKAGES[@]}"; do
-		(cd "$REPO_ROOT/$pkg" && lake build >/dev/null)
+		if [[ "$pkg" == "crates/lean-rs-host/shims/lean-rs-interop-shims" ]]; then
+			(cd "$REPO_ROOT/$pkg" && lake -R -KleanRsGeneratedShims=true build >/dev/null)
+		else
+			(cd "$REPO_ROOT/$pkg" && lake build >/dev/null)
+		fi
 	done
 }
 

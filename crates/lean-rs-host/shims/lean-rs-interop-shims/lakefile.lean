@@ -8,7 +8,7 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
 ]
 
 def leanRsBuildDir : FilePath :=
-  if Lean.versionString == "4.36.0" then
+  if Lean.versionString == "4.36.0" && (get_config? leanRsGeneratedShims) == some "true" then
     ".lake" / "lean-rs-generated" / "lean-4.36.0"
   else
     defaultBuildDir

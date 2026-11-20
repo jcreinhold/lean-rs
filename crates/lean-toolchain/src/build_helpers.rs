@@ -981,6 +981,16 @@ impl LakeRunner for RealLakeRunner<'_> {
         if let Some(threads) = options.lean_num_threads {
             command.env("LEAN_NUM_THREADS", threads.to_string());
         }
+        if options.generated_output_key.is_some()
+            && options
+                .private_bootstrap
+                .as_ref()
+                .is_some_and(|mode| mode.is_bundled_host_interop(project_root))
+        {
+            // A previous Lake trace can retain the default options. Reconfigure
+            // this bundled provider under the writer; do not touch read probes.
+            command.args(["-R", "-KleanRsGeneratedShims=true"]);
+        }
         command
             .arg("build")
             .arg(format!("{target_name}:shared"))

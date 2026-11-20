@@ -7,6 +7,12 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
   ⟨`pp.unicode.fun, true⟩,
 ]
 
+def leanRsBuildDir : FilePath :=
+  if Lean.versionString == "4.36.0" && (get_config? leanRsGeneratedShims) == some "true" then
+    ".lake" / "lean-rs-generated" / "lean-4.36.0"
+  else
+    defaultBuildDir
+
 /-! Generic Lean/Rust interop helpers for `lean-rs`.
 
     This package contains reusable ABI support shared by downstream Lean
@@ -14,7 +20,8 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
     host policy, declaration introspection, elaboration, or `MetaM` services.
     Those stay in `lean-rs-host-shims`. Worker streaming helpers in this
     package define callback-envelope mechanics, not downstream row schemas. -/
-package «lean_rs_interop_shims»
+package «lean_rs_interop_shims» where
+  buildDir := leanRsBuildDir
 
 input_file interop_callback.c where
   path := "c" / "interop_callback.c"

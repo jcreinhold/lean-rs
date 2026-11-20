@@ -24,7 +24,8 @@ def leanRsBuildDir : FilePath :=
 package «lean_rs_host_shims» where
   buildDir := leanRsBuildDir
 
-require «lean_rs_interop_shims» from "../lean-rs-interop-shims"
+require «lean_rs_interop_shims» from "../lean-rs-interop-shims" with
+  (Lean.mkNameMap String).insert `leanRsGeneratedShims "true"
 
 input_file interop_callback.c where
   path := ".." / "lean-rs-interop-shims" / "c" / "interop_callback.c"

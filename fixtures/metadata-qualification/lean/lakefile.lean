@@ -16,7 +16,8 @@ def leanRsBuildDir : FilePath :=
 package «lean_rs_interop_consumer» where
   buildDir := leanRsBuildDir
 
-require «lean_rs_interop_shims» from "../../../crates/lean-rs-host/shims/lean-rs-interop-shims"
+require «lean_rs_interop_shims» from "../../../crates/lean-rs-host/shims/lean-rs-interop-shims" with
+  (Lean.mkNameMap String).insert `leanRsGeneratedShims "true"
 
 @[default_target]
 lean_lib «LeanRsInteropConsumer» where

@@ -437,7 +437,11 @@ for dir in \
 	"$REPO_ROOT/fixtures/lean" \
 	"$REPO_ROOT/fixtures/interop-shims"; do
 	log_step "lake build ($(basename "$dir"))"
-	(cd "$dir" && lake build)
+	if [[ "$dir" == "$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-interop-shims" ]]; then
+		(cd "$dir" && lake -R -KleanRsGeneratedShims=true build)
+	else
+		(cd "$dir" && lake build)
+	fi
 done
 
 if [[ "$LEAN_VERSION" == "4.36.0" ]]; then

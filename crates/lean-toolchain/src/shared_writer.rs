@@ -188,6 +188,7 @@ fn stopped_failure(error: &io::Error, receipt: &Value) -> io::Error {
 pub struct PrivateLakeBootstrap {
     project_root: PathBuf,
     owner_root: PathBuf,
+    bundled_host_interop: bool,
 }
 
 impl PrivateLakeBootstrap {
@@ -211,10 +212,21 @@ impl PrivateLakeBootstrap {
                 "private Lean bootstrap dependencies must stay below their Cargo owner",
             ));
         }
+        let bundled_host_interop = manifest
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            == Some("lean-rs-host")
+            && project_root == owner.join("shims/lean-rs-interop-shims");
         Ok(Self {
             project_root,
             owner_root: owner,
+            bundled_host_interop,
         })
+    }
+
+    pub(crate) fn is_bundled_host_interop(&self, project_root: &Path) -> bool {
+        self.bundled_host_interop && self.project_root == project_root
     }
 
     pub(crate) fn covers_roots(&self, roots: &[PathBuf]) -> bool {

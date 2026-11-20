@@ -110,7 +110,7 @@ jobs:
         run: |
           chmod 700 fixtures/lean fixtures/interop-shims crates/lean-rs/shims/lean-rs-interop-shims
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
-          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
           (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
@@ -307,7 +307,7 @@ jobs:
       - name: Build Lake packages
         run: |
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
-          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
           (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
