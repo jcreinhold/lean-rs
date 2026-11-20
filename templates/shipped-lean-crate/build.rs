@@ -25,8 +25,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
     let lean_root = owner.join("lean");
+    let toolchain = lean_toolchain::discover_toolchain(&Default::default())?;
+    let pin = std::fs::read_to_string(lean_root.join("lean-toolchain"))?;
+    if pin.trim() != format!("leanprover/lean4:v{}", toolchain.version) {
+        return Err(format!("template pins {}, selected Lean {}", pin.trim(), toolchain.version).into());
+    }
+    if toolchain.version != lean_toolchain::LEAN_VERSION {
+        return Err(format!(
+            "selected Lean {} differs from Cargo's Lean {}; set LEAN_SYSROOT to the pinned Lean prefix",
+            toolchain.version,
+            lean_toolchain::LEAN_VERSION,
+        )
+        .into());
+    }
+    let sysroot = toolchain.prefix.canonicalize()?;
+    lean_toolchain::emit_lean_link_directives_checked()?;
+    println!("cargo:rerun-if-env-changed=ELAN_TOOLCHAIN");
+    println!(
+        "cargo:rerun-if-changed={}",
+        sysroot.join("include/lean/version.h").display()
+    );
+    for input in [
+        "lakefile.lean",
+        "lake-manifest.json",
+        "lean-toolchain",
+        "ShipLeanDemo.lean",
+    ] {
+        println!("cargo:rerun-if-changed={}", lean_root.join(input).display());
+    }
+    let shim_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?;
     let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
     let demo = lean_toolchain::CargoLeanCapability::new(&lean_root, "ShipLeanDemo")
+        .lean_sysroot(&sysroot)
         .private_bootstrap(bootstrap)
         .package("ship_lean_demo")
         .module("ShipLeanDemo")
@@ -41,8 +71,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 LeanExportOwnership::None,
                 LeanExportResultConvention::Pure,
             ),
-        ))
-        .build()?;
+        ));
+    // Cargo can keep its build record after Lake's outputs are removed. Watch
+    // both files, and reuse a ready manifest without rewriting it when Cargo
+    // reruns because the outputs were just generated.
+    let ready = match deployment::hold(std::slice::from_ref(&lean_root)) {
+        Ok(_readers) => demo.probe_ready()?,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let demo = match ready {
+        Some(ready) => ready,
+        None => demo.build_quiet()?,
+    };
+    for (key, input) in [
+        (demo.manifest_env_var(), demo.manifest_path()),
+        (demo.env_var(), demo.dylib_path()),
+    ] {
+        println!("cargo:rerun-if-changed={}", input.display());
+        println!("cargo:rustc-env={key}={}", input.display());
+    }
     if !deployment::matches_demo(
         &serde_json::from_slice(&std::fs::read(demo.manifest_path())?)?,
         demo.dylib_path(),
@@ -84,10 +139,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("missing package root")?;
     let interop = host.join("shims/lean-rs-interop-shims");
     let shim = host.join("shims/lean-rs-host-shims");
-    let sysroot = lean_toolchain::discover_toolchain(&Default::default())?
-        .prefix
-        .canonicalize()?;
-    let shim_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?;
     let builder = |root: &std::path::Path, package: &str, target: &str| -> Result<_, Box<dyn std::error::Error>> {
         let private = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(host, root)?;
         let mut builder = lean_toolchain::CargoLeanCapability::new(root, target)
