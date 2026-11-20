@@ -356,7 +356,10 @@ with (root/'native-heartbeat').open('ab',buffering=0) as output:
             let _status = leaf.wait();
         });
     }
-    fs::write(Path::new(&root).join("native-body"), std::process::id().to_string()).unwrap();
+    let body = Path::new(&root).join("native-body");
+    let pending = body.with_extension("pending");
+    fs::write(&pending, std::process::id().to_string()).unwrap();
+    fs::rename(pending, body).unwrap();
     loop {
         std::thread::sleep(Duration::from_secs(1));
     }

@@ -299,10 +299,6 @@ fn run_fake_child(mode: &str) {
         other => panic!("expected frame-limit configuration, got {other:?}"),
     }
 
-    if mode == "slow_send_and_response" {
-        thread::sleep(Duration::from_millis(200));
-    }
-
     let mut last_header: Option<String> = None;
     let mut last_session: Option<Vec<String>> = None;
     let mut reused_session = false;
@@ -325,6 +321,7 @@ fn run_fake_child(mode: &str) {
                 write_frame(&mut stdout, Message::Response(Response::HealthOk), MAX_FRAME_BYTES)
                     .expect("fake child writes health response");
             }
+            Request::EmitTestRows { .. } if mode == "hang_on_emit" => sleep_forever(),
             Request::EmitTestRows { streams } if mode == "rows_then_hang" => {
                 let mut emitter = DataRowEmitter::default();
                 for stream in streams {
@@ -335,6 +332,16 @@ fn run_fake_child(mode: &str) {
                         .expect("fake child writes data row");
                 }
                 sleep_forever();
+            }
+            Request::EmitTestRows { streams } if mode == "slow_send_and_response" && streams.is_empty() => {
+                // Acknowledge the setup request, then delay reading the large request on this child only.
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::RowsComplete { count: 0 }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake child acknowledges slow read setup");
+                thread::sleep(Duration::from_millis(200));
             }
             Request::EmitTestRows { streams } => {
                 if mode == "slow_send_and_response" {
@@ -856,6 +863,9 @@ fn send_and_response_share_deadline_and_replacement_remains_usable() -> Result<(
         config.request_timeout(Duration::from_millis(300))
     })
     .map_err(|error| error.to_string())?;
+    worker
+        .__emit_test_rows(Vec::new(), None, None)
+        .map_err(|error| error.to_string())?;
     // Larger than the pipe buffer, so sending waits for the child to read.
     let result = worker.__emit_test_rows(vec!["x".repeat(256 * 1024)], None, None);
     if !matches!(result, Err(LeanWorkerError::Timeout { .. })) {
@@ -1384,7 +1394,7 @@ fn request_stop_receipt_matches_checkpoint_across_replacement() -> Result<(), St
 }
 
 fn newer_request_shadows_older_stop_receipt() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("slow_send_and_response", |config| {
+    let mut worker = fake_worker_with_config("hang_on_emit", |config| {
         config.request_timeout(Duration::from_millis(300))
     })
     .map_err(|error| error.to_string())?;
