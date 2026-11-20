@@ -371,6 +371,7 @@ fn prepare_typed_session(
         "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
         "package": package,
         "module": module,
+        "target_name": if stream { "LeanRsInteropConsumer" } else { "LeanRsFixture" },
         "primary_dylib": image,
         "dependencies": dependencies,
         "build_toolchain": {"sysroot": sysroot},

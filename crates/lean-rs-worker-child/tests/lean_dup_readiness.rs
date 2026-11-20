@@ -13,6 +13,9 @@ use lean_toolchain::{LeanModuleSetFingerprint, ToolchainFingerprint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -31,6 +34,8 @@ fn interop_root() -> PathBuf {
 }
 
 fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
+    let selected = ordinary_typed_selection::ordinary_stream_selection();
+    let project = selected.map_or_else(interop_root, |fixture| fixture.fixture.clone());
     let modules = ["Fixture.Basic", "Fixture.Advanced"]
         .into_iter()
         .map(|module| {
@@ -49,18 +54,28 @@ fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
         source_count: modules.len() as u64,
         source_max_mtime_ns: 0,
     };
-    let config = LeanWorkerImportPlanConfig::new(interop_root(), "lean_rs_interop_consumer", "LeanRsInteropConsumer")
+    let config = LeanWorkerImportPlanConfig::new(project, "lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .base_imports(["LeanRsInteropConsumer.Callback"])
         .validate_metadata(
             "lean_rs_interop_consumer_worker_shape_metadata",
             json!({"source": "lean-dup-readiness-test"}),
         );
-    LeanWorkerImportPlanner::new(config)
+    let batch = LeanWorkerImportPlanner::new(config)
         .plan_work_items(modules, &fingerprint)
         .expect("readiness work items plan")
         .into_iter()
         .next()
-        .expect("readiness planner produced a batch")
+        .expect("readiness planner produced a batch");
+    if let Some(fixture) = selected {
+        return batch
+            .capability_builder_with_manifest(&fixture.json_manifest)
+            .expect("use the prebuilt artifact for the real plan")
+            .worker_child(
+                lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&fixture.worker, &fixture.sysroot)
+                    .checked_native_loader_environment(),
+            );
+    }
+    batch
         .capability_builder()
         .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
         .json_command_export("lean_rs_interop_consumer_worker_shape_version")

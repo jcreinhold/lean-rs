@@ -15,6 +15,11 @@ use lean_rs_worker_parent::{
 use lean_toolchain::{LeanModuleDiscoveryOptions, discover_lake_modules};
 use serde::{Deserialize, Serialize};
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+#[path = "support/sealed_stream_builder.rs"]
+mod sealed_stream_builder;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -158,23 +163,44 @@ fn missing_selected_root_and_capability_target_are_typed() {
 
 #[test]
 fn planned_batches_execute_through_pool_with_one_import_group() {
-    let batches = planner().plan_lake_project().expect("planner succeeds");
+    let selection = ordinary_typed_selection::ordinary_stream_selection();
+    let batches = if let Some(fixture) = selection {
+        let discovered = discover_lake_modules(
+            LeanModuleDiscoveryOptions::new(interop_root()).selected_roots(["LeanRsInteropConsumer"]),
+        )
+        .expect("discover original fixture sources");
+        assert!(
+            discovered
+                .declared_lean_libs
+                .iter()
+                .any(|target| target == "LeanRsInteropConsumer")
+        );
+        LeanWorkerImportPlanner::new(
+            LeanWorkerImportPlanConfig::new(&fixture.fixture, "lean_rs_interop_consumer", "LeanRsInteropConsumer")
+                .base_imports(["LeanRsInteropConsumer.Callback"]),
+        )
+        .plan_discovered(&discovered)
+        .expect("plan the discovered work against the prebuilt target")
+    } else {
+        planner().plan_lake_project().expect("planner succeeds")
+    };
     assert_eq!(batches.len(), 1);
     let modules = batches[0].modules.len();
     assert!(modules > 1, "fixture should provide more than one module");
 
     let naive_start = Instant::now();
     for module in &batches[0].modules {
-        let mut capability = LeanWorkerCapabilityBuilder::new(
-            interop_root(),
-            "lean_rs_interop_consumer",
-            "LeanRsInteropConsumer",
-            ["LeanRsInteropConsumer.Callback"],
-        )
-        .json_command_export("lean_rs_interop_consumer_worker_json_command")
-        .worker_executable(worker_binary())
-        .open()
-        .expect("naive capability opens");
+        let builder = sealed_stream_builder::selected().unwrap_or_else(|| {
+            LeanWorkerCapabilityBuilder::new(
+                interop_root(),
+                "lean_rs_interop_consumer",
+                "LeanRsInteropConsumer",
+                ["LeanRsInteropConsumer.Callback"],
+            )
+            .json_command_export("lean_rs_interop_consumer_worker_json_command")
+            .worker_executable(worker_binary())
+        });
+        let mut capability = builder.open().expect("naive capability opens");
         let mut session = capability.open_session(None, None).expect("naive session opens");
         let response = session
             .run_json_command(
@@ -192,15 +218,23 @@ fn planned_batches_execute_through_pool_with_one_import_group() {
 
     let planned_start = Instant::now();
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut lease = pool
-        .acquire_lease(
-            batches[0]
-                .capability_builder()
-                .metadata_export("lean_rs_interop_consumer_worker_metadata")
-                .json_command_export("lean_rs_interop_consumer_worker_json_command")
-                .worker_executable(worker_binary()),
-        )
-        .expect("planned batch lease opens");
+    let batch = &batches[0];
+    let builder = if let Some(fixture) = selection {
+        batch
+            .capability_builder_with_manifest(&fixture.json_manifest)
+            .expect("use the prebuilt artifact for the real plan")
+            .worker_child(
+                lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&fixture.worker, &fixture.sysroot)
+                    .checked_native_loader_environment(),
+            )
+    } else {
+        batch
+            .capability_builder()
+            .metadata_export("lean_rs_interop_consumer_worker_metadata")
+            .json_command_export("lean_rs_interop_consumer_worker_json_command")
+            .worker_executable(worker_binary())
+    };
+    let mut lease = pool.acquire_lease(builder).expect("planned batch lease opens");
     for module in &batches[0].modules {
         let response = lease
             .run_json_command(

@@ -282,6 +282,8 @@ def main():
             else ("lean_rs_host_shims", "LeanRsHostShims", hi)
         )
         assert (v["package"], v["module"], v["primary_dylib"]) == (p, m, str(i))
+        if stream and manifest == "consumer":
+            assert v["target_name"] == "LeanRsInteropConsumer"
         assert v["dependencies"] == (
             []
             if (scalar or (typed and not stream)) and manifest == "consumer"
@@ -313,7 +315,7 @@ def main():
         exports = json.loads(rec["consumer_json"])["exports"]
         symbols = [export["symbol"] for export in exports]
         if signature_probe is None:
-            assert 0 < len(symbols) <= 30 and len(set(symbols)) == len(symbols)
+            assert 0 < len(symbols) <= 33 and len(set(symbols)) == len(symbols)
             project_symbols.extend(symbols)
         else:
             real_symbol = "lean_rs_interop_consumer_worker_json_command"

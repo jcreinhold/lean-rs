@@ -15,6 +15,9 @@ use lean_toolchain::{LeanModuleSetFingerprint, ToolchainFingerprint};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -67,8 +70,10 @@ fn source_fingerprint(module_count: usize) -> LeanModuleSetFingerprint {
 }
 
 fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
+    let selected = ordinary_typed_selection::ordinary_stream_selection();
+    let project = selected.map_or_else(interop_root, |fixture| fixture.fixture.clone());
     let modules = fallback_modules();
-    let config = LeanWorkerImportPlanConfig::new(interop_root(), "lean_rs_interop_consumer", "LeanRsInteropConsumer")
+    let config = LeanWorkerImportPlanConfig::new(project, "lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .base_imports(["LeanRsInteropConsumer.Callback"])
         .validate_metadata(
             "lean_rs_interop_consumer_worker_shape_metadata",
@@ -87,10 +92,17 @@ fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
         .plan_work_items(work, &source_fingerprint(modules.len()))
         .expect("mathlib-style modules plan");
     assert_eq!(batches.len(), 1, "fallback modules share one worker session key");
-    batches
-        .into_iter()
-        .next()
-        .expect("one planned batch")
+    let batch = batches.into_iter().next().expect("one planned batch");
+    if let Some(fixture) = selected {
+        return batch
+            .capability_builder_with_manifest(&fixture.json_manifest)
+            .expect("use the prebuilt artifact for the real plan")
+            .worker_child(
+                lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&fixture.worker, &fixture.sysroot)
+                    .checked_native_loader_environment(),
+            );
+    }
+    batch
         .capability_builder()
         .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
         .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")

@@ -88,6 +88,39 @@ impl Exports {
 
 pub(crate) const CASES: &[(&[&str], Exports)] = &[
     (
+        &["planned_batches_execute_through_pool_with_one_import_group"],
+        Exports::Json,
+    ),
+    (
+        &["readiness_commands_run_through_planner_pool_lease_and_typed_facade"],
+        Exports::Shape(
+            &["metadata", "version", "doctor"],
+            &["extract", "features", "index", "probe"],
+        ),
+    ),
+    (
+        &["readiness_operational_failures_and_recovery_are_typed"],
+        Exports::Shape(
+            &["metadata", "version"],
+            &["timeout_after_row", "extract", "panic_after_row"],
+        ),
+    ),
+    (
+        &["mathlib_scale_fixture_runs_through_planner_pool_lease_and_typed_command"],
+        Exports::Shape(&["metadata"], &["mathlib_scale_index"]),
+    ),
+    (
+        &["mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly"],
+        Exports::Shape(
+            &["metadata"],
+            &[
+                "mathlib_scale_timeout_after_row",
+                "mathlib_scale_index",
+                "mathlib_scale_panic_after_row",
+            ],
+        ),
+    ),
+    (
         &[
             "capability_builder_session_import_profile_reaches_child_import",
             "open_session_with_imports_overrides_builder_imports",
