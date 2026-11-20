@@ -27,9 +27,17 @@ pub(super) fn bracketed<'lean, 'c>(
     caps: &'c LeanCapabilities<'lean, '_>,
     names: &[&str],
 ) -> TrustedBracketedImports<'lean, 'c> {
-    let roots = super::fixture::approved_graph(caps, names, &HostImportOptions::default(), "host-services/bracketed");
+    let roots = if names == ["LeanRsFixture.Handles"] {
+        super::fixture::native_bracketed_handles_paths(caps)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| {
+        super::fixture::approved_graph(caps, names, &HostImportOptions::default(), "host-services/bracketed")
+    });
     #[allow(unsafe_code, reason = "separate protected authorization for region release")]
-    // SAFETY: the reviewed graph row approves bracketed import and cleanup for these exact images.
+    // SAFETY: the reviewed row or the held ordinary fixture supplies the exact
+    // graph and images. The same bracketed scope controls import and cleanup.
     unsafe {
         caps.shim_capability()
             .bracketed_import_scope(roots, names.iter().map(|s| (*s).into()).collect())

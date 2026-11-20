@@ -830,8 +830,8 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
     const IMPORTS: &[&str] = &["LeanRsFixture.Handles"];
     const DECL: &str = "LeanRsFixture.Handles.nameAnonymous";
     const MISSING: &str = "LeanRsFixture.Handles.noSuchDeclaration";
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
 
     let result = caps
         .bracketed_import_query(
@@ -1015,8 +1015,8 @@ fn bracketed_import_query_result_surface_cannot_carry_lean_handles() {
 
 #[test]
 fn bracketed_import_query_reports_rejected_full_session_operations() {
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let result = caps
         .bracketed_import_query(
             &service_requests::bracketed(&caps, &["LeanRsFixture.Handles"]),

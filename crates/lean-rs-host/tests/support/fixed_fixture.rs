@@ -660,6 +660,19 @@ fn imports_for_fixture<'lean, 'c>(
     }
 }
 
+#[allow(dead_code, reason = "host services only")]
+pub(super) fn native_bracketed_handles_paths(caps: &LeanCapabilities<'_, '_>) -> Option<Vec<String>> {
+    #[cfg(all(test, unix))]
+    {
+        native_import_paths(caps, &["LeanRsFixture.Handles"])
+    }
+    #[cfg(not(all(test, unix)))]
+    {
+        let _ = caps;
+        None
+    }
+}
+
 #[cfg(all(test, unix))]
 fn native_import_paths(caps: &LeanCapabilities<'_, '_>, names: &[&str]) -> Option<Vec<String>> {
     ordinary_fixture().map(|fixture| checked_native_import_paths(fixture, caps, names))
