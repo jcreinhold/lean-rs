@@ -1576,15 +1576,16 @@ def qualify_stream(
     *,
     pinned_selection=None,
     bookended_release=False,
+    retain_for_workspace=False,
 ):
     if pinned_selection is not None:
         require(pinned_selection[0]["shim_manifest_path"] == str(shim_manifest)
                 and pinned_selection[0]["shim_manifest_json"] == shim_manifest.read_text(),
                 "prepared host manifest changed before stream qualification")
-    owner, manifest, image_pins = prepare_stream_package(release, shim_manifest)
+    owner, manifest, isolated_pins = prepare_stream_package(release, shim_manifest)
+    image_pins = isolated_pins
     if pinned_selection is not None:
-        # The combined release command also hands its original images to workspace tests.
-        image_pins = [*pinned_selection[1], *image_pins]
+        image_pins = [*pinned_selection[1], *isolated_pins]
     selected = cases or [name for _, name in INTEROP_TESTS]
     regular = [
         name
@@ -1597,11 +1598,64 @@ def qualify_stream(
     probes = [(name,) for name in selected if name in INTEROP_SIGNATURE_CASES]
     legacy = [INTEROP_LEGACY_CASE] if INTEROP_LEGACY_CASE in selected else []
     cohorts = [group for group in (regular, foreign, *probes, legacy) if group]
+    descriptor = None
     for index, cohort in enumerate(cohorts):
-        run_stream_group(release, profile, manifest, cohort, image_pins=image_pins,
-                         build_provider=index == 0, bookended_release=bookended_release)
+        descriptor = run_stream_group(release, profile, manifest, cohort, image_pins=image_pins,
+                                      build_provider=index == 0, bookended_release=bookended_release)
+    if retain_for_workspace:
+        require(descriptor is not None, "workspace tests require a verified stream cohort")
+        return json.dumps({
+            "prefix": str(release),
+            "manifest": descriptor["shim_manifest_path"],
+            "manifest_sha256": hashlib.sha256(descriptor["shim_manifest_json"].encode()).hexdigest(),
+            "roots": descriptor["artifact_roots"],
+            "search_paths": descriptor["shim_search_paths"],
+            "images": isolated_pins,
+            "package_identity": [owner.st_dev, owner.st_ino],
+        }, separators=(",", ":"))
     # A failed cohort retains its package and audit until worker closure can be established.
     remove_owned_state(stream_package_root(), owner)
+
+
+def verify_provider(image_pins):
+    for path, dev, inode, sha256 in image_pins:
+        image = Path(path)
+        identity = image.stat()
+        require(
+            image.resolve(strict=True) == image
+            and (identity.st_dev, identity.st_ino) == (dev, inode)
+            and digest(image) == sha256,
+            f"stream build changed a verified shim image: {image}",
+        )
+
+
+def workspace_tests(expression):
+    # The named qualifier published this selection only after its workers closed.
+    root = stream_package_root()
+    selection = json.loads(os.environ["LEAN_RS_TEST_ORDINARY_HOST_SHIMS"])
+    with ordinary_state_lock():
+        require(root.resolve(strict=True) == root, "aliased workspace shim package")
+        owner = root.stat()
+        require(owner.st_uid == os.geteuid() and stat.S_IMODE(owner.st_mode) == 0o700
+                and [owner.st_dev, owner.st_ino] == selection["package_identity"],
+                "workspace shim package ownership changed")
+        require(not os.path.lexists(root.parent / "interop-stream"), "stream cohort has not closed")
+        manifest = Path(selection["manifest"])
+        require(manifest.is_relative_to(root) and manifest.resolve(strict=True) == manifest
+                and digest(manifest) == selection["manifest_sha256"], "workspace shim manifest changed")
+        require(len(selection["images"]) == 2 and all(Path(pin[0]).is_relative_to(root) for pin in selection["images"]),
+                "workspace shim images must belong to the retained package")
+        verify_provider(selection["images"])
+        # A later invocation must not retry or remove a package left by an interrupted workspace run.
+        (root / "workspace-running").mkdir(mode=0o700)
+        result = subprocess.run(
+            ["cargo", "nextest", "run", "--workspace", "--profile", "ci", "-E", expression],
+            cwd=SDK,
+        )
+        if result.returncode:
+            # Keep the package when the test run cannot certify closure.
+            raise SystemExit(result.returncode)
+        remove_owned_state(root, owner)
 
 
 def require_no_legacy_provider_shadow(provider):
@@ -1740,20 +1794,9 @@ def run_stream_group(
             stdout=sys.stderr,
         )
 
-    def verify_provider():
-        for path, dev, inode, sha256 in image_pins:
-            image = Path(path)
-            identity = image.stat()
-            require(
-                image.resolve(strict=True) == image
-                and (identity.st_dev, identity.st_ino) == (dev, inode)
-                and digest(image) == sha256,
-                f"stream build changed a verified shim image: {image}",
-            )
-
     # The typed workers have closed and this job holds the qualification lock.
     # The probe and image checks detect changes; they do not block writes.
-    verify_provider()
+    verify_provider(image_pins)
     if build_provider and not legacy:
         lake = release / "bin/lake"
         run(
@@ -1772,10 +1815,10 @@ def run_stream_group(
             ],
             project,
         )
-    verify_provider()
+    verify_provider(image_pins)
     if legacy:
         build_legacy_interop_project(run, release, state, interop)
-        verify_provider()
+        verify_provider(image_pins)
     cargo = ["cargo", "build", "--locked", "--offline", "-j1", "--config", stream_cargo_patch()]
     if probes:
         env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
@@ -1888,6 +1931,7 @@ def run_stream_group(
         )
         events.unlink()
     remove_owned_state(state, owner)
+    return descriptor
 
 
 def ordinary_host_shim_selection(release, selected):
@@ -2355,6 +2399,7 @@ def qualify_broken_import(
     run_typed=False,
     run_stream=False,
     bookended_release=False,
+    retain_for_workspace=False,
 ):
     """Run one ordinary SDK worker test, without the downstream host helper."""
     require(TARGET == TARGET.resolve(strict=True), "aliased SDK target")
@@ -2452,14 +2497,17 @@ def qualify_broken_import(
         qualify_scalar_entry(release, profile, run, env, cargo, typed_descriptor)
         direct_tests += qualify_optional_whnf(release, profile, run, env)
     if run_stream:
-        qualify_stream(
+        isolated_selection = qualify_stream(
             release,
             profile,
             manifest,
             None,
             pinned_selection=(json.loads(typed_descriptor), image_pins),
             bookended_release=bookended_release,
+            retain_for_workspace=retain_for_workspace,
         )
+        if retain_for_workspace:
+            host_selection = isolated_selection
     if emit_host_selection:
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
         print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)
@@ -2544,6 +2592,10 @@ def main():
     broken.add_argument(
         "--run-typed", action="store_true", help="also run the fixed typed SDK tests"
     )
+    broken.add_argument("--workspace-shims", action="store_true",
+                        help="retain the checked stream package for workspace-tests")
+    workspace = commands.add_parser("workspace-tests", help="run workspace Nextest with the retained shim package")
+    workspace.add_argument("expression", help="Nextest filter from the named qualifier")
     stream = commands.add_parser(
         "interop-stream", help="qualify the fixed-export stream tests"
     )
@@ -2569,11 +2621,19 @@ def main():
     run.add_argument("--control-sha256", required=True)
     run.add_argument("--deployment-sha256", required=True)
     args = parser.parse_args()
+    if args.command == "workspace-tests":
+        try:
+            workspace_tests(args.expression)
+        except (OSError, ValueError, KeyError) as error:
+            parser.exit(1, f"workspace shim qualification failed: {error}\n")
+        return
     if args.command == "broken-import":
         if args.writer is not None or args.writer_sha256 is not None:
             parser.error("broken-import does not use a writer helper")
         if args.run_typed and not args.emit_host_selection:
             parser.error("--run-typed requires --emit-host-selection")
+        if args.workspace_shims and not args.run_typed:
+            parser.error("--workspace-shims requires --run-typed")
     elif args.command == "interop-stream":
         if args.writer is not None or args.writer_sha256 is not None:
             parser.error("interop-stream does not use a writer helper")
@@ -2628,6 +2688,7 @@ def main():
                         run_typed=args.run_typed,
                         run_stream=args.run_typed,
                         bookended_release=True,
+                        retain_for_workspace=args.workspace_shims,
                     ),
                     emit_host_selection=args.emit_host_selection,
                 )

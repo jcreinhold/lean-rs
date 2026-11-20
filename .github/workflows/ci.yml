@@ -187,7 +187,7 @@ jobs:
           cargo fetch --locked --manifest-path fixtures/metadata-qualification/app/Cargo.toml
           # Remove only the library path injected by this workflow's Lake setup.
           # The qualifier still refuses inherited preloads and other loader overrides.
-          selection=$(env -u LD_LIBRARY_PATH python3 scripts/qualify_metadata.py broken-import --emit-host-selection --run-typed)
+          selection=$(env -u LD_LIBRARY_PATH python3 scripts/qualify_metadata.py broken-import --emit-host-selection --run-typed --workspace-shims)
           printf '%s\n' "$selection" | grep '^LEAN_RS_TEST_ORDINARY_HOST_SHIMS=' >> "$GITHUB_ENV"
           printf '%s\n' "$selection" | grep '^LEAN_RS_TEST_REMAINING_FILTER=' >> "$GITHUB_ENV"
 
@@ -213,7 +213,7 @@ jobs:
         run: |
           if [ "${{ matrix.lean_version }}" = "4.36.0" ]; then
             test -n "${LEAN_RS_TEST_REMAINING_FILTER-}"
-            cargo nextest run --workspace --profile ci -E "$LEAN_RS_TEST_REMAINING_FILTER"
+            python3 scripts/qualify_metadata.py workspace-tests "$LEAN_RS_TEST_REMAINING_FILTER"
           else
             cargo nextest run --workspace --profile ci -j1
           fi

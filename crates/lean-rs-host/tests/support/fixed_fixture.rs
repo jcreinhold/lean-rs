@@ -75,6 +75,7 @@ struct OrdinaryShims {
     roots: Vec<PathBuf>,
     search_paths: Vec<PathBuf>,
     images: [(PathBuf, u64, u64, String); 2],
+    package_identity: Option<(u64, u64)>,
 }
 
 #[cfg(all(test, unix))]
@@ -137,7 +138,22 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
                 std::env::var_os("LEAN_SYSROOT").as_deref(),
                 Some(shims.prefix.as_os_str())
             );
-            let workspace = checkout.join("crates/lean-rs-host/shims");
+            let package = if let Some(identity) = shims.package_identity {
+                let package = checkout.join("target/metadata-qualification/stream-package");
+                assert_eq!(
+                    package.canonicalize().expect("canonical workspace shim package"),
+                    package
+                );
+                let metadata = package.metadata().expect("workspace shim package");
+                assert_eq!((metadata.dev(), metadata.ino()), identity);
+                assert!(metadata.is_dir());
+                assert_eq!(metadata.uid(), checkout.metadata().expect("checkout owner").uid());
+                assert_eq!(metadata.mode() & 0o7777, 0o700);
+                package
+            } else {
+                checkout.clone()
+            };
+            let workspace = package.join("crates/lean-rs-host/shims");
             let host = workspace.join("lean-rs-host-shims");
             let interop = workspace.join("lean-rs-interop-shims");
             assert_eq!(shims.roots, [host.clone(), interop.clone()]);

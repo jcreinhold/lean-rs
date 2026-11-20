@@ -1135,6 +1135,56 @@ class MetadataQualificationTest(unittest.TestCase):
         run.assert_called_once()
         self.assertTrue(assets.is_dir())
 
+    def test_workspace_uses_the_named_package_and_removes_it_only_after_success(self):
+        root = qualification.stream_package_root()
+        root.mkdir(mode=0o700)
+        owner = root.stat()
+        manifest = root / "shim.json"
+        manifest.write_text("{}")
+        pins = []
+        for name in ("host", "interop"):
+            image = root / name
+            image.write_text(name)
+            identity = image.stat()
+            pins.append([str(image), identity.st_dev, identity.st_ino, qualification.digest(image)])
+        descriptor = {
+            "shim_manifest_path": str(manifest), "shim_manifest_json": "{}",
+            "artifact_roots": [], "shim_search_paths": [],
+        }
+        with (
+            patch.object(qualification, "prepare_stream_package", return_value=(owner, manifest, pins)),
+            patch.object(qualification, "run_stream_group", return_value=descriptor),
+        ):
+            selection = qualification.qualify_stream(
+                self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"],
+                retain_for_workspace=True,
+            )
+        self.assertTrue(root.is_dir())
+        env = {"LEAN_RS_TEST_ORDINARY_HOST_SHIMS": selection}
+        with (
+            patch.dict(os.environ, env),
+            patch.object(qualification, "STATE_LOCK", root.parent / ".ordinary.lock"),
+            patch("subprocess.run") as run,
+        ):
+            bad = {**json.loads(selection), "package_identity": [owner.st_dev, owner.st_ino + 1]}
+            with patch.dict(os.environ, {"LEAN_RS_TEST_ORDINARY_HOST_SHIMS": json.dumps(bad)}):
+                with self.assertRaisesRegex(ValueError, "ownership changed"):
+                    qualification.workspace_tests("all()")
+            run.assert_not_called()
+            # A previously entered workspace run has not confirmed closure.
+            marker = root / "workspace-running"
+            marker.mkdir()
+            with self.assertRaises(FileExistsError):
+                qualification.workspace_tests("all()")
+            run.assert_not_called()
+            marker.rmdir()
+            run.return_value.returncode = 0
+            qualification.workspace_tests("all()")
+            run.assert_called_with(
+                ["cargo", "nextest", "run", "--workspace", "--profile", "ci", "-E", "all()"], cwd=self.sdk
+            )
+        self.assertFalse(root.exists())
+
     def test_missing_doctor_exports_audit_requires_admission_without_a_grant(self):
         case = qualification.NO_EXPORTS_CASE
         marker = f"admit-fixed-no-exports-{case}".encode()
@@ -1330,6 +1380,7 @@ class MetadataQualificationTest(unittest.TestCase):
             run_typed=False,
             run_stream=False,
             bookended_release=True,
+            retain_for_workspace=False,
         )
         self.launch.assert_not_called()
 

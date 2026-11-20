@@ -143,6 +143,9 @@ absolute path of the prepared `*.lean-rs-capability.json` file reported in the s
 The qualifier builds the stream worker against a disposable copy of the host package and its checked-in Lake sources under
 `target/metadata-qualification/stream-package`. It verifies the isolated manifest against the selected SDK manifest.
 The stream and legacy workers use this package’s own lock files and the installed Lean toolchain.
+For the full 4.36 release checks, `--workspace-shims` keeps this same package for the direct-host tests.
+`workspace-tests` checks its identity, runs the workspace filter, and removes the package after Nextest succeeds.
+An interrupted or failed workspace run retains the package for inspection.
 
 ```sh
 python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \

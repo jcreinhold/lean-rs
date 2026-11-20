@@ -505,7 +505,7 @@ run_sdk_worker_tests() {
 	fi
 	cargo fetch --locked --manifest-path "$REPO_ROOT/fixtures/metadata-qualification/app/Cargo.toml" || return
 	local selection
-	selection=$(env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import --emit-host-selection --run-typed) || return
+	selection=$(env -u LD_LIBRARY_PATH python3 "$REPO_ROOT/scripts/qualify_metadata.py" broken-import --emit-host-selection --run-typed --workspace-shims) || return
 	LEAN_RS_TEST_ORDINARY_HOST_SHIMS=$(printf '%s\n' "$selection" | sed -n 's/^LEAN_RS_TEST_ORDINARY_HOST_SHIMS=//p')
 	LEAN_RS_TEST_REMAINING_FILTER=$(printf '%s\n' "$selection" | sed -n 's/^LEAN_RS_TEST_REMAINING_FILTER=//p')
 	if [[ -z "$LEAN_RS_TEST_ORDINARY_HOST_SHIMS" || -z "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
@@ -550,7 +550,7 @@ run_nextest() {
 		env_args+=("LEAN_RS_LEAK_LOOP_ITERS=4")
 	fi
 	if [[ -n "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
-		"${env_args[@]}" cargo nextest run --workspace --profile ci -E "$LEAN_RS_TEST_REMAINING_FILTER"
+		"${env_args[@]}" python3 "$REPO_ROOT/scripts/qualify_metadata.py" workspace-tests "$LEAN_RS_TEST_REMAINING_FILTER"
 	else
 		"${env_args[@]}" cargo nextest run --workspace --profile ci -j1
 	fi
