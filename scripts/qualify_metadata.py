@@ -123,15 +123,56 @@ ORDINARY_MODULE_QUERY_TESTS = (
     ),
     ("typed_session", "process_module_query_references_through_worker", ((1, 1),)),
 )
+ORDINARY_PROOF_TESTS = (
+    (
+        "typed_session",
+        "attempt_proof_successful_candidate_closes_simple_goal",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "attempt_proof_envelope_entry_state_carries_goals_and_locals",
+        ((1, 1),),
+    ),
+    ("typed_session", "attempt_proof_bad_selector_yields_empty_entry_state", ((1, 1),)),
+    (
+        "typed_session",
+        "attempt_proof_bad_candidate_on_unicode_signature_does_not_false_close",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "attempt_proof_single_line_by_tactic_aligns_and_closes",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "attempt_proof_entry_selector_accepts_from_scratch_block_where_default_traps",
+        ((1, 2),),
+    ),
+    (
+        "typed_session",
+        "attempt_proof_candidate_list_is_capped_and_does_not_write_files",
+        ((1, 1),),
+    ),
+    ("typed_session", "attempt_proof_ten_candidates_returns_ordered_rows", ((1, 1),)),
+    (
+        "typed_session",
+        "attempt_proof_global_output_budget_returns_partial_not_attempted_rows",
+        ((1, 1),),
+    ),
+)
 JSON_GRANT = b"authorize-consumer-load"
 META_TERM_GRANT = b"authorize-fixed-meta-term"
 MODULE_QUERY_GRANT = b"authorize-fixed-module-query"
+PROOF_GRANT = b"authorize-fixed-proof-attempt"
 ORDINARY_AUDITED_TESTS = tuple(
     (target, name, counts, event)
     for cases, event in (
         (ORDINARY_JSON_TESTS, JSON_GRANT),
         (ORDINARY_META_TESTS, META_TERM_GRANT),
         (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
+        (ORDINARY_PROOF_TESTS, PROOF_GRANT),
     )
     for target, name, counts in cases
 )
@@ -885,7 +926,12 @@ def check_typed_children_closed(
     started = []
     admitted = set()
     workers = set()
-    grants = {JSON_GRANT: [], META_TERM_GRANT: [], MODULE_QUERY_GRANT: []}
+    grants = {
+        JSON_GRANT: [],
+        META_TERM_GRANT: [],
+        MODULE_QUERY_GRANT: [],
+        PROOF_GRANT: [],
+    }
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")

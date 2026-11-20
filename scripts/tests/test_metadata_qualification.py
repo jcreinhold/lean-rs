@@ -668,13 +668,24 @@ class MetadataQualificationTest(unittest.TestCase):
             "process_module_query_returns_cursor_type_and_goal_through_worker",
             "process_module_query_references_through_worker",
         )
+        proof_cases = (
+            "attempt_proof_successful_candidate_closes_simple_goal",
+            "attempt_proof_envelope_entry_state_carries_goals_and_locals",
+            "attempt_proof_bad_selector_yields_empty_entry_state",
+            "attempt_proof_bad_candidate_on_unicode_signature_does_not_false_close",
+            "attempt_proof_single_line_by_tactic_aligns_and_closes",
+            "attempt_proof_entry_selector_accepts_from_scratch_block_where_default_traps",
+            "attempt_proof_candidate_list_is_capped_and_does_not_write_files",
+            "attempt_proof_ten_candidates_returns_ordered_rows",
+            "attempt_proof_global_output_budget_returns_partial_not_attempted_rows",
+        )
         audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
             *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
             *(
                 f"(binary(=typed_session) & (test(={name})))"
-                for name in (*meta_cases, *module_query_cases)
+                for name in (*meta_cases, *module_query_cases, *proof_cases)
             ),
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)

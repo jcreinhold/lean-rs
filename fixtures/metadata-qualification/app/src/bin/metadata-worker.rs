@@ -3,7 +3,8 @@ use lean_rs::host_bridge::{
     TrustedHostKernelRequest, TrustedHostTerm, TrustedModuleSource,
     module_requests::{
         DeclarationVerificationBatchRequest, DeclarationVerificationRequest, DeclarationVerificationTarget,
-        ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, SorryPolicy,
+        ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, ProofEditTarget,
+        ProofPositionSelector, SorryPolicy,
     },
 };
 use lean_rs::module::{
@@ -60,6 +61,68 @@ fn ioerr(e: std::io::Error) -> lean_rs::LeanError {
         audit(&format!("refused {e}"));
     }
     lean_rs::error::host_internal(e.to_string())
+}
+fn matches_fixed_proof(file: &str, request: &ProofAttemptRequest) -> bool {
+    use ProofPositionSelector::{Default as First, Entry, Index};
+
+    const SKIP: &str = "theorem t : True := by\n  skip\n";
+    const SUCCESS: &str = "import Lean\n\ntheorem t : True := by\n  skip\n/-- following docstring must remain parseable -/\ntheorem u : True := by\n  trivial\n";
+    const ENTRY_STATE: &str =
+        "import Lean\n\ntheorem t : ∀ n : Nat, n + 0 = n := by\n  intro n\n  show n + 0 = n\n  exact Nat.add_zero n\n";
+    const UNICODE: &str = "theorem unicodeSig (hα : True) : True := by\n  skip\n/-- following docstring must remain parseable -/\ntheorem after : True := by\n  trivial\n";
+    const ENTRY_GOAL: &str = "theorem t : ∀ (p : Prop), p → p := by\n  intro p hp\n  exact hp\n";
+    const BAD: &str = "exact definitely_missing_identifier";
+    const IDS: [&str; 18] = [
+        "c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c12", "c13", "c14", "c15", "c16",
+        "c17",
+    ];
+
+    let ProofEditTarget::Declaration { name, position } = &request.edit;
+    let ordinary = request.budgets == ModuleQueryOutputBudgets::default();
+    let one =
+        |id, text| matches!(request.candidates.as_slice(), [candidate] if candidate.id == id && candidate.text == text);
+    let numbered = |count, alternating| {
+        request.candidates.len() == count
+            && request
+                .candidates
+                .iter()
+                .zip(IDS)
+                .enumerate()
+                .all(|(index, (candidate, id))| {
+                    candidate.id == id && candidate.text == if alternating && index % 2 == 1 { BAD } else { "trivial" }
+                })
+    };
+
+    match (file, request.source.as_str(), name.as_str(), position) {
+        ("/attempt/success.lean", SUCCESS, "t", First)
+        | (
+            "/attempt/bad-selector.lean",
+            "import Lean\n\ntheorem t : True := by\n  trivial\n",
+            "t",
+            Index { index: 99 },
+        )
+        | ("/attempt/single-line.lean", "theorem t : True := by skip\n", "t", First) => {
+            ordinary && one("trivial", "trivial")
+        }
+        ("/attempt/entry-state.lean", ENTRY_STATE, "t", Index { index: 2 }) => {
+            ordinary && one("exact", "exact Nat.add_zero n")
+        }
+        ("/attempt/unicode.lean", UNICODE, "unicodeSig", First) => ordinary && one("bad", BAD),
+        ("/attempt/entry.lean", ENTRY_GOAL, "t", Entry | First) => {
+            ordinary && one("from-scratch", "intro p hp; exact hp")
+        }
+        ("/attempt/cap.lean", SKIP, "t", First) => ordinary && numbered(18, false),
+        ("/attempt/ten.lean", SKIP, "t", First) => ordinary && numbered(10, true),
+        ("/attempt/budget.lean", SKIP, "t", First) => {
+            request.budgets
+                == (ModuleQueryOutputBudgets {
+                    per_field_bytes: 16,
+                    total_bytes: 1,
+                })
+                && numbered(3, false)
+        }
+        _ => false,
+    }
 }
 impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
@@ -403,11 +466,45 @@ impl WorkerAuthority for MetadataApp {
     }
     fn proof<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: ProofAttemptRequest,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: ProofAttemptRequest,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, ProofAttemptRequest>> {
-        Err(denied())
+        let d = &self.deployment()?.record;
+        if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
+            || d.broken_import
+            || !d.typed_session
+            || d.verification
+            || !session.imports.matches_request(
+                &d.import_roots
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>(),
+                &["LeanRsHostShims.Elaboration".to_owned()],
+            )
+            || *session.imports.options() != HostImportOptions::default()
+            || !options.namespace.is_empty()
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || options.options_json != "{}"
+            || !matches_fixed_proof(&options.file, &request)
+        {
+            return Err(denied());
+        }
+        // SAFETY: grant_source checked the exact search path and ruled out plugins.
+        // Held pins the sealed images and imports. The checker admits only the fixed
+        // in-memory source, targets, candidate order and budgets in the table.
+        let grant = unsafe {
+            session.capability.proof_attempt_scope(
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                options,
+            )?
+        };
+        audit("authorize-fixed-proof-attempt");
+        Ok(grant)
     }
     fn validate_source_context(
         &self,
