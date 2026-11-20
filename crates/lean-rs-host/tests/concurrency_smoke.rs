@@ -17,14 +17,22 @@
 mod fixture;
 
 use std::path::PathBuf;
-use std::sync::Barrier;
+use std::sync::{Barrier, Mutex};
 use std::thread;
 
 use lean_rs::{LeanRuntime, LeanThreadGuard};
-use lean_rs_host::{LeanHost, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanHost, SessionPool};
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
+}
+
+fn initialized_fixture<'h>(host: &'h LeanHost<'static>) -> LeanCapabilities<'static, 'h> {
+    // Native setup rejects racing initialization. The threads meet at the
+    // barrier after this lock is released, then import and query independently.
+    static FIXTURE_INIT: Mutex<()> = Mutex::new(());
+    let _guard = FIXTURE_INIT.lock().expect("fixture initialization lock");
+    fixture::native_capabilities(host).expect("worker loads capabilities")
 }
 
 #[test]
@@ -78,12 +86,12 @@ fn independent_worker_sessions_run_in_parallel() {
             let runtime = LeanRuntime::init().expect("worker init must succeed");
             let _guard = LeanThreadGuard::attach(runtime);
             let host = LeanHost::from_lake_project(runtime, lake_root).expect("worker host opens");
-            let caps = fixture::capabilities(&host).expect("worker loads capabilities");
+            let caps = initialized_fixture(&host);
             // Stagger session imports past a barrier so several threads
             // do Lean work simultaneously.
             barrier.wait();
             let mut session = caps
-                .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
+                .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
                 .expect("worker imports its own session");
 
             let decl = session
@@ -126,10 +134,10 @@ fn per_worker_session_pool_under_concurrency() {
             let runtime = LeanRuntime::init().expect("worker init must succeed");
             let _guard = LeanThreadGuard::attach(runtime);
             let host = LeanHost::from_lake_project(runtime, lake_root).expect("host opens");
-            let caps = fixture::capabilities(&host).expect("loads capabilities");
+            let caps = initialized_fixture(&host);
             let pool = SessionPool::with_capacity(runtime, 2);
             barrier.wait();
-            let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+            let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
             for _ in 0..CHECKOUTS_PER_WORKER {
                 let mut session = pool
                     .acquire(&caps, &imports, None, None)

@@ -31,11 +31,14 @@ pub struct LeanModule<'lean, 'lib> {
 impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     /// Build the typed handle.
     ///
-    /// `pub(super)` so only `LeanLibrary::initialize_module` can produce
-    /// one—the construction site is the proof that initialization
-    /// succeeded.
+    /// The caller must already have initialized this module in this library.
     pub(super) fn new(library: &'lib LeanLibrary<'lean>, initializer: InitializerName) -> Self {
         Self { library, initializer }
+    }
+
+    /// Retain the exact initialized name when its owner keeps the library.
+    pub(super) fn into_initializer(self) -> InitializerName {
+        self.initializer
     }
 
     /// Human-readable `package::Module.Path` form for diagnostics.

@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::bundle::BundleLifetime;
+use super::initializer::InitializerName;
 use super::preflight::{CapabilityManifest, LeanRuntimePreflight, manifest_error_to_lean_error, report_into_error};
 use super::{
     DecodeCallResult, LeanArgs, LeanExported, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule,
@@ -40,6 +41,7 @@ fn built_capability_error_to_lean_error(err: &LeanBuiltCapabilityError) -> LeanE
 /// the build-script pairing.
 pub struct LeanCapability<'lean> {
     bundle: LeanLibraryBundle<'lean>,
+    initialized_module: InitializerName,
     package: String,
     module: String,
     export_signatures: HashMap<String, LeanExportSignature>,
@@ -301,13 +303,14 @@ impl<'lean> LeanCapability<'lean> {
         module: String,
         export_signatures: impl IntoIterator<Item = LeanExportSignature>,
     ) -> LeanResult<Self> {
-        let _module = bundle.initialize_module(&package, &module)?;
+        let initialized_module = bundle.initialize_module(&package, &module)?.into_initializer();
         let export_signatures = export_signatures
             .into_iter()
             .map(|signature| (signature.symbol().to_owned(), signature))
             .collect();
         Ok(Self {
             bundle,
+            initialized_module,
             package,
             module,
             export_signatures,
@@ -341,7 +344,9 @@ impl<'lean> LeanCapability<'lean> {
         R: DecodeCallResult<'lean>,
     {
         self.check_export_shape::<Args, R>(name)?;
-        let module = self.module().map_err(LeanCheckedExportError::Module)?;
+        // Construction already initialized this exact module in the still-owned
+        // library. Binding does not need to enter its native initializer again.
+        let module = LeanModule::new(self.bundle.library(), self.initialized_module.clone());
         // SAFETY: the caller established the complete native value contract.
         // Slot metadata and the loaded function/global kind were checked above.
         unsafe { module.exported_unchecked::<Args, R>(name) }.map_err(|source| LeanCheckedExportError::MissingSymbol {
