@@ -892,6 +892,59 @@ pub(super) fn native_elaboration_paths(
     native_source_paths(caps, &[MODULE]).expect("ordinary elaboration fixture selected")
 }
 
+#[allow(dead_code, reason = "host services only")]
+pub(super) fn native_module_syntax_imports<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    names: &[&str],
+) -> TrustedHostImports<'lean, 'c> {
+    let roots = native_module_syntax_paths(caps, names, false);
+    #[allow(unsafe_code, reason = "two exact import orders in the held module syntax fixture")]
+    // SAFETY: the ordinary fixture owns the fixed source-built modules and holds the
+    // selected shim inputs. No additional roots, imports or options are admitted.
+    unsafe {
+        caps.shim_capability().import_scope_with_options(
+            roots,
+            names.iter().map(|name| (*name).into()).collect(),
+            Default::default(),
+        )
+    }
+}
+
+#[allow(dead_code, reason = "host services only")]
+pub(super) fn native_module_syntax_source_paths(
+    caps: &LeanCapabilities<'_, '_>,
+    session: &lean_rs_host::LeanSession<'_, '_>,
+    names: &[&str],
+) -> Vec<String> {
+    let (_, imports) = session.source_context();
+    imports
+        .check_capability(caps.shim_capability())
+        .expect("same loaded capability");
+    assert!(imports.matches_request(
+        &caps.import_search_paths(),
+        &names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>()
+    ));
+    assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
+    native_module_syntax_paths(caps, names, true)
+}
+
+fn native_module_syntax_paths(caps: &LeanCapabilities<'_, '_>, names: &[&str], source: bool) -> Vec<String> {
+    assert!(matches!(
+        names,
+        ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"]
+            | ["Fixture.Internal", "Fixture.PrivateScope", "Fixture.Imported"]
+    ));
+    if source {
+        native_source_paths(caps, names).expect("ordinary module syntax fixture selected")
+    } else {
+        #[cfg(all(test, unix))]
+        let paths = native_import_paths(caps, names);
+        #[cfg(not(all(test, unix)))]
+        let paths: Option<Vec<String>> = None;
+        paths.expect("ordinary module syntax fixture selected")
+    }
+}
+
 fn native_source_paths(caps: &LeanCapabilities<'_, '_>, modules: &[&str]) -> Option<Vec<String>> {
     #[cfg(all(test, unix))]
     {

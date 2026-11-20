@@ -3461,27 +3461,39 @@ fn session_process_module_query_surfaces_header_parse_error() {
     );
 }
 
-#[test]
-fn session_process_module_query_handles_module_system_header() {
-    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+const MODULE_SYNTAX_IMPORTS: [&str; 3] = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
+const MODULE_SYNTAX_REORDERED: [&str; 3] = ["Fixture.Internal", "Fixture.PrivateScope", "Fixture.Imported"];
 
-    let project = TempLakeProject::new("module-query-header-host");
+fn module_syntax_host(name: &str) -> (LeanHost<'static>, Option<TempLakeProject>) {
+    if fixture::native_fixture_selected() {
+        let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens fixture");
+        return (host, None);
+    }
+    let project = TempLakeProject::new(name);
     write_module_syntax_fixture(&project);
     let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
-    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
-    let mut session = caps
-        .session(
-            &service_requests::imports(
-                &caps,
-                &["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"],
-                LeanSessionImportProfile::default(),
-            ),
-            None,
-            None,
-        )
-        .expect("session imports module-system fixture dependencies");
+    (host, Some(project))
+}
 
-    let src = "\
+fn module_syntax_session<'lean, 'c>(
+    caps: &'c lean_rs_host::LeanCapabilities<'lean, '_>,
+    names: &[&str],
+) -> LeanSession<'lean, 'c> {
+    let scope = if fixture::native_fixture_selected() {
+        fixture::native_module_syntax_imports(caps, names)
+    } else {
+        service_requests::imports(caps, names, LeanSessionImportProfile::default())
+    };
+    caps.session(&scope, None, None)
+        .expect("session imports module-system fixture dependencies")
+}
+
+fn module_syntax_query<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+) -> lean_rs::LeanResult<lean_rs_host::host::process::ModuleQueryOutcome> {
+    use lean_rs_host::host::process::ModuleQuery;
+    const SOURCE: &str = "\
 module
 
 public import Fixture.Imported
@@ -3491,16 +3503,46 @@ import Fixture.PrivateScope
 def moduleSyntaxFoo : Nat := imported + internalSecret
 #check privateOnly
 ";
-    let outcome = call_service!(
-        caps,
-        session,
-        process_module_query,
-        src,
-        &ModuleQuery::Diagnostics,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+
+    let options = LeanElabOptions::new();
+    if !fixture::native_fixture_selected() {
+        return call_service!(
+            caps,
+            session,
+            process_module_query,
+            SOURCE,
+            &ModuleQuery::Diagnostics,
+            &options,
+            None
+        );
+    }
+    let paths = fixture::native_module_syntax_source_paths(caps, session, &MODULE_SYNTAX_IMPORTS);
+    let (env, scope) = session.source_context();
+    let request = lean_rs::host_bridge::HostModuleQuery {
+        source: SOURCE.into(),
+        query: ModuleQuery::Diagnostics,
+    };
+    #[allow(
+        unsafe_code,
+        reason = "one exact diagnostics query in the held module syntax fixture"
+    )]
+    // SAFETY: this fixed request uses the exact fixture graph, retained paths
+    // and default diagnostics options; no caller-provided source enters.
+    let admitted = unsafe {
+        caps.shim_capability()
+            .module_query_scope(env, scope, paths, request, options.source_options())
+    }?;
+    session.process_module_query(&admitted, None)
+}
+
+#[test]
+fn session_process_module_query_handles_module_system_header() {
+    use lean_rs_host::host::process::{ModuleQueryOutcome, ModuleQueryResult};
+
+    let (host, _temp) = module_syntax_host("module-query-header-host");
+    let caps = fixture::native_shims_only(&host).expect("shim-only capabilities load");
+    let mut session = module_syntax_session(&caps, &MODULE_SYNTAX_IMPORTS);
+    let outcome = module_syntax_query(&caps, &mut session).expect("host stack reports no exception");
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::Diagnostics(diagnostics),
         imports,
@@ -3538,114 +3580,141 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
     );
 }
 
-/// Warm module headers must preserve the same visibility and diagnostics as a
-/// fresh import, including when a caller changes the header or its options.
-#[test]
-fn cached_module_headers_match_cold_queries_after_edits() {
-    use lean_rs_host::host::process::{
-        ModuleQueryBatchCachedOutcome, ModuleQueryCachePolicy, ModuleQueryOutputBudgets, ModuleQuerySelector,
-    };
+#[derive(Clone, Copy)]
+enum ModuleSyntaxCacheCase {
+    Base,
+    Body,
+    Visibility,
+    Private,
+    Public,
+    Options,
+    Label,
+    NewSession,
+}
 
-    let project = TempLakeProject::new("cached-module-header-host");
-    write_module_syntax_fixture(&project);
-    let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
-    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
-    let imports = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
-    let mut session = caps
-        .session(
-            &service_requests::imports(&caps, &imports, LeanSessionImportProfile::default()),
-            None,
-            None,
-        )
-        .expect("session imports fixture");
+impl ModuleSyntaxCacheCase {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Base => "base",
+            Self::Body => "body",
+            Self::Visibility => "visibility",
+            Self::Private => "private",
+            Self::Public => "public",
+            Self::Options => "options",
+            Self::Label => "label",
+            Self::NewSession => "new-session",
+        }
+    }
+}
+
+fn module_syntax_cached_query<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    case: ModuleSyntaxCacheCase,
+) -> lean_rs::LeanResult<lean_rs_host::host::process::ModuleQueryBatchCachedOutcome> {
+    use lean_rs_host::host::process::{ModuleQueryCachePolicy, ModuleQueryOutputBudgets, ModuleQuerySelector};
+
     let header = "module\npublic import Fixture.Imported\nimport all Fixture.Internal\nimport Fixture.PrivateScope\n";
     let base = format!("{header}\ndef foo : Nat := imported + internalSecret\n#check privateOnly\n");
-    let cases = [
-        (
-            format!("{base}\ndef bar : Nat := 3\n"),
-            "body",
-            100_000,
-            "/cache/module.lean",
-        ),
-        (
-            base.replace("import all Fixture.Internal", "import Fixture.Internal"),
-            "visibility",
-            100_000,
-            "/cache/module.lean",
-        ),
-        (
-            base.replace("import Fixture.PrivateScope", "import all Fixture.PrivateScope"),
-            "private",
-            100_000,
-            "/cache/module.lean",
-        ),
-        (
-            base.replace("public import Fixture.Imported", "import Fixture.Imported"),
-            "public",
-            100_000,
-            "/cache/module.lean",
-        ),
-        (base.clone(), "options", 200_000, "/cache/module.lean"),
-        (base.clone(), "label", 100_000, "/cache/other.lean"),
-    ];
-    let selectors = [ModuleQuerySelector::Diagnostics {
-        id: "diagnostics".to_owned(),
-    }];
-    let budgets = ModuleQueryOutputBudgets::default();
-    let policy = |key: &str| ModuleQueryCachePolicy {
+    let source = match case {
+        ModuleSyntaxCacheCase::Body => format!("{base}\ndef bar : Nat := 3\n"),
+        ModuleSyntaxCacheCase::Visibility => base.replace("import all Fixture.Internal", "import Fixture.Internal"),
+        ModuleSyntaxCacheCase::Private => {
+            base.replace("import Fixture.PrivateScope", "import all Fixture.PrivateScope")
+        }
+        ModuleSyntaxCacheCase::Public => base.replace("public import Fixture.Imported", "import Fixture.Imported"),
+        ModuleSyntaxCacheCase::Base
+        | ModuleSyntaxCacheCase::Options
+        | ModuleSyntaxCacheCase::Label
+        | ModuleSyntaxCacheCase::NewSession => base,
+    };
+    let policy = ModuleQueryCachePolicy {
         file_identity: "module-header-test".to_owned(),
-        key: key.to_owned(),
+        key: case.key().to_owned(),
         max_entries: 8,
         ttl_millis: 60_000,
         max_bytes: 1_048_576,
     };
-    let baseline_opts = LeanElabOptions::new()
-        .file_label("/cache/module.lean")
-        .heartbeat_limit(100_000);
-    for (source, name, heartbeats, label) in cases {
-        session.clear_module_snapshot_cache().expect("clear prior case");
-        session.clear_module_header_cache().expect("clear prior header");
-        call_service!(
-            caps,
-            session,
-            process_module_query_batch_cached,
-            &base,
-            &selectors,
-            &budgets,
-            &baseline_opts,
-            &policy("base"),
-            None
-        )
-        .expect("seed snapshot");
-        let opts = LeanElabOptions::new().file_label(label).heartbeat_limit(heartbeats);
-        let warm = call_service!(
+    let label = if matches!(case, ModuleSyntaxCacheCase::Label) {
+        "/cache/other.lean"
+    } else {
+        "/cache/module.lean"
+    };
+    let heartbeats = if matches!(case, ModuleSyntaxCacheCase::Options) {
+        200_000
+    } else {
+        100_000
+    };
+    let options = LeanElabOptions::new().file_label(label).heartbeat_limit(heartbeats);
+    let selectors = [ModuleQuerySelector::Diagnostics {
+        id: "diagnostics".into(),
+    }];
+    let budgets = ModuleQueryOutputBudgets::default();
+    if !fixture::native_fixture_selected() {
+        return call_service!(
             caps,
             session,
             process_module_query_batch_cached,
             &source,
             &selectors,
             &budgets,
-            &opts,
-            &policy(name),
+            &options,
+            &policy,
             None
-        )
-        .expect("warm query");
+        );
+    }
+    let names = if matches!(case, ModuleSyntaxCacheCase::NewSession) {
+        &MODULE_SYNTAX_REORDERED
+    } else {
+        &MODULE_SYNTAX_IMPORTS
+    };
+    let paths = fixture::native_module_syntax_source_paths(caps, session, names);
+    let (env, scope) = session.source_context();
+    let request = lean_rs::host_bridge::HostCachedModuleBatch {
+        batch: lean_rs::host_bridge::HostModuleBatch {
+            source,
+            selectors: selectors.into(),
+            budgets,
+        },
+        policy: format!(
+            "{}\n{}\n{}\n{}\n{}",
+            policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
+        ),
+    };
+    #[allow(
+        unsafe_code,
+        reason = "eight exact cached requests in the held module syntax fixture"
+    )]
+    // SAFETY: the cases fix the source, diagnostics selector, budgets, cache
+    // policy and options in the exact retained import graph.
+    let admitted = unsafe {
+        caps.shim_capability()
+            .cached_module_batch_scope(env, scope, paths, request, options.source_options())
+    }?;
+    session.process_module_query_batch_cached(&admitted, None)
+}
+
+/// Warm module headers must preserve the same visibility and diagnostics as a
+/// fresh import, including when a caller changes the header or its options.
+#[test]
+fn cached_module_headers_match_cold_queries_after_edits() {
+    use lean_rs_host::host::process::ModuleQueryBatchCachedOutcome;
+
+    let (host, _temp) = module_syntax_host("cached-module-header-host");
+    let caps = fixture::native_shims_only(&host).expect("shim-only capabilities load");
+    let mut session = module_syntax_session(&caps, &MODULE_SYNTAX_IMPORTS);
+    use ModuleSyntaxCacheCase::{Base, Body, Label, NewSession, Options, Private, Public, Visibility};
+    for case in [Body, Visibility, Private, Public, Options, Label] {
+        let name = case.key();
+        session.clear_module_snapshot_cache().expect("clear prior case");
+        session.clear_module_header_cache().expect("clear prior header");
+        module_syntax_cached_query(&caps, &mut session, Base).expect("seed snapshot");
+        let warm = module_syntax_cached_query(&caps, &mut session, case).expect("warm query");
         session.clear_module_snapshot_cache().expect("clear warm snapshot");
         session
             .clear_module_header_cache()
             .expect("force genuinely cold header");
-        let cold = call_service!(
-            caps,
-            session,
-            process_module_query_batch_cached,
-            &source,
-            &selectors,
-            &budgets,
-            &opts,
-            &policy(name),
-            None
-        )
-        .expect("cold query");
+        let cold = module_syntax_cached_query(&caps, &mut session, case).expect("cold query");
         let (
             ModuleQueryBatchCachedOutcome::Ok { result: warm, .. },
             ModuleQueryBatchCachedOutcome::Ok { result: cold, .. },
@@ -3661,43 +3730,11 @@ fn cached_module_headers_match_cold_queries_after_edits() {
     }
     // Same file and header, but a different imported environment. The global
     // snapshot cache must not carry a header environment across sessions.
-    let mut other = caps
-        .session(
-            &service_requests::imports(
-                &caps,
-                &["Fixture.Internal", "Fixture.PrivateScope", "Fixture.Imported"],
-                LeanSessionImportProfile::default(),
-            ),
-            None,
-            None,
-        )
-        .expect("different session imports fixture");
-    let warm = call_service!(
-        caps,
-        other,
-        process_module_query_batch_cached,
-        &base,
-        &selectors,
-        &budgets,
-        &baseline_opts,
-        &policy("new-session"),
-        None,
-    )
-    .expect("new-session query");
+    let mut other = module_syntax_session(&caps, &MODULE_SYNTAX_REORDERED);
+    let warm = module_syntax_cached_query(&caps, &mut other, NewSession).expect("new-session query");
     other.clear_module_snapshot_cache().expect("clear new-session snapshot");
     other.clear_module_header_cache().expect("clear new-session header");
-    let cold = call_service!(
-        caps,
-        other,
-        process_module_query_batch_cached,
-        &base,
-        &selectors,
-        &budgets,
-        &baseline_opts,
-        &policy("new-session"),
-        None,
-    )
-    .expect("cold new-session query");
+    let cold = module_syntax_cached_query(&caps, &mut other, NewSession).expect("cold new-session query");
     let (
         ModuleQueryBatchCachedOutcome::Ok { result: warm, .. },
         ModuleQueryBatchCachedOutcome::Ok { result: cold, .. },
