@@ -905,7 +905,7 @@ pub(super) fn native_module_syntax_imports<'lean, 'c>(
         caps.shim_capability().import_scope_with_options(
             roots,
             names.iter().map(|name| (*name).into()).collect(),
-            Default::default(),
+            lean_rs::module::HostImportOptions::default(),
         )
     }
 }
