@@ -20,9 +20,8 @@ mod transitive_assertions;
 #[path = "support/good_shims_assertions.rs"]
 mod good_shims_assertions;
 
-// Only the two option regressions use the held elaboration fixture for these
-// calls. Their sources, targets, selectors, cache policy and options are fixed
-// at the call sites; other requests still need the independent policy record.
+// The marked regression calls fix their sources, selectors and options at
+// the call site. All other calls still need the independent policy record.
 macro_rules! service_paths {
     ($caps:ident, $session:ident, $operation:literal, $payload:expr, $options:ident) => {
         service_requests::approved_paths(&$caps, &$session, $operation, $payload, &$options)
@@ -30,6 +29,20 @@ macro_rules! service_paths {
     ($caps:ident, $session:ident, $operation:literal, $payload:expr, $options:ident, option_regression) => {
         if fixture::native_fixture_selected() {
             fixture::native_elaboration_paths(&$caps, &$session)
+        } else {
+            service_paths!($caps, $session, $operation, $payload, $options)
+        }
+    };
+    ($caps:ident, $session:ident, $operation:literal, $payload:expr, $options:ident, header_accounting) => {
+        if fixture::native_fixture_selected() {
+            fixture::HeldHostImport::HeaderAccounting.source_paths(&$caps, &$session)
+        } else {
+            service_paths!($caps, $session, $operation, $payload, $options)
+        }
+    };
+    ($caps:ident, $session:ident, $operation:literal, $payload:expr, $options:ident, full_profile($profile:ident)) => {
+        if fixture::native_fixture_selected() {
+            fixture::HeldHostImport::FullProfiles($profile).source_paths(&$caps, &$session)
         } else {
             service_paths!($caps, $session, $operation, $payload, $options)
         }
@@ -59,10 +72,10 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.kernel_check(&admitted, $cancel, $progress)
     }};
-    ($caps:ident, $session:ident, elaborate, $source:expr, None, $options:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, elaborate, $source:expr, None, $options:expr, $cancel:expr $(; $policy_kind:ident $(($profile:ident))?)? $(,)?) => {{
         let request: String = ($source).to_owned();
         let options = ($options).source_options();
-        let paths = service_requests::approved_paths(&$caps, &$session, "elaborate", &format!("{request:?}"), &options);
+        let paths = service_paths!($caps, $session, "elaborate", &format!("{request:?}"), options $(, $policy_kind $(($profile))?)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -101,7 +114,7 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query_batch, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query_batch, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $cancel:expr $(; $policy_kind:ident $(($profile:ident))?)? $(,)?) => {{
         let batch = lean_rs::host_bridge::HostModuleBatch {
             source: ($source).to_owned(),
             selectors: ($selectors).to_vec(),
@@ -110,7 +123,7 @@ macro_rules! call_service {
         let request = batch;
         let options = ($options).source_options();
         let paths = service_paths!($caps, $session, "process_module_query_batch",
-            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)), options $(, $policy_kind)?);
+            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)), options $(, $policy_kind $(($profile))?)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -649,16 +662,21 @@ fn session_import_profiles_pass_full_host_gates() {
 
     const IMPORTS: &[&str] = &["LeanRsFixture.Handles", "LeanRsHostShims.Elaboration"];
     const DECL: &str = "LeanRsFixture.Handles.nameAnonymous";
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let imports = |profile| {
+        if fixture::native_fixture_selected() {
+            fixture::HeldHostImport::FullProfiles(profile).imports(&caps)
+        } else {
+            service_requests::imports(&caps, IMPORTS, profile)
+        }
+    };
 
     for profile in [
         LeanSessionImportProfile::ExportedPublic,
         LeanSessionImportProfile::Server,
     ] {
-        let Err(err) =
-            caps.session_with_profile(&service_requests::imports(&caps, IMPORTS, profile), profile, None, None)
-        else {
+        let Err(err) = caps.session_with_profile(&imports(profile), profile, None, None) else {
             panic!("{} should report the non-module fixture blocker", profile.label());
         };
         let message = format!("{err:?}");
@@ -674,7 +692,7 @@ fn session_import_profiles_pass_full_host_gates() {
         LeanSessionImportProfile::FullPrivateCompat,
     ] {
         let mut session = caps
-            .session_with_profile(&service_requests::imports(&caps, IMPORTS, profile), profile, None, None)
+            .session_with_profile(&imports(profile), profile, None, None)
             .unwrap_or_else(|err| panic!("{} session imports cleanly: {err:?}", profile.label()));
         let stats = session.import_stats().clone();
         assert_eq!(stats.import_all, profile.import_all(), "{} importAll", profile.label());
@@ -727,7 +745,7 @@ fn session_import_profiles_pass_full_host_gates() {
             "(1 + 2 : Nat)",
             None,
             &LeanElabOptions::new(),
-            None
+            None; full_profile(profile)
         )
         .unwrap_or_else(|err| panic!("{} elaboration dispatch succeeds: {err:?}", profile.label()));
         assert!(
@@ -748,7 +766,7 @@ fn session_import_profiles_pass_full_host_gates() {
             }],
             &ModuleQueryOutputBudgets::default(),
             &LeanElabOptions::new(),
-            None,
+            None; full_profile(profile)
         )
         .unwrap_or_else(|err| panic!("{} proof-state dispatch succeeds: {err:?}", profile.label()));
         let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
@@ -4093,15 +4111,14 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
 #[test]
 fn header_import_accounting_survives_snapshot_eviction_and_query_paths() {
     use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector};
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("caps");
-    let mut session = caps
-        .session(
-            &service_requests::imports(&caps, &["Lean"], LeanSessionImportProfile::default()),
-            None,
-            None,
-        )
-        .expect("session");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("caps");
+    let imports = if fixture::native_fixture_selected() {
+        fixture::HeldHostImport::HeaderAccounting.imports(&caps)
+    } else {
+        service_requests::imports(&caps, &["Lean"], LeanSessionImportProfile::default())
+    };
+    let mut session = caps.session(&imports, None, None).expect("session");
     let source = "module\nimport Lean\npublic def headerAccountingProbe : Nat := 1\n";
     let opts = LeanElabOptions::new().file_label("header-accounting.lean");
     session
@@ -4115,7 +4132,7 @@ fn header_import_accounting_survives_snapshot_eviction_and_query_paths() {
         source,
         &ModuleQuery::Diagnostics,
         &opts,
-        None
+        None; header_accounting
     )
     .expect("first query");
     let imported = session.header_import_state().expect("fresh accounting");
@@ -4132,7 +4149,7 @@ fn header_import_accounting_survives_snapshot_eviction_and_query_paths() {
         }],
         &ModuleQueryOutputBudgets::default(),
         &opts,
-        None,
+        None; header_accounting
     )
     .expect("other query path");
     let reused = session.header_import_state().expect("warm accounting");
@@ -4148,7 +4165,7 @@ fn header_import_accounting_survives_snapshot_eviction_and_query_paths() {
         source,
         &ModuleQuery::Diagnostics,
         &opts,
-        None
+        None; header_accounting
     )
     .expect("reimport");
     assert_eq!(

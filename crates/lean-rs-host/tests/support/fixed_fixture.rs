@@ -890,6 +890,97 @@ pub(super) fn native_meta_term<'lean, 'c>(
 }
 
 #[allow(dead_code, reason = "host services only")]
+#[derive(Clone, Copy)]
+pub(super) enum HeldHostImport {
+    HeaderAccounting,
+    FullProfiles(lean_rs_host::LeanSessionImportProfile),
+}
+
+impl HeldHostImport {
+    fn modules(self) -> &'static [&'static str] {
+        match self {
+            Self::HeaderAccounting => &["Lean"],
+            Self::FullProfiles(_) => &["LeanRsFixture.Handles", "LeanRsHostShims.Elaboration"],
+        }
+    }
+
+    fn options(self) -> lean_rs::module::HostImportOptions {
+        let profile = match self {
+            Self::HeaderAccounting => lean_rs_host::LeanSessionImportProfile::Private,
+            Self::FullProfiles(profile) => profile,
+        };
+        lean_rs_host::LeanImportProfileMode::FullSession(profile)
+            .native_options(&lean_rs_host::LeanImportProfilerOptions::default())
+    }
+
+    fn roots(self, caps: &LeanCapabilities<'_, '_>) -> (Vec<String>, PathBuf) {
+        // The header case must find Lean in the installed release, never in
+        // the explicit fixture paths. The existing path check forbids shadows.
+        let local = match self {
+            Self::HeaderAccounting => &[][..],
+            Self::FullProfiles(_) => self.modules(),
+        };
+        #[cfg(all(test, unix))]
+        let explicit = native_import_paths(caps, local);
+        #[cfg(not(all(test, unix)))]
+        let explicit: Option<Vec<String>> = {
+            let _ = (caps, local);
+            None
+        };
+        let paths = explicit.expect("ordinary host fixture selected");
+        let prefix = Path::new(lean_toolchain::LEAN_HEADER_PATH)
+            .ancestors()
+            .nth(3)
+            .expect("build-selected Lean prefix");
+        assert_eq!(std::env::var_os("LEAN_SYSROOT").as_deref(), Some(prefix.as_os_str()));
+        assert!(std::env::var_os("LEAN_PATH").is_none());
+        let release = prefix.join("lib/lean");
+        assert_eq!(release.canonicalize().expect("canonical Lean library"), release);
+        let lean = release.join("Lean.olean");
+        assert!(lean.is_file() && lean.canonicalize().expect("canonical Lean module") == lean);
+        (paths, release)
+    }
+
+    #[allow(dead_code, reason = "host services only")]
+    pub(super) fn imports<'lean, 'c>(self, caps: &'c LeanCapabilities<'lean, '_>) -> TrustedHostImports<'lean, 'c> {
+        let (paths, _) = self.roots(caps);
+        let names = self.modules().iter().map(|name| (*name).into()).collect();
+        #[allow(unsafe_code, reason = "the held fixture covers only these two fixed import lists")]
+        // SAFETY: the verified user and shim roots and installed release cover
+        // the fixed imports. Profile options come from the supported full-session
+        // modes with profiling and file output disabled.
+        unsafe {
+            caps.shim_capability()
+                .import_scope_with_options(paths, names, self.options())
+        }
+    }
+
+    #[allow(dead_code, reason = "host services only")]
+    pub(super) fn source_paths(
+        self,
+        caps: &LeanCapabilities<'_, '_>,
+        session: &lean_rs_host::LeanSession<'_, '_>,
+    ) -> Vec<String> {
+        assert!(!matches!(
+            self,
+            Self::FullProfiles(
+                lean_rs_host::LeanSessionImportProfile::ExportedPublic | lean_rs_host::LeanSessionImportProfile::Server
+            )
+        ));
+        let (mut paths, release) = self.roots(caps);
+        let (_, imports) = session.source_context();
+        imports
+            .check_capability(caps.shim_capability())
+            .expect("same held capability");
+        let names = self.modules().iter().map(|name| (*name).into()).collect::<Vec<_>>();
+        assert!(imports.matches_request(&paths, &names));
+        assert_eq!(imports.options(), &self.options());
+        paths.push(release.to_str().expect("UTF-8 Lean path").to_owned());
+        paths
+    }
+}
+
+#[allow(dead_code, reason = "host services only")]
 pub(super) fn native_elaboration_paths(
     caps: &LeanCapabilities<'_, '_>,
     session: &lean_rs_host::LeanSession<'_, '_>,
