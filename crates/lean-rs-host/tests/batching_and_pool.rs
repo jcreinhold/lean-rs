@@ -669,7 +669,10 @@ impl ReceiptProject {
         .expect("write project configuration");
         fs::write(
             project.0.join("lake-manifest.json"),
-            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"receipt_second","lakeDir":".lake"}"#,
+            concat!(
+                r#"{"version":"1.1.0","packagesDir":".lake/packages","#,
+                r#""packages":[],"name":"receipt_second","lakeDir":".lake"}"#,
+            ),
         )
         .expect("write exact empty dependency graph");
         fs::write(

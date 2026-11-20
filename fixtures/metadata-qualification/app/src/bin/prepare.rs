@@ -687,7 +687,11 @@ fn build_transitive_fixture(project: &Path, sysroot: &Path) -> Result<(), Box<dy
     )?;
     fs::write(
         project.join("lake-manifest.json"),
-        r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"./.lake/packages/dep","configFile":"lakefile.lean"}],"name":"consumer","lakeDir":".lake"}"#,
+        concat!(
+            r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"dep","#,
+            r#""manifestFile":"lake-manifest.json","inherited":false,"dir":"./.lake/packages/dep","#,
+            r#""configFile":"lakefile.lean"}],"name":"consumer","lakeDir":".lake"}"#,
+        ),
     )?;
     for (root, target) in [(dep.as_path(), "Dep.Hello"), (project, "Consumer")] {
         if !std::process::Command::new(sysroot.join("bin/lake"))

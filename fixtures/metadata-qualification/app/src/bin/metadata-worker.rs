@@ -220,12 +220,19 @@ fn pool_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) ->
         Ok("lease_module_query_batch_reuses_one_warm_session") => {
             batch.budgets.per_field_bytes == 8192
                 && batch.budgets.total_bytes == 65536
-                && matches!(batch.selectors.as_slice(), [Diagnostics { id: diagnostics }, ProofState { id: state, line: 2, column: 4 }] if diagnostics == "diagnostics" && state == "state")
+                && matches!(
+                    batch.selectors.as_slice(),
+                    [Diagnostics { id: diagnostics }, ProofState { id: state, line: 2, column: 4 }]
+                        if diagnostics == "diagnostics" && state == "state"
+                )
         }
         Ok("lease_module_query_batch_preserves_item_level_budget_failures") => {
             batch.budgets.per_field_bytes == 128
                 && batch.budgets.total_bytes == 0
-                && matches!(batch.selectors.as_slice(), [ProofState { id: state, line: 2, column: 4 }] if state == "state")
+                && matches!(
+                    batch.selectors.as_slice(),
+                    [ProofState { id: state, line: 2, column: 4 }] if state == "state"
+                )
         }
         _ => false,
     };

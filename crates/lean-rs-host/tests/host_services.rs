@@ -52,7 +52,8 @@ macro_rules! service_paths {
 // Capture exact typed requests before taking the mutable session borrow. The policy
 // encoding uses derived Debug for closed SDK request enums (including every field).
 macro_rules! call_service {
-    ($caps:ident, $session:ident, kernel_check, $source:expr, $options:expr, $cancel:expr, $progress:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, kernel_check,
+        $source:expr, $options:expr, $cancel:expr, $progress:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request: String = ($source).to_owned();
         let options = ($options).source_options();
         let paths =
@@ -72,10 +73,12 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.kernel_check(&admitted, $cancel, $progress)
     }};
-    ($caps:ident, $session:ident, elaborate, $source:expr, None, $options:expr, $cancel:expr $(; $policy_kind:ident $(($profile:ident))?)? $(,)?) => {{
+    ($caps:ident, $session:ident, elaborate,
+        $source:expr, None, $options:expr, $cancel:expr $(; $policy_kind:ident $(($profile:ident))?)? $(,)?) => {{
         let request: String = ($source).to_owned();
         let options = ($options).source_options();
-        let paths = service_paths!($caps, $session, "elaborate", &format!("{request:?}"), options $(, $policy_kind $(($profile))?)?);
+        let paths = service_paths!($caps, $session, "elaborate",
+            &format!("{request:?}"), options $(, $policy_kind $(($profile))?)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -91,7 +94,8 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.elaborate(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query, $source:expr, $query:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query,
+        $source:expr, $query:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = lean_rs::host_bridge::HostModuleQuery {
             source: ($source).to_owned(),
             query: ($query).clone(),
@@ -114,7 +118,9 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query_batch, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $cancel:expr $(; $policy_kind:ident $(($profile:ident))?)? $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query_batch,
+        $source:expr, $selectors:expr, $budgets:expr,
+        $options:expr, $cancel:expr $(; $policy_kind:ident $(($profile:ident))?)? $(,)?) => {{
         let batch = lean_rs::host_bridge::HostModuleBatch {
             source: ($source).to_owned(),
             selectors: ($selectors).to_vec(),
@@ -123,7 +129,8 @@ macro_rules! call_service {
         let request = batch;
         let options = ($options).source_options();
         let paths = service_paths!($caps, $session, "process_module_query_batch",
-            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)), options $(, $policy_kind $(($profile))?)?);
+            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)),
+            options $(, $policy_kind $(($profile))?)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -139,7 +146,9 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query_batch(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query_batch_cached, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $policy:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query_batch_cached,
+        $source:expr, $selectors:expr, $budgets:expr,
+        $options:expr, $policy:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let batch = lean_rs::host_bridge::HostModuleBatch {
             source: ($source).to_owned(),
             selectors: ($selectors).to_vec(),
@@ -179,7 +188,8 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query_batch_cached(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, verify_declaration_batch, $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, verify_declaration_batch,
+        $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = ($input).clone();
         let options = ($options).source_options();
         let paths = service_paths!($caps, $session, "verify_declaration_batch",
@@ -199,7 +209,8 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.verify_declaration_batch(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, verify_declaration, $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, verify_declaration,
+        $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = ($input).clone();
         let options = ($options).source_options();
         let paths = service_paths!($caps, $session, "verify_declaration",
@@ -219,7 +230,8 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.verify_declaration(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, attempt_proof, $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
+    ($caps:ident, $session:ident, attempt_proof,
+        $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = ($input).clone();
         let options = ($options).source_options();
         let paths =
