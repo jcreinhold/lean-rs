@@ -633,3 +633,52 @@ fn malformed_fifo_owner_is_rejected_without_waiting_for_a_writer() {
     assert!(started.elapsed() < Duration::from_millis(300));
     assert!(reserve(&fixture, 2, &slot("other", "main", 1)).is_err());
 }
+
+#[test]
+fn exact_native_recovery_intent_has_one_winner() {
+    let fixture = Fixture::new();
+    let record = reserve_owner_record(&fixture.registry, NONCE, Duration::from_secs(1)).unwrap();
+    let mut child = private_group();
+    running(&record, &child);
+    let expected = NativeProcessIdentity::capture(child.id()).unwrap().unwrap();
+    let budget = Duration::from_secs(1);
+    let live = claim_native_recovery(&record, &expected, budget).unwrap_err();
+    assert_eq!(live.kind(), io::ErrorKind::WouldBlock);
+
+    // Only the parent birth is synthetic. The worker anchor is a real
+    // test-owned group, and the fixture's guardian identity is already stale.
+    let mut value = read_owner(&record).unwrap();
+    value["parent"]["start"] = json!("synthetic-previous-service");
+    persist_owner(&record, &value).unwrap();
+    let mut stale = expected.clone();
+    stale.start = "wrong-worker-birth".to_owned();
+    assert!(claim_native_recovery(&record, &stale, budget).is_err());
+
+    let start = std::sync::Barrier::new(2);
+    let outcomes = thread::scope(|contenders| {
+        let claim = || {
+            start.wait();
+            claim_native_recovery(&record, &expected, budget)
+        };
+        let first = contenders.spawn(claim);
+        let second = contenders.spawn(claim);
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    stopped(&mut child);
+    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| outcome
+                .as_ref()
+                .is_err_and(|error| error.kind() == io::ErrorKind::WouldBlock))
+            .count(),
+        1
+    );
+    let recorded: NativeProcessIdentity =
+        serde_json::from_value(read_owner(&record).unwrap()["recovery_claim"].clone()).unwrap();
+    assert_eq!(
+        recorded,
+        NativeProcessIdentity::capture(std::process::id()).unwrap().unwrap()
+    );
+}

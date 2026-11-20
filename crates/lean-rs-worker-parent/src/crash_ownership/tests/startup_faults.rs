@@ -96,6 +96,7 @@ fn partial_ack_fails_after_positive_wire_write() {
         guardian: Some(identity.clone()),
         protected_domains: Vec::new(),
         capacity_slot: None,
+        recovery_claim: None,
     };
     // This synthetic admitted lease isolates ACK framing, not admission or OS custody.
     let mut lease = ParentLifetimeLease {

@@ -115,6 +115,9 @@ pub struct LeanWorkerOwnedGeneration {
     pub protected_domains: Vec<NativeReadDomain>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capacity_slot: Option<native_guardian::NativeCapacitySlot>,
+    #[doc(hidden)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_claim: Option<LeanWorkerOwnedProcess>,
 }
 
 /// Link-free lifetime admission for an external native process group.
@@ -699,6 +702,7 @@ impl ParentLifetime {
             guardian,
             protected_domains: Vec::new(),
             capacity_slot: self.capacity_slot.clone(),
+            recovery_claim: None,
         };
         let record = self.directory.join("owner.json");
         if self.guarded {

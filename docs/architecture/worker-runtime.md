@@ -551,6 +551,11 @@ no-op. No additional cleanup process or journal is created.
 
 If another waiter has revoked the actual parent's wait authority (`ECHILD`), confirmed whole-group absence may release
 resource capacity without supplying any exit-status receipt. Other wait errors retain the actual child for retry.
+The SDK can persist a first recovery intent in a guarded Running owner record after the exact original service and
+guardian are non-live and the original worker anchor still matches. The admission lock serializes competing claims.
+A committed intent carries no signal, descriptor, or launch authority. Replacing a dead claimant and recovering an
+interrupted intent publication require further recovery transitions.
+
 Physical capacity recovery never changes an unknown request into a proof result. A failed guardian does not authorize
 signaling a serialized numeric PID: a surviving parent uses only its still-owned unreaped child pin. If both the server
 and guardian disappear, no such signaling authority remains and surviving descendants must close before passive recovery

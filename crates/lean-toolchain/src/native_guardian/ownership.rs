@@ -174,6 +174,12 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             .validate()?;
     }
     let phase = field(value, "phase");
+    if !field(value, "recovery_claim").is_null() {
+        if version != 2 || phase != "running" {
+            return Err(invalid("native recovery claim requires a running guarded owner"));
+        }
+        checked_identity(field(value, "recovery_claim"))?;
+    }
     if phase == "preparing" || phase == "preparing_closed" || phase == "dispatching" {
         if version != 2
             || !field(value, "process").is_null()
@@ -318,21 +324,50 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
         .and_then(Path::parent)
         .ok_or_else(|| invalid("owner registry missing"))?;
     validate_registry(root)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(root.join(".admission.lock"))?;
-    let until = deadline(timeout)?;
-    loop {
-        match file.try_lock() {
-            Ok(()) => return Ok(file),
-            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
-                thread::sleep(Duration::from_millis(5));
-            }
-            Err(std::fs::TryLockError::WouldBlock) => return Err(expired()),
-            Err(std::fs::TryLockError::Error(e)) => return Err(e),
-        }
+    lock_admission(root, deadline(timeout)?, false)
+}
+
+/// Publish the first recovery intent for an exact running worker after loss
+/// of the original service and its guardian. This arbitrates intent only.
+/// It conveys no authority to signal, take custody or reuse the worker slot.
+/// A committed intent stays fenced against another claimant until scope
+/// retirement. Replacement of a dead claimant requires a later protocol.
+///
+/// # Errors
+/// Returns WouldBlock for a live owner or prior claim. Refuses changed or
+/// closed scopes and propagates unavailable observations or failed publication.
+#[doc(hidden)]
+pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, timeout: Duration) -> io::Result<()> {
+    let _lock = lock_publication(record, timeout)?;
+    validate_registry(
+        record
+            .parent()
+            .ok_or_else(|| invalid("native owner directory missing"))?,
+    )?;
+    let mut value = read_owner(record)?;
+    validate_owner_header(&value)?;
+    if field(&value, "version") != 2
+        || field(&value, "phase") != "running"
+        || checked_identity(field(&value, "process"))? != *expected
+    {
+        return Err(invalid("native recovery scope changed"));
     }
+    if !field(&value, "recovery_claim").is_null()
+        || checked_identity(field(&value, "parent"))?.is_live()?
+        || checked_identity(field(&value, "guardian"))?.is_live()?
+    {
+        return Err(busy("native recovery owner is already live or claimed"));
+    }
+    if NativeProcessIdentity::capture(expected.pid)?.as_ref() != Some(expected) || !expected.is_live()? {
+        return Err(invalid("native recovery payload anchor is unavailable"));
+    }
+    let claimant =
+        NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native recoverer absent"))?;
+    value
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?
+        .insert("recovery_claim".to_owned(), json!(claimant));
+    super::persist_owner_at(record, &value, "recovery-write")
 }
 
 /// Mark possible dispatch durably before invoking the spawn syscall.
@@ -569,7 +604,12 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
         if record_can_be_removed(&value)? {
             // Keep the committed record parseable through partial asset cleanup.
             super::cleanup_generation_inputs(&entry.path())?;
-            for name in ["owner.write", "owner.guardian-write", "owner.closure-write"] {
+            for name in [
+                "owner.write",
+                "owner.guardian-write",
+                "owner.closure-write",
+                "owner.recovery-write",
+            ] {
                 match fs::remove_file(entry.path().join(name)) {
                     Ok(()) => {}
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
