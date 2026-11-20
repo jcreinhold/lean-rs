@@ -26,6 +26,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let target = sdk.join("target").canonicalize()?;
     let profile = env::args().nth(2);
+    if profile.as_deref() == Some("--stream-shims") && env::args().len() == 3 {
+        if state != target.join("metadata-qualification/stream-package") {
+            return Err("stream shims require the private fixture package".into());
+        }
+        let prepared = lean_rs_host::host::prepare_host_artifacts_for_generated_output("lean-4.36.0")?;
+        println!("{}", prepared.manifest_path().display());
+        return Ok(());
+    }
     let broken_import =
         match profile.as_deref() {
             None => false,
@@ -307,12 +315,10 @@ fn prepare_typed_session(
     };
     let expected_project = if legacy {
         state.join("legacy")
+    } else if stream {
+        sdk.join("target/metadata-qualification/stream-package/fixtures/interop-worker")
     } else {
-        sdk.join(if stream {
-            "fixtures/interop-worker"
-        } else {
-            "fixtures/lean"
-        })
+        sdk.join("fixtures/lean")
     };
     let project = expected_project.canonicalize()?;
     // The trusted job already built this exact checkout fixture once and keeps

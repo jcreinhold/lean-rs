@@ -12,6 +12,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tomllib
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 
@@ -1494,6 +1495,79 @@ STREAM_REACQUIRE = {
 }
 
 
+def stream_package_root():
+    return TARGET / "metadata-qualification/stream-package"
+
+
+def stream_cargo_patch():
+    host = Path("crates/lean-rs-host")
+    return f'patch.{json.dumps((SDK / host).as_uri())}.lean-rs-host.path={json.dumps(str(stream_package_root() / host))}'
+
+
+def prepare_stream_package(release, reference):
+    root = stream_package_root()
+    require(not os.path.lexists(root.parent / "interop-stream"), "previous stream cohort has not closed")
+    require(root.parent.resolve(strict=True) == root.parent, "aliased stream package parent")
+    root.mkdir(mode=0o700)
+    owner = root.stat()
+    host = Path("crates/lean-rs-host")
+    paths = [str(host / name) for name in ("Cargo.toml", "build.rs", "src", "shims")]
+    # Cargo validates even the explicitly declared targets we don't compile here.
+    with (SDK / host / "Cargo.toml").open("rb") as stream:
+        package = tomllib.load(stream)
+    for kind, directory in (("example", "examples"), ("bench", "benches")):
+        for target in package.get(kind, []):
+            paths.append(str(host / target.get("path", f"{directory}/{target['name']}.rs")))
+    paths += ["fixtures/interop-worker", "fixtures/interop-shims/LeanRsInteropConsumer.lean",
+              "fixtures/interop-shims/LeanRsInteropConsumer"]
+    files = subprocess.check_output(["git", "-C", SDK, "ls-files", "-z", "--", *paths])
+    for raw in files.rstrip(b"\0").split(b"\0"):
+        rel = Path(os.fsdecode(raw))
+        src, dst = SDK / rel, root / rel
+        require(src.resolve(strict=True) == src and src.is_file(), f"invalid stream package input: {src}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+    (root / "fixtures/interop-worker").chmod(0o700)
+    scratch = root / "tmp"
+    scratch.mkdir(mode=0o700)
+    env = build_environment(release, scratch)
+    config = ["--config", stream_cargo_patch()]
+    cargo = ["cargo", "metadata", "--format-version", "1", "--locked", "--offline", *config]
+    graph = json.loads(subprocess.check_output(cargo, cwd=APP, env=env))
+    require(Path(graph["target_directory"]) == TARGET, "stream worker must reuse the workspace Cargo target")
+    selected = [p for p in graph["packages"] if p["name"] == "lean-rs-host"]
+    require(
+        len(selected) == 1 and Path(selected[0]["manifest_path"]) == root / host / "Cargo.toml",
+        "fixture worker did not select the isolated host package",
+    )
+    subprocess.run(["cargo", "build", "--locked", "--offline", "-j1", *config, "--bin", "prepare"],
+                   cwd=APP, env=env, check=True, stdout=sys.stderr)
+    manifest = Path(subprocess.check_output([TARGET / "debug/prepare", root, "--stream-shims"],
+                                            cwd=APP, env=env, text=True).strip())
+    # Only the package root changes. Compare the full SDK manifest, including signatures and toolchain.
+    directory = host / "shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lean-rs-build-cache"
+    require(reference.parent == SDK / directory and reference.resolve(strict=True) == reference,
+            "select the canonical SDK host manifest")
+    require(manifest.parent == root / directory and manifest.resolve(strict=True) == manifest,
+            "stream worker prepared a different host package")
+    expected = json.loads(reference.read_bytes())
+    actual = json.loads(manifest.read_bytes())
+    # Rebase only path fields owned by the two bundled Lake packages.
+    def original(path):
+        return str(SDK / Path(path).relative_to(root))
+    contract = {**actual, "primary_dylib": original(actual["primary_dylib"]),
+                "search_dirs": [original(d) for d in actual["search_dirs"]],
+                "dependencies": [{**d, "dylib_path": original(d["dylib_path"])} for d in actual["dependencies"]]}
+    require(contract == expected, "isolated host manifest differs from the selected SDK contract")
+    pins = []
+    for path in (actual["primary_dylib"], *(d["dylib_path"] for d in actual["dependencies"])):
+        image = Path(path)
+        require(image.resolve(strict=True) == image, "aliased isolated shim image")
+        identity = image.stat()
+        pins.append((path, identity.st_dev, identity.st_ino, digest(image)))
+    return owner, manifest, pins
+
+
 def qualify_stream(
     release,
     profile,
@@ -1503,10 +1577,14 @@ def qualify_stream(
     pinned_selection=None,
     bookended_release=False,
 ):
-    project = SDK / "fixtures/interop-worker"
-    require(project.resolve(strict=True) == project, "aliased stream project")
-    owner = project.stat()
-    require(owner.st_uid == os.geteuid(), "stream project requires its checkout owner")
+    if pinned_selection is not None:
+        require(pinned_selection[0]["shim_manifest_path"] == str(shim_manifest)
+                and pinned_selection[0]["shim_manifest_json"] == shim_manifest.read_text(),
+                "prepared host manifest changed before stream qualification")
+    owner, manifest, image_pins = prepare_stream_package(release, shim_manifest)
+    if pinned_selection is not None:
+        # The combined release command also hands its original images to workspace tests.
+        image_pins = [*pinned_selection[1], *image_pins]
     selected = cases or [name for _, name in INTEROP_TESTS]
     regular = [
         name
@@ -1519,33 +1597,11 @@ def qualify_stream(
     probes = [(name,) for name in selected if name in INTEROP_SIGNATURE_CASES]
     legacy = [INTEROP_LEGACY_CASE] if INTEROP_LEGACY_CASE in selected else []
     cohorts = [group for group in (regular, foreign, *probes, legacy) if group]
-    if legacy:
-        require_no_legacy_provider_shadow(
-            SDK / "crates/lean-rs-host/shims/lean-rs-interop-shims"
-        )
-    if pinned_selection is not None:
-        project.chmod(0o700)
     for index, cohort in enumerate(cohorts):
-        # Foreign imports, legacy direct loading and each negative manifest have separate seals.
-        run_stream_group(
-            release,
-            profile,
-            shim_manifest,
-            cohort,
-            pinned_selection=pinned_selection,
-            build_provider=index == 0,
-            **({"bookended_release": True} if bookended_release else {}),
-        )
-    if pinned_selection is None:
-        return
-    current = project.stat()
-    require(
-        (current.st_dev, current.st_ino) == (owner.st_dev, owner.st_ino),
-        "stream project changed during qualification",
-    )
-    # Failure keeps the project private and the test state available to check
-    # closure. Restore the prior mode only after the run proves closure.
-    project.chmod(owner.st_mode & 0o7777)
+        run_stream_group(release, profile, manifest, cohort, image_pins=image_pins,
+                         build_provider=index == 0, bookended_release=bookended_release)
+    # A failed cohort retains its package and audit until worker closure can be established.
+    remove_owned_state(stream_package_root(), owner)
 
 
 def require_no_legacy_provider_shadow(provider):
@@ -1559,7 +1615,7 @@ def build_legacy_interop_project(run, release, state, provider):
     project = state / "legacy"
     project.mkdir(mode=0o700)
     (project / "lean-toolchain").write_text("leanprover/lean4:v4.36.0\n")
-    source = json.dumps(str(SDK / "fixtures/interop-shims"), ensure_ascii=False)
+    source = json.dumps(str(stream_package_root() / "fixtures/interop-shims"), ensure_ascii=False)
     dependency = json.dumps(str(provider), ensure_ascii=False)
     (project / "lakefile.lean").write_text(
         f"""import Lake
@@ -1614,7 +1670,7 @@ def run_stream_group(
     shim_manifest,
     cases,
     *,
-    pinned_selection=None,
+    image_pins,
     build_provider=True,
     bookended_release=False,
 ):
@@ -1627,14 +1683,14 @@ def run_stream_group(
         not foreign or all(name in INTEROP_FOREIGN_IMPORT_CASES for name in cases),
         "foreign imports require their own seal",
     )
-    project = SDK / "fixtures/interop-worker"
+    project = stream_package_root() / "fixtures/interop-worker"
     require(project.resolve(strict=True) == project, "aliased stream project")
     require(
         project.stat().st_uid == os.geteuid()
         and project.stat().st_mode & 0o7777 == 0o700,
         "stream project requires an exclusively owned checkout",
     )
-    bundle = SDK / "crates/lean-rs-host/shims"
+    bundle = stream_package_root() / "crates/lean-rs-host/shims"
     host, interop = (
         bundle / name for name in ("lean-rs-host-shims", "lean-rs-interop-shims")
     )
@@ -1681,58 +1737,46 @@ def run_stream_group(
             cwd=cwd,
             env=ordinary_compile_environment(env, args, bookended_release),
             check=True,
-            **({"stdout": sys.stderr} if pinned_selection is not None else {}),
+            stdout=sys.stderr,
         )
 
-    if pinned_selection is not None:
-        selected_descriptor, image_pins = pinned_selection
-        require(
-            selected_descriptor == descriptor,
-            "stream build does not use the verified host descriptor",
+    def verify_provider():
+        for path, dev, inode, sha256 in image_pins:
+            image = Path(path)
+            identity = image.stat()
+            require(
+                image.resolve(strict=True) == image
+                and (identity.st_dev, identity.st_ino) == (dev, inode)
+                and digest(image) == sha256,
+                f"stream build changed a verified shim image: {image}",
+            )
+
+    # The typed workers have closed and this job holds the qualification lock.
+    # The probe and image checks detect changes; they do not block writes.
+    verify_provider()
+    if build_provider and not legacy:
+        lake = release / "bin/lake"
+        run(
+            [lake, "--no-cache", "--no-build", "-KleanRsGeneratedShims=true", "build", "LeanRsInterop:shared"],
+            interop,
         )
-
-        def verify_provider():
-            for path, dev, inode, sha256 in image_pins:
-                image = Path(path)
-                identity = image.stat()
-                require(
-                    image.resolve(strict=True) == image
-                    and (identity.st_dev, identity.st_ino) == (dev, inode)
-                    and digest(image) == sha256,
-                    f"stream build changed a verified shim image: {image}",
-                )
-
-        # The typed workers have closed and this job holds the qualification lock.
-        # The probe and image checks detect changes; they do not block writes.
-        verify_provider()
-        if build_provider and not legacy:
-            lake = release / "bin/lake"
-            run(
-                [lake, "--no-cache", "--no-build", "build", "LeanRsInterop:shared"],
-                interop,
-            )
-            run(
-                [
-                    lake,
-                    "--no-cache",
-                    "--fail-fast",
-                    "-R",
-                    "-KleanRsGeneratedShims=true",
-                    "build",
-                    "LeanRsInteropConsumer:shared",
-                ],
-                project,
-            )
-        verify_provider()
+        run(
+            [
+                lake,
+                "--no-cache",
+                "--fail-fast",
+                "-R",
+                "-KleanRsGeneratedShims=true",
+                "build",
+                "LeanRsInteropConsumer:shared",
+            ],
+            project,
+        )
+    verify_provider()
     if legacy:
         build_legacy_interop_project(run, release, state, interop)
-        if pinned_selection is not None:
-            verify_provider()
-    cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
-    # The managed qualifier already compiled prepare for this release.
-    # Standalone use compiles it in the first cohort and reuses it thereafter.
-    if pinned_selection is None and build_provider:
-        run([*cargo, "--bin", "prepare"], APP)
+        verify_provider()
+    cargo = ["cargo", "build", "--locked", "--offline", "-j1", "--config", stream_cargo_patch()]
     if probes:
         env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
     if foreign:
@@ -2337,10 +2381,6 @@ def qualify_broken_import(
             not os.path.lexists(typed), f"typed fixture state already exists: {typed}"
         )
     require(not run_stream or run_typed, "stream tests require the typed fixture first")
-    if run_stream:
-        require_no_legacy_provider_shadow(
-            SDK / "crates/lean-rs-host/shims/lean-rs-interop-shims"
-        )
     check_tracked_fixture_sources()
     space(TARGET)
     state = parent / "broken-import"

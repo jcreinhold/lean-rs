@@ -140,7 +140,9 @@ python3 scripts/qualify_metadata.py broken-import --emit-host-selection
 
 For stream or metadata changes, test the affected cases and one control. Set `SHIM_MANIFEST` to the
 absolute path of the prepared `*.lean-rs-capability.json` file reported in the shim descriptor above.
-The stream fixture must already be built by the normal qualification command; this shortcut does not rebuild it.
+The qualifier builds the stream worker against a disposable copy of the host package and its checked-in Lake sources under
+`target/metadata-qualification/stream-package`. It verifies the isolated manifest against the selected SDK manifest.
+The stream and legacy workers use this package’s own lock files and the installed Lean toolchain.
 
 ```sh
 python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \

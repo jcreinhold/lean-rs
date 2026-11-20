@@ -1102,41 +1102,38 @@ class MetadataQualificationTest(unittest.TestCase):
         missing, wrong = qualification.INTEROP_SIGNATURE_CASES
         foreign = list(qualification.INTEROP_FOREIGN_IMPORT_CASES)
         legacy = qualification.INTEROP_LEGACY_CASE
-        pinned = ({}, [])
-        with patch.object(qualification, "run_stream_group") as run:
+        assets = qualification.stream_package_root()
+        assets.mkdir(parents=True)
+        manifest.write_text("{}")
+        original_images = [("original", 1, 2, "original-digest")]
+        isolated_images = [("isolated", 1, 3, "isolated-digest")]
+        pinned = ({"shim_manifest_path": str(manifest), "shim_manifest_json": "{}"}, original_images)
+        with (
+            patch.object(qualification, "prepare_stream_package", return_value=(assets.stat(), manifest, isolated_images)),
+            patch.object(qualification, "run_stream_group") as run,
+        ):
             qualification.qualify_stream(
-                release,
-                qualification.DARWIN_ARM64_PINS,
-                manifest,
-                [regular, foreign[0], missing, legacy, *foreign[1:], wrong],
-                pinned_selection=pinned,
+                release, qualification.DARWIN_ARM64_PINS, manifest,
+                [regular, foreign[0], missing, legacy, *foreign[1:], wrong], pinned_selection=pinned,
             )
         self.assertEqual(
             [args[3] for args, _ in run.call_args_list],
             [[regular], foreign, (missing,), (wrong,), [legacy]],
         )
-        self.assertEqual(
-            [kwargs for _, kwargs in run.call_args_list],
-            [
-                {"pinned_selection": pinned, "build_provider": True},
-                {"pinned_selection": pinned, "build_provider": False},
-                {"pinned_selection": pinned, "build_provider": False},
-                {"pinned_selection": pinned, "build_provider": False},
-                {"pinned_selection": pinned, "build_provider": False},
-            ],
-        )
+        self.assertEqual([kwargs["build_provider"] for _, kwargs in run.call_args_list],
+                         [True, False, False, False, False])
+        for _, kwargs in run.call_args_list:
+            self.assertEqual(kwargs["image_pins"], original_images + isolated_images)
+        self.assertFalse(assets.exists())
+        assets.mkdir()
         with (
-            patch.object(
-                qualification,
-                "run_stream_group",
-                side_effect=ValueError("first did not close"),
-            ) as run,
+            patch.object(qualification, "prepare_stream_package", return_value=(assets.stat(), manifest, [])),
+            patch.object(qualification, "run_stream_group", side_effect=ValueError("first did not close")) as run,
             self.assertRaisesRegex(ValueError, "first did not close"),
         ):
-            qualification.qualify_stream(
-                release, qualification.DARWIN_ARM64_PINS, manifest, [missing, wrong]
-            )
+            qualification.qualify_stream(release, qualification.DARWIN_ARM64_PINS, manifest, [missing, wrong])
         run.assert_called_once()
+        self.assertTrue(assets.is_dir())
 
     def test_missing_doctor_exports_audit_requires_admission_without_a_grant(self):
         case = qualification.NO_EXPORTS_CASE

@@ -212,6 +212,7 @@ def main():
         )
     )
     builder = builder_profiles.get(host_builder_case)
+    assets = sdk / "target/metadata-qualification/stream-package" if stream else sdk
     project = (
         state
         / (
@@ -226,7 +227,7 @@ def main():
             else "lean"
         )
         if broken
-        else sdk
+        else assets
         / (
             "fixtures/interop-worker"
             if stream
@@ -249,7 +250,7 @@ def main():
         owner = foreign.stat()
         assert owner.st_uid == os.geteuid() and owner.st_mode & 0o7777 == 0o700
     release = Path(rec["sysroot"])
-    bundle = state / "shims" if optional_whnf else sdk / "crates/lean-rs-host/shims"
+    bundle = state / "shims" if optional_whnf else assets / "crates/lean-rs-host/shims"
     dep = bundle / "lean-rs-interop-shims"
     host = bundle / "lean-rs-host-shims"
     if legacy:
@@ -423,7 +424,7 @@ def main():
             "LeanRsInteropConsumer.lean",
             "LeanRsInteropConsumer/Callback.lean",
         ):
-            pin_content(sdk / "fixtures/interop-shims" / source)
+            pin_content(assets / "fixtures/interop-shims" / source)
     images = [
         (di, ["initialize_lean__rs__interop__shims_LeanRsInterop"]),
         (hi, ["initialize_lean__rs__host__shims_LeanRsHostShims"]),
