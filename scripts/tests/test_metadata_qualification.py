@@ -693,6 +693,7 @@ class MetadataQualificationTest(unittest.TestCase):
         else:
             host_builder.assert_called_once()
             scalar.assert_called_once()
+            self.assertEqual(host_builder.call_args.args[-1], scalar.call_args.args[-1])
         self.assertFalse(broken.exists())
         self.assertEqual(
             len(seen),
