@@ -429,10 +429,14 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => None,
     };
-    let prepared_host = if shared_reads {
-        Some(crate::host_artifacts::from_environment()?)
+    let descriptor = crate::host_artifacts::from_launch(
+        std::env::var_os(crate::host_artifacts::PREPARED_ENV).as_deref(),
+        shared_reads,
+    )?;
+    let (guarded_prepared, mut ordinary_prepared) = if shared_reads {
+        (descriptor, None)
     } else {
-        None
+        (None, descriptor)
     };
     let runtime = LeanRuntime::init()?;
     configure_lean_runtime_memory_limit_from_env();
@@ -452,9 +456,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     // asked for. A linear scan, not a map: `HostSessionMode` is not `Hash`,
     // and a child serves one key in practice, so the list is length 1.
     let mut anchors: Vec<&'static HostAnchor> = Vec::new();
-    // The bundled fallback is fixed for this child's selected toolchain, not
-    // for a caller project. Later anchors can open while the first still holds shared locks.
-    let mut fallback_prepared = None;
     let plugin = GenerationPlugin::default();
     let mut session_import_bytes = 0_u64;
     let mut session_imports = 0_u64;
@@ -604,7 +605,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 // Capture storage facts only. No dylib/initializer may run
                 // before the actual FD union is ACKed by the independent guardian.
-                let admission = match prepared_host
+                let admission = match guarded_prepared
                     .as_ref()
                     .map(|prepared| SessionAdmission::capture(&project_root, &mode, prepared.clone()))
                     .transpose()
@@ -702,7 +703,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     &project_root,
                     &mode,
                     admission.as_ref(),
-                    &mut fallback_prepared,
+                    &mut ordinary_prepared,
                 ) {
                     Ok(anchor) => anchor,
                     Err(error) => {
@@ -1584,12 +1585,12 @@ fn ready_host_anchor(
     project_root: &str,
     mode: &HostSessionMode,
     admission: Option<&SessionAdmission>,
-    fallback_prepared: &mut Option<LeanPreparedHostArtifacts>,
+    ordinary_prepared: &mut Option<LeanPreparedHostArtifacts>,
 ) -> LeanResult<&'static HostAnchor> {
     if let Some(anchor) = anchors.iter().find(|anchor| anchor.matches(project_root, mode)) {
         return Ok(*anchor);
     }
-    let anchor = HostAnchor::build(runtime, project_root, mode, admission, fallback_prepared)?;
+    let anchor = HostAnchor::build(runtime, project_root, mode, admission, ordinary_prepared)?;
     anchors.push(anchor);
     Ok(anchor)
 }
@@ -1627,7 +1628,7 @@ impl HostAnchor {
         project_root: &str,
         mode: &HostSessionMode,
         admission: Option<&SessionAdmission>,
-        fallback_prepared: &mut Option<LeanPreparedHostArtifacts>,
+        ordinary_prepared: &mut Option<LeanPreparedHostArtifacts>,
     ) -> LeanResult<&'static Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
         let authority = worker_authority()?;
@@ -1640,7 +1641,7 @@ impl HostAnchor {
         // The ordinary ready probe releases its read locks before calling the
         // application, which must independently verify and hold custody. Managed
         // admission carries its own descriptor and its load order is unchanged.
-        let prepared = match (admission, fallback_prepared) {
+        let prepared = match (admission, ordinary_prepared) {
             (Some(admission), _) => &admission.prepared,
             (None, Some(prepared)) => prepared,
             (None, missing) => missing.insert(prepare_ordinary_host_artifacts()?),

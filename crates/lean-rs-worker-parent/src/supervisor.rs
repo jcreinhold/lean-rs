@@ -2047,6 +2047,10 @@ impl LeanWorker {
         if let Some(current_dir) = &config.current_dir {
             command.current_dir(current_dir);
         }
+        if !config.shared_artifact_reads {
+            // An ordinary deployment selects its own snapshot for this child.
+            command.env_remove("LEAN_RS_PREPARED_HOST_ARTIFACTS");
+        }
         for (key, value) in &config.env {
             command.env(key, value);
         }

@@ -1,5 +1,6 @@
 //! Runtime-free preparation and complete, captured pre-load admission metadata.
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use lean_toolchain::CapabilityManifest;
 use lean_toolchain::shared_writer::{SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots_with_domains};
 
 const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
-const PREPARED_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
+pub(crate) const PREPARED_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -90,6 +91,13 @@ pub(crate) fn preparation_mode() -> Option<ExitCode> {
 }
 
 fn write_descriptor(prepared: &LeanPreparedHostArtifacts) -> io::Result<()> {
+    let bytes = descriptor_bytes(prepared)?;
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(&bytes)?;
+    stdout.write_all(b"\n")
+}
+
+fn descriptor_bytes(prepared: &LeanPreparedHostArtifacts) -> io::Result<Vec<u8>> {
     let path_string = |path: &Path| {
         path.to_str()
             .map(str::to_owned)
@@ -114,17 +122,24 @@ fn write_descriptor(prepared: &LeanPreparedHostArtifacts) -> io::Result<()> {
     if bytes.len() > MAX_DESCRIPTOR_BYTES {
         return Err(invalid("prepared descriptor exceeds 64 KiB"));
     }
-    let mut stdout = std::io::stdout().lock();
-    stdout.write_all(&bytes)?;
-    stdout.write_all(b"\n")
+    Ok(bytes)
 }
 
-pub(crate) fn from_environment() -> io::Result<LeanPreparedHostArtifacts> {
-    let value = std::env::var(PREPARED_ENV).map_err(io::Error::other)?;
+pub(crate) fn from_launch(value: Option<&OsStr>, shared_reads: bool) -> io::Result<Option<LeanPreparedHostArtifacts>> {
+    let Some(value) = value else {
+        return if shared_reads {
+            Err(invalid("shared artifact reads require a prepared host descriptor"))
+        } else {
+            Ok(None)
+        };
+    };
+    let value = value
+        .to_str()
+        .ok_or_else(|| invalid("prepared descriptor must be UTF-8"))?;
     if value.len() > MAX_DESCRIPTOR_BYTES {
         return Err(invalid("prepared descriptor exceeds 64 KiB"));
     }
-    let dto: LeanWorkerPreparedHostArtifacts = serde_json::from_str(&value).map_err(io::Error::other)?;
+    let dto: LeanWorkerPreparedHostArtifacts = serde_json::from_str(value).map_err(io::Error::other)?;
     if dto.protocol != 1 && dto.protocol != 2 {
         return Err(invalid("unsupported prepared artifact protocol"));
     }
@@ -136,12 +151,24 @@ pub(crate) fn from_environment() -> io::Result<LeanPreparedHostArtifacts> {
     )
     .map_err(io::Error::other)?;
     if dto.protocol == 2 {
-        prepared
+        let generated = prepared
+            .clone()
             .with_project_generated_output_matching_shims()
-            .map_err(io::Error::other)
-    } else {
-        Ok(prepared)
+            .map_err(io::Error::other)?;
+        if shared_reads {
+            return Ok(Some(generated));
+        }
+        // Ordinary project imports are selected by WorkerAuthority::use_generated_project_imports.
     }
+    if !shared_reads {
+        let path = prepared.manifest_path();
+        if path.canonicalize()? != path || read_bounded(path)? != prepared.manifest_json().as_bytes() {
+            return Err(invalid(
+                "ordinary prepared host manifest differs from its launch snapshot",
+            ));
+        }
+    }
+    Ok(Some(prepared))
 }
 
 pub(crate) struct ManifestSnapshot {
@@ -572,6 +599,75 @@ mod tests {
         fn drop(&mut self) {
             let _removed = fs::remove_dir_all(&self.directory);
         }
+    }
+
+    #[test]
+    fn ordinary_launch_selects_the_exact_prepared_snapshot_or_refuses() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let fixture = Fixture::new();
+        let expected = fixture.prepared(false);
+        let bytes = descriptor_bytes(&expected).expect("encode deployment outside bundled roots");
+        let explicit = Some(OsStr::from_bytes(&bytes));
+        let actual = from_launch(explicit, false)
+            .expect("ordinary launch")
+            .expect("explicit snapshot");
+        assert_eq!(actual.manifest_path(), expected.manifest_path());
+        assert_eq!(actual.manifest_json(), expected.manifest_json());
+        assert_eq!(actual.shim_search_paths(), expected.shim_search_paths());
+        assert_eq!(actual.artifact_roots(), expected.artifact_roots());
+        assert!(from_launch(None, false).expect("ordinary default").is_none());
+        assert!(from_launch(None, true).is_err());
+        assert!(from_launch(Some(OsStr::new("")), false).is_err());
+        assert!(from_launch(Some(OsStr::from_bytes(&[0xff])), false).is_err());
+
+        fs::write(expected.manifest_path(), b"{}").expect("replace named manifest");
+        assert!(
+            from_launch(explicit, false)
+                .expect_err("stale snapshot")
+                .to_string()
+                .contains("differs")
+        );
+        fs::remove_file(expected.manifest_path()).expect("remove named manifest");
+        assert_eq!(
+            from_launch(explicit, false).expect_err("missing manifest").kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn ordinary_descriptor_cannot_select_generated_project_imports() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let fixture = Fixture::new();
+        let flat = fixture.prepared(false);
+        let paths = [&fixture.interop, &fixture.host].map(|root| {
+            let path = root.join(".lake/lean-rs-generated/lean-4.36.0/lib/lean");
+            fs::create_dir_all(&path).expect("generated shim path");
+            path
+        });
+        let generated = LeanPreparedHostArtifacts::from_snapshot(
+            flat.manifest_path().to_owned(),
+            flat.manifest_json().to_owned(),
+            flat.artifact_roots().to_vec(),
+            paths.to_vec(),
+        )
+        .expect("generated shim descriptor")
+        .with_project_generated_output_matching_shims()
+        .expect("protocol 2");
+        let bytes = descriptor_bytes(&generated).expect("encode generated descriptor");
+        let explicit = Some(OsStr::from_bytes(&bytes));
+        let ordinary = from_launch(explicit, false)
+            .expect("ordinary launch")
+            .expect("explicit snapshot");
+        assert_eq!(ordinary.shim_search_paths(), paths);
+        assert!(!ordinary.project_uses_generated_output());
+        assert!(
+            from_launch(explicit, true)
+                .expect("shared launch")
+                .expect("required snapshot")
+                .project_uses_generated_output()
+        );
     }
     #[test]
     fn admission_includes_separate_semantic_primary_and_manifest_dependency() {

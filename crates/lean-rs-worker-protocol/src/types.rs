@@ -25,7 +25,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Runtime-free facts prepared before a guarded native generation starts.
+/// Runtime-free storage facts selected for a worker generation.
 ///
 /// These paths and the exact shim manifest snapshot are storage facts. They
 /// do not attest what the child eventually loaded or authorize a proof result.
