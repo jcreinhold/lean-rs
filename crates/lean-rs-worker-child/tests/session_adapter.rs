@@ -49,6 +49,18 @@ fn worker_config() -> LeanWorkerConfig {
     LeanWorkerConfig::new(worker_binary())
 }
 
+#[test]
+fn ordinary_worker_refuses_invalid_prepared_shims_before_handshake() {
+    let result = Command::new(worker_binary())
+        .env_remove("LEAN_RS_WORKER_SHARED_ARTIFACT_READS")
+        .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", "{}")
+        .output()
+        .expect("run the ordinary worker");
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty(), "refused launch must not emit a handshake");
+    assert!(String::from_utf8_lossy(&result.stderr).contains("missing field `protocol`"));
+}
+
 fn handles_session_config() -> LeanWorkerSessionConfig {
     LeanWorkerSessionConfig::new(
         ordinary_typed_selection().map_or_else(fixture_root, |selected| selected.fixture.clone()),

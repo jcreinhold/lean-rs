@@ -143,6 +143,17 @@ prove a submitted command ran, a child exited, or a proof succeeded.
 
 ## Shared artifact read custody
 
+An application with an immutable prepared deployment can pass its descriptor through
+`LeanWorkerChild::prepared_host_artifacts` to an ordinary child running `run_worker_child_with_authority`.
+The child checks the bounded descriptor and named shim manifest, then uses those inputs for every host anchor in
+that generation. Only an omitted ordinary descriptor selects bundled shim discovery and preparation. An invalid
+explicit descriptor or a refused grant fails the operation. The application's `WorkerAuthority::host` must
+independently verify the exact manifest, images, initializers and ordered import paths under custody that prevents
+replacement throughout native use. The launch-time byte comparison alone cannot establish immutability.
+Project manifest reads, native loads and imports still require their ordinary application grants, including
+`use_generated_project_imports` to select generated project output. Shared-read workers require their descriptor
+and the guardian admission below.
+
 `LeanWorkerChild::shared_artifact_reads(true)` requires the actual child to hold shared artifact locks while it imports
 or runs a host operation. Generic library configuration defaults to false; embedders opt in on each worker builder
 that requires this coordination. The configured helper owns the read/write admission algorithm. The actual worker

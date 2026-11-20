@@ -2186,10 +2186,12 @@ impl LeanWorkerChild {
         self
     }
 
-    /// Supply a runtime-free descriptor prepared before guarded generation startup.
+    /// Select the exact prepared host shims for this worker generation.
     ///
-    /// The child validates and acquires the listed read domains before loading
-    /// from the exact manifest snapshot. Actual loaded checks remain separate.
+    /// An ordinary child passes the snapshot to its application's host loader.
+    /// The application must verify the actual artifacts and retain their custody.
+    /// A shared-read child also acquires the admitted domains through its guardian.
+    /// An explicit descriptor error fails startup or session admission.
     #[must_use]
     pub fn prepared_host_artifacts(
         mut self,
