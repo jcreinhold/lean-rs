@@ -348,12 +348,10 @@ fn callback_status_error_is_typed() {
 
 #[test]
 fn child_fatal_exit_is_reported_to_parent() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(
@@ -502,12 +500,10 @@ fn request_timeout_cycles_child_and_invalidates_session() {
 
 #[test]
 fn row_before_child_panic_is_delivered_before_terminal_failure() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(

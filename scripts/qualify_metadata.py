@@ -1204,6 +1204,8 @@ STREAM_TESTS = (
         "typed_command",
         "typed_streaming_command_decodes_large_payload_from_performance_path",
     ),
+    ("streaming_runner", "child_fatal_exit_is_reported_to_parent"),
+    ("streaming_runner", "row_before_child_panic_is_delivered_before_terminal_failure"),
 )
 
 

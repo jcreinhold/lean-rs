@@ -13,6 +13,11 @@ pub(crate) const CASES: &[(&[&str], &[&str])] = &[
         &[""],
     ),
     (&["malformed_row_json_is_typed"], &["_malformed_json"]),
+    (&["child_fatal_exit_is_reported_to_parent"], &["_panic"]),
+    (
+        &["row_before_child_panic_is_delivered_before_terminal_failure"],
+        &["_row_then_panic"],
+    ),
     (
         &["missing_stream_or_payload_is_typed"],
         &["_missing_stream", "_missing_payload"],
