@@ -263,6 +263,12 @@ def main():
     )
     for r in [project_oleans, *shims, release / "lib/lean"]:
         tree(r)
+    if typed:
+        for module in ("LeanRsFixtureLateExtension.olean", "LeanRsFixture/Meta.olean"):
+            required = project_oleans / module
+            assert str(required) in filepins, (
+                f"missing sealed registration/control artifact: {required}"
+            )
     # Verify original transitive import selection and refuse local shadows of builtin namespaces.
     for prefix in ["Init", "Lean", "Lake", "Std"]:
         for r in [project_oleans, *shims]:

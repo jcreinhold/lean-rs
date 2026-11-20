@@ -208,7 +208,7 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
     const INCOMPLETE: &str = "import LeanRsFixture.DoesNotExist\n\ntheorem present : True := totallyUndefinedSymbol\n";
     const REUSE_STATE: &str =
         "theorem reuseProbeDecl : True := trivial\ntheorem reuseProbeSorry : True := by\n  sorry\n";
-    const EVICTION_PROBE: &str =
+    const SCOPE_PROBE: &str =
         "namespace P\n\nsection S\n\nopen Nat in\ntheorem t (h : True) : True := by\n  exact h\n\nend S\n\nend P\n";
     const DEFAULT_LIMITS: [&str; 3] = ["4", "300000", "67108864"];
 
@@ -276,7 +276,19 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
             _,
         ) if state_at(2) => (DEFAULT_LIMITS, true),
         ("/reuse/state.lean", REUSE_STATE, _) if state_at(2) => (DEFAULT_LIMITS, true),
-        ("/capacity/evicted.lean", EVICTION_PROBE, _) if state_at(7) => (DEFAULT_LIMITS, true),
+        ("/capacity/evicted.lean", SCOPE_PROBE, _) if state_at(7) => (DEFAULT_LIMITS, true),
+        (
+            "/staleness/probe-first.lean"
+            | "/staleness/probe-second.lean"
+            | "/staleness/evict.lean"
+            | "/staleness/inert.lean"
+            | "/staleness/capacity-one-first.lean"
+            | "/staleness/capacity-one-second.lean",
+            SCOPE_PROBE,
+            _,
+        ) if state_at(7) && std::env::var_os("LEAN_RS_TEST_STALENESS_PROFILE").is_some_and(|v| v == "1") => {
+            (DEFAULT_LIMITS, true)
+        }
         (
             "<elaborate>",
             BASE,

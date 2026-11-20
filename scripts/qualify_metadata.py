@@ -227,6 +227,38 @@ ORDINARY_REUSE_IMPORT_TESTS = (
         ((2, 5),),
     ),
 )
+ORDINARY_STALENESS_BATCH_TESTS = (
+    (
+        "session_reuse",
+        "a_late_extension_registration_never_reaches_a_pooled_environment",
+        ((1, 2),),
+    ),
+    (
+        "session_reuse",
+        "a_late_extension_registration_evicts_the_pooled_environment",
+        ((1, 2),),
+    ),
+    (
+        "session_reuse",
+        "an_import_that_registers_nothing_leaves_the_pool_intact",
+        ((1, 2),),
+    ),
+    ("session_reuse", "capacity_one_is_unaffected_by_staleness_eviction", ((1, 2),)),
+)
+ORDINARY_STALENESS_IMPORT_TESTS = (
+    (
+        "session_reuse",
+        "a_staleness_eviction_does_not_disable_the_reuse_hint",
+        ((1, 4),),
+    ),
+)
+ORDINARY_STALENESS_CASES = frozenset(
+    name
+    for _, name, _ in (
+        *ORDINARY_STALENESS_BATCH_TESTS,
+        *ORDINARY_STALENESS_IMPORT_TESTS,
+    )
+)
 ORDINARY_VERIFICATION_TESTS = (
     (
         "typed_session",
@@ -308,6 +340,8 @@ ORDINARY_AUDITED_TESTS = (
             (ORDINARY_BATCH_TESTS, BATCH_GRANT),
             (ORDINARY_REUSE_BATCH_TESTS, BATCH_GRANT),
             (ORDINARY_REUSE_IMPORT_TESTS, IMPORT_GRANT),
+            (ORDINARY_STALENESS_BATCH_TESTS, BATCH_GRANT),
+            (ORDINARY_STALENESS_IMPORT_TESTS, IMPORT_GRANT),
             (ORDINARY_VERIFICATION_TESTS, VERIFICATION_GRANT),
             (ORDINARY_VERIFICATION_BATCH_TESTS, VERIFICATION_BATCH_GRANT),
         )
@@ -1198,8 +1232,11 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     for target, name, expected_counts, grant_event in ORDINARY_AUDITED_TESTS:
         if name in ORDINARY_WIDE_REUSE_CASES:
             env["LEAN_RS_TEST_WIDE_REUSE_CASE"] = name
+        if name in ORDINARY_STALENESS_CASES:
+            env["LEAN_RS_TEST_STALENESS_PROFILE"] = "1"
         nextest(target, selection=scoped_tests(target, (name,)))
         env.pop("LEAN_RS_TEST_WIDE_REUSE_CASE", None)
+        env.pop("LEAN_RS_TEST_STALENESS_PROFILE", None)
         check_typed_children_closed(
             typed_audit(events),
             case=name,

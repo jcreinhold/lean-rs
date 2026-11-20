@@ -265,11 +265,15 @@ impl Record {
                     | "a_mispredicted_reuse_restarts_before_the_actual_import"
                     | "a_reused_session_carries_no_state_from_the_previous_one")
             );
+        let staleness_probe = std::env::var_os("LEAN_RS_TEST_STALENESS_PROFILE").is_some_and(|v| v == "1")
+            && (names == ["LeanRsHostShims.Elaboration", "LeanRsFixtureLateExtension"]
+                || names == ["LeanRsHostShims.Elaboration", "LeanRsFixture.Meta"]);
         let reuse_imports = self.typed_session
             && !self.broken_import
             && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
             && (wide_reuse
+                || staleness_probe
                 || [
                     &["LeanRsHostShims.Elaboration"][..],
                     &["LeanRsHostShims.Elaboration", "Lean"][..],

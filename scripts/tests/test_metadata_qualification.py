@@ -738,6 +738,13 @@ class MetadataQualificationTest(unittest.TestCase):
             "an_alternation_that_fits_the_pool_never_evicts",
             wide_reuse_cases[3],
         )
+        staleness_cases = (
+            "a_late_extension_registration_never_reaches_a_pooled_environment",
+            "a_late_extension_registration_evicts_the_pooled_environment",
+            "an_import_that_registers_nothing_leaves_the_pool_intact",
+            "capacity_one_is_unaffected_by_staleness_eviction",
+            "a_staleness_eviction_does_not_disable_the_reuse_hint",
+        )
         audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
@@ -747,7 +754,10 @@ class MetadataQualificationTest(unittest.TestCase):
                 for name in (*meta_cases, *module_query_cases, *proof_cases)
             ),
             *(f"(binary(={target}) & (test(={name})))" for target, name in batch_cases),
-            *(f"(binary(=session_reuse) & (test(={name})))" for name in reuse_cases),
+            *(
+                f"(binary(=session_reuse) & (test(={name})))"
+                for name in (*reuse_cases, *staleness_cases)
+            ),
             *(
                 f"(binary(=typed_session) & (test(={name})))"
                 for name in verification_cases
@@ -758,6 +768,7 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)
         self.assertNotIn("LEAN_RS_TEST_WIDE_REUSE_CASE", run_env)
+        self.assertNotIn("LEAN_RS_TEST_STALENESS_PROFILE", run_env)
         for cmd, case_env in audited_cases:
             self.assertEqual(cmd[cmd.index("--retries") + 1], "0")
             wide_case = case_env.get("LEAN_RS_TEST_WIDE_REUSE_CASE")
@@ -770,6 +781,14 @@ class MetadataQualificationTest(unittest.TestCase):
                 None,
             )
             self.assertEqual(wide_case, expected_wide)
+            staleness = any(
+                cmd[-1] == f"(binary(=session_reuse) & (test(={name})))"
+                for name in staleness_cases
+            )
+            self.assertEqual(
+                case_env.get("LEAN_RS_TEST_STALENESS_PROFILE"),
+                "1" if staleness else None,
+            )
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
             self.assertEqual(
