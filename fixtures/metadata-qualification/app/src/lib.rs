@@ -257,17 +257,28 @@ impl Record {
         } else {
             &[MODULE]
         };
+        let wide_reuse = names == ["LeanRsHostShims.Elaboration", "LeanRsFixture.Handles"]
+            && matches!(
+                std::env::var("LEAN_RS_TEST_WIDE_REUSE_CASE").as_deref(),
+                Ok("switching_back_to_a_pooled_import_set_does_not_reimport"
+                    | "capacity_one_restores_the_pre_pool_child"
+                    | "a_mispredicted_reuse_restarts_before_the_actual_import"
+                    | "a_reused_session_carries_no_state_from_the_previous_one")
+            );
         let reuse_imports = self.typed_session
             && !self.broken_import
             && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
-            && [
-                &["LeanRsHostShims.Elaboration"][..],
-                &["LeanRsHostShims.Elaboration", "Lean"][..],
-                &["LeanRsFixture.Scalars"][..],
-                &["LeanRsFixture.Scalars", "LeanRsFixture.Strings"][..],
-                &["LeanRsFixture.Strings", "LeanRsFixture.Scalars"][..],
-            ].iter().any(|allowed| names == *allowed);
+            && (wide_reuse
+                || [
+                    &["LeanRsHostShims.Elaboration"][..],
+                    &["LeanRsHostShims.Elaboration", "Lean"][..],
+                    &["LeanRsFixture.Scalars"][..],
+                    &["LeanRsFixture.Scalars", "LeanRsFixture.Strings"][..],
+                    &["LeanRsFixture.Strings", "LeanRsFixture.Scalars"][..],
+                ]
+                .iter()
+                .any(|allowed| names == *allowed));
         require(
             (names == expected || reuse_imports) && *options == Default::default(),
             "wrong module or import profile",

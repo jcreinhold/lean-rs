@@ -534,7 +534,11 @@ class MetadataQualificationTest(unittest.TestCase):
                     for index in range(started):
                         pid = 51 + index
                         stream.write(f"{pid} worker-started\n")
-                        if event == qualification.JSON_GRANT:
+                        if per_worker := qualification.ORDINARY_GRANTS_BY_WORKER.get(
+                            name
+                        ):
+                            granted = (event,) * per_worker[index]
+                        elif event == qualification.JSON_GRANT:
                             granted = (event,) if index < grants else ()
                         else:
                             granted = qualification.ORDINARY_MIXED_GRANTS.get(
@@ -722,6 +726,18 @@ class MetadataQualificationTest(unittest.TestCase):
             "verify_declaration_reports_needs_build_for_unbuilt_import",
             "declaration_verification_batch_returns_ordered_rows_through_worker",
         )
+        wide_reuse_cases = (
+            "switching_back_to_a_pooled_import_set_does_not_reimport",
+            "capacity_one_restores_the_pre_pool_child",
+            "a_reused_session_carries_no_state_from_the_previous_one",
+            "a_mispredicted_reuse_restarts_before_the_actual_import",
+        )
+        reuse_cases = (
+            *wide_reuse_cases[:3],
+            "a_capacity_eviction_clears_the_snapshot_cache",
+            "an_alternation_that_fits_the_pool_never_evicts",
+            wide_reuse_cases[3],
+        )
         audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
@@ -731,6 +747,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 for name in (*meta_cases, *module_query_cases, *proof_cases)
             ),
             *(f"(binary(={target}) & (test(={name})))" for target, name in batch_cases),
+            *(f"(binary(=session_reuse) & (test(={name})))" for name in reuse_cases),
             *(
                 f"(binary(=typed_session) & (test(={name})))"
                 for name in verification_cases
@@ -740,8 +757,19 @@ class MetadataQualificationTest(unittest.TestCase):
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)
+        self.assertNotIn("LEAN_RS_TEST_WIDE_REUSE_CASE", run_env)
         for cmd, case_env in audited_cases:
             self.assertEqual(cmd[cmd.index("--retries") + 1], "0")
+            wide_case = case_env.get("LEAN_RS_TEST_WIDE_REUSE_CASE")
+            expected_wide = next(
+                (
+                    name
+                    for name in wide_reuse_cases
+                    if cmd[-1] == f"(binary(=session_reuse) & (test(={name})))"
+                ),
+                None,
+            )
+            self.assertEqual(wide_case, expected_wide)
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
             self.assertEqual(
@@ -841,6 +869,27 @@ class MetadataQualificationTest(unittest.TestCase):
                         grant_event=events[0],
                     )
                 probe.assert_not_called()
+
+    def test_reuse_restart_requires_exact_checks_before_and_after_replacement(self):
+        case = "a_mispredicted_reuse_restarts_before_the_actual_import"
+        grant = b" " + qualification.IMPORT_GRANT + b"\n"
+        audit = (
+            b"51 worker-started\n51 verified-deployment\n"
+            + (b"51" + grant) * 2
+            + b"52 worker-started\n52 verified-deployment\n"
+            + (b"52" + grant) * 3
+        )
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(ValueError, "wrong grant counts per worker"),
+        ):
+            qualification.check_typed_children_closed(
+                audit,
+                case=case,
+                expected_counts=((2, 5),),
+                grant_event=qualification.IMPORT_GRANT,
+            )
+        probe.assert_not_called()
 
     def test_typed_group_with_live_worker_retains_only_typed_state(self):
         self.run_typed_selection(live_pid=True)

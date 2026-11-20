@@ -205,6 +205,28 @@ ORDINARY_BATCH_TESTS = (
         ((1, 3),),
     ),
 )
+ORDINARY_REUSE_BATCH_TESTS = (
+    (
+        "session_reuse",
+        "switching_back_to_a_pooled_import_set_does_not_reimport",
+        ((1, 3),),
+    ),
+    ("session_reuse", "capacity_one_restores_the_pre_pool_child", ((1, 4),)),
+    (
+        "session_reuse",
+        "a_reused_session_carries_no_state_from_the_previous_one",
+        ((1, 1),),
+    ),
+    ("session_reuse", "a_capacity_eviction_clears_the_snapshot_cache", ((2, 4),)),
+)
+ORDINARY_REUSE_IMPORT_TESTS = (
+    ("session_reuse", "an_alternation_that_fits_the_pool_never_evicts", ((1, 6),)),
+    (
+        "session_reuse",
+        "a_mispredicted_reuse_restarts_before_the_actual_import",
+        ((2, 5),),
+    ),
+)
 ORDINARY_VERIFICATION_TESTS = (
     (
         "typed_session",
@@ -251,6 +273,20 @@ PROOF_GRANT = b"authorize-fixed-proof-attempt"
 BATCH_GRANT = b"authorize-fixed-module-batch"
 VERIFICATION_GRANT = b"authorize-fixed-declaration-verification"
 VERIFICATION_BATCH_GRANT = b"authorize-fixed-verification-batch"
+IMPORT_GRANT = b"authorize-checked-typed-import"
+ORDINARY_WIDE_REUSE_CASES = frozenset(
+    {
+        "switching_back_to_a_pooled_import_set_does_not_reimport",
+        "capacity_one_restores_the_pre_pool_child",
+        "a_mispredicted_reuse_restarts_before_the_actual_import",
+        "a_reused_session_carries_no_state_from_the_previous_one",
+    }
+)
+ORDINARY_GRANTS_BY_WORKER = {
+    "a_mispredicted_reuse_restarts_before_the_actual_import": (3, 2),
+    "a_capacity_eviction_clears_the_snapshot_cache": (2, 2),
+}
+
 ORDINARY_MIXED_GRANTS = {
     "attempt_proof_bad_candidate_returns_diagnostics_and_session_survives": (
         PROOF_GRANT,
@@ -270,6 +306,8 @@ ORDINARY_AUDITED_TESTS = (
             (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
             (ORDINARY_PROOF_TESTS, PROOF_GRANT),
             (ORDINARY_BATCH_TESTS, BATCH_GRANT),
+            (ORDINARY_REUSE_BATCH_TESTS, BATCH_GRANT),
+            (ORDINARY_REUSE_IMPORT_TESTS, IMPORT_GRANT),
             (ORDINARY_VERIFICATION_TESTS, VERIFICATION_GRANT),
             (ORDINARY_VERIFICATION_BATCH_TESTS, VERIFICATION_BATCH_GRANT),
         )
@@ -280,7 +318,9 @@ ORDINARY_AUDITED_TESTS = (
         for name, events in ORDINARY_MIXED_GRANTS.items()
     ),
 )
-ORDINARY_GRANT_EVENTS = frozenset(event for *_, event in ORDINARY_AUDITED_TESTS)
+ORDINARY_GRANT_EVENTS = frozenset(
+    event for *_, event in ORDINARY_AUDITED_TESTS if event != IMPORT_GRANT
+)
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
@@ -1032,7 +1072,7 @@ def check_typed_children_closed(
     admitted = set()
     workers = set()
     granted = []
-    grant_pids = set()
+    grant_pids = []
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
@@ -1042,9 +1082,9 @@ def check_typed_children_closed(
             started.append(pid)
         if event == b"verified-deployment":
             admitted.add(pid)
-        if event in ORDINARY_GRANT_EVENTS:
+        if event in ORDINARY_GRANT_EVENTS or event == grant_event:
             granted.append(event)
-            grant_pids.add(pid)
+            grant_pids.append(pid)
     if case is None:
         require(
             len(admitted) >= ORDINARY_APP_TEST_COUNT,
@@ -1055,7 +1095,7 @@ def check_typed_children_closed(
             (len(started), len(granted)) in expected_counts
             and len(started) == len(workers)
             and set(started) == workers
-            and admitted == grant_pids <= workers
+            and admitted == set(grant_pids) <= workers
             and (grant_event != JSON_GRANT or len(granted) == len(admitted)),
             f"{case}: wrong started worker / {grant_event.decode()} counts",
         )
@@ -1064,6 +1104,12 @@ def check_typed_children_closed(
             tuple(granted) == expected,
             f"{case}: wrong started worker / {grant_event.decode()} counts or grant order",
         )
+        by_worker = ORDINARY_GRANTS_BY_WORKER.get(case)
+        if by_worker is not None:
+            require(
+                tuple(grant_pids.count(pid) for pid in started) == by_worker,
+                f"{case}: wrong grant counts per worker",
+            )
     for pid in workers:
         try:
             os.kill(pid, 0)
@@ -1150,7 +1196,10 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     events.unlink()
     env["LEAN_RS_TEST_AUDIT_WORKER_START"] = "1"
     for target, name, expected_counts, grant_event in ORDINARY_AUDITED_TESTS:
+        if name in ORDINARY_WIDE_REUSE_CASES:
+            env["LEAN_RS_TEST_WIDE_REUSE_CASE"] = name
         nextest(target, selection=scoped_tests(target, (name,)))
+        env.pop("LEAN_RS_TEST_WIDE_REUSE_CASE", None)
         check_typed_children_closed(
             typed_audit(events),
             case=name,

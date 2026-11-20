@@ -206,13 +206,23 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
     const TRIVIAL: &str = "theorem t : True := by\n  trivial\n";
     const PRISTINE: &str = "theorem t : ∀ (p : Prop), p → p := by\n  intro p hp\n  exact hp\n";
     const INCOMPLETE: &str = "import LeanRsFixture.DoesNotExist\n\ntheorem present : True := totallyUndefinedSymbol\n";
+    const REUSE_STATE: &str =
+        "theorem reuseProbeDecl : True := trivial\ntheorem reuseProbeSorry : True := by\n  sorry\n";
+    const EVICTION_PROBE: &str =
+        "namespace P\n\nsection S\n\nopen Nat in\ntheorem t (h : True) : True := by\n  exact h\n\nend S\n\nend P\n";
     const DEFAULT_LIMITS: [&str; 3] = ["4", "300000", "67108864"];
 
     let source = batch.source.as_str();
     let selectors = batch.selectors.as_slice();
     let ordinary = imports == ["LeanRsHostShims.Elaboration"];
-    let cache_imports = file == "/cache/imports.lean" && imports == ["LeanRsHostShims.Elaboration", "Lean"];
-    if !ordinary && !cache_imports {
+    let wide = imports == ["LeanRsHostShims.Elaboration", "LeanRsFixture.Handles"];
+    let exact_imports = match file {
+        "/switch/wide.lean" => wide,
+        "/capacity-one/cache.lean" => ordinary || wide,
+        "/cache/imports.lean" => ordinary || imports == ["LeanRsHostShims.Elaboration", "Lean"],
+        _ => ordinary,
+    };
+    if !exact_imports {
         return None;
     }
     let state_at = |line| matches!(selectors, [ProofState { id, line: at, column: 4 }] if id == "state" && *at == line);
@@ -256,7 +266,17 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
         ("/cache/entry-a.lean" | "/cache/entry-b.lean", BASE, _) if state_at(2) => (["1", "300000", "67108864"], false),
         ("/cache/tiny.lean", BASE, _) if state_at(2) => (["4", "300000", "1"], false),
 
-        ("/reuse/cache.lean" | "/shared/cache.lean", BASE, _) if state_at(2) => (DEFAULT_LIMITS, true),
+        (
+            "/reuse/cache.lean"
+            | "/shared/cache.lean"
+            | "/switch/narrow.lean"
+            | "/switch/wide.lean"
+            | "/capacity-one/cache.lean",
+            BASE,
+            _,
+        ) if state_at(2) => (DEFAULT_LIMITS, true),
+        ("/reuse/state.lean", REUSE_STATE, _) if state_at(2) => (DEFAULT_LIMITS, true),
+        ("/capacity/evicted.lean", EVICTION_PROBE, _) if state_at(7) => (DEFAULT_LIMITS, true),
         (
             "<elaborate>",
             BASE,
