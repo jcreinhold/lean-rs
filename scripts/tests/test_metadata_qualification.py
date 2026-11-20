@@ -692,9 +692,14 @@ class MetadataQualificationTest(unittest.TestCase):
             "is_def_eq_recognises_equal_terms",
         )
         adapter_cases = (
-            "declaration_bulk_adapter_matches_in_process_session",
-            "progress_events_cross_worker_boundary_in_order",
-            "parent_can_cancel_long_worker_request_at_progress_boundary",
+            ("session_adapter", "declaration_bulk_adapter_matches_in_process_session"),
+            ("session_adapter", "progress_events_cross_worker_boundary_in_order"),
+            (
+                "session_adapter",
+                "parent_can_cancel_long_worker_request_at_progress_boundary",
+            ),
+            ("supervisor", "max_import_policy_restarts_before_next_import"),
+            ("session_adapter", "elaboration_and_kernel_adapter_match_status_shape"),
         )
         module_query_cases = (
             "process_module_query_handles_module_system_header_through_worker",
@@ -780,8 +785,8 @@ class MetadataQualificationTest(unittest.TestCase):
             *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
             *(f"(binary(=typed_session) & (test(={name})))" for name in meta_cases),
             *(
-                f"(binary(=session_adapter) & (test(={name})))"
-                for name in adapter_cases
+                f"(binary(={target}) & (test(={name})))"
+                for target, name in adapter_cases
             ),
             *(
                 f"(binary(=typed_session) & (test(={name})))"
@@ -836,8 +841,8 @@ class MetadataQualificationTest(unittest.TestCase):
             expected_adapter = next(
                 (
                     name
-                    for name in adapter_cases
-                    if cmd[-1] == f"(binary(=session_adapter) & (test(={name})))"
+                    for target, name in adapter_cases
+                    if cmd[-1] == f"(binary(={target}) & (test(={name})))"
                 ),
                 None,
             )
