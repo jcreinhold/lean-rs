@@ -7,7 +7,7 @@ mod qualification_launch;
 
 pub(super) fn builder() -> LeanWorkerCapabilityBuilder {
     let Some(selection) = option_env!("LEAN_RS_TEST_QUALIFIED_METADATA") else {
-        return super::builder();
+        return super::sealed_stream_builder::selected().unwrap_or_else(super::builder);
     };
     let q = qualification_launch::checked(selection);
     let state = q.owners.parent().expect("qualified owners have a state directory");

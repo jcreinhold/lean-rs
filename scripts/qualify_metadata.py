@@ -1142,7 +1142,13 @@ def check_typed_children_closed(
             started.append(pid)
         if event == b"verified-deployment":
             admitted.add(pid)
-        if event in ORDINARY_GRANT_EVENTS or event == grant_event:
+        if (
+            event in ORDINARY_GRANT_EVENTS
+            or event == grant_event
+            or event.startswith(
+                (b"authorize-fixed-stream-", b"authorize-fixed-metadata-")
+            )
+        ):
             granted.append(event)
             grant_pids.append(pid)
     if case is None:
@@ -1207,6 +1213,16 @@ STREAM_TESTS = (
     ("streaming_runner", "child_fatal_exit_is_reported_to_parent"),
     ("streaming_runner", "row_before_child_panic_is_delivered_before_terminal_failure"),
 )
+
+
+INTEROP_METADATA_TESTS = (
+    ("capability_builder", "builder_opens_worker_capability_and_validates_metadata"),
+    ("capability_builder", "metadata_mismatch_is_reported_by_bootstrap_check"),
+    ("capability_builder", "metadata_validation_failure_is_typed"),
+    ("pool", "metadata_mismatch_is_typed"),
+)
+INTEROP_METADATA_CASES = frozenset(name for _, name in INTEROP_METADATA_TESTS)
+INTEROP_TESTS = (*STREAM_TESTS, *INTEROP_METADATA_TESTS)
 
 
 STREAM_READY_REPLACEMENT = {
@@ -1351,7 +1367,7 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
         }
     )
     select_nextest_runner(env, profile)
-    selected = {name: target for target, name in STREAM_TESTS}
+    selected = {name: target for target, name in INTEROP_TESTS}
     for name in cases or selected:
         target = selected[name]
         env["LEAN_RS_METADATA_STREAM_CASE"] = name
@@ -1376,13 +1392,14 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             ],
             SDK,
         )
+        grant_kind = "metadata" if name in INTEROP_METADATA_CASES else "stream"
         check_typed_children_closed(
             typed_audit(events),
             case=name,
             expected_counts=((2, 1),)
             if name in STREAM_READY_REPLACEMENT
             else ((1, 1),),
-            grant_event=f"authorize-fixed-stream-{name}".encode(),
+            grant_event=f"authorize-fixed-{grant_kind}-{name}".encode(),
         )
         events.unlink()
     remove_owned_state(state, owner)
@@ -1719,7 +1736,7 @@ def qualify_broken_import(
             completed = [broken, typed]
             if run_stream:
                 completed.extend(
-                    scoped_tests(target, (name,)) for target, name in STREAM_TESTS
+                    scoped_tests(target, (name,)) for target, name in INTEROP_TESTS
                 )
             print(
                 "LEAN_RS_TEST_REMAINING_FILTER="
@@ -1770,7 +1787,7 @@ def main():
     )
     stream.add_argument("shim_manifest", type=Path)
     stream.add_argument(
-        "--case", action="append", choices=[name for _, name in STREAM_TESTS]
+        "--case", action="append", choices=[name for _, name in INTEROP_TESTS]
     )
     run = commands.add_parser(
         "run", help="execute the selected tests against a reviewed deployment"

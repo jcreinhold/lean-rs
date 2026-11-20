@@ -904,6 +904,33 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(good, expected)
 
+    def test_metadata_audit_refuses_a_grant_for_another_interop_case(self):
+        for target, name in qualification.INTEROP_METADATA_TESTS:
+            with self.subTest(target=target, name=name):
+                grant = f"authorize-fixed-metadata-{name}".encode()
+                audit = (
+                    b"51 worker-started\n51 verified-deployment\n51 " + grant + b"\n"
+                )
+                with patch.object(
+                    qualification.os, "kill", side_effect=ProcessLookupError
+                ) as probe:
+                    qualification.check_typed_children_closed(
+                        audit, case=name, expected_counts=((1, 1),), grant_event=grant
+                    )
+                probe.assert_called_once_with(51, 0)
+                with (
+                    patch.object(qualification.os, "kill") as probe,
+                    self.assertRaisesRegex(ValueError, "wrong started worker"),
+                ):
+                    qualification.check_typed_children_closed(
+                        audit
+                        + b"51 authorize-fixed-stream-malformed_row_json_is_typed\n",
+                        case=name,
+                        expected_counts=((1, 1),),
+                        grant_event=grant,
+                    )
+                probe.assert_not_called()
+
     def test_module_query_audit_refuses_an_unexpected_term_grant(self):
         audit = (
             b"51 worker-started\n51 verified-deployment\n"

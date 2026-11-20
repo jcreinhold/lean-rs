@@ -23,6 +23,9 @@ use serde_json::json;
 #[path = "support/metadata_qualification.rs"]
 mod metadata_qualification;
 
+#[path = "support/sealed_stream_builder.rs"]
+mod sealed_stream_builder;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -1005,7 +1008,8 @@ fn handshake_failure_is_a_bootstrap_diagnostic() {
 
 #[test]
 fn metadata_validation_failure_is_typed() {
-    let err = builder()
+    let err = sealed_stream_builder::selected()
+        .unwrap_or_else(builder)
         .validate_metadata(
             "lean_rs_interop_consumer_worker_metadata_missing",
             json!({"caller": "builder-test"}),

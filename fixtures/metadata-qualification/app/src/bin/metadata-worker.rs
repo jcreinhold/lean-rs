@@ -451,7 +451,7 @@ impl WorkerAuthority for MetadataApp {
         }
         let contracts = if d.stream {
             let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
-            let (_, suffixes) = stream_cases::CASES
+            let (_, exports) = stream_cases::CASES
                 .iter()
                 .find(|(names, _)| names.contains(&requested.as_str()))
                 .ok_or_else(denied)?;
@@ -460,16 +460,18 @@ impl WorkerAuthority for MetadataApp {
                 .get("exports")
                 .and_then(serde_json::Value::as_array)
                 .ok_or_else(denied)?;
+            let (contract, audit_kind) = match exports {
+                stream_cases::Exports::Streams(_) => (WorkerExportContract::StringStream, "stream"),
+                stream_cases::Exports::Metadata => (WorkerExportContract::StringIoString, "metadata"),
+            };
             let mut contracts = Vec::new();
-            for suffix in *suffixes {
-                let symbol = stream_cases::symbol(suffix);
-                let signature = lean_rs_worker_protocol::worker_exports::streaming_command_signature(&symbol);
+            for signature in exports.signatures() {
                 if !signatures.contains(&signature.to_json()) {
                     return Err(denied());
                 }
-                contracts.push((symbol, WorkerExportContract::StringStream));
+                contracts.push((signature.symbol().to_owned(), contract));
             }
-            audit(&format!("authorize-fixed-stream-{requested}"));
+            audit(&format!("authorize-fixed-{audit_kind}-{requested}"));
             contracts
         } else {
             let export = if d.typed_session {

@@ -49,6 +49,9 @@ fn builder() -> LeanWorkerCapabilityBuilder {
     .worker_executable(worker_binary())
 }
 
+#[path = "support/sealed_stream_builder.rs"]
+mod sealed_stream_builder;
+
 fn json_builder() -> LeanWorkerCapabilityBuilder {
     ordinary_typed_json::json_builder().unwrap_or_else(builder)
 }
@@ -607,8 +610,9 @@ fn metadata_mismatch_is_typed() {
         extra: None,
     };
 
+    let builder = sealed_stream_builder::selected().unwrap_or_else(builder);
     let err = pool
-        .acquire_lease(builder().expect_metadata(
+        .acquire_lease(builder.expect_metadata(
             "lean_rs_interop_consumer_worker_metadata",
             json!({"caller": "pool-metadata-mismatch"}),
             wrong_metadata,

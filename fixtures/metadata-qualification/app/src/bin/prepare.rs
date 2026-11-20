@@ -220,11 +220,8 @@ fn prepare_typed_session(
             shim_json["dependencies"].clone(),
             stream_cases::CASES
                 .iter()
-                .flat_map(|(_, suffixes)| suffixes.iter())
-                .map(|suffix| {
-                    lean_rs_worker_protocol::worker_exports::streaming_command_signature(stream_cases::symbol(suffix))
-                        .to_json()
-                })
+                .flat_map(|(_, exports)| exports.signatures())
+                .map(|sig| sig.to_json())
                 .collect::<Vec<_>>(),
         )
     } else {
