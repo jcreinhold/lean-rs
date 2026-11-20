@@ -503,7 +503,11 @@ class MetadataQualificationTest(unittest.TestCase):
             elif command[-1] == "--typed-session":
                 (typed / "deployment.json").write_text("{}")
                 (typed / "worker-json-capability.json").write_text("{}")
-            elif "nextest" in command and "typed_session" in command:
+            elif (
+                "nextest" in command
+                and "typed_session" in command
+                and "LEAN_RS_TEST_AUDIT_WORKER_START" not in env
+            ):
                 Path(env["LEAN_RS_METADATA_AUDIT_PATH"]).write_text(
                     "".join(
                         f"{pid} verified-deployment\n"
@@ -516,9 +520,9 @@ class MetadataQualificationTest(unittest.TestCase):
                 self.assertFalse(
                     audit.exists(), "already checked audit was not cleared"
                 )
-                target, _name, (counts, *_) = next(
+                target, _name, (counts, *_), event = next(
                     case
-                    for case in qualification.ORDINARY_JSON_TESTS
+                    for case in qualification.ORDINARY_AUDITED_TESTS
                     if command[-1] == qualification.scoped_tests(case[0], (case[1],))
                 )
                 self.assertIn(target, command)
@@ -530,11 +534,14 @@ class MetadataQualificationTest(unittest.TestCase):
                     for index in range(started):
                         pid = 51 + index
                         stream.write(f"{pid} worker-started\n")
-                        if index < grants:
-                            stream.write(
-                                f"{pid} verified-deployment\n"
-                                f"{pid} authorize-consumer-load\n"
-                            )
+                        count = (
+                            grants
+                            if event == qualification.META_TERM_GRANT
+                            else int(index < grants)
+                        )
+                        if count:
+                            stream.write(f"{pid} verified-deployment\n")
+                            stream.write(f"{pid} {event.decode()}\n" * count)
 
         output = io.StringIO()
         with (
@@ -572,7 +579,7 @@ class MetadataQualificationTest(unittest.TestCase):
                     )
             elif extra_json_worker:
                 with self.assertRaisesRegex(
-                    ValueError, "wrong started worker / JSON capability grant counts"
+                    ValueError, "wrong started worker / authorize-consumer-load counts"
                 ):
                     qualification.qualify_broken_import(
                         self.target,
@@ -595,7 +602,7 @@ class MetadataQualificationTest(unittest.TestCase):
                     qualification.ORDINARY_APP_TEST_COUNT
                     + sum(
                         counts[0][0]
-                        for _, _, counts in qualification.ORDINARY_JSON_TESTS
+                        for _, _, counts, _ in qualification.ORDINARY_AUDITED_TESTS
                     ),
                 )
         self.assertFalse(broken.exists())
@@ -605,14 +612,14 @@ class MetadataQualificationTest(unittest.TestCase):
             if live_pid
             else 8
             if extra_json_worker
-            else 7 + len(qualification.ORDINARY_JSON_TESTS),
+            else 7 + len(qualification.ORDINARY_AUDITED_TESTS),
         )
         return seen, output.getvalue()
 
     def test_typed_group_reuses_prepared_shims_and_excludes_only_completed_tests(self):
         seen, output = self.run_typed_selection()
         (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[4:7]
-        json_cases = seen[7:]
+        audited_cases = seen[7:]
         assignments = dict(line.split("=", 1) for line in output.splitlines())
         descriptor = assignments["LEAN_RS_PREPARED_HOST_ARTIFACTS"]
         self.assertEqual(prepare[-1], "--typed-session")
@@ -648,14 +655,20 @@ class MetadataQualificationTest(unittest.TestCase):
             "per_worker_rss_policy_invalidates_old_lease_before_work",
             "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
         )
-        json_filters = [
+        meta_cases = (
+            "infer_type_returns_rendered_type_for_known_term",
+            "whnf_reduces_known_term",
+            "is_def_eq_recognises_equal_terms",
+        )
+        audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
             *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
+            *(f"(binary(=typed_session) & (test(={name})))" for name in meta_cases),
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
-        self.assertEqual([cmd[-1] for cmd, _ in json_cases], json_filters)
-        for cmd, case_env in json_cases:
+        self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)
+        for cmd, case_env in audited_cases:
             self.assertEqual(cmd[cmd.index("--retries") + 1], "0")
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
@@ -670,7 +683,7 @@ class MetadataQualificationTest(unittest.TestCase):
         remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
         self.assertEqual(
             remaining,
-            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & (test(={qualification.BROKEN_IMPORT_TEST}))) | {selection} | {' | '.join(json_filters)}))",
+            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & (test(={qualification.BROKEN_IMPORT_TEST}))) | {selection} | {' | '.join(audited_filters)}))",
         )
 
     def test_typed_group_extra_pool_worker_keeps_state_and_skips_json_smoke(self):
@@ -697,9 +710,28 @@ class MetadataQualificationTest(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "52 remains; keeping fixture state"),
         ):
             qualification.check_typed_children_closed(
-                audit, json_case=case, expected_counts=counts
+                audit, case=case, expected_counts=counts
             )
         probe.assert_any_call(52, 0)
+
+    def test_meta_def_eq_requires_two_term_grants_from_the_same_worker(self):
+        case = "is_def_eq_recognises_equal_terms"
+        audit = (
+            b"51 worker-started\n51 verified-deployment\n51 authorize-fixed-meta-term\n"
+        )
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(
+                ValueError, "wrong started worker / authorize-fixed-meta-term counts"
+            ),
+        ):
+            qualification.check_typed_children_closed(
+                audit,
+                case=case,
+                expected_counts=((1, 2),),
+                grant_event=qualification.META_TERM_GRANT,
+            )
+        probe.assert_not_called()
 
     def test_typed_group_with_live_worker_retains_only_typed_state(self):
         self.run_typed_selection(live_pid=True)

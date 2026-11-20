@@ -211,14 +211,25 @@ impl WorkerAuthority for MetadataApp {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedHostTerm<'static, 'cap>> {
         let d = &self.deployment()?.record;
+        let paths: Vec<_> = d.import_roots.iter().map(|path| path.display().to_string()).collect();
+        let recovery = request == "(Nat.succ 0 : Nat)"
+            && session.imports.matches_request(
+                &paths,
+                &[
+                    "LeanRsFixture.Handles".to_owned(),
+                    "LeanRsFixture.SourceRanges".to_owned(),
+                ],
+            );
+        let meta = matches!(request.as_str(), "(1 + 1 : Nat)" | "(2 : Nat)")
+            && session
+                .imports
+                .matches_request(&paths, &["LeanRsHostShims.Elaboration".to_owned()]);
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
-            || d.broken_import || !d.typed_session || d.verification
-            || !session.imports.matches_request(
-                &d.import_roots.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
-                &["LeanRsFixture.Handles".to_owned(), "LeanRsFixture.SourceRanges".to_owned()],
-            )
+            || d.broken_import
+            || !d.typed_session
+            || d.verification
+            || !(recovery || meta)
             || *session.imports.options() != HostImportOptions::default()
-            || request != "(Nat.succ 0 : Nat)"
             || !options.namespace.is_empty()
             || options.file != "<elaborate>"
             || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
@@ -227,10 +238,10 @@ impl WorkerAuthority for MetadataApp {
         {
             return Err(denied());
         }
-        // SAFETY: grant_source checked the actual Handles/SourceRanges import scope and
-        // complete search path. Held retains its sealed images and imports. Only this
-        // fixed recovery term with default options is admitted; no plugin is allowed.
-        unsafe {
+        // SAFETY: grant_source checked the complete search path and plugin absence. Held
+        // retains the sealed images and imports. Only the named terms can enter their
+        // exact import scopes, with default options and no plugin.
+        let grant = unsafe {
             session.capability.term_scope(
                 session.environment,
                 session.imports,
@@ -238,8 +249,12 @@ impl WorkerAuthority for MetadataApp {
                 request,
                 None,
                 options,
-            )
+            )?
+        };
+        if meta {
+            audit("authorize-fixed-meta-term");
         }
+        Ok(grant)
     }
     fn kernel<'cap>(
         &self,

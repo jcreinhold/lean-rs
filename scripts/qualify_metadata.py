@@ -90,6 +90,23 @@ ORDINARY_JSON_TESTS = (
         ((2, 2), (3, 2)),
     ),
 )
+ORDINARY_META_TESTS = (
+    ("typed_session", "infer_type_returns_rendered_type_for_known_term", ((1, 1),)),
+    ("typed_session", "whnf_reduces_known_term", ((1, 1),)),
+    ("typed_session", "is_def_eq_recognises_equal_terms", ((1, 2),)),
+)
+JSON_GRANT = b"authorize-consumer-load"
+META_TERM_GRANT = b"authorize-fixed-meta-term"
+ORDINARY_AUDITED_TESTS = (
+    *(
+        (target, name, counts, JSON_GRANT)
+        for target, name, counts in ORDINARY_JSON_TESTS
+    ),
+    *(
+        (target, name, counts, META_TERM_GRANT)
+        for target, name, counts in ORDINARY_META_TESTS
+    ),
+)
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
@@ -834,11 +851,13 @@ def typed_audit(events):
     return data
 
 
-def check_typed_children_closed(data, *, json_case=None, expected_counts=()):
+def check_typed_children_closed(
+    data, *, case=None, expected_counts=(), grant_event=JSON_GRANT
+):
     started = []
     admitted = set()
     workers = set()
-    command_grants = []
+    grants = {JSON_GRANT: [], META_TERM_GRANT: []}
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
@@ -848,21 +867,23 @@ def check_typed_children_closed(data, *, json_case=None, expected_counts=()):
             started.append(pid)
         if event == b"verified-deployment":
             admitted.add(pid)
-        if event == b"authorize-consumer-load":
-            command_grants.append(pid)
-    if json_case is None:
+        if event in grants:
+            grants[event].append(pid)
+    if case is None:
         require(
             len(admitted) >= ORDINARY_APP_TEST_COUNT,
             "typed tests did not start the expected admitted workers",
         )
     else:
+        recorded = grants[grant_event]
         require(
-            (len(started), len(command_grants)) in expected_counts
+            (len(started), len(recorded)) in expected_counts
             and len(started) == len(workers)
             and set(started) == workers
-            and admitted == set(command_grants) <= workers
-            and len(command_grants) == len(admitted),
-            f"{json_case}: wrong started worker / JSON capability grant counts",
+            and admitted == set(recorded) <= workers
+            and (grant_event != JSON_GRANT or len(recorded) == len(admitted))
+            and not any(pids for event, pids in grants.items() if event != grant_event),
+            f"{case}: wrong started worker / {grant_event.decode()} counts",
         )
     for pid in workers:
         try:
@@ -949,10 +970,13 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     check_typed_children_closed(typed_audit(events))
     events.unlink()
     env["LEAN_RS_TEST_AUDIT_WORKER_START"] = "1"
-    for target, name, expected_counts in ORDINARY_JSON_TESTS:
+    for target, name, expected_counts, grant_event in ORDINARY_AUDITED_TESTS:
         nextest(target, selection=scoped_tests(target, (name,)))
         check_typed_children_closed(
-            typed_audit(events), json_case=name, expected_counts=expected_counts
+            typed_audit(events),
+            case=name,
+            expected_counts=expected_counts,
+            grant_event=grant_event,
         )
         events.unlink()
     remove_owned_state(state, owner)
@@ -1103,7 +1127,7 @@ def qualify_broken_import(
                     ordinary_app_tests(),
                     *(
                         scoped_tests(target, (name,))
-                        for target, name, _ in ORDINARY_JSON_TESTS
+                        for target, name, _, _ in ORDINARY_AUDITED_TESTS
                     ),
                 ]
             )
