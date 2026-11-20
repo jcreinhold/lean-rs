@@ -124,3 +124,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../../../../crates/lean-rs-host/tests/support/transitive_assertions.rs"]
+mod transitive_assertions;
+
+#[test]
+fn import_finds_transitive_lake_package_oleans() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_rs::{LeanRuntime, module::LoadedHostArtifacts};
+    use lean_rs_host::host::LeanPreparedHostArtifacts;
+    use lean_rs_host::{
+        LeanCapabilities, LeanHost, LeanImportProfileMode, LeanImportProfilerOptions, LeanSessionImportProfile,
+    };
+    use metadata_qualification::{Held, audit};
+    use std::sync::Arc;
+
+    const WORKER_CASE: &str = "shims_only_host_handle_imports_transitive_lake_package_oleans";
+    let held = Arc::new(Held::acquire(Record::selected())?);
+    let r = &held.record;
+    assert!(r.broken_import && !r.typed_session && !r.stream && !r.verification);
+    assert_eq!(r.host_builder_case.as_deref(), Some(WORKER_CASE));
+    assert_eq!(
+        r.project.file_name().and_then(|name| name.to_str()),
+        Some("lean-transitive")
+    );
+    held.verify()?;
+    held.check_interop_visibility(false)?;
+
+    let runtime = LeanRuntime::init()?;
+    let host = LeanHost::from_lake_project(runtime, &r.project)?;
+    let prepared = LeanPreparedHostArtifacts::from_snapshot(
+        r.shim_manifest.clone(),
+        r.shim_json.clone(),
+        r.shim_roots.clone(),
+        r.shim_paths.clone(),
+    )?;
+    // SAFETY: Held verified the exact sealed loader inputs and retains the
+    // consumer, path dependency and both shim locks across the direct call.
+    let loaded = unsafe {
+        LoadedHostArtifacts::load(
+            runtime,
+            r.shim_manifest.clone(),
+            r.shim_json.as_bytes().to_vec(),
+            r.shim_roots.clone(),
+            r.shim_paths.clone(),
+            Arc::clone(&held),
+        )?
+    };
+    held.check_interop_visibility(true)?;
+    let caps = LeanCapabilities::from_prepared(&host, &prepared, loaded)?;
+    assert_eq!(caps.artifact_roots(), r.roots);
+    let paths = caps.import_search_paths();
+    transitive_assertions::check(&caps, |module| {
+        let names = vec![module.to_owned()];
+        let options = LeanImportProfileMode::FullSession(LeanSessionImportProfile::default())
+            .native_options(&LeanImportProfilerOptions::default());
+        r.check_order(&paths, &names, &options)
+            .expect("exact sealed import graph");
+        // SAFETY: check_order admits only the two reviewed modules, in this
+        // exact order of held artifact roots and with default import options.
+        unsafe {
+            caps.shim_capability()
+                .import_scope_with_options(paths.clone(), names, options)
+        }
+    });
+    audit("direct-host-transitive-passed");
+    Ok(())
+}

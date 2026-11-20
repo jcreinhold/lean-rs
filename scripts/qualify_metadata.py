@@ -30,6 +30,8 @@ STATE = TARGET / "metadata-qualification/ordinary"
 STATE_LOCK = TARGET / "metadata-qualification/.ordinary.lock"
 SOCKET_ROOT = TARGET / "ws"
 BROKEN_IMPORT_TEST = "a_host_handle_built_with_a_broken_import_still_fails_at_open"
+TRANSITIVE_WORKER_TEST = "shims_only_host_handle_imports_transitive_lake_package_oleans"
+DIRECT_TRANSITIVE_TEST = "import_finds_transitive_lake_package_oleans"
 HOST_BUILDER_CASES = (
     (
         "a_host_handle_built_without_imports_opens_no_session",
@@ -50,7 +52,7 @@ HOST_BUILDER_CASES = (
         ),
     ),
     (
-        "shims_only_host_handle_imports_transitive_lake_package_oleans",
+        TRANSITIVE_WORKER_TEST,
         "--host-builder-transitive",
         "lean-transitive",
         (
@@ -1730,17 +1732,16 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     remove_owned_state(state, owner)
 
 
-def check_host_builder_children_closed(data, expected):
+def check_host_builder_children_closed(
+    data, expected, *, prefix=(b"worker-started", b"verified-deployment")
+):
     by_pid = {}
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid host builder PID")
         by_pid.setdefault(int(raw), []).append(event)
     require(
-        list(by_pid.values())
-        == [
-            [b"worker-started", b"verified-deployment", *events] for events in expected
-        ],
+        list(by_pid.values()) == [[*prefix, *events] for events in expected],
         "wrong worker count, custody or ordered imports for host builder",
     )
     for pid in by_pid:
@@ -1810,6 +1811,7 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
 
 def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
     state = parent / "broken-import"
+    direct_transitive = False
     for case, mode, project, imports in HOST_BUILDER_CASES:
         # Each graph has the original sources, its own seal and a checked close.
         # Refuse an incomplete previous run before touching this state.
@@ -1825,8 +1827,37 @@ def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
         check_host_builder_children_closed(
             typed_audit(state / "native-events.log"), imports
         )
+        if case == TRANSITIVE_WORKER_TEST:
+            events = state / "direct-events.log"
+            env["LEAN_RS_METADATA_AUDIT_PATH"] = str(events)
+            run(
+                [
+                    "cargo",
+                    "nextest",
+                    "run",
+                    "--locked",
+                    "--offline",
+                    "-j1",
+                    "--no-tests",
+                    "fail",
+                    "--retries",
+                    "0",
+                    "--features",
+                    "admitted",
+                    "--bin",
+                    "control",
+                    "-E",
+                    f"test(={DIRECT_TRANSITIVE_TEST})",
+                ],
+                APP,
+            )
+            check_host_builder_children_closed(
+                typed_audit(events), ((b"direct-host-transitive-passed",),), prefix=()
+            )
+            direct_transitive = True
         remove_owned_state(state, owner)
     env.clear()
+    return direct_transitive
 
 
 def qualify_broken_import(
@@ -1911,9 +1942,12 @@ def qualify_broken_import(
             "prepared shim descriptor exceeds wire bound",
         )
     remove_owned_state(state, owner)
+    direct_transitive = False
     if run_typed:
         qualify_typed_group(parent, release, profile, run, env, cargo, typed_descriptor)
-        qualify_host_builder_cases(parent, release, profile, run, env, cargo)
+        direct_transitive = qualify_host_builder_cases(
+            parent, release, profile, run, env, cargo
+        )
     if run_stream:
         qualify_stream(
             release,
@@ -1944,10 +1978,11 @@ def qualify_broken_import(
                 completed.extend(
                     scoped_tests(target, (name,)) for target, name in INTEROP_TESTS
                 )
-            print(
-                "LEAN_RS_TEST_REMAINING_FILTER="
-                f"not (package(=lean-rs-worker-child) & ({' | '.join(completed)}))"
-            )
+            excluded = f"package(=lean-rs-worker-child) & ({' | '.join(completed)})"
+            if direct_transitive:
+                host = scoped_tests("host_services", (DIRECT_TRANSITIVE_TEST,))
+                excluded = f"({excluded}) | (package(=lean-rs-host) & {host})"
+            print(f"LEAN_RS_TEST_REMAINING_FILTER=not ({excluded})")
 
 
 def main():

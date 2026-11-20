@@ -14,6 +14,9 @@ mod fixture;
 #[path = "support/service_requests.rs"]
 mod service_requests;
 
+#[path = "support/transitive_assertions.rs"]
+mod transitive_assertions;
+
 // Only the two option regressions use the held elaboration fixture for these
 // calls. Their sources, targets, selectors, cache policy and options are fixed
 // at the call sites; other requests still need the independent policy record.
@@ -579,39 +582,9 @@ fn import_finds_transitive_lake_package_oleans() {
 
     let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
     let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
-    let mut session = caps
-        .session(
-            &service_requests::imports(&caps, &["Consumer"], LeanSessionImportProfile::default()),
-            None,
-            None,
-        )
-        .expect("consumer imports dependency");
-    let declarations = session
-        .list_declarations_strings(&LeanDeclarationFilter::default(), None, None)
-        .expect("list declarations works");
-    assert!(
-        declarations.iter().any(|name| name.starts_with("Dep.")),
-        "dependency declaration should be visible when transitive oleans are on the search path"
-    );
-
-    let Err(missing_err) = caps.session(
-        &service_requests::imports(&caps, &["Dep.NonExistent"], LeanSessionImportProfile::default()),
-        None,
-        None,
-    ) else {
-        panic!("missing dependency module unexpectedly imported");
-    };
-    match missing_err {
-        LeanError::LeanException(exc) => {
-            assert!(
-                exc.message().contains("Dep.NonExistent"),
-                "missing module should be reported by Lean import, got: {}",
-                exc.message(),
-            );
-        }
-        LeanError::Host(failure) => panic!("expected LeanException for missing import, got Host {failure:?}"),
-        LeanError::Cancelled(cancelled) => panic!("expected LeanException for missing import, got {cancelled:?}"),
-    }
+    transitive_assertions::check(&caps, |name| {
+        service_requests::imports(&caps, &[name], LeanSessionImportProfile::default())
+    });
 }
 
 // -- session import + query ---------------------------------------------

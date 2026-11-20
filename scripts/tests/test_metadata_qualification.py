@@ -480,7 +480,9 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
         run.assert_called_once()
 
-    def run_typed_selection(self, *, live_pid=False, extra_json_worker=False):
+    def run_typed_selection(
+        self, *, live_pid=False, extra_json_worker=False, direct_transitive=False
+    ):
         broken = self.state.with_name("broken-import")
         typed = self.state.with_name("typed-session")
         self.worker.chmod(0o500)
@@ -579,7 +581,11 @@ class MetadataQualificationTest(unittest.TestCase):
                 side_effect=None if live_pid else ProcessLookupError,
             ) as probe,
             patch("sys.stdout", output),
-            patch.object(qualification, "qualify_host_builder_cases") as host_builder,
+            patch.object(
+                qualification,
+                "qualify_host_builder_cases",
+                return_value=direct_transitive,
+            ) as host_builder,
         ):
             if live_pid:
                 with self.assertRaisesRegex(
@@ -879,6 +885,30 @@ class MetadataQualificationTest(unittest.TestCase):
             remaining,
             f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & ({builder_filter})) | {selection} | {' | '.join(audited_filters)}))",
         )
+
+    def test_direct_transitive_replaces_only_the_matching_host_test(self):
+        _, output = self.run_typed_selection(direct_transitive=True)
+        remaining = dict(line.split("=", 1) for line in output.splitlines())[
+            "LEAN_RS_TEST_REMAINING_FILTER"
+        ]
+        self.assertTrue(
+            remaining.endswith(
+                " | (package(=lean-rs-host) & (binary(=host_services) & "
+                "(test(=import_finds_transitive_lake_package_oleans)))))"
+            )
+        )
+        self.assertEqual(remaining.count("package(=lean-rs-host)"), 1)
+
+    def test_direct_transitive_receipt_requires_process_exit(self):
+        marker = ((b"direct-host-transitive-passed",),)
+        audit = b"51 direct-host-transitive-passed\n"
+        with patch.object(qualification.os, "kill", side_effect=ProcessLookupError):
+            qualification.check_host_builder_children_closed(audit, marker, prefix=())
+        with (
+            patch.object(qualification.os, "kill", return_value=None),
+            self.assertRaisesRegex(ValueError, "PID 51 remains"),
+        ):
+            qualification.check_host_builder_children_closed(audit, marker, prefix=())
 
     def test_typed_group_extra_pool_worker_keeps_state_and_skips_json_smoke(self):
         self.run_typed_selection(extra_json_worker=True)
