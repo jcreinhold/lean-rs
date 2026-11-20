@@ -244,7 +244,7 @@ pub(super) fn payload_closed(value: &Value) -> io::Result<bool> {
 }
 // Record retention includes the descriptor custodian, independently of compute
 // occupancy. A closed payload may leave a live guardian holding artifact loans.
-fn record_can_be_removed(value: &Value) -> io::Result<bool> {
+pub(super) fn record_can_be_removed(value: &Value) -> io::Result<bool> {
     if !payload_closed(value)? {
         return Ok(false);
     }

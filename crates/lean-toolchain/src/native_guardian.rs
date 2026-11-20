@@ -839,58 +839,32 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
         if !matches!(version, Some(1 | 2)) {
             return Err(invalid("unknown native owner record version"));
         }
-        // A closed payload needs no access to former artifact paths. Its live
-        // guardian may still retain SH and a recovery record; callers hold EX.
-        if ownership::payload_closed(&value)? || field(&value, "phase") == "preparing" {
+        // A raw EX candidate cannot replace the registry's custody check.
+        // A fully closed scope needs no access to its former artifact paths.
+        if ownership::record_can_be_removed(&value)? || field(&value, "phase") == "preparing" {
             continue;
         }
-        if field(&value, "phase") == "dispatching" {
+        // Dispatching and legacy records have no usable domain binding.
+        if field(&value, "phase") == "dispatching" || version == Some(1) {
             return Ok(false);
         }
-        let process = field(&value, "process");
-        let group =
-            pid(field(process, "process_group")).ok_or_else(|| invalid("native owner process group missing"))?;
-        if pid(field(process, "pid")) != Some(group) || pid(field(process, "session")) != Some(group) {
-            return Err(invalid("native owner process scope differs"));
-        }
-        // Legacy lifelines have no independent FD custodian. Optional empty
-        // fields written by a newer serializer cannot weaken their fence.
-        if version == Some(1) {
-            if crate::process_group::group_present(group)? {
-                return Ok(false);
-            }
-            continue;
-        }
-        let domains: Vec<NativeReadDomain> = match value.get("protected_domains") {
-            Some(domains) => serde_json::from_value(domains.clone()).map_err(io::Error::other)?,
-            None if version == Some(1) => {
-                if crate::process_group::group_present(group)? {
-                    return Ok(false);
-                }
-                continue;
-            }
-            None => return Err(invalid("native owner protected domains missing")),
-        };
+        let domains: Vec<NativeReadDomain> =
+            serde_json::from_value(field(&value, "protected_domains").clone()).map_err(io::Error::other)?;
         if domains.len() > MAX_READ_DOMAINS {
             return Err(invalid("native owner domain union exceeds limit"));
         }
-        let mut seen = std::collections::BTreeSet::new();
-        for domain in domains {
-            if domain.epoch.is_empty()
-                || domain.epoch.len() > 4096
-                || !domain.project_root.is_absolute()
-                || domain.project_root.canonicalize()? != domain.project_root
+        // Only the matching recorded path can conflict. Do not reopen an
+        // unrelated guardian's project paths, which may already be gone.
+        if let Some(domain) = domains.into_iter().find(|domain| domain.lock_path == lock_path) {
+            if domain.project_root.canonicalize()? != domain.project_root
                 || crate::shared_writer::project_lock_path(&domain.project_root)? != domain.lock_path
-                || !seen.insert(domain.lock_path.clone())
             {
                 return Err(invalid("invalid native protected domain"));
             }
-            if domain.lock_path == lock_path && crate::process_group::group_present(group)? {
-                if (domain.device, domain.inode) != identity {
-                    return Err(invalid("protected native lock inode changed"));
-                }
-                return Ok(false);
+            if (domain.device, domain.inode) != identity {
+                return Err(invalid("protected native lock inode changed"));
             }
+            return Ok(false);
         }
     }
     Ok(true)

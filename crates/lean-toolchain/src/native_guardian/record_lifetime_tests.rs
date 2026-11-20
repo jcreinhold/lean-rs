@@ -159,6 +159,30 @@ fn closed_payload_keeps_guardian_record_without_occupying_compute() {
     let probe = OpenOptions::new().read(true).write(true).open(fixture.lock()).unwrap();
     let inode = probe.metadata().unwrap();
     assert_blocked(&probe);
+    assert!(
+        !protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (inode.dev(), inode.ino())).unwrap(),
+        "the registry must independently fence a matching live custodian after payload exit"
+    );
+    let unrelated_root = fixture.root.join("unrelated");
+    fs::create_dir(&unrelated_root).unwrap();
+    let unrelated_lock = crate::shared_writer::project_lock_path(&unrelated_root).unwrap();
+    let unrelated = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&unrelated_lock)
+        .unwrap();
+    unrelated.try_lock().unwrap();
+    let unrelated_inode = unrelated.metadata().unwrap();
+    assert!(
+        protected_native_reads_stopped(
+            &fixture.registry,
+            &unrelated_lock,
+            (unrelated_inode.dev(), unrelated_inode.ino()),
+        )
+        .unwrap(),
+        "a scoped guardian must not fence an unrelated stable lock"
+    );
     let replacement = reserve(&fixture, &candidate_nonce, "replacement-actor").unwrap();
     assert_blocked(&probe);
     eprintln!(
