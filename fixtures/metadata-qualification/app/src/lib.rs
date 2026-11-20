@@ -276,6 +276,9 @@ impl Record {
                 "Dep.NonExistent" => Some("authorize-builder-missing-dependency"),
                 _ => None,
             },
+            (Some("shims_only_session_opens_without_user_dylib"), [name]) if name == "Good" => {
+                Some("authorize-builder-good")
+            }
             (Some("a_host_handle_built_without_imports_opens_no_session"), []) => Some("authorize-builder-empty"),
             (Some("shims_only_host_handle_skips_user_shared_build"), [name]) if name == "Demo.Broken" => {
                 Some("authorize-builder-broken")

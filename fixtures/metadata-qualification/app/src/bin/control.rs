@@ -129,25 +129,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[path = "../../../../../crates/lean-rs-host/tests/support/transitive_assertions.rs"]
 mod transitive_assertions;
 
-#[test]
-fn import_finds_transitive_lake_package_oleans() -> Result<(), Box<dyn std::error::Error>> {
+#[cfg(test)]
+#[path = "../../../../../crates/lean-rs-host/tests/support/good_shims_assertions.rs"]
+mod good_shims_assertions;
+
+#[cfg(test)]
+fn with_direct_shims(
+    case: &str,
+    project: &str,
+    check: impl FnOnce(&lean_rs_host::LeanCapabilities<'static, '_>, &Record) -> Result<(), Box<dyn std::error::Error>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     use lean_rs::{LeanRuntime, module::LoadedHostArtifacts};
     use lean_rs_host::host::LeanPreparedHostArtifacts;
-    use lean_rs_host::{
-        LeanCapabilities, LeanHost, LeanImportProfileMode, LeanImportProfilerOptions, LeanSessionImportProfile,
-    };
-    use metadata_qualification::{Held, audit};
+    use lean_rs_host::{LeanCapabilities, LeanHost};
+    use metadata_qualification::Held;
     use std::sync::Arc;
 
-    const WORKER_CASE: &str = "shims_only_host_handle_imports_transitive_lake_package_oleans";
     let held = Arc::new(Held::acquire(Record::selected())?);
     let r = &held.record;
     assert!(r.broken_import && !r.typed_session && !r.stream && !r.verification);
-    assert_eq!(r.host_builder_case.as_deref(), Some(WORKER_CASE));
-    assert_eq!(
-        r.project.file_name().and_then(|name| name.to_str()),
-        Some("lean-transitive")
-    );
+    assert_eq!(r.host_builder_case.as_deref(), Some(case));
+    assert_eq!(r.project.file_name().and_then(|name| name.to_str()), Some(project));
     held.verify()?;
     held.check_interop_visibility(false)?;
 
@@ -174,20 +176,79 @@ fn import_finds_transitive_lake_package_oleans() -> Result<(), Box<dyn std::erro
     held.check_interop_visibility(true)?;
     let caps = LeanCapabilities::from_prepared(&host, &prepared, loaded)?;
     assert_eq!(caps.artifact_roots(), r.roots);
-    let paths = caps.import_search_paths();
-    transitive_assertions::check(&caps, |module| {
-        let names = vec![module.to_owned()];
-        let options = LeanImportProfileMode::FullSession(LeanSessionImportProfile::default())
-            .native_options(&LeanImportProfilerOptions::default());
-        r.check_order(&paths, &names, &options)
-            .expect("exact sealed import graph");
-        // SAFETY: check_order admits only the two reviewed modules, in this
-        // exact order of held artifact roots and with default import options.
-        unsafe {
+    check(&caps, r)?;
+    Ok(())
+}
+
+#[test]
+fn import_finds_transitive_lake_package_oleans() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_rs_host::{LeanImportProfileMode, LeanImportProfilerOptions, LeanSessionImportProfile};
+    with_direct_shims(
+        "shims_only_host_handle_imports_transitive_lake_package_oleans",
+        "lean-transitive",
+        |caps, r| {
+            let paths = caps.import_search_paths();
+            transitive_assertions::check(caps, |module| {
+                let names = vec![module.to_owned()];
+                let options = LeanImportProfileMode::FullSession(LeanSessionImportProfile::default())
+                    .native_options(&LeanImportProfilerOptions::default());
+                r.check_order(&paths, &names, &options)
+                    .expect("exact sealed import graph");
+                // SAFETY: check_order admits only the two reviewed modules, in this
+                // exact order of held artifact roots and with default import options.
+                unsafe {
+                    caps.shim_capability()
+                        .import_scope_with_options(paths.clone(), names, options)
+                }
+            });
+            Ok(())
+        },
+    )?;
+    metadata_qualification::audit("direct-host-transitive-passed");
+    Ok(())
+}
+
+#[test]
+fn load_shims_only_opens_session_against_user_oleans() -> Result<(), Box<dyn std::error::Error>> {
+    use good_shims_assertions::{IMPORTS, KERNEL_SOURCE};
+    use lean_rs::module::HostImportOptions;
+    use lean_rs_host::LeanElabOptions;
+
+    with_direct_shims("shims_only_session_opens_without_user_dylib", "lean-good", |caps, r| {
+        let paths = caps.import_search_paths();
+        assert!(
+            paths
+                .iter()
+                .map(std::path::Path::new)
+                .eq(r.import_roots.iter().map(std::path::PathBuf::as_path))
+        );
+        let names = IMPORTS.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+        let options = HostImportOptions::default();
+        // SAFETY: this direct-only request uses the exact reviewed module order
+        // and default options while holding the verified Good and shim roots.
+        let imports = unsafe {
             caps.shim_capability()
-                .import_scope_with_options(paths.clone(), names, options)
-        }
-    });
-    audit("direct-host-transitive-passed");
+                .import_scope_with_options(paths.clone(), names.clone(), options.clone())
+        };
+        good_shims_assertions::check(caps, &imports, |session| {
+            let (env, scope) = session.source_context();
+            assert!(scope.matches_request(&paths, &names));
+            assert_eq!(scope.options(), &options);
+            // SAFETY: only the fixed theorem is admitted, in this same held
+            // session environment with its checked imports and default options.
+            let request = unsafe {
+                caps.shim_capability().kernel_scope(
+                    env,
+                    scope,
+                    r.verification_roots(),
+                    KERNEL_SOURCE.into(),
+                    LeanElabOptions::new().source_options(),
+                )
+            }?;
+            session.kernel_check(&request, None, None)
+        });
+        Ok(())
+    })?;
+    metadata_qualification::audit("direct-host-good-passed");
     Ok(())
 }

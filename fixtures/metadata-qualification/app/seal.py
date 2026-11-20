@@ -131,12 +131,22 @@ def main():
     transitive = host_builder_case == (
         "shims_only_host_handle_imports_transitive_lake_package_oleans"
     )
+    good = host_builder_case == "shims_only_session_opens_without_user_dylib"
     assert host_builder_case is None or (
-        broken and (transitive or host_builder_case in builder_profiles)
+        broken and (transitive or good or host_builder_case in builder_profiles)
     )
     builder = builder_profiles.get(host_builder_case)
     project = (
-        state / ("lean-transitive" if transitive else builder[0] if builder else "lean")
+        state
+        / (
+            "lean-transitive"
+            if transitive
+            else "lean-good"
+            if good
+            else builder[0]
+            if builder
+            else "lean"
+        )
         if broken
         else sdk
         / (
@@ -371,6 +381,19 @@ def main():
                 f.suffix in {".dylib", ".so", ".dll"}
                 for f in (root / ".lake/build/lib").rglob("*")
             )
+    elif good:
+        assert packages == []
+        for name, value in {
+            "lakefile.lean": "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n",
+            "Good.lean": "def goodValue : Nat := 41\n",
+            "lean-toolchain": "leanprover/lean4:v4.36.0\n",
+        }.items():
+            assert (project / name).read_text() == value
+            pin_content(project / name)
+        assert not any(
+            f.suffix in {".dylib", ".so", ".dll"}
+            for f in (project / ".lake/build/lib").rglob("*")
+        )
     elif broken:
         assert packages == []
         sources = ["lakefile.lean", "Demo.lean", "lean-toolchain"]
@@ -481,6 +504,11 @@ def main():
                 if (root / relative).exists()
             ]
             assert found == ([selected] if selected else [])
+    elif good:
+        assert str(project_oleans / "Good.olean") in filepins
+        assert not any(
+            (r / "Good.olean").exists() for r in [*shims, release / "lib/lean"]
+        )
     elif broken:
         if builder:
             assert str(project_oleans / "Demo/Good.olean") in filepins

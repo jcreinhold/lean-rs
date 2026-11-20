@@ -232,21 +232,37 @@ fn declaration_bulk_adapter_matches_in_process_session() {
 
 #[test]
 fn shims_only_session_opens_without_user_dylib() {
-    let project = TempLakeProject::new("shims-only");
-    project.write(
-        "lakefile.lean",
-        "import Lake\nopen Lake DSL\npackage worker_shims\nlean_lib Good\n",
-    );
-    project.write("Good.lean", "def goodValue : Nat := 41\n");
-    project.lake_build_ok("Good");
+    let mut temporary = None;
+    let (project, config, tracker) = if let Some(selected) = ordinary_typed_selection::ordinary_scalar_selection() {
+        let target = workspace_root().canonicalize().expect("canonical SDK").join("target");
+        assert_eq!(
+            selected.fixture,
+            target.join("metadata-qualification/broken-import/lean-good")
+        );
+        assert_eq!(selected.worker, target.join("debug/metadata-worker"));
+        let Some(prepared) = option_env!("LEAN_RS_PREPARED_HOST_ARTIFACTS") else {
+            panic!("selected Good fixture requires its sealed shim descriptor");
+        };
+        let tracker = LeanWorkerProcessTracker::new();
+        let config = LeanWorkerConfig::new(&selected.worker)
+            .checked_native_loader_environment()
+            .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", prepared)
+            .process_tracker(tracker.clone());
+        (selected.fixture.clone(), config, Some(tracker))
+    } else {
+        let project = temporary.insert(TempLakeProject::new("shims-only"));
+        project.write(
+            "lakefile.lean",
+            "import Lake\nopen Lake DSL\npackage worker_shims\nlean_lib Good\n",
+        );
+        project.write("Good.lean", "def goodValue : Nat := 41\n");
+        project.lake_build_ok("Good");
+        (project.path().to_path_buf(), worker_config(), None)
+    };
 
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
     let mut session = worker
-        .open_session(
-            &LeanWorkerSessionConfig::shims_only(project.path(), ["Good"]),
-            None,
-            None,
-        )
+        .open_session(&LeanWorkerSessionConfig::shims_only(project, ["Good"]), None, None)
         .expect("shims-only worker session opens");
     let declarations = session
         .list_declarations_strings(&LeanWorkerDeclarationFilter::default(), None, None)
@@ -256,6 +272,7 @@ fn shims_only_session_opens_without_user_dylib() {
         declarations.iter().any(|name| name == "goodValue"),
         "worker shims-only session should see user oleans"
     );
+    stop_selected_worker(worker, tracker);
 }
 
 #[test]

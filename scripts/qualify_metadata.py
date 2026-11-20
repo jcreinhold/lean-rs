@@ -32,7 +32,19 @@ SOCKET_ROOT = TARGET / "ws"
 BROKEN_IMPORT_TEST = "a_host_handle_built_with_a_broken_import_still_fails_at_open"
 TRANSITIVE_WORKER_TEST = "shims_only_host_handle_imports_transitive_lake_package_oleans"
 DIRECT_TRANSITIVE_TEST = "import_finds_transitive_lake_package_oleans"
+GOOD_WORKER_TEST = "shims_only_session_opens_without_user_dylib"
+DIRECT_GOOD_TEST = "load_shims_only_opens_session_against_user_oleans"
+DIRECT_BUILDER_TESTS = {
+    TRANSITIVE_WORKER_TEST: (DIRECT_TRANSITIVE_TEST, b"direct-host-transitive-passed"),
+    GOOD_WORKER_TEST: (DIRECT_GOOD_TEST, b"direct-host-good-passed"),
+}
 HOST_BUILDER_CASES = (
+    (
+        GOOD_WORKER_TEST,
+        "--host-builder-good",
+        "lean-good",
+        ((b"authorize-builder-good",),),
+    ),
     (
         "a_host_handle_built_without_imports_opens_no_session",
         "--host-builder-lazy",
@@ -1814,6 +1826,20 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
     }
     if case == BROKEN_IMPORT_TEST:
         env["LEAN_RS_TEST_BROKEN_IMPORT"] = json.dumps(selection)
+    elif case == GOOD_WORKER_TEST:
+        selected = json.loads(record.read_bytes())
+        env["LEAN_RS_PREPARED_HOST_ARTIFACTS"] = json.dumps(
+            {
+                "protocol": 2,
+                "shim_manifest_path": selected["shim_manifest"],
+                "shim_manifest_json": selected["shim_json"],
+                "artifact_roots": selected["shim_roots"],
+                "shim_search_paths": selected["shim_paths"],
+            }
+        )
+        env["LEAN_RS_TEST_ORDINARY_SCALAR"] = json.dumps(
+            {"fixture": selection.pop("project"), **selection}
+        )
     else:
         env["LEAN_RS_TEST_HOST_BUILDER"] = json.dumps({"case": case, **selection})
     select_nextest_runner(env, profile)
@@ -1832,7 +1858,7 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
             "-p",
             "lean-rs-worker-child",
             "--test",
-            "capability_builder",
+            "session_adapter" if case == GOOD_WORKER_TEST else "capability_builder",
             "-E",
             f"test(={case})",
         ],
@@ -1841,9 +1867,38 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
     return record
 
 
+def qualify_direct_builder_case(case, state, run, env):
+    name, marker = DIRECT_BUILDER_TESTS[case]
+    events = state / "direct-events.log"
+    env["LEAN_RS_METADATA_AUDIT_PATH"] = str(events)
+    run(
+        [
+            "cargo",
+            "nextest",
+            "run",
+            "--locked",
+            "--offline",
+            "-j1",
+            "--no-tests",
+            "fail",
+            "--retries",
+            "0",
+            "--features",
+            "admitted",
+            "--bin",
+            "control",
+            "-E",
+            f"test(={name})",
+        ],
+        APP,
+    )
+    check_host_builder_children_closed(typed_audit(events), ((marker,),), prefix=())
+    return name
+
+
 def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
     state = parent / "broken-import"
-    direct_transitive = False
+    direct_tests = []
     for case, mode, project, imports in HOST_BUILDER_CASES:
         # Each graph has the original sources, its own seal and a checked close.
         # Refuse an incomplete previous run before touching this state.
@@ -1859,37 +1914,11 @@ def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
         check_host_builder_children_closed(
             typed_audit(state / "native-events.log"), imports
         )
-        if case == TRANSITIVE_WORKER_TEST:
-            events = state / "direct-events.log"
-            env["LEAN_RS_METADATA_AUDIT_PATH"] = str(events)
-            run(
-                [
-                    "cargo",
-                    "nextest",
-                    "run",
-                    "--locked",
-                    "--offline",
-                    "-j1",
-                    "--no-tests",
-                    "fail",
-                    "--retries",
-                    "0",
-                    "--features",
-                    "admitted",
-                    "--bin",
-                    "control",
-                    "-E",
-                    f"test(={DIRECT_TRANSITIVE_TEST})",
-                ],
-                APP,
-            )
-            check_host_builder_children_closed(
-                typed_audit(events), ((b"direct-host-transitive-passed",),), prefix=()
-            )
-            direct_transitive = True
+        if case in DIRECT_BUILDER_TESTS:
+            direct_tests.append(qualify_direct_builder_case(case, state, run, env))
         remove_owned_state(state, owner)
     env.clear()
-    return direct_transitive
+    return tuple(direct_tests)
 
 
 SCALAR_ENTRY_TESTS = (
@@ -2087,10 +2116,10 @@ def qualify_broken_import(
             "prepared shim descriptor exceeds wire bound",
         )
     remove_owned_state(state, owner)
-    direct_transitive = False
+    direct_tests = ()
     if run_typed:
         qualify_typed_group(parent, release, profile, run, env, cargo, typed_descriptor)
-        direct_transitive = qualify_host_builder_cases(
+        direct_tests = qualify_host_builder_cases(
             parent, release, profile, run, env, cargo
         )
         qualify_scalar_entry(release, profile, run, env, cargo, typed_descriptor)
@@ -2117,7 +2146,14 @@ def qualify_broken_import(
             )
             broken = scoped_tests(
                 "capability_builder",
-                (BROKEN_IMPORT_TEST, *(case for case, *_ in HOST_BUILDER_CASES)),
+                (
+                    BROKEN_IMPORT_TEST,
+                    *(
+                        case
+                        for case, *_ in HOST_BUILDER_CASES
+                        if case != GOOD_WORKER_TEST
+                    ),
+                ),
             )
             completed = [
                 broken,
@@ -2132,8 +2168,11 @@ def qualify_broken_import(
                     scoped_tests(target, (name,)) for target, name in INTEROP_TESTS
                 )
             excluded = f"package(=lean-rs-worker-child) & ({' | '.join(completed)})"
-            if direct_transitive:
-                host = scoped_tests("host_services", (DIRECT_TRANSITIVE_TEST,))
+            if DIRECT_GOOD_TEST in direct_tests:
+                good = scoped_tests("session_adapter", (GOOD_WORKER_TEST,))
+                excluded = f"({excluded}) | (package(=lean-rs-worker-child) & {good})"
+            if direct_tests:
+                host = scoped_tests("host_services", direct_tests)
                 excluded = f"({excluded}) | (package(=lean-rs-host) & {host})"
             print(f"LEAN_RS_TEST_REMAINING_FILTER=not ({excluded})")
 

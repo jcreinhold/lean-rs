@@ -26,15 +26,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let target = sdk.join("target").canonicalize()?;
     let profile = env::args().nth(2);
-    let broken_import =
-        match profile.as_deref() {
-            None => false,
-            Some("--typed-session" | "--interop-stream" | "--scalar-entry") if env::args().len() == 3 => false,
-            Some(
-                "--broken-import" | "--host-builder-lazy" | "--host-builder-shims-only" | "--host-builder-transitive",
-            ) if env::args().len() == 3 => true,
-            _ => return Err("unknown metadata qualification profile".into()),
-        };
+    let broken_import = match profile.as_deref() {
+        None => false,
+        Some("--typed-session" | "--interop-stream" | "--scalar-entry") if env::args().len() == 3 => false,
+        Some(
+            "--broken-import"
+            | "--host-builder-lazy"
+            | "--host-builder-shims-only"
+            | "--host-builder-transitive"
+            | "--host-builder-good",
+        ) if env::args().len() == 3 => true,
+        _ => return Err("unknown metadata qualification profile".into()),
+    };
     let typed_session = profile.as_deref() == Some("--typed-session");
     let stream = profile.as_deref() == Some("--interop-stream");
     let scalar = profile.as_deref() == Some("--scalar-entry");
@@ -426,6 +429,33 @@ fn prepare_broken_import(
             key,
             project,
             Some("shims_only_host_handle_imports_transitive_lake_package_oleans"),
+        );
+    }
+    if profile == Some("--host-builder-good") {
+        let project = state.join("lean-good");
+        fs::DirBuilder::new().mode(0o700).create(&project)?;
+        fs::write(project.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
+        fs::write(
+            project.join("lakefile.lean"),
+            "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n",
+        )?;
+        fs::write(project.join("Good.lean"), "def goodValue : Nat := 41\n")?;
+        if !std::process::Command::new(sysroot.join("bin/lake"))
+            .args(["build", "Good"])
+            .current_dir(&project)
+            .stdin(std::process::Stdio::null())
+            .status()?
+            .success()
+        {
+            return Err("expected the selected Lean to build Good".into());
+        }
+        return seal_shims_only(
+            app,
+            state,
+            sysroot,
+            key,
+            project,
+            Some("shims_only_session_opens_without_user_dylib"),
         );
     }
     let (directory, package, umbrella, good, bad_target, case) = match profile {

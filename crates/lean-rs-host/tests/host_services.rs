@@ -17,6 +17,9 @@ mod service_requests;
 #[path = "support/transitive_assertions.rs"]
 mod transitive_assertions;
 
+#[path = "support/good_shims_assertions.rs"]
+mod good_shims_assertions;
+
 // Only the two option regressions use the held elaboration fixture for these
 // calls. Their sources, targets, selectors, cache policy and options are fixed
 // at the call sites; other requests still need the independent policy record.
@@ -489,46 +492,22 @@ fn load_shims_only_opens_session_against_user_oleans() {
 
     let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
     let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
-    let mut session = caps
-        .session(
-            &service_requests::imports(
-                &caps,
-                &["Good", "LeanRsHostShims.Meta"],
-                LeanSessionImportProfile::default(),
-            ),
+    let imports = service_requests::imports(
+        &caps,
+        good_shims_assertions::IMPORTS,
+        LeanSessionImportProfile::default(),
+    );
+    good_shims_assertions::check(&caps, &imports, |session| {
+        call_service!(
+            caps,
+            session,
+            kernel_check,
+            good_shims_assertions::KERNEL_SOURCE,
+            &LeanElabOptions::new(),
             None,
             None,
         )
-        .expect("session imports user and shim oleans");
-
-    let declarations = session
-        .list_declarations_strings(&LeanDeclarationFilter::default(), None, None)
-        .expect("list declarations works");
-    assert!(
-        declarations.iter().any(|name| name == "goodValue"),
-        "user declaration should be visible in shim-only session"
-    );
-
-    let expr = session
-        .declaration_type("goodValue", None)
-        .expect("type query succeeds")
-        .expect("goodValue has a type");
-    let inferred = session
-        .run_meta(&infer_type(), expr, &LeanMetaOptions::new(), None)
-        .expect("infer_type dispatch succeeds");
-    assert_eq!(inferred.status(), MetaCallStatus::Ok);
-
-    let checked = call_service!(
-        caps,
-        session,
-        kernel_check,
-        "theorem good_kernel_check : 1 + 1 = 2 := rfl",
-        &LeanElabOptions::new(),
-        None,
-        None,
-    )
-    .expect("kernel_check dispatch succeeds");
-    assert_eq!(checked.status(), EvidenceStatus::Checked);
+    });
 }
 
 #[test]

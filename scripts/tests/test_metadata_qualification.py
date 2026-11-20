@@ -481,7 +481,7 @@ class MetadataQualificationTest(unittest.TestCase):
         run.assert_called_once()
 
     def run_typed_selection(
-        self, *, live_pid=False, extra_json_worker=False, direct_transitive=False
+        self, *, live_pid=False, extra_json_worker=False, direct_tests=()
     ):
         broken = self.state.with_name("broken-import")
         typed = self.state.with_name("typed-session")
@@ -584,7 +584,7 @@ class MetadataQualificationTest(unittest.TestCase):
             patch.object(
                 qualification,
                 "qualify_host_builder_cases",
-                return_value=direct_transitive,
+                return_value=direct_tests,
             ) as host_builder,
             patch.object(qualification, "qualify_scalar_entry") as scalar,
         ):
@@ -896,7 +896,9 @@ class MetadataQualificationTest(unittest.TestCase):
         )
 
     def test_direct_transitive_replaces_only_the_matching_host_test(self):
-        _, output = self.run_typed_selection(direct_transitive=True)
+        _, output = self.run_typed_selection(
+            direct_tests=(qualification.DIRECT_TRANSITIVE_TEST,)
+        )
         remaining = dict(line.split("=", 1) for line in output.splitlines())[
             "LEAN_RS_TEST_REMAINING_FILTER"
         ]
@@ -907,6 +909,29 @@ class MetadataQualificationTest(unittest.TestCase):
             )
         )
         self.assertEqual(remaining.count("package(=lean-rs-host)"), 1)
+
+    def test_good_pair_replaces_only_its_original_worker_and_host_cases(self):
+        _, output = self.run_typed_selection(
+            direct_tests=(qualification.DIRECT_GOOD_TEST,)
+        )
+        remaining = dict(line.split("=", 1) for line in output.splitlines())[
+            "LEAN_RS_TEST_REMAINING_FILTER"
+        ]
+        self.assertIn(
+            f"package(=lean-rs-worker-child) & (binary(=session_adapter) & "
+            f"(test(={qualification.GOOD_WORKER_TEST})))",
+            remaining,
+        )
+        self.assertIn(
+            f"package(=lean-rs-host) & (binary(=host_services) & "
+            f"(test(={qualification.DIRECT_GOOD_TEST})))",
+            remaining,
+        )
+        self.assertEqual(remaining.count(qualification.GOOD_WORKER_TEST), 1)
+        self.assertNotIn(
+            "load_shims_only_succeeds_when_user_shared_facet_does_not_build", remaining
+        )
+        self.assertNotIn(qualification.DIRECT_TRANSITIVE_TEST, remaining)
 
     def test_direct_transitive_receipt_requires_process_exit(self):
         marker = ((b"direct-host-transitive-passed",),)
