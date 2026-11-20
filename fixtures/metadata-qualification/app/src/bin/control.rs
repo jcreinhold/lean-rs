@@ -252,3 +252,36 @@ fn load_shims_only_opens_session_against_user_oleans() -> Result<(), Box<dyn std
     metadata_qualification::audit("direct-host-good-passed");
     Ok(())
 }
+
+#[test]
+fn load_shims_only_succeeds_when_user_shared_facet_does_not_build() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_rs::module::HostImportOptions;
+    with_direct_shims(
+        "load_shims_only_succeeds_when_user_shared_facet_does_not_build",
+        "lean-broken-shared",
+        |caps, r| {
+            let paths = caps.import_search_paths();
+            assert!(
+                paths
+                    .iter()
+                    .map(std::path::Path::new)
+                    .eq(r.import_roots.iter().map(std::path::PathBuf::as_path))
+            );
+            good_shims_assertions::check_broken_shared(caps, |name| {
+                assert!(matches!(name, "Good" | "Broken"));
+                // SAFETY: only the two original requests are admitted, with default
+                // options and the same exact ordered roots under held read locks.
+                unsafe {
+                    caps.shim_capability().import_scope_with_options(
+                        paths.clone(),
+                        vec![name.to_owned()],
+                        HostImportOptions::default(),
+                    )
+                }
+            });
+            Ok(())
+        },
+    )?;
+    metadata_qualification::audit("direct-host-broken-shared-passed");
+    Ok(())
+}

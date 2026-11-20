@@ -35,3 +35,26 @@ pub(super) fn check<'lean, 'cap>(
     let checked = kernel_check(&mut session).expect("kernel_check dispatch succeeds");
     assert_eq!(checked.status(), EvidenceStatus::Checked);
 }
+
+pub(super) fn check_broken_shared<'lean, 'cap>(
+    caps: &'cap LeanCapabilities<'lean, '_>,
+    import: impl Fn(&str) -> TrustedHostImports<'lean, 'cap>,
+) {
+    use lean_rs::error::LeanError;
+    let mut good_session = caps
+        .session(&import("Good"), None, None)
+        .expect("unrelated module imports");
+    let kind = good_session
+        .declaration_kind("goodValue", None)
+        .expect("declaration query works in unrelated module");
+    assert_eq!(kind, "definition");
+
+    let Err(broken_err) = caps.session(&import("Broken"), None, None) else {
+        panic!("broken module import unexpectedly succeeded");
+    };
+    match broken_err {
+        LeanError::LeanException(_) => {}
+        LeanError::Host(failure) => panic!("expected LeanException for broken import, got Host {failure:?}"),
+        LeanError::Cancelled(cancelled) => panic!("expected LeanException for broken import, got {cancelled:?}"),
+    }
+}

@@ -34,7 +34,14 @@ TRANSITIVE_WORKER_TEST = "shims_only_host_handle_imports_transitive_lake_package
 DIRECT_TRANSITIVE_TEST = "import_finds_transitive_lake_package_oleans"
 GOOD_WORKER_TEST = "shims_only_session_opens_without_user_dylib"
 DIRECT_GOOD_TEST = "load_shims_only_opens_session_against_user_oleans"
+DIRECT_BROKEN_SHARED_TEST = (
+    "load_shims_only_succeeds_when_user_shared_facet_does_not_build"
+)
 DIRECT_BUILDER_TESTS = {
+    DIRECT_BROKEN_SHARED_TEST: (
+        DIRECT_BROKEN_SHARED_TEST,
+        b"direct-host-broken-shared-passed",
+    ),
     TRANSITIVE_WORKER_TEST: (DIRECT_TRANSITIVE_TEST, b"direct-host-transitive-passed"),
     GOOD_WORKER_TEST: (DIRECT_GOOD_TEST, b"direct-host-good-passed"),
 }
@@ -1893,6 +1900,9 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
         LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
         LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
     )
+    if case == DIRECT_BROKEN_SHARED_TEST:
+        select_nextest_runner(env, profile)
+        return record
     if case != BROKEN_IMPORT_TEST:
         env.update(
             LEAN_RS_METADATA_AUDIT_PATH=str(state / "native-events.log"),
@@ -1982,7 +1992,15 @@ def qualify_direct_builder_case(case, state, run, env):
 def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
     state = parent / "broken-import"
     direct_tests = []
-    for case, mode, project, imports in HOST_BUILDER_CASES:
+    for case, mode, project, imports in (
+        *HOST_BUILDER_CASES,
+        (
+            DIRECT_BROKEN_SHARED_TEST,
+            "--direct-host-broken-shared",
+            "lean-broken-shared",
+            (),
+        ),
+    ):
         # Each graph has the original sources, its own seal and a checked close.
         # Refuse an incomplete previous run before touching this state.
         state.mkdir(mode=0o700)
@@ -1994,9 +2012,10 @@ def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
         launch_host_builder(
             case, mode, project, state, release, profile, run, env, cargo
         )
-        check_host_builder_children_closed(
-            typed_audit(state / "native-events.log"), imports
-        )
+        if case != DIRECT_BROKEN_SHARED_TEST:
+            check_host_builder_children_closed(
+                typed_audit(state / "native-events.log"), imports
+            )
         if case in DIRECT_BUILDER_TESTS:
             direct_tests.append(qualify_direct_builder_case(case, state, run, env))
         remove_owned_state(state, owner)

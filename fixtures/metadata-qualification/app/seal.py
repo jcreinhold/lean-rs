@@ -134,8 +134,14 @@ def main():
         "shims_only_host_handle_imports_transitive_lake_package_oleans"
     )
     good = host_builder_case == "shims_only_session_opens_without_user_dylib"
+    broken_shared = host_builder_case == (
+        "load_shims_only_succeeds_when_user_shared_facet_does_not_build"
+    )
     assert host_builder_case is None or (
-        broken and (transitive or good or host_builder_case in builder_profiles)
+        broken
+        and (
+            transitive or good or broken_shared or host_builder_case in builder_profiles
+        )
     )
     builder = builder_profiles.get(host_builder_case)
     project = (
@@ -143,6 +149,8 @@ def main():
         / (
             "lean-transitive"
             if transitive
+            else "lean-broken-shared"
+            if broken_shared
             else "lean-good"
             if good
             else builder[0]
@@ -399,15 +407,27 @@ def main():
                 f.suffix in {".dylib", ".so", ".dll"}
                 for f in (root / ".lake/build/lib").rglob("*")
             )
-    elif good:
+    elif good or broken_shared:
         assert packages == []
+        lakefile = (
+            "import Lake\nopen Lake DSL\npackage demo_broken\nlean_lib Good\nlean_lib Broken\n"
+            if broken_shared
+            else "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n"
+        )
         for name, value in {
-            "lakefile.lean": "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n",
+            "lakefile.lean": lakefile,
             "Good.lean": "def goodValue : Nat := 41\n",
             "lean-toolchain": "leanprover/lean4:v4.36.0\n",
         }.items():
             assert (project / name).read_text() == value
             pin_content(project / name)
+        if broken_shared:
+            source = project / "Broken.lean"
+            assert (
+                source.read_text()
+                == "theorem broken : True := sorry_that_doesnt_exist\n"
+            )
+            pin_content(source)
         assert not any(
             f.suffix in {".dylib", ".so", ".dll"}
             for f in (project / ".lake/build/lib").rglob("*")
@@ -529,11 +549,17 @@ def main():
                 if (root / relative).exists()
             ]
             assert found == ([selected] if selected else [])
-    elif good:
+    elif good or broken_shared:
         assert str(project_oleans / "Good.olean") in filepins
         assert not any(
             (r / "Good.olean").exists() for r in [*shims, release / "lib/lean"]
         )
+        if broken_shared:
+            assert not any(
+                os.path.lexists(r / name)
+                for r in [project_oleans, *shims, release / "lib/lean"]
+                for name in ("Broken", "Broken.olean")
+            )
     elif broken:
         if builder:
             assert str(project_oleans / "Demo/Good.olean") in filepins

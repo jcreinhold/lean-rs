@@ -38,7 +38,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             | "--host-builder-lazy"
             | "--host-builder-shims-only"
             | "--host-builder-transitive"
-            | "--host-builder-good",
+            | "--host-builder-good"
+            | "--direct-host-broken-shared",
         ) if env::args().len() == 3 => true,
         _ => return Err("unknown metadata qualification profile".into()),
     };
@@ -459,13 +460,22 @@ fn prepare_broken_import(
             Some("shims_only_host_handle_imports_transitive_lake_package_oleans"),
         );
     }
-    if profile == Some("--host-builder-good") {
-        let project = state.join("lean-good");
+    if matches!(profile, Some("--host-builder-good" | "--direct-host-broken-shared")) {
+        let broken_shared = profile == Some("--direct-host-broken-shared");
+        let project = state.join(if broken_shared {
+            "lean-broken-shared"
+        } else {
+            "lean-good"
+        });
         fs::DirBuilder::new().mode(0o700).create(&project)?;
         fs::write(project.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
         fs::write(
             project.join("lakefile.lean"),
-            "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n",
+            if broken_shared {
+                "import Lake\nopen Lake DSL\npackage demo_broken\nlean_lib Good\nlean_lib Broken\n"
+            } else {
+                "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n"
+            },
         )?;
         fs::write(project.join("Good.lean"), "def goodValue : Nat := 41\n")?;
         if !std::process::Command::new(sysroot.join("bin/lake"))
@@ -477,13 +487,24 @@ fn prepare_broken_import(
         {
             return Err("expected the selected Lean to build Good".into());
         }
+        if broken_shared {
+            fs::write(
+                project.join("Broken.lean"),
+                "theorem broken : True := sorry_that_doesnt_exist\n",
+            )?;
+            check_broken_shared_build(&project, sysroot)?;
+        }
         return seal_shims_only(
             app,
             state,
             sysroot,
             key,
             project,
-            Some("shims_only_session_opens_without_user_dylib"),
+            Some(if broken_shared {
+                "load_shims_only_succeeds_when_user_shared_facet_does_not_build"
+            } else {
+                "shims_only_session_opens_without_user_dylib"
+            }),
         );
     }
     let (directory, package, umbrella, good, bad_target, case) = match profile {
@@ -546,6 +567,36 @@ fn prepare_broken_import(
     }
     fs::create_dir_all(project.join(".lake/build/lib/lean"))?;
     seal_shims_only(app, state, sysroot, key, project, case)
+}
+
+fn check_broken_shared_build(project: &Path, sysroot: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{Read as _, Write as _};
+    const LIMIT: u64 = 16 * 1024;
+    let (reader, writer) = std::io::pipe()?;
+    let mut child = std::process::Command::new(sysroot.join("bin/lake"))
+        .args(["--no-cache", "--fail-fast", "build", "Broken:shared"])
+        .current_dir(project)
+        .stdin(std::process::Stdio::null())
+        .stdout(writer.try_clone()?)
+        .stderr(writer)
+        .spawn()?;
+    let mut diagnostic = Vec::new();
+    let read = reader.take(LIMIT + 1).read_to_end(&mut diagnostic);
+    if read.is_err() || u64::try_from(diagnostic.len())? > LIMIT {
+        let _ = child.kill();
+        child.wait()?;
+        return Err("Broken:shared diagnostic exceeded its bounded read".into());
+    }
+    let status = child.wait()?;
+    std::io::stdout().write_all(&diagnostic)?;
+    if status.code() != Some(1)
+        || !String::from_utf8(diagnostic)?
+            .lines()
+            .any(|line| line.contains("Broken.lean:") && line.contains("Unknown identifier `sorry_that_doesnt_exist`"))
+    {
+        return Err("expected Broken:shared to fail on its exact Lean source error".into());
+    }
+    Ok(())
 }
 
 fn build_transitive_fixture(project: &Path, sysroot: &Path) -> Result<(), Box<dyn std::error::Error>> {

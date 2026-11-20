@@ -541,30 +541,9 @@ fn load_shims_only_succeeds_when_user_shared_facet_does_not_build() {
 
     let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
     let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
-    let mut good_session = caps
-        .session(
-            &service_requests::imports(&caps, &["Good"], LeanSessionImportProfile::default()),
-            None,
-            None,
-        )
-        .expect("unrelated module imports");
-    let kind = good_session
-        .declaration_kind("goodValue", None)
-        .expect("declaration query works in unrelated module");
-    assert_eq!(kind, "definition");
-
-    let Err(broken_err) = caps.session(
-        &service_requests::imports(&caps, &["Broken"], LeanSessionImportProfile::default()),
-        None,
-        None,
-    ) else {
-        panic!("broken module import unexpectedly succeeded");
-    };
-    match broken_err {
-        LeanError::LeanException(_) => {}
-        LeanError::Host(failure) => panic!("expected LeanException for broken import, got Host {failure:?}"),
-        LeanError::Cancelled(cancelled) => panic!("expected LeanException for broken import, got {cancelled:?}"),
-    }
+    good_shims_assertions::check_broken_shared(&caps, |name| {
+        service_requests::imports(&caps, &[name], LeanSessionImportProfile::default())
+    });
 }
 
 #[test]

@@ -933,6 +933,21 @@ class MetadataQualificationTest(unittest.TestCase):
         )
         self.assertNotIn(qualification.DIRECT_TRANSITIVE_TEST, remaining)
 
+    def test_broken_shared_replaces_only_its_original_host_case(self):
+        case = qualification.DIRECT_BROKEN_SHARED_TEST
+        _, output = self.run_typed_selection(direct_tests=(case,))
+        remaining = dict(line.split("=", 1) for line in output.splitlines())[
+            "LEAN_RS_TEST_REMAINING_FILTER"
+        ]
+        self.assertTrue(
+            remaining.endswith(
+                f" | (package(=lean-rs-host) & (binary(=host_services) & (test(={case})))))"
+            )
+        )
+        self.assertEqual(remaining.count(case), 1)
+        self.assertNotIn(qualification.DIRECT_GOOD_TEST, remaining)
+        self.assertNotIn(qualification.GOOD_WORKER_TEST, remaining)
+
     def test_direct_transitive_receipt_requires_process_exit(self):
         marker = ((b"direct-host-transitive-passed",),)
         audit = b"51 direct-host-transitive-passed\n"
