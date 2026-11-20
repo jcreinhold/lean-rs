@@ -434,13 +434,11 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
 
 #[test]
 fn request_timeout_cycles_child_and_invalidates_session() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     {
-        let mut session = worker
-            .open_session(&stream_session_config(), None, None)
-            .expect("worker session opens");
+        let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
         session.set_request_timeout(Duration::from_millis(50));
         let err = session

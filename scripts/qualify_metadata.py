@@ -339,6 +339,8 @@ ORDINARY_WIDE_REUSE_CASES = frozenset(
     }
 )
 ORDINARY_GRANTS_BY_WORKER = {
+    "request_timeout_cycles_child_and_invalidates_session": (1, 0),
+    "cancellation_during_backpressure_invalidates_lease": (1, 0),
     "typed_streaming_command_row_decode_error_names_stream_and_sequence": (1, 0),
     "row_sink_cancellation_cycles_child_and_invalidates_session": (1, 0),
     "a_mispredicted_reuse_restarts_before_the_actual_import": (3, 2),
@@ -1212,6 +1214,20 @@ STREAM_TESTS = (
     ),
     ("streaming_runner", "child_fatal_exit_is_reported_to_parent"),
     ("streaming_runner", "row_before_child_panic_is_delivered_before_terminal_failure"),
+    ("streaming_runner", "request_timeout_cycles_child_and_invalidates_session"),
+    ("observability_backpressure", "pool_and_lease_snapshots_record_stream_throughput"),
+    (
+        "observability_backpressure",
+        "slow_sink_applies_bounded_backpressure_without_losing_rows",
+    ),
+    (
+        "observability_backpressure",
+        "cancellation_during_backpressure_invalidates_lease",
+    ),
+    (
+        "observability_backpressure",
+        "fatal_exit_after_buffered_rows_records_failure_without_commit",
+    ),
 )
 
 
@@ -1228,6 +1244,8 @@ INTEROP_TESTS = (*STREAM_TESTS, *INTEROP_METADATA_TESTS)
 STREAM_READY_REPLACEMENT = {
     "typed_streaming_command_row_decode_error_names_stream_and_sequence",
     "row_sink_cancellation_cycles_child_and_invalidates_session",
+    "request_timeout_cycles_child_and_invalidates_session",
+    "cancellation_during_backpressure_invalidates_lease",
 }
 
 

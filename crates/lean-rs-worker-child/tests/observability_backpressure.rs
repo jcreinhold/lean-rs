@@ -29,6 +29,13 @@ fn interop_root() -> PathBuf {
     workspace_root().join("fixtures").join("interop-shims")
 }
 
+#[path = "support/sealed_stream_builder.rs"]
+mod sealed_stream_builder;
+
+fn stream_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
+    sealed_stream_builder::selected().unwrap_or_else(builder)
+}
+
 fn builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
     lean_rs_worker_parent::LeanWorkerCapabilityBuilder::new(
         interop_root(),
@@ -125,7 +132,7 @@ impl LeanWorkerTypedDataSink<ManyRow> for SlowCancelRows<'_> {
 #[test]
 fn pool_and_lease_snapshots_record_stream_throughput() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let mut lease = pool.acquire_lease(stream_builder()).expect("pool opens lease");
     let initial = lease.snapshot();
     assert_eq!(initial.active_workers, 1);
     assert_eq!(initial.warm_leases, 0);
@@ -163,7 +170,7 @@ fn pool_and_lease_snapshots_record_stream_throughput() {
 #[test]
 fn slow_sink_applies_bounded_backpressure_without_losing_rows() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let mut lease = pool.acquire_lease(stream_builder()).expect("pool opens lease");
     let rows = SlowRows::new(Duration::from_millis(2));
     let summary = lease
         .run_streaming_command(
@@ -190,7 +197,7 @@ fn slow_sink_applies_bounded_backpressure_without_losing_rows() {
 #[test]
 fn cancellation_during_backpressure_invalidates_lease() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let mut lease = pool.acquire_lease(stream_builder()).expect("pool opens lease");
     let token = LeanWorkerCancellationToken::new();
     let rows = SlowCancelRows {
         token: &token,
@@ -225,7 +232,7 @@ fn cancellation_during_backpressure_invalidates_lease() {
 #[test]
 fn fatal_exit_after_buffered_rows_records_failure_without_commit() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let mut lease = pool.acquire_lease(stream_builder()).expect("pool opens lease");
     let rows = RecordingRows::default();
 
     let err = lease

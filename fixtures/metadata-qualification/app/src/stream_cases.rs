@@ -63,8 +63,21 @@ pub(crate) const CASES: &[(&[&str], Exports)] = &[
         Exports::Streams(&["_wrong_callback"]),
     ),
     (
-        &["large_stream_records_live_forwarding_throughput_and_rss"],
+        &[
+            "large_stream_records_live_forwarding_throughput_and_rss",
+            "pool_and_lease_snapshots_record_stream_throughput",
+            "slow_sink_applies_bounded_backpressure_without_losing_rows",
+            "cancellation_during_backpressure_invalidates_lease",
+        ],
         Exports::Streams(&["_many"]),
+    ),
+    (
+        &["fatal_exit_after_buffered_rows_records_failure_without_commit"],
+        Exports::Streams(&["_many_then_panic"]),
+    ),
+    (
+        &["request_timeout_cycles_child_and_invalidates_session"],
+        Exports::Streams(&["_slow_after_row"]),
     ),
     (
         &["helper_chunked_stream_delivers_rows_diagnostics_progress_and_metadata"],
