@@ -35,6 +35,7 @@ impl Drop for ResetHook {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn on_first_ack_write(action: impl FnOnce(usize) + 'static) -> impl Drop {
     let mut action = Some(action);
     WRITE_HOOK.with(|hook| {
