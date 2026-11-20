@@ -9,6 +9,7 @@ use std::{
     io::{self, Read, Write},
     os::unix::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 pub const MODULE_SYNTAX_IMPORTS: [&str; 3] = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
@@ -515,8 +516,18 @@ impl Held {
             .map(|r| project_lock_path(r))
             .collect::<R<Vec<_>>>()?;
         locks.sort();
-        let admission = lean_toolchain::writer_demand::ReadAdmission::try_acquire(&locks)?
-            .ok_or_else(|| err("competing writer"))?;
+        let started = Instant::now();
+        let admission = loop {
+            match lean_toolchain::writer_demand::ReadAdmission::try_acquire(&locks) {
+                // On transient reader contention, try_acquire has already dropped our partial gates.
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock && started.elapsed() < Duration::from_secs(1) =>
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                result => break result?.ok_or_else(|| err("competing writer"))?,
+            }
+        };
         let mut held = vec![];
         for p in locks {
             require(p.canonicalize()? == p, "aliased custody domain")?;
