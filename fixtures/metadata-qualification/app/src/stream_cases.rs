@@ -1,6 +1,6 @@
 //! The existing fixture commands each named test may call.
 use lean_rs_worker_protocol::worker_exports::{
-    json_command_signature, metadata_signature, streaming_command_signature,
+    doctor_signature, json_command_signature, metadata_signature, streaming_command_signature,
 };
 use lean_toolchain::LeanExportSignature;
 
@@ -8,6 +8,9 @@ use lean_toolchain::LeanExportSignature;
 pub(crate) enum Exports {
     Streams(&'static [&'static str]),
     Metadata,
+    Doctor,
+    MalformedMetadataAndDoctor,
+    NoExports,
     MalformedJson,
     StreamAndJson(&'static str),
     Shape(&'static [&'static str], &'static [&'static str]),
@@ -24,6 +27,18 @@ impl Exports {
         match self {
             Self::Streams(suffixes) => suffixes.iter().map(|suffix| stream(suffix)).collect(),
             Self::Metadata => vec![(metadata_signature("lean_rs_interop_consumer_worker_metadata"), false)],
+            Self::Doctor => vec![(doctor_signature("lean_rs_interop_consumer_worker_doctor"), false)],
+            Self::MalformedMetadataAndDoctor => vec![
+                (
+                    metadata_signature("lean_rs_interop_consumer_worker_metadata_malformed"),
+                    false,
+                ),
+                (
+                    doctor_signature("lean_rs_interop_consumer_worker_doctor_malformed"),
+                    false,
+                ),
+            ],
+            Self::NoExports => Vec::new(),
             Self::MalformedJson => vec![(
                 json_command_signature("lean_rs_interop_consumer_worker_json_command_malformed"),
                 false,
@@ -89,8 +104,18 @@ pub(crate) const CASES: &[(&[&str], Exports)] = &[
             "metadata_mismatch_is_reported_by_bootstrap_check",
             "metadata_validation_failure_is_typed",
             "metadata_mismatch_is_typed",
+            "runtime_and_capability_metadata_are_separate",
         ],
         Exports::Metadata,
+    ),
+    (&["doctor_reports_pass_warning_and_error_diagnostics"], Exports::Doctor),
+    (
+        &["malformed_metadata_and_doctor_json_are_typed"],
+        Exports::MalformedMetadataAndDoctor,
+    ),
+    (
+        &["missing_metadata_and_doctor_exports_are_typed_worker_errors"],
+        Exports::NoExports,
     ),
     (
         &[

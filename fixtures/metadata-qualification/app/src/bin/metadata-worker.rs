@@ -460,11 +460,15 @@ impl WorkerAuthority for MetadataApp {
                 .get("exports")
                 .and_then(serde_json::Value::as_array)
                 .ok_or_else(denied)?;
-            let audit_kind = match exports {
-                stream_cases::Exports::Metadata => "metadata",
-                stream_cases::Exports::MalformedJson => "json",
-                stream_cases::Exports::Shape(_, _) => "shape",
-                stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => "stream",
+            let event = match exports {
+                stream_cases::Exports::Metadata => "authorize-fixed-metadata",
+                stream_cases::Exports::Doctor | stream_cases::Exports::MalformedMetadataAndDoctor => {
+                    "authorize-fixed-doctor"
+                }
+                stream_cases::Exports::NoExports => "admit-fixed-no-exports",
+                stream_cases::Exports::MalformedJson => "authorize-fixed-json",
+                stream_cases::Exports::Shape(_, _) => "authorize-fixed-shape",
+                stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => "authorize-fixed-stream",
             };
             let mut contracts = Vec::new();
             for (signature, streaming) in exports.signatures() {
@@ -478,7 +482,8 @@ impl WorkerAuthority for MetadataApp {
                 };
                 contracts.push((signature.symbol().to_owned(), contract));
             }
-            audit(&format!("authorize-fixed-{audit_kind}-{requested}"));
+            // With NoExports this records image admission only; the attested table is empty.
+            audit(&format!("{event}-{requested}"));
             contracts
         } else {
             let export = if d.typed_session {
@@ -493,8 +498,8 @@ impl WorkerAuthority for MetadataApp {
             vec![(export.into(), WorkerExportContract::StringIoString)]
         };
         // SAFETY: Held checks the exact sealed images, initializer and runtime.
-        // For streams the named fixture case selects only its exact checked
-        // StringStream contracts, never other exports from the same image.
+        // Each named interop case selects only its exact checked contracts,
+        // or no contracts for the missing-export case.
         Ok(unsafe { AuthorizedWorkerSnapshot::attest(runtime, path.into(), bytes.to_vec(), contracts, held.clone()) })
     }
     fn host(

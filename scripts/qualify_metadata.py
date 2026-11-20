@@ -1180,7 +1180,14 @@ def check_typed_children_closed(
             event in ORDINARY_GRANT_EVENTS
             or event == grant_event
             or event.startswith(
-                (b"authorize-fixed-stream-", b"authorize-fixed-metadata-")
+                (
+                    b"authorize-fixed-stream-",
+                    b"authorize-fixed-metadata-",
+                    b"authorize-fixed-doctor-",
+                    b"authorize-fixed-json-",
+                    b"authorize-fixed-shape-",
+                    b"admit-fixed-no-exports-",
+                )
             )
         ):
             granted.append(event)
@@ -1274,9 +1281,17 @@ INTEROP_METADATA_TESTS = (
     ("pool", "metadata_mismatch_is_typed"),
 )
 INTEROP_METADATA_CASES = frozenset(name for _, name in INTEROP_METADATA_TESTS)
+NO_EXPORTS_CASE = "missing_metadata_and_doctor_exports_are_typed_worker_errors"
+INTEROP_DOCTOR_EVENTS = {
+    "runtime_and_capability_metadata_are_separate": "authorize-fixed-metadata",
+    "doctor_reports_pass_warning_and_error_diagnostics": "authorize-fixed-doctor",
+    "malformed_metadata_and_doctor_json_are_typed": "authorize-fixed-doctor",
+    NO_EXPORTS_CASE: "admit-fixed-no-exports",
+}
 INTEROP_TESTS = (
     *STREAM_TESTS,
     *INTEROP_METADATA_TESTS,
+    *(("metadata_doctor", name) for name in INTEROP_DOCTOR_EVENTS),
     *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
 
@@ -1456,14 +1471,16 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             ],
             SDK,
         )
-        if name in SDK_SHAPE_GRANTS_BY_WORKER:
-            grant_kind = "shape"
+        if name in INTEROP_DOCTOR_EVENTS:
+            marker = INTEROP_DOCTOR_EVENTS[name]
+        elif name in SDK_SHAPE_GRANTS_BY_WORKER:
+            marker = "authorize-fixed-shape"
         elif name in INTEROP_METADATA_CASES:
-            grant_kind = "metadata"
+            marker = "authorize-fixed-metadata"
         elif name == "typed_json_command_decode_error_is_typed":
-            grant_kind = "json"
+            marker = "authorize-fixed-json"
         else:
-            grant_kind = "stream"
+            marker = "authorize-fixed-stream"
         counts = (1, 1)
         if shape_grants := SDK_SHAPE_GRANTS_BY_WORKER.get(name):
             counts = (len(shape_grants), sum(shape_grants))
@@ -1475,7 +1492,7 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             typed_audit(events),
             case=name,
             expected_counts=(counts,),
-            grant_event=f"authorize-fixed-{grant_kind}-{name}".encode(),
+            grant_event=f"{marker}-{name}".encode(),
         )
         events.unlink()
     remove_owned_state(state, owner)

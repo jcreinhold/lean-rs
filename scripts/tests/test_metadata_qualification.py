@@ -951,6 +951,30 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(good, expected)
 
+    def test_missing_doctor_exports_audit_requires_admission_without_a_grant(self):
+        case = qualification.NO_EXPORTS_CASE
+        marker = f"admit-fixed-no-exports-{case}".encode()
+        audit = b"51 worker-started\n51 verified-deployment\n51 " + marker + b"\n"
+        with patch.object(
+            qualification.os, "kill", side_effect=ProcessLookupError
+        ) as probe:
+            qualification.check_typed_children_closed(
+                audit, case=case, expected_counts=((1, 1),), grant_event=marker
+            )
+        probe.assert_called_once_with(51, 0)
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(ValueError, "wrong started worker"),
+        ):
+            qualification.check_typed_children_closed(
+                audit
+                + b"51 authorize-fixed-doctor-doctor_reports_pass_warning_and_error_diagnostics\n",
+                case=case,
+                expected_counts=((1, 1),),
+                grant_event=marker,
+            )
+        probe.assert_not_called()
+
     def test_metadata_audit_refuses_a_grant_for_another_interop_case(self):
         for target, name in qualification.INTEROP_METADATA_TESTS:
             with self.subTest(target=target, name=name):

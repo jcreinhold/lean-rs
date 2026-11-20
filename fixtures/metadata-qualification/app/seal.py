@@ -241,7 +241,7 @@ def main():
     if stream:
         exports = json.loads(rec["consumer_json"])["exports"]
         symbols = [export["symbol"] for export in exports]
-        assert 0 < len(symbols) <= 27 and len(set(symbols)) == len(symbols)
+        assert 0 < len(symbols) <= 30 and len(set(symbols)) == len(symbols)
         project_symbols.extend(symbols)
         for source in (
             "LeanRsInteropConsumer.lean",
