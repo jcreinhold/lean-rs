@@ -1320,13 +1320,20 @@ INTEROP_SIGNATURE_CASES = (
     "manifest_missing_worker_export_signature_fails_before_dispatch",
     "manifest_wrong_worker_export_signature_fails_before_dispatch",
 )
+INTEROP_BUILDER_IMPORT_CASES = (
+    "capability_builder_session_import_profile_reaches_child_import",
+    "open_session_with_imports_overrides_builder_imports",
+)
 INTEROP_TESTS = (
     *STREAM_TESTS,
     *INTEROP_METADATA_TESTS,
     *(("pool", name) for name in POOL_BATCH_GRANTS),
     ("pool", "distinct_session_key_respects_fixed_pool_limit"),
     *(("metadata_doctor", name) for name in INTEROP_DOCTOR_EVENTS),
-    *(("capability_builder", name) for name in INTEROP_SIGNATURE_CASES),
+    *(
+        ("capability_builder", name)
+        for name in (*INTEROP_SIGNATURE_CASES, *INTEROP_BUILDER_IMPORT_CASES)
+    ),
     *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
 
@@ -1535,7 +1542,7 @@ def run_stream_group(
         )
         if name in INTEROP_SIGNATURE_CASES:
             marker = "authorize-fixed-signature-probe"
-        elif name in POOL_BATCH_GRANTS:
+        elif name in POOL_BATCH_GRANTS or name in INTEROP_BUILDER_IMPORT_CASES:
             marker = "admit-fixed-no-exports"
         elif name in INTEROP_DOCTOR_EVENTS:
             marker = INTEROP_DOCTOR_EVENTS[name]

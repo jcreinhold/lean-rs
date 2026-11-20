@@ -1040,8 +1040,8 @@ fn metadata_validation_failure_is_typed() {
     }
 }
 
-fn signature_probe_fixture(wrong_signature: bool) -> (LeanWorkerConfig, LeanWorkerSessionConfig) {
-    if let Some(selected) = ordinary_typed_selection::ordinary_stream_selection() {
+fn sealed_interop_session() -> Option<(LeanWorkerConfig, LeanWorkerSessionConfig)> {
+    ordinary_typed_selection::ordinary_stream_selection().map(|selected| {
         let worker = LeanWorkerConfig::new(&selected.worker)
             .checked_native_loader_environment()
             .env("LEAN_SYSROOT", selected.sysroot.as_os_str());
@@ -1052,7 +1052,13 @@ fn signature_probe_fixture(wrong_signature: bool) -> (LeanWorkerConfig, LeanWork
             &selected.json_manifest,
             ["LeanRsInteropConsumer.Callback"],
         );
-        return (worker, session);
+        (worker, session)
+    })
+}
+
+fn signature_probe_fixture(wrong_signature: bool) -> (LeanWorkerConfig, LeanWorkerSessionConfig) {
+    if let Some(selection) = sealed_interop_session() {
+        return selection;
     }
     let mut builder = CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
         .package("lean_rs_interop_consumer")
@@ -1177,13 +1183,18 @@ fn no_manifest_worker_session_rejects_worker_command_as_checked_binding() {
 
 #[test]
 fn capability_builder_session_import_profile_reaches_child_import() {
-    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
-    let default_config = LeanWorkerSessionConfig::new(
-        interop_root(),
-        "lean_rs_interop_consumer",
-        "LeanRsInteropConsumer",
-        ["LeanRsInteropConsumer.Callback"],
-    );
+    let (worker, default_config) = sealed_interop_session().unwrap_or_else(|| {
+        (
+            LeanWorkerConfig::new(worker_binary()),
+            LeanWorkerSessionConfig::new(
+                interop_root(),
+                "lean_rs_interop_consumer",
+                "LeanRsInteropConsumer",
+                ["LeanRsInteropConsumer.Callback"],
+            ),
+        )
+    });
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     let compat_config = default_config
         .clone()
         .with_import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat);
@@ -1238,7 +1249,9 @@ fn restart_policy_override_is_applied_during_builder_startup() {
 
 #[test]
 fn open_session_with_imports_overrides_builder_imports() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let sealed = sealed_stream_builder::selected();
+    let qualified = sealed.is_some();
+    let mut capability = sealed.unwrap_or_else(builder).open().expect("builder opens capability");
 
     capability
         .open_session(None, None)
@@ -1250,7 +1263,14 @@ fn open_session_with_imports_overrides_builder_imports() {
 
     match capability.open_session_with_imports(["LeanRsInteropConsumer.DefinitelyDoesNotExist"], None, None) {
         Ok(_) => panic!("override with a bogus import should be rejected by the child"),
-        Err(LeanWorkerError::Worker { .. } | LeanWorkerError::CapabilityBuild { .. }) => {}
+        Err(LeanWorkerError::Worker { code, message }) if qualified => {
+            assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
+            assert!(
+                message.contains("DefinitelyDoesNotExist"),
+                "Lean import must name the missing override module: {message}",
+            );
+        }
+        Err(LeanWorkerError::Worker { .. } | LeanWorkerError::CapabilityBuild { .. }) if !qualified => {}
         Err(other) => panic!("expected the child to reject the bad import, got {other:?}"),
     }
 }

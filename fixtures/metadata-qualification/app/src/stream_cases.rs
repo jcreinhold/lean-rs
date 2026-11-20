@@ -87,6 +87,13 @@ impl Exports {
 }
 
 pub(crate) const CASES: &[(&[&str], Exports)] = &[
+    (
+        &[
+            "capability_builder_session_import_profile_reaches_child_import",
+            "open_session_with_imports_overrides_builder_imports",
+        ],
+        Exports::NoExports,
+    ),
     (&["distinct_session_key_respects_fixed_pool_limit"], Exports::Json),
     (
         &[

@@ -305,6 +305,42 @@ impl Record {
                 == Ok("elaboration_and_kernel_adapter_match_status_shape")
     }
 
+    fn interop_builder_imports(&self, names: &[String], options: &lean_rs::module::HostImportOptions) -> Option<R<()>> {
+        if !self.typed_session || !self.stream || self.broken_import || self.verification {
+            return None;
+        }
+        let default = lean_rs::module::HostImportOptions::default();
+        let allowed = match std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() {
+            Ok("capability_builder_session_import_profile_reaches_child_import") => {
+                names == [MODULE]
+                    && (*options == default
+                        || *options
+                            == lean_rs::module::HostImportOptions {
+                                import_all: true,
+                                ..default
+                            })
+            }
+            Ok("open_session_with_imports_overrides_builder_imports") => {
+                let rollup = "LeanRsInteropConsumer.olean";
+                let missing = "LeanRsInteropConsumer/DefinitelyDoesNotExist.olean";
+                *options == default
+                    && (names == [MODULE]
+                        || (names == ["LeanRsInteropConsumer"]
+                            && self
+                                .import_roots
+                                .first()
+                                .is_some_and(|root| self.files.contains_key(&root.join(rollup))))
+                        || (names == ["LeanRsInteropConsumer.DefinitelyDoesNotExist"]
+                            && self.verification_roots().iter().all(|root| {
+                                fs::symlink_metadata(Path::new(root).join(missing))
+                                    .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+                            })))
+            }
+            _ => return None,
+        };
+        Some(require(allowed, "wrong sealed interop builder import or profile"))
+    }
+
     pub fn check_order(
         &self,
         paths: &[String],
@@ -346,21 +382,25 @@ impl Record {
                 ]
                 .iter()
                 .any(|allowed| names == *allowed));
-        require(
-            (if self.host_builder_case.is_some() {
-                self.host_builder_import_event(names).is_some()
-            } else if std::env::var_os("LEAN_RS_TEST_ADAPTER_CASE").is_some() {
-                (self.adapter_handles_case()
-                    && (names == ["LeanRsFixture.Handles"]
-                        || (names == ["LeanRsHostShims.Elaboration"]
-                            && std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref()
-                                == Ok("max_import_policy_restarts_before_next_import"))))
-                    || (self.adapter_kernel_case() && names == ["LeanRsHostShims.Elaboration"])
-            } else {
-                names == expected || reuse_imports
-            }) && *options == Default::default(),
-            "wrong module or import profile",
-        )?;
+        if let Some(result) = self.interop_builder_imports(names, options) {
+            result?;
+        } else {
+            require(
+                (if self.host_builder_case.is_some() {
+                    self.host_builder_import_event(names).is_some()
+                } else if std::env::var_os("LEAN_RS_TEST_ADAPTER_CASE").is_some() {
+                    (self.adapter_handles_case()
+                        && (names == ["LeanRsFixture.Handles"]
+                            || (names == ["LeanRsHostShims.Elaboration"]
+                                && std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref()
+                                    == Ok("max_import_policy_restarts_before_next_import"))))
+                        || (self.adapter_kernel_case() && names == ["LeanRsHostShims.Elaboration"])
+                } else {
+                    names == expected || reuse_imports
+                }) && *options == Default::default(),
+                "wrong module or import profile",
+            )?;
+        }
         require(
             paths
                 .iter()
