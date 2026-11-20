@@ -29,6 +29,8 @@ fn interop_root() -> PathBuf {
     workspace_root().join("fixtures").join("interop-shims")
 }
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
 #[path = "support/sealed_stream_builder.rs"]
 mod sealed_stream_builder;
 

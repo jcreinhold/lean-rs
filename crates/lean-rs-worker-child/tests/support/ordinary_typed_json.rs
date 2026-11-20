@@ -2,8 +2,7 @@
 use lean_rs::LeanBuiltCapability;
 use lean_rs_worker_parent::{LeanWorkerCapabilityBuilder, LeanWorkerChild};
 
-#[path = "ordinary_typed_selection.rs"]
-mod ordinary_typed_selection;
+use super::ordinary_typed_selection;
 
 pub(super) fn json_builder() -> Option<LeanWorkerCapabilityBuilder> {
     ordinary_typed_selection::ordinary_typed_selection().map(sealed_json_builder)

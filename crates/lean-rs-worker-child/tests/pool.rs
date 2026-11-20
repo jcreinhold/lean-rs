@@ -49,6 +49,8 @@ fn builder() -> LeanWorkerCapabilityBuilder {
     .worker_executable(worker_binary())
 }
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
 #[path = "support/sealed_stream_builder.rs"]
 mod sealed_stream_builder;
 

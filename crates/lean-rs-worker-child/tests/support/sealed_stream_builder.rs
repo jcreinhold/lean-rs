@@ -1,8 +1,7 @@
 //! Build a worker from the exact ordinary interop selection, when present.
 use lean_rs_worker_parent::{LeanWorkerCapabilityBuilder, LeanWorkerChild};
 
-#[path = "ordinary_typed_selection.rs"]
-mod ordinary_typed_selection;
+use super::ordinary_typed_selection;
 
 pub(super) fn selected() -> Option<LeanWorkerCapabilityBuilder> {
     ordinary_typed_selection::ordinary_stream_selection().map(sealed_builder)
