@@ -68,9 +68,27 @@ ORDINARY_SESSION_REUSE_TESTS = (
     "an_explicit_child_environment_outranks_the_configured_capacity",
 )
 ORDINARY_APP_TEST_COUNT = len(ORDINARY_TYPED_TESTS) + len(ORDINARY_SESSION_REUSE_TESTS)
+# Allowed (started workers, manifest grants). A policy replacement can reach
+# READY without opening a session. The Rust cases still check the policy result.
 ORDINARY_JSON_TESTS = (
-    ("pool", "compatible_session_key_reuses_one_worker"),
-    ("typed_command", "typed_json_command_decodes_response"),
+    ("pool", "compatible_session_key_reuses_one_worker", ((1, 1),)),
+    ("typed_command", "typed_json_command_decodes_response", ((1, 1),)),
+    ("pool", "import_profile_partitions_pool_session_keys", ((1, 1),)),
+    ("pool", "import_workspace_root_partitions_pool_session_keys", ((1, 1),)),
+    ("pool", "explicit_cycle_invalidates_only_the_current_lease", ((2, 2),)),
+    ("pool", "queue_wait_timeout_is_typed_when_pool_is_full", ((1, 1),)),
+    (
+        "pool",
+        "per_worker_rss_policy_invalidates_old_lease_before_work",
+        ((1, 1), (2, 1)),
+    ),
+    # If the renewed child goes idle before reassignment, it is replaced again
+    # before that intermediate child can receive a session.
+    (
+        "pool",
+        "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
+        ((2, 2), (3, 2)),
+    ),
 )
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
@@ -816,7 +834,8 @@ def typed_audit(events):
     return data
 
 
-def check_typed_children_closed(data, *, json_case=None):
+def check_typed_children_closed(data, *, json_case=None, expected_counts=()):
+    started = []
     admitted = set()
     workers = set()
     command_grants = []
@@ -825,6 +844,8 @@ def check_typed_children_closed(data, *, json_case=None):
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
         pid = int(raw)
         workers.add(pid)
+        if event == b"worker-started":
+            started.append(pid)
         if event == b"verified-deployment":
             admitted.add(pid)
         if event == b"authorize-consumer-load":
@@ -836,10 +857,12 @@ def check_typed_children_closed(data, *, json_case=None):
         )
     else:
         require(
-            len(workers) == 1
-            and workers == admitted == set(command_grants)
-            and len(command_grants) == 1,
-            f"{json_case}: expected one admitted worker and one JSON capability grant",
+            (len(started), len(command_grants)) in expected_counts
+            and len(started) == len(workers)
+            and set(started) == workers
+            and admitted == set(command_grants) <= workers
+            and len(command_grants) == len(admitted),
+            f"{json_case}: wrong started worker / JSON capability grant counts",
         )
     for pid in workers:
         try:
@@ -920,16 +943,18 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
             SDK,
         )
 
+    # Keep one audit under the existing cap. Clear it only after all recorded
+    # workers have closed; a failed run leaves its state untouched.
     nextest("typed_session", "session_reuse", selection=ordinary_app_tests())
-    before = typed_audit(events)
-    # A failed run or unconfirmed closure leaves this one state in place.
-    check_typed_children_closed(before)
-    for target, name in ORDINARY_JSON_TESTS:
+    check_typed_children_closed(typed_audit(events))
+    events.unlink()
+    env["LEAN_RS_TEST_AUDIT_WORKER_START"] = "1"
+    for target, name, expected_counts in ORDINARY_JSON_TESTS:
         nextest(target, selection=scoped_tests(target, (name,)))
-        after = typed_audit(events)
-        require(after.startswith(before), "typed worker audit changed")
-        check_typed_children_closed(after[len(before) :], json_case=name)
-        before = after
+        check_typed_children_closed(
+            typed_audit(events), json_case=name, expected_counts=expected_counts
+        )
+        events.unlink()
     remove_owned_state(state, owner)
 
 
@@ -1078,7 +1103,7 @@ def qualify_broken_import(
                     ordinary_app_tests(),
                     *(
                         scoped_tests(target, (name,))
-                        for target, name in ORDINARY_JSON_TESTS
+                        for target, name, _ in ORDINARY_JSON_TESTS
                     ),
                 ]
             )

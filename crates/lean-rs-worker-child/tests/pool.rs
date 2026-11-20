@@ -49,8 +49,12 @@ fn builder() -> LeanWorkerCapabilityBuilder {
     .worker_executable(worker_binary())
 }
 
-fn distinct_valid_builder() -> LeanWorkerCapabilityBuilder {
-    builder().restart_policy(LeanWorkerRestartPolicy::default().max_requests(99))
+fn json_builder() -> LeanWorkerCapabilityBuilder {
+    ordinary_typed_json::json_builder().unwrap_or_else(builder)
+}
+
+fn distinct_valid_builder(builder: LeanWorkerCapabilityBuilder) -> LeanWorkerCapabilityBuilder {
+    builder.restart_policy(LeanWorkerRestartPolicy::default().max_requests(99))
 }
 
 #[derive(Debug, Serialize)]
@@ -159,11 +163,10 @@ fn assert_batch_has_state(outcome: &LeanWorkerModuleQueryBatchOutcome) {
 
 #[test]
 fn compatible_session_key_reuses_one_worker() {
-    let builder = || ordinary_typed_json::json_builder().unwrap_or_else(builder);
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens first lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-reuse-1"), None, None)
             .expect("typed command succeeds");
@@ -175,7 +178,9 @@ fn compatible_session_key_reuses_one_worker() {
     let cold_attempts_after_first_lease = pool.snapshot().cold_open_attempts;
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool reuses compatible lease");
+        let mut lease = pool
+            .acquire_lease(json_builder())
+            .expect("pool reuses compatible lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-reuse-2"), None, None)
             .expect("typed command succeeds after reuse");
@@ -388,7 +393,7 @@ fn import_profile_partitions_pool_session_keys() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens first lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-profile-default"), None, None)
             .expect("typed command succeeds");
@@ -396,7 +401,7 @@ fn import_profile_partitions_pool_session_keys() {
     }
 
     let err = pool
-        .acquire_lease(builder().import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat))
+        .acquire_lease(json_builder().import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat))
         .expect_err("fixed-size pool should reject a second import profile");
     match err {
         LeanWorkerError::WorkerPoolExhausted { max_workers, resource } => {
@@ -419,14 +424,14 @@ fn import_workspace_root_partitions_pool_session_keys() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens first lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-import-root"), None, None)
             .expect("typed command succeeds");
         assert!(response.accepted);
     }
 
-    let different_import_root = builder().import_workspace_root(workspace_root());
+    let different_import_root = json_builder().import_workspace_root(workspace_root());
     let err = pool
         .acquire_lease(different_import_root)
         .expect_err("fixed-size pool should reject a second import workspace root");
@@ -569,7 +574,7 @@ fn explicit_cycle_invalidates_only_the_current_lease() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens lease");
         lease.cycle().expect("explicit cycle succeeds");
         assert!(
             matches!(
@@ -581,7 +586,7 @@ fn explicit_cycle_invalidates_only_the_current_lease() {
     }
 
     let mut lease = pool
-        .acquire_lease(builder())
+        .acquire_lease(json_builder())
         .expect("fresh lease opens after explicit cycle");
     let response = lease
         .run_json_command(&json_command(), &request("pool-after-cycle"), None, None)
@@ -630,7 +635,7 @@ fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
         assert!(response.accepted);
     }
 
-    let admission = match pool.acquire_lease(distinct_valid_builder()) {
+    let admission = match pool.acquire_lease(distinct_valid_builder(builder())) {
         Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
             current_kib,
             limit_kib,
@@ -671,7 +676,7 @@ fn queue_wait_timeout_is_typed_when_pool_is_full() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).queue_wait_timeout(Duration::from_millis(10)));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens first lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-queue-timeout"), None, None)
             .expect("typed command succeeds");
@@ -679,7 +684,7 @@ fn queue_wait_timeout_is_typed_when_pool_is_full() {
     }
 
     let err = pool
-        .acquire_lease(distinct_valid_builder())
+        .acquire_lease(distinct_valid_builder(json_builder()))
         .expect_err("full pool should wait only until the configured queue timeout");
     match err {
         LeanWorkerError::WorkerPoolQueueTimeout { waited, resource } => {
@@ -700,7 +705,7 @@ fn per_worker_rss_policy_invalidates_old_lease_before_work() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).per_worker_rss_ceiling_kib(1));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens lease");
         match lease.run_json_command(&json_command(), &request("pool-memory-cycle"), None, None) {
             Err(LeanWorkerError::LeaseInvalidated { reason }) => {
                 assert!(reason.contains("memory policy"), "unexpected reason: {reason}");
@@ -742,7 +747,7 @@ fn idle_policy_invalidates_lease_and_fresh_lease_can_continue() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).idle_cycle_after(Duration::from_millis(1)));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens lease");
         thread::sleep(Duration::from_millis(15));
         let err = lease
             .run_json_command(&json_command(), &request("pool-idle-cycle"), None, None)
@@ -763,7 +768,7 @@ fn idle_policy_invalidates_lease_and_fresh_lease_can_continue() {
     ));
 
     let mut lease = pool
-        .acquire_lease(builder())
+        .acquire_lease(json_builder())
         .expect("fresh lease opens after idle policy cycle");
     let response = lease
         .run_json_command(&json_command(), &request("pool-after-idle-cycle"), None, None)
@@ -784,7 +789,7 @@ fn rss_snapshot_records_available_samples_on_supported_platforms() {
     }
 
     let lease = pool
-        .acquire_lease(distinct_valid_builder())
+        .acquire_lease(distinct_valid_builder(builder()))
         .expect("second lease admission samples existing worker RSS");
     drop(lease);
     let snapshot = pool.snapshot();

@@ -434,6 +434,12 @@ impl WorkerAuthority for MetadataApp {
     }
 }
 fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
+    // A policy restart can shut down before the replacement receives any request.
+    if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
+        && std::env::var_os("LEAN_RS_TEST_AUDIT_WORKER_START").as_deref() == Some(std::ffi::OsStr::new("1"))
+    {
+        audit("worker-started");
+    }
     let app = MetadataApp(OnceLock::new());
     Ok(lean_rs_worker_child::run_worker_child_with_authority(app)?)
 }

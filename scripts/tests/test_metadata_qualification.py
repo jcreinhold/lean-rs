@@ -511,17 +511,30 @@ class MetadataQualificationTest(unittest.TestCase):
                     )
                 )
 
-            elif "nextest" in command and "pool" in command:
+            elif "nextest" in command and "LEAN_RS_TEST_AUDIT_WORKER_START" in env:
                 audit = Path(env["LEAN_RS_METADATA_AUDIT_PATH"])
-                with audit.open("a") as stream:
-                    stream.write("51 verified-deployment\n51 authorize-consumer-load\n")
-                    if extra_json_worker:
-                        stream.write(
-                            "52 verified-deployment\n52 authorize-consumer-load\n"
-                        )
-            elif "nextest" in command and "typed_command" in command:
-                with Path(env["LEAN_RS_METADATA_AUDIT_PATH"]).open("a") as stream:
-                    stream.write("61 verified-deployment\n61 authorize-consumer-load\n")
+                self.assertFalse(
+                    audit.exists(), "already checked audit was not cleared"
+                )
+                target, _name, (counts, *_) = next(
+                    case
+                    for case in qualification.ORDINARY_JSON_TESTS
+                    if command[-1] == qualification.scoped_tests(case[0], (case[1],))
+                )
+                self.assertIn(target, command)
+                started, grants = counts
+                if extra_json_worker:
+                    started += 1
+                    grants += 1
+                with audit.open("w") as stream:
+                    for index in range(started):
+                        pid = 51 + index
+                        stream.write(f"{pid} worker-started\n")
+                        if index < grants:
+                            stream.write(
+                                f"{pid} verified-deployment\n"
+                                f"{pid} authorize-consumer-load\n"
+                            )
 
         output = io.StringIO()
         with (
@@ -558,7 +571,9 @@ class MetadataQualificationTest(unittest.TestCase):
                         run_typed=True,
                     )
             elif extra_json_worker:
-                with self.assertRaisesRegex(ValueError, "expected one admitted worker"):
+                with self.assertRaisesRegex(
+                    ValueError, "wrong started worker / JSON capability grant counts"
+                ):
                     qualification.qualify_broken_import(
                         self.target,
                         qualification.DARWIN_ARM64_PINS,
@@ -576,16 +591,28 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
                 self.assertFalse(typed.exists())
                 self.assertEqual(
-                    probe.call_count, qualification.ORDINARY_APP_TEST_COUNT + 2
+                    probe.call_count,
+                    qualification.ORDINARY_APP_TEST_COUNT
+                    + sum(
+                        counts[0][0]
+                        for _, _, counts in qualification.ORDINARY_JSON_TESTS
+                    ),
                 )
         self.assertFalse(broken.exists())
-        self.assertEqual(len(seen), 7 if live_pid else 8 if extra_json_worker else 9)
+        self.assertEqual(
+            len(seen),
+            7
+            if live_pid
+            else 8
+            if extra_json_worker
+            else 7 + len(qualification.ORDINARY_JSON_TESTS),
+        )
         return seen, output.getvalue()
 
     def test_typed_group_reuses_prepared_shims_and_excludes_only_completed_tests(self):
         seen, output = self.run_typed_selection()
-        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[-5:-2]
-        json_cases = seen[-2:]
+        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[4:7]
+        json_cases = seen[7:]
         assignments = dict(line.split("=", 1) for line in output.splitlines())
         descriptor = assignments["LEAN_RS_PREPARED_HOST_ARTIFACTS"]
         self.assertEqual(prepare[-1], "--typed-session")
@@ -613,14 +640,25 @@ class MetadataQualificationTest(unittest.TestCase):
             "test(=process_module_query_batch_changed_session_imports_rebuilds)",
             selection,
         )
+        pool_cases = (
+            "import_profile_partitions_pool_session_keys",
+            "import_workspace_root_partitions_pool_session_keys",
+            "explicit_cycle_invalidates_only_the_current_lease",
+            "queue_wait_timeout_is_typed_when_pool_is_full",
+            "per_worker_rss_policy_invalidates_old_lease_before_work",
+            "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
+        )
         json_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
+            *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
         ]
+        self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in json_cases], json_filters)
         for cmd, case_env in json_cases:
             self.assertEqual(cmd[cmd.index("--retries") + 1], "0")
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
+            self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
             self.assertEqual(
                 case_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"],
                 run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"],
@@ -637,6 +675,31 @@ class MetadataQualificationTest(unittest.TestCase):
 
     def test_typed_group_extra_pool_worker_keeps_state_and_skips_json_smoke(self):
         self.run_typed_selection(extra_json_worker=True)
+
+    def test_json_pool_policy_checks_closure_of_start_without_manifest_grant(self):
+        case = "per_worker_rss_policy_invalidates_old_lease_before_work"
+        counts = next(
+            counts
+            for _, name, counts in qualification.ORDINARY_JSON_TESTS
+            if name == case
+        )
+        audit = (
+            b"51 worker-started\n51 verified-deployment\n51 authorize-consumer-load\n"
+            b"52 worker-started\n"
+        )
+
+        def check_pid(pid, _signal):
+            if pid == 51:
+                raise ProcessLookupError
+
+        with (
+            patch.object(qualification.os, "kill", side_effect=check_pid) as probe,
+            self.assertRaisesRegex(ValueError, "52 remains; keeping fixture state"),
+        ):
+            qualification.check_typed_children_closed(
+                audit, json_case=case, expected_counts=counts
+            )
+        probe.assert_any_call(52, 0)
 
     def test_typed_group_with_live_worker_retains_only_typed_state(self):
         self.run_typed_selection(live_pid=True)
