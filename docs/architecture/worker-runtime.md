@@ -554,8 +554,12 @@ resource capacity without supplying any exit-status receipt. Other wait errors r
 The SDK can persist a first recovery intent in a guarded Running owner record after the exact original service and
 guardian are non-live and the original worker anchor still matches. The admission lock serializes competing claims.
 Claimed records use registry version 3, which older registry readers refuse. Startup snapshots keep their original format.
-A committed intent carries no signal, descriptor, or launch authority. Replacing a dead claimant and recovering an
-interrupted intent publication require further recovery transitions.
+A committed intent carries no signal, descriptor, or launch authority. A replacement must observe the same kernel
+boot session, a non-live exact claimant, and the original live worker anchor under the admission lock. A failed boot
+or process observation keeps the previous intent. Interrupted intent publication still requires a recovery transition.
+The first claim on a legacy version 2 record stores the claimant's boot UUID. That UUID cannot establish the original
+worker's boot. Any future signaling or custody reclamation requires an independently verified original-worker boot
+binding.
 
 Physical capacity recovery never changes an unknown request into a proof result. A failed guardian does not authorize
 signaling a serialized numeric PID: a surviving parent uses only its still-owned unreaped child pin. If both the server

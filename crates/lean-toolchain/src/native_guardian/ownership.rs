@@ -154,6 +154,37 @@ fn checked_identity(value: &Value) -> io::Result<NativeProcessIdentity> {
     }
     Ok(identity)
 }
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryClaim {
+    boot: String,
+    claimant: NativeProcessIdentity,
+}
+
+fn validate_boot_uuid(boot: &str) -> io::Result<()> {
+    if boot.len() == 36
+        && boot.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+    {
+        Ok(())
+    } else {
+        Err(invalid("invalid native boot session UUID"))
+    }
+}
+
+fn recovery_claim(value: &Value) -> io::Result<RecoveryClaim> {
+    let claim: RecoveryClaim =
+        serde_json::from_value(field(value, "recovery_claim").clone()).map_err(io::Error::other)?;
+    validate_boot_uuid(&claim.boot)?;
+    checked_identity(field(field(value, "recovery_claim"), "claimant"))?;
+    Ok(claim)
+}
+
 pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     let version = field(value, "version")
         .as_u64()
@@ -199,7 +230,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
         if phase != "running" {
             return Err(invalid("native recovery claim requires a running guarded owner"));
         }
-        checked_identity(field(value, "recovery_claim"))?;
+        recovery_claim(value)?;
     } else if value.get("recovery_claim").is_some() {
         return Err(invalid("native recovery claim requires owner version 3"));
     }
@@ -353,12 +384,15 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
 /// Publish the first recovery intent for an exact running worker after loss
 /// of the original service and its guardian. This arbitrates intent only.
 /// It conveys no authority to signal, take custody or reuse the worker slot.
-/// A committed intent stays fenced against another claimant until scope
-/// retirement. Replacement of a dead claimant requires a later protocol.
+/// A later attempt can replace only an exact non-live claimant from the same
+/// boot, after rechecking the original worker anchor under the admission lock.
+/// The UUID identifies the claimant's boot. The first claim on a version 2
+/// record cannot establish the original worker's boot. Any later operation
+/// that can signal or reclaim custody must verify that binding independently.
 ///
 /// # Errors
-/// Returns WouldBlock for a live owner or prior claim. Refuses changed or
-/// closed scopes and propagates unavailable observations or failed publication.
+/// Returns WouldBlock for a live owner or claimant. Refuses changed scopes,
+/// cross-boot claims and unavailable observations or failed publication.
 #[doc(hidden)]
 pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, timeout: Duration) -> io::Result<()> {
     let _lock = lock_publication(record, timeout)?;
@@ -375,11 +409,21 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     {
         return Err(invalid("native recovery scope changed"));
     }
-    if field(&value, "version") == 3
-        || checked_identity(field(&value, "parent"))?.is_live()?
+    let boot = native::boot_session()?;
+    validate_boot_uuid(&boot)?;
+    if field(&value, "version") == 3 {
+        let prior = recovery_claim(&value)?;
+        if !prior.boot.eq_ignore_ascii_case(&boot) {
+            return Err(invalid("native recovery claim belongs to another boot"));
+        }
+        if prior.claimant.is_live()? {
+            return Err(busy("native recovery claim still owns this scope"));
+        }
+    }
+    if checked_identity(field(&value, "parent"))?.is_live()?
         || checked_identity(field(&value, "guardian"))?.is_live()?
     {
-        return Err(busy("native recovery owner is already live or claimed"));
+        return Err(busy("original native recovery owner is live"));
     }
     if NativeProcessIdentity::capture(expected.pid)?.as_ref() != Some(expected) || !expected.is_live()? {
         return Err(invalid("native recovery payload anchor is unavailable"));
@@ -391,7 +435,7 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
         .ok_or_else(|| invalid("native owner object missing"))?;
     owner.insert("version".to_owned(), json!(3));
     owner.insert("scope".to_owned(), json!("inherited-process-group-v3"));
-    owner.insert("recovery_claim".to_owned(), json!(claimant));
+    owner.insert("recovery_claim".to_owned(), json!(RecoveryClaim { boot, claimant }));
     super::persist_owner_at(record, &value, "recovery-write")
 }
 
@@ -773,11 +817,45 @@ mod native {
         unsafe_code,
         reason = "narrow scalar kernel identity queries with checked output storage"
     )]
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "linux"))]
     use super::invalid;
     use super::io;
     #[cfg(target_os = "linux")]
     use super::{PathBuf, read_process};
+    #[cfg(target_os = "macos")]
+    pub(super) fn boot_session() -> io::Result<String> {
+        let mut bytes = [0_u8; 37];
+        let mut size = bytes.len();
+        // SAFETY: fixed read-only sysctl with bounded writable output and no input.
+        let result = unsafe {
+            libc::sysctlbyname(
+                c"kern.bootsessionuuid".as_ptr(),
+                bytes.as_mut_ptr().cast(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let bytes = bytes
+            .get(..size)
+            .ok_or_else(|| invalid("boot session UUID exceeded output"))?;
+        std::ffi::CStr::from_bytes_with_nul(bytes)
+            .map_err(io::Error::other)?
+            .to_str()
+            .map(str::to_owned)
+            .map_err(io::Error::other)
+    }
+    #[cfg(target_os = "linux")]
+    pub(super) fn boot_session() -> io::Result<String> {
+        std::fs::read_to_string("/proc/sys/kernel/random/boot_id").map(|boot| boot.trim().to_owned())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub(super) fn boot_session() -> io::Result<String> {
+        Err(invalid("native boot session identity unavailable"))
+    }
     #[cfg(target_os = "macos")]
     pub(super) fn snapshot(pid: u32) -> io::Result<Option<(String, bool)>> {
         let native = i32::try_from(pid).map_err(io::Error::other)?;

@@ -654,17 +654,19 @@ fn exact_native_recovery_intent_has_one_winner() {
     stale.start = "wrong-worker-birth".to_owned();
     assert!(claim_native_recovery(&record, &stale, budget).is_err());
 
-    let start = std::sync::Barrier::new(2);
-    let outcomes = thread::scope(|contenders| {
-        let claim = || {
-            start.wait();
-            claim_native_recovery(&record, &expected, budget)
-        };
-        let first = contenders.spawn(claim);
-        let second = contenders.spawn(claim);
-        [first.join().unwrap(), second.join().unwrap()]
-    });
-    stopped(&mut child);
+    let contend = || {
+        let start = Barrier::new(2);
+        thread::scope(|contenders| {
+            let claim = || {
+                start.wait();
+                claim_native_recovery(&record, &expected, budget)
+            };
+            let first = contenders.spawn(claim);
+            let second = contenders.spawn(claim);
+            [first.join().unwrap(), second.join().unwrap()]
+        })
+    };
+    let outcomes = contend();
     assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
     assert_eq!(
         outcomes
@@ -678,7 +680,58 @@ fn exact_native_recovery_intent_has_one_winner() {
     let claimed = read_owner(&record).unwrap();
     assert_eq!(claimed["version"], 3);
     assert_eq!(claimed["scope"], "inherited-process-group-v3");
-    let recorded: NativeProcessIdentity = serde_json::from_value(claimed["recovery_claim"].clone()).unwrap();
+    let recorded: NativeProcessIdentity =
+        serde_json::from_value(claimed["recovery_claim"]["claimant"].clone()).unwrap();
+    assert_eq!(
+        recorded,
+        NativeProcessIdentity::capture(std::process::id()).unwrap().unwrap()
+    );
+
+    // Give the test record a separate, real claimant that exits by EOF.
+    // This tests replacement of its observed birth, without signal injection.
+    let mut prior = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut prior_record = claimed.clone();
+    prior_record["recovery_claim"]["claimant"] = json!(NativeProcessIdentity::capture(prior.id()).unwrap().unwrap());
+    persist_owner(&record, &prior_record).unwrap();
+    assert_eq!(
+        claim_native_recovery(&record, &expected, budget).unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drop(prior.stdin.take());
+    assert!(prior.wait().unwrap().success());
+
+    let mut other_boot = prior_record.clone();
+    let previous_boot = prior_record["recovery_claim"]["boot"].as_str().unwrap();
+    let different = if previous_boot.starts_with('0') {
+        "10000000-0000-0000-0000-000000000000"
+    } else {
+        "00000000-0000-0000-0000-000000000000"
+    };
+    other_boot["recovery_claim"]["boot"] = json!(different);
+    persist_owner(&record, &other_boot).unwrap();
+    assert_eq!(
+        claim_native_recovery(&record, &expected, budget).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(read_owner(&record).unwrap(), other_boot);
+
+    persist_owner(&record, &prior_record).unwrap();
+    let [first, second] = contend();
+    let (winner, loser) = if first.is_ok() {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert!(winner.is_ok());
+    assert_eq!(loser.unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(read_owner(&record).unwrap(), claimed);
+
+    // The existing group fixture self-expires. Reap it without a signal.
+    assert!(child.wait().unwrap().success());
     let mut malformed = claimed.clone();
     malformed["unexpected_authority"] = json!(true);
     persist_owner(&record, &malformed).unwrap();
