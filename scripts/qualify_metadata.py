@@ -205,11 +205,52 @@ ORDINARY_BATCH_TESTS = (
         ((1, 3),),
     ),
 )
+ORDINARY_VERIFICATION_TESTS = (
+    (
+        "typed_session",
+        "verify_declaration_not_found_carries_similar_declarations",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "verify_declaration_accepts_closed_theorem_and_rejects_sorry",
+        ((1, 2),),
+    ),
+    (
+        "typed_session",
+        "module_public_section_resolves_to_unique_declaration",
+        ((1, 2),),
+    ),
+    (
+        "typed_session",
+        "verify_declaration_reports_ambiguous_with_candidates",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "verify_declaration_ambiguous_open_reference_does_not_restart_child",
+        ((1, 1),),
+    ),
+    (
+        "typed_session",
+        "verify_declaration_reports_needs_build_for_unbuilt_import",
+        ((1, 1),),
+    ),
+)
+ORDINARY_VERIFICATION_BATCH_TESTS = (
+    (
+        "typed_session",
+        "declaration_verification_batch_returns_ordered_rows_through_worker",
+        ((1, 1),),
+    ),
+)
 JSON_GRANT = b"authorize-consumer-load"
 META_TERM_GRANT = b"authorize-fixed-meta-term"
 MODULE_QUERY_GRANT = b"authorize-fixed-module-query"
 PROOF_GRANT = b"authorize-fixed-proof-attempt"
 BATCH_GRANT = b"authorize-fixed-module-batch"
+VERIFICATION_GRANT = b"authorize-fixed-declaration-verification"
+VERIFICATION_BATCH_GRANT = b"authorize-fixed-verification-batch"
 ORDINARY_AUDITED_TESTS = tuple(
     (target, name, counts, event)
     for cases, event in (
@@ -218,6 +259,8 @@ ORDINARY_AUDITED_TESTS = tuple(
         (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
         (ORDINARY_PROOF_TESTS, PROOF_GRANT),
         (ORDINARY_BATCH_TESTS, BATCH_GRANT),
+        (ORDINARY_VERIFICATION_TESTS, VERIFICATION_GRANT),
+        (ORDINARY_VERIFICATION_BATCH_TESTS, VERIFICATION_BATCH_GRANT),
     )
     for target, name, counts in cases
 )
@@ -977,6 +1020,8 @@ def check_typed_children_closed(
         MODULE_QUERY_GRANT: [],
         PROOF_GRANT: [],
         BATCH_GRANT: [],
+        VERIFICATION_GRANT: [],
+        VERIFICATION_BATCH_GRANT: [],
     }
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)

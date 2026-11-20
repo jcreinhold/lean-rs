@@ -711,6 +711,15 @@ class MetadataQualificationTest(unittest.TestCase):
                 "a_pooled_sibling_in_another_mode_never_answers_from_the_wrong_environment",
             ),
         )
+        verification_cases = (
+            "verify_declaration_not_found_carries_similar_declarations",
+            "verify_declaration_accepts_closed_theorem_and_rejects_sorry",
+            "module_public_section_resolves_to_unique_declaration",
+            "verify_declaration_reports_ambiguous_with_candidates",
+            "verify_declaration_ambiguous_open_reference_does_not_restart_child",
+            "verify_declaration_reports_needs_build_for_unbuilt_import",
+            "declaration_verification_batch_returns_ordered_rows_through_worker",
+        )
         audited_filters = [
             "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
             "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
@@ -720,6 +729,10 @@ class MetadataQualificationTest(unittest.TestCase):
                 for name in (*meta_cases, *module_query_cases, *proof_cases)
             ),
             *(f"(binary(={target}) & (test(={name})))" for target, name in batch_cases),
+            *(
+                f"(binary(=typed_session) & (test(={name})))"
+                for name in verification_cases
+            ),
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)

@@ -49,6 +49,62 @@ impl MetadataApp {
             .as_ref()
             .map_err(|message| lean_rs::error::host_internal(message.clone()))
     }
+
+    fn ordinary_verification_record(
+        &self,
+        session: &WorkerSourceContext<'_, '_>,
+        options: &HostSourceOptions,
+    ) -> LeanResult<&Record> {
+        if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
+            return Err(denied());
+        }
+        let d = &self.deployment()?.record;
+        if d.broken_import
+            || !d.typed_session
+            || d.verification
+            || !session.imports.matches_request(
+                &d.import_roots
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>(),
+                &["LeanRsHostShims.Elaboration".to_owned()],
+            )
+            || *session.imports.options() != HostImportOptions::default()
+            || !options.namespace.is_empty()
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || options.options_json != "{}"
+        {
+            return Err(denied());
+        }
+        Ok(d)
+    }
+
+    fn verify_ordinary<'cap>(
+        &self,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: DeclarationVerificationRequest,
+        options: HostSourceOptions,
+    ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationRequest>> {
+        let d = self.ordinary_verification_record(&session, &options)?;
+        if !matches_ordinary_verification(&options.file, &request) {
+            return Err(denied());
+        }
+        // SAFETY: grant_source verified the session and its exact sealed roots.
+        // Held pins the artifacts. The request table admits only exact source,
+        // target, label, verification policy and budgets in this scope.
+        let grant = unsafe {
+            session.capability.verification_scope(
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                options,
+            )?
+        };
+        audit("authorize-fixed-declaration-verification");
+        Ok(grant)
+    }
 }
 fn denied() -> lean_rs::LeanError {
     lean_rs::error::host_internal("operation outside this metadata application")
@@ -247,6 +303,38 @@ fn matches_boundary_fixture(source: &str) -> bool {
         })
         && lines.next() == Some("  trivial\n")
         && lines.next().is_none()
+}
+fn matches_ordinary_verification(file: &str, request: &DeclarationVerificationRequest) -> bool {
+    const SIMILAR: &str = "namespace Probe\ntheorem fooBar : True := by\n  trivial\ntheorem unrelated : True := by\n  trivial\nend Probe\n";
+    const PUBLIC_SECTION: &str = "module\n\n@[expose] public section\nnamespace SSet.boundary\n\ntheorem isPushout : True := by\n  trivial\n\nend SSet.boundary\nend\n";
+    const AMBIGUOUS: &str = "namespace A\ntheorem dup : True := by trivial\nend A\n\nnamespace B\ntheorem dup : True := by trivial\nend B\n";
+    const AMBIGUOUS_OPEN: &str = "namespace AmbigA\ndef collide : Nat := 0\nend AmbigA\n\nnamespace AmbigB\ndef collide : Nat := 1\nend AmbigB\n\nopen AmbigA AmbigB\n\nexample : Nat := collide\n";
+    const NEEDS_BUILD: &str = "import LeanRsFixture.DoesNotExist\n\ntheorem present : True := by trivial\n";
+
+    let DeclarationVerificationTarget::Name { name } = &request.target else {
+        return false;
+    };
+    request.sorry_policy == SorryPolicy::Deny
+        && request.budgets == ModuleQueryOutputBudgets::default()
+        && matches!(
+            (file, request.source.as_str(), name.as_str(), request.report_axioms),
+            ("/verify/similar.lean", SIMILAR, "Other.fooBar", false)
+                | (
+                    "/verify/theorem.lean",
+                    "theorem t : True := by\n  trivial\n" | "theorem t : True := by\n  sorry\n",
+                    "t",
+                    true
+                )
+                | (
+                    "/verify/module.lean",
+                    PUBLIC_SECTION,
+                    "isPushout" | "SSet.boundary.isPushout",
+                    true
+                )
+                | ("/verify/ambiguous.lean", AMBIGUOUS, "dup", true)
+                | ("/verify/ambiguous-open.lean", AMBIGUOUS_OPEN, "collide", true)
+                | ("/verify/needs-build.lean", NEEDS_BUILD, "notDefinedHere", true)
+        )
 }
 impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
@@ -654,6 +742,9 @@ impl WorkerAuthority for MetadataApp {
         request: DeclarationVerificationRequest,
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationRequest>> {
+        if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1") {
+            return self.verify_ordinary(session, request, options);
+        }
         if broken_import_profile() || !self.deployment()?.record.verification {
             return Err(denied());
         }
@@ -714,11 +805,40 @@ impl WorkerAuthority for MetadataApp {
     }
     fn verify_batch<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: DeclarationVerificationBatchRequest,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: DeclarationVerificationBatchRequest,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationBatchRequest>> {
-        Err(denied())
+        let d = self.ordinary_verification_record(&session, &options)?;
+        let [closed, sorry] = request.targets.as_slice() else {
+            return Err(denied());
+        };
+        if options.file != "/verify/batch.lean"
+            || request.source != "theorem closed : True := by\n  trivial\ntheorem withSorry : True := by\n  sorry\n"
+            || request.sorry_policy != SorryPolicy::Deny
+            || !request.report_axioms
+            || request.budgets != ModuleQueryOutputBudgets::default()
+            || closed.id != "closed-row"
+            || sorry.id != "sorry-row"
+            || !matches!(&closed.target, DeclarationVerificationTarget::Name { name } if name == "closed")
+            || !matches!(&sorry.target, DeclarationVerificationTarget::Name { name } if name == "withSorry")
+        {
+            return Err(denied());
+        }
+        // SAFETY: grant_source verified the session and its exact sealed roots.
+        // Held pins the artifacts. This is one checked batch with its exact
+        // ordered targets, source, file label, verification policy and budgets.
+        let grant = unsafe {
+            session.capability.verification_batch_scope(
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                options,
+            )?
+        };
+        audit("authorize-fixed-verification-batch");
+        Ok(grant)
     }
 }
 fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
