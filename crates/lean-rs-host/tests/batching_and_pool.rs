@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
+use std::{fs, path::Path};
 
 use lean_rs::{HostStage, LeanDiagnosticCode, LeanError, LeanRuntime};
 use lean_rs_host::{
@@ -635,19 +636,110 @@ fn independently_admitted_equivalent_roots_do_not_reuse() {
     assert_eq!(stats.distinct_keys_seen, 1);
 }
 
+// The second project imports only the held shims. It needs a real Lake
+// identity and an empty output root, not another compiled image.
+struct ReceiptProject(PathBuf);
+
+impl ReceiptProject {
+    fn selected() -> Option<Self> {
+        fixture::native_fixture_selected().then(Self::new)
+    }
+
+    fn new() -> Self {
+        let target = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .canonicalize()
+            .expect("canonical Cargo test scratch");
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let root = target.join(format!("receipt-project-{}-{nonce}", std::process::id()));
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt as _;
+            builder.mode(0o700);
+        }
+        builder.create(&root).expect("claim private project");
+        let project = Self(root);
+        fs::write(
+            project.0.join("lakefile.lean"),
+            "import Lake\nopen Lake DSL\npackage receipt_second\n",
+        )
+        .expect("write project configuration");
+        fs::write(
+            project.0.join("lake-manifest.json"),
+            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"receipt_second","lakeDir":".lake"}"#,
+        )
+        .expect("write exact empty dependency graph");
+        fs::write(
+            project.0.join("lean-toolchain"),
+            include_str!("../../../lean-toolchain"),
+        )
+        .expect("write pinned toolchain");
+        fs::create_dir_all(project.0.join(".lake/build/lib/lean")).expect("create empty output root");
+        project
+    }
+}
+
+impl Drop for ReceiptProject {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).expect("remove private receipt project");
+    }
+}
+
+fn second_receipt<'lean, 'c>(
+    first: &LeanCapabilities<'lean, '_>,
+    second: &'c LeanCapabilities<'lean, '_>,
+    project: &ReceiptProject,
+) -> lean_rs::module::TrustedHostImports<'lean, 'c> {
+    let root = project.0.join(".lake/build/lib/lean");
+    assert_eq!(root.canonicalize().expect("canonical empty root"), root);
+    assert!(fs::read_dir(&root).expect("inspect empty root").next().is_none());
+    assert!(second.artifact_roots().contains(&project.0));
+    assert!(!first.artifact_roots().contains(&project.0));
+    assert_eq!(
+        second.shim_capability().library_path(),
+        first.shim_capability().library_path()
+    );
+    let paths = second.import_search_paths();
+    assert!(
+        paths
+            .iter()
+            .map(Path::new)
+            .eq(std::iter::once(root.as_path()).chain(first.import_search_paths().iter().skip(1).map(Path::new)))
+    );
+    #[allow(unsafe_code, reason = "one exact shim import with a private empty project root")]
+    // SAFETY: the same held native shims remain in the same order; the
+    // private project's empty first root cannot shadow them.
+    unsafe {
+        second.shim_capability().import_scope_with_options(
+            paths,
+            vec!["LeanRsHostShims.Elaboration".into()],
+            lean_rs::module::HostImportOptions::default(),
+        )
+    }
+}
+
+fn strict_second_project() -> PathBuf {
+    fixture::fixture_root()
+        .parent()
+        .expect("qualified scratch")
+        .join("lean-rs-interop-shims")
+}
+
 #[test]
 fn session_pool_rejects_receipt_from_foreign_project_before_lookup() {
     let runtime = runtime();
-    let host = LeanHost::from_lake_project(runtime, fixture::fixture_root()).expect("host opens");
-    let other = fixture::fixture_root()
-        .parent()
-        .expect("qualified scratch")
-        .join("lean-rs-interop-shims");
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let selected = ReceiptProject::selected();
+    let other = selected.as_ref().map_or_else(strict_second_project, |p| p.0.clone());
     let workspace_host = LeanHost::from_lake_project(runtime, other).expect("second controlled project");
-    let caps = fixture::capabilities(&host).expect("load caps");
-    let shims_only = fixture::shims_only(&workspace_host).expect("load workspace shims");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let shims_only = fixture::native_shims_only(&workspace_host).expect("load workspace shims");
+    assert_ne!(caps.import_search_paths(), shims_only.import_search_paths());
     let pool = SessionPool::with_memory_policy(runtime, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     drop(
         pool.acquire(&caps, &imports, None, None)
@@ -669,15 +761,21 @@ fn session_pool_rejects_receipt_from_foreign_project_before_lookup() {
 #[test]
 fn independent_project_receipts_miss_before_exhausted_import_budget() {
     let rt = runtime();
-    let root = fixture::fixture_root();
-    let first_host = LeanHost::from_lake_project(rt, &root).expect("fixture host");
-    let other_root = root.parent().expect("fixture scratch").join("lean-rs-interop-shims");
-    let second_host = LeanHost::from_lake_project(rt, other_root).expect("interop host");
-    let first = fixture::shims_only(&first_host).expect("first capability");
-    let second = fixture::shims_only(&second_host).expect("second capability");
+    let first_host = LeanHost::from_lake_project(rt, fixture_lake_root()).expect("fixture host");
+    let selected = ReceiptProject::selected();
+    let other = selected.as_ref().map_or_else(strict_second_project, |p| p.0.clone());
+    let second_host = LeanHost::from_lake_project(rt, other).expect("second fixture host");
+    let first = fixture::native_shims_only(&first_host).expect("first capability");
+    let second = fixture::native_shims_only(&second_host).expect("second capability");
     assert_ne!(first.import_search_paths(), second.import_search_paths());
-    let first_scope = fixture::imports(&first, "LeanRsHostShims.Elaboration");
-    let second_scope = fixture::imports(&second, "LeanRsHostShims.Elaboration");
+    let first_scope = fixture::native_imports(&first, "LeanRsHostShims.Elaboration");
+    #[cfg(unix)]
+    let second_scope = selected
+        .as_ref()
+        .map(|project| second_receipt(&first, &second, project));
+    #[cfg(not(unix))]
+    let second_scope = None;
+    let second_scope = second_scope.unwrap_or_else(|| fixture::imports(&second, "LeanRsHostShims.Elaboration"));
     let pool = SessionPool::with_memory_policy(rt, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
     drop(
         pool.acquire(&first, &first_scope, None, None)
