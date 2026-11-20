@@ -30,7 +30,7 @@ fn main() -> ExitCode {
             eprintln!("lean-rs-writer {name}: {error}");
             match action {
                 Command::Reader(_) | Command::ReadProxy(_) => ExitCode::from(writer::reader_failure_exit_code(&error)),
-                _ => ExitCode::FAILURE,
+                Command::Writer(_) | Command::WriterLockPath(_) | Command::WriterExec => ExitCode::FAILURE,
             }
         }
     }

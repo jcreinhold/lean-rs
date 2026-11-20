@@ -2204,7 +2204,7 @@ def qualify_direct_builder_case(case, state, run, env):
     return name
 
 
-def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
+def qualify_host_builder_cases(parent, release, profile, run, env, cargo, descriptor):
     state = parent / "broken-import"
     direct_tests = []
     for case, mode, project, imports in (
@@ -2223,7 +2223,7 @@ def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
         scratch = state / "tmp"
         scratch.mkdir(mode=0o700)
         env.clear()
-        env.update(build_environment(release, scratch))
+        env.update(build_environment(release, scratch), LEAN_RS_PREPARED_HOST_ARTIFACTS=descriptor)
         launch_host_builder(
             case, mode, project, state, release, profile, run, env, cargo
         )
@@ -2488,7 +2488,7 @@ def qualify_broken_import(
     if run_typed:
         qualify_typed_group(parent, release, profile, run, env, cargo, typed_descriptor)
         direct_tests = qualify_host_builder_cases(
-            parent, release, profile, run, env, cargo
+            parent, release, profile, run, env, cargo, typed_descriptor
         )
         qualify_scalar_entry(release, profile, run, env, cargo, typed_descriptor)
         direct_tests += qualify_optional_whnf(release, profile, run, env)

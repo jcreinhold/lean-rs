@@ -11,6 +11,10 @@ categories = ["development-tools::build-utils"]
 keywords = ["lean", "lake", "artifacts"]
 readme = "README.md"
 
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 lean-toolchain.workspace = true

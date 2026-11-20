@@ -1,6 +1,6 @@
 # Release checklist
 
-[`.github/workflows/release.yml`](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release.yml) publishes all nine crates when a `v<semver>` tag is
+[`.github/workflows/release.yml`](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release.yml) publishes all ten crates when a `v<semver>` tag is
 pushed. It verifies the head Lean version on Ubuntu and macOS, checks public API baselines, packages and publishes
 crates in dependency order, and creates a GitHub Release from the matching `## [<version>]` changelog section.
 
@@ -24,8 +24,8 @@ verification job tests only the head.
 3. Move the unreleased changelog entries into `## [X.Y.Z]`. The heading must match tag `vX.Y.Z` exactly.
 4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`.
 5. Regenerate intentionally changed public API baselines using the pinned tools and procedure in
-   [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` is
-   published but currently has no baseline in that loop.
+   [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` and
+   `lean-rs-writer` are published outside that loop.
 6. Merge the release changes after the required checks pass.
 
 The repository must have a scoped crates.io publish token in the `CARGO_REGISTRY_TOKEN` Actions secret. Local publishing
@@ -78,7 +78,7 @@ Dispatch the Release workflow with `dry_run: true` (the default). It runs verifi
 [`scripts/publish-workspace.sh --dry-run`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/publish-workspace.sh) without uploading crates or creating a
 GitHub Release. Manual runs of Release cannot upload crates; use the tag for a live release.
 
-Cargo builds all nine publishable tarballs from a temporary registry. Sibling crates do not need to be
+Cargo builds all ten publishable tarballs from a temporary registry. Sibling crates do not need to be
 published for this check, but external dependencies still have to resolve. A real release runs the same
 check before its first upload, then publishes crates in dependency order.
 
