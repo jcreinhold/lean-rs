@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -342,6 +343,31 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.verified_platform("Linux", "x86_64")
         self.launch.assert_not_called()
+
+    def test_build_environment_selects_separate_cargo_and_nextest_bins(self):
+        rust = self.target / "rustup/bin"
+        plugin = self.target / "install-action/bin"
+        unrelated = self.target / "unrelated"
+        for directory, name in ((rust, "cargo"), (plugin, "cargo-nextest"), (unrelated, "cargo-public-api")):
+            directory.mkdir(parents=True)
+            binary = directory / name
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+        homes = {"CARGO_HOME": str(self.target / "cargo-home"), "RUSTUP_HOME": str(self.target / "rustup-home")}
+        inherited = {
+            **homes,
+            "PATH": os.pathsep.join(map(str, (unrelated, rust, plugin))),
+            "LD_LIBRARY_PATH": "/unreviewed",
+            "DYLD_LIBRARY_PATH": "/unreviewed",
+            "RUSTC_WRAPPER": "/unreviewed/wrapper",
+        }
+        with patch.dict(os.environ, inherited, clear=True):
+            env = qualification.build_environment(self.target / "lean", self.target)
+        self.assertEqual(shutil.which("cargo", path=env["PATH"]), str(rust / "cargo"))
+        self.assertEqual(shutil.which("cargo-nextest", path=env["PATH"]), str(plugin / "cargo-nextest"))
+        self.assertNotIn(str(unrelated), env["PATH"].split(os.pathsep))
+        self.assertEqual({key: env[key] for key in homes}, homes)
+        self.assertTrue({"LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "RUSTC_WRAPPER"}.isdisjoint(env))
 
     def test_platform_profiles_select_only_the_reviewed_nextest_loader_cleanup(self):
         cases = [

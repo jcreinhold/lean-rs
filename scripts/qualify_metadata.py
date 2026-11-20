@@ -783,21 +783,17 @@ def build_environment(release, scratch):
     # These are trusted build tools. In particular, no loader overrides or Cargo wrappers
     # cross into the readiness executable, writer, guardian or child.
     prefix = release
-    cargo = Path.home() / ".cargo/bin"
+    cargo = shutil.which("cargo")
+    require(cargo is not None, "could not locate cargo for metadata qualification")
+    rust_bins = [Path(cargo).absolute().parent]
+    # Hosted runners can install this Cargo subcommand separately from rustup's proxies.
+    if nextest := shutil.which("cargo-nextest"):
+        rust_bins.append(Path(nextest).absolute().parent)
+    path = [prefix / "bin", *rust_bins, Path(sys.executable).parent, "/usr/bin", "/bin"]
     return {
         "HOME": str(Path.home()),
-        "PATH": os.pathsep.join(
-            map(
-                str,
-                [
-                    prefix / "bin",
-                    cargo,
-                    Path(sys.executable).parent,
-                    "/usr/bin",
-                    "/bin",
-                ],
-            )
-        ),
+        "PATH": os.pathsep.join(dict.fromkeys(map(str, path))),
+        **{name: os.environ[name] for name in ("CARGO_HOME", "RUSTUP_HOME") if name in os.environ},
         "LEAN_SYSROOT": str(prefix),
         "LEAN_NUM_THREADS": "1",
         "CARGO_BUILD_JOBS": "1",
