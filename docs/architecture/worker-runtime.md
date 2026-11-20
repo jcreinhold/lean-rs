@@ -556,7 +556,8 @@ guardian are non-live and the original worker anchor still matches. The admissio
 Claimed records use registry version 3, which older registry readers refuse. Startup snapshots keep their original format.
 A committed intent carries no signal, descriptor, or launch authority. A replacement must observe the same kernel
 boot session, a non-live exact claimant, and the original live worker anchor under the admission lock. A failed boot
-or process observation keeps the previous intent. Interrupted intent publication still requires a recovery transition.
+or process observation keeps the previous intent. An eligible retry discards uncommitted staging under the admission lock.
+After rename, the visible owner record fences further claims even when publication returned an error.
 On guarded startup, the original launcher can publish a boot witness with Running after matching the worker birth
 in Bootstrap and checking that same live worker across the boot observation. The private version 3 Running record
 keeps the witness when a recovery claim is added. Without an observable boot UUID, ordinary startup can continue

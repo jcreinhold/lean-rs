@@ -498,6 +498,22 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     owner.insert("version".to_owned(), json!(3));
     owner.insert("scope".to_owned(), json!("inherited-process-group-v3"));
     owner.insert("recovery_claim".to_owned(), json!(RecoveryClaim { boot, claimant }));
+    // An eligible retry has the sole publication lock. Only owner.json is
+    // committed evidence. A prior staging file cannot grant claim authority.
+    let staged = record.with_extension("recovery-write");
+    match fs::symlink_metadata(&staged) {
+        Ok(metadata)
+            if metadata.is_file()
+                && metadata.nlink() == 1
+                && metadata.uid() == rustix::process::getuid().as_raw()
+                && metadata.len() <= super::MAX_OWNER_BYTES as u64 =>
+        {
+            fs::remove_file(staged)?;
+        }
+        Ok(_) => return Err(invalid("invalid native recovery staging file")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
     super::persist_owner_at(record, &value, "recovery-write")
 }
 

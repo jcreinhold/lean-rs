@@ -805,10 +805,36 @@ fn guarded_running_publication_witnesses_original_worker_boot() {
     let mut lost = bound.clone();
     lost["parent"]["start"] = json!("synthetic-previous-service");
     persist_owner(&record, &lost).unwrap();
-    claim_native_recovery(&record, &worker, budget).unwrap();
+    let staged = record.with_extension("recovery-write");
+    RECOVERY_WRITE_CUT.with(|armed| armed.set(Some(RecoveryWriteCut::BeforeRename)));
+    let interrupted = claim_native_recovery(&record, &worker, budget).unwrap_err();
+    assert_eq!(interrupted.to_string(), "injected recovery publication interruption");
+    assert_eq!(read_owner(&record).unwrap(), lost);
+    let staged_bytes = fs::read(&staged).unwrap();
+
+    RECOVERY_WRITE_CUT.with(|armed| armed.set(Some(RecoveryWriteCut::AfterRename)));
+    let uncertain = claim_native_recovery(&record, &worker, budget).unwrap_err();
+    assert_eq!(uncertain.to_string(), "injected recovery publication interruption");
+    assert!(!staged.exists());
     let claimed = read_owner(&record).unwrap();
     assert_eq!(claimed["original_worker_boot"], bound["original_worker_boot"]);
     assert!(claimed.get("recovery_claim").is_some());
+
+    let barrier = Barrier::new(2);
+    thread::scope(|contenders| {
+        let retry = || {
+            barrier.wait();
+            claim_native_recovery(&record, &worker, budget).unwrap_err().kind()
+        };
+        let first = contenders.spawn(retry);
+        let second = contenders.spawn(retry);
+        assert_eq!(first.join().unwrap(), io::ErrorKind::WouldBlock);
+        assert_eq!(second.join().unwrap(), io::ErrorKind::WouldBlock);
+    });
+    assert_eq!(read_owner(&record).unwrap(), claimed);
+
+    // A recovery staging child must not prevent collection after closure.
+    fs::write(&staged, staged_bytes).unwrap();
     assert!(child.wait().unwrap().success());
     collect_closed_owner_records(&fixture.registry, budget).unwrap();
 }

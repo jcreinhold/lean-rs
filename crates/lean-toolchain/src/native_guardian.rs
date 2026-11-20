@@ -412,6 +412,25 @@ fn validate_owner_record_path(record: &Path, value: Value) -> io::Result<Value> 
 fn persist_owner(record: &Path, value: &Value) -> io::Result<()> {
     persist_owner_at(record, value, "guardian-write")
 }
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecoveryWriteCut {
+    BeforeRename,
+    AfterRename,
+}
+#[cfg(test)]
+thread_local! {
+    static RECOVERY_WRITE_CUT: std::cell::Cell<Option<RecoveryWriteCut>> = const { std::cell::Cell::new(None) };
+}
+#[cfg(test)]
+fn interrupt_recovery_write(suffix: &str, cut: RecoveryWriteCut) -> io::Result<()> {
+    if suffix == "recovery-write" && RECOVERY_WRITE_CUT.with(|armed| armed.get() == Some(cut) && armed.take().is_some())
+    {
+        return Err(io::Error::other("injected recovery publication interruption"));
+    }
+    Ok(())
+}
+
 fn persist_owner_at(record: &Path, value: &Value, suffix: &str) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
     if bytes.len() > MAX_OWNER_BYTES {
@@ -424,7 +443,11 @@ fn persist_owner_at(record: &Path, value: &Value, suffix: &str) -> io::Result<()
         .open(&temporary)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
+    #[cfg(test)]
+    interrupt_recovery_write(suffix, RecoveryWriteCut::BeforeRename)?;
     fs::rename(&temporary, record)?;
+    #[cfg(test)]
+    interrupt_recovery_write(suffix, RecoveryWriteCut::AfterRename)?;
     File::open(
         record
             .parent()
