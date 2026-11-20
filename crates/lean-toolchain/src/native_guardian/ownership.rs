@@ -7,7 +7,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 #[cfg(target_os = "linux")]
 use std::io::Read as _;
-use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -727,7 +727,7 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
             return Err(expired());
         }
         let entry = entry?;
-        if entry.file_name() == ".admission.lock" {
+        if entry.file_name() == ".admission.lock" || super::writer_storage::is_charge_directory(&entry)? {
             continue;
         }
         seen = seen
@@ -772,15 +772,28 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
     Ok(occupied)
 }
 fn lock_admission(root: &Path, until: std::time::Instant, create: bool) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .create(create)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    let mutex = options.open(root.join(".admission.lock"))?;
+    lock_admission_at(&File::open(root)?, until, create)
+}
+pub(super) fn lock_admission_at(root: &File, until: std::time::Instant, create: bool) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags, openat};
+    let flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let existing = || openat(root, ".admission.lock", flags, Mode::empty());
+    let mutex = File::from(match existing() {
+        Err(rustix::io::Errno::NOENT) if create => {
+            // Concurrent first reservations share the winning inode. Never
+            // replace or truncate a published mutex.
+            match openat(
+                root,
+                ".admission.lock",
+                flags | OFlags::CREATE | OFlags::EXCL,
+                Mode::RUSR | Mode::WUSR,
+            ) {
+                Err(rustix::io::Errno::EXIST) => existing()?,
+                result => result?,
+            }
+        }
+        result => result?,
+    });
     let metadata = mutex.metadata()?;
     if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != rustix::process::getuid().as_raw() {
         return Err(invalid("native admission lock must be an owned regular file"));
@@ -810,11 +823,13 @@ pub fn collect_closed_owner_records(root: &Path, timeout: Duration) -> io::Resul
     let _mutex = lock_admission(root, until, false)?;
     let occupied = collect_records_locked(root, until)?;
     File::open(root)?.sync_all()?;
-    if occupied.is_empty() {
-        Ok(())
-    } else {
-        Err(busy("native generation custody remains open"))
+    if !occupied.is_empty() {
+        return Err(busy("native generation custody remains open"));
     }
+    if super::writer_storage::charges_remain(root)? {
+        return Err(busy("writer storage custody remains open"));
+    }
+    Ok(())
 }
 /// Reserve bounded generation and actor capacity under the same admission lock.
 ///

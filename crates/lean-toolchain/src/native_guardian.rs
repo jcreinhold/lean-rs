@@ -53,6 +53,8 @@ mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};
 mod ownership;
+#[doc(hidden)]
+pub mod writer_storage;
 pub use ownership::{
     NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, claim_native_recovery,
     collect_closed_owner_records, dispatch_owner_record, publish_startup_owner, registry_directory,
@@ -837,7 +839,7 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
     for entry in entries {
         let entry = entry?;
         let name = entry.file_name();
-        if name == ".admission.lock" {
+        if name == ".admission.lock" || writer_storage::is_charge_directory(&entry)? {
             continue;
         }
         count = count
