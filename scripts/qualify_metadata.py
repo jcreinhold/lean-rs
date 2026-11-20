@@ -89,6 +89,16 @@ ORDINARY_JSON_TESTS = (
         "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
         ((2, 2), (3, 2)),
     ),
+    (
+        "pool",
+        "memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted",
+        ((1, 1), (2, 2)),
+    ),
+    (
+        "pool",
+        "rss_snapshot_records_available_samples_on_supported_platforms",
+        ((2, 2),),
+    ),
 )
 ORDINARY_META_TESTS = (
     ("typed_session", "infer_type_returns_rendered_type_for_known_term", ((1, 1),)),

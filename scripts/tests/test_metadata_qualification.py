@@ -654,6 +654,8 @@ class MetadataQualificationTest(unittest.TestCase):
             "queue_wait_timeout_is_typed_when_pool_is_full",
             "per_worker_rss_policy_invalidates_old_lease_before_work",
             "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
+            "memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted",
+            "rss_snapshot_records_available_samples_on_supported_platforms",
         )
         meta_cases = (
             "infer_type_returns_rendered_type_for_known_term",

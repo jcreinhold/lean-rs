@@ -623,19 +623,30 @@ fn metadata_mismatch_is_typed() {
     }
 }
 
+fn assert_first_json_worker_survived_second_admission(pool: &mut LeanWorkerPool) {
+    assert_eq!(pool.snapshot().workers, 2);
+    // Keep the second worker in the pool while checking the first key again.
+    // The named qualifier verifies both PIDs exited and rejects any third start.
+    let mut first = pool.acquire_lease(json_builder()).expect("first key remains usable");
+    let response = first
+        .run_json_command(&json_command(), &request("pool-rss-first-key-after-second"), None, None)
+        .expect("first worker serves while the second is retained");
+    assert!(response.accepted);
+}
+
 #[test]
 fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2).max_total_child_rss_kib(1));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens first lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-rss-budget"), None, None)
             .expect("typed command succeeds");
         assert!(response.accepted);
     }
 
-    let admission = match pool.acquire_lease(distinct_valid_builder(builder())) {
+    let admission = match pool.acquire_lease(distinct_valid_builder(json_builder())) {
         Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
             current_kib,
             limit_kib,
@@ -668,6 +679,7 @@ fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
             snapshot.rss_samples_unavailable > 0,
             "budget admission should only proceed when RSS samples are unavailable",
         );
+        assert_first_json_worker_survived_second_admission(&mut pool);
     }
 }
 
@@ -781,7 +793,7 @@ fn rss_snapshot_records_available_samples_on_supported_platforms() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2).max_total_child_rss_kib(u64::MAX));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(json_builder()).expect("pool opens lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-rss-snapshot"), None, None)
             .expect("typed command succeeds");
@@ -789,7 +801,7 @@ fn rss_snapshot_records_available_samples_on_supported_platforms() {
     }
 
     let lease = pool
-        .acquire_lease(distinct_valid_builder(builder()))
+        .acquire_lease(distinct_valid_builder(json_builder()))
         .expect("second lease admission samples existing worker RSS");
     drop(lease);
     let snapshot = pool.snapshot();
@@ -801,4 +813,5 @@ fn rss_snapshot_records_available_samples_on_supported_platforms() {
             "unavailable child RSS samples should be recorded explicitly",
         );
     }
+    assert_first_json_worker_survived_second_admission(&mut pool);
 }
