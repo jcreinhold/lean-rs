@@ -106,6 +106,8 @@ def main():
     stream = rec.get("stream", False)
     assert not (broken and typed)
     assert not stream or typed
+    signature_probe = rec.get("signature_probe")
+    assert signature_probe is None or stream
     if typed:
         assert rec.get("verification") is False
     host_builder_case = rec.get("host_builder_case")
@@ -247,8 +249,24 @@ def main():
     if stream:
         exports = json.loads(rec["consumer_json"])["exports"]
         symbols = [export["symbol"] for export in exports]
-        assert 0 < len(symbols) <= 30 and len(set(symbols)) == len(symbols)
-        project_symbols.extend(symbols)
+        if signature_probe is None:
+            assert 0 < len(symbols) <= 30 and len(set(symbols)) == len(symbols)
+            project_symbols.extend(symbols)
+        else:
+            real_symbol = "lean_rs_interop_consumer_worker_json_command"
+            if (
+                signature_probe
+                == "manifest_missing_worker_export_signature_fails_before_dispatch"
+            ):
+                assert symbols == []
+            else:
+                assert (
+                    signature_probe
+                    == "manifest_wrong_worker_export_signature_fails_before_dispatch"
+                )
+                assert symbols == [real_symbol]
+            # Check the actual export, even when its manifest row is absent.
+            project_symbols.append(real_symbol)
         for source in (
             "LeanRsInteropConsumer.lean",
             "LeanRsInteropConsumer/Callback.lean",

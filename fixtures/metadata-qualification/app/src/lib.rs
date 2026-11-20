@@ -142,6 +142,8 @@ pub struct Record {
     pub typed_session: bool,
     #[serde(default)]
     pub stream: bool,
+    #[serde(default)]
+    pub signature_probe: Option<String>,
     pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]

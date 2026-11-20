@@ -478,40 +478,53 @@ impl WorkerAuthority for MetadataApp {
         }
         let contracts = if d.stream {
             let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
-            let (_, exports) = stream_cases::CASES
-                .iter()
-                .find(|(names, _)| names.contains(&requested.as_str()))
-                .ok_or_else(denied)?;
             let manifest: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
             let signatures = manifest
                 .get("exports")
                 .and_then(serde_json::Value::as_array)
                 .ok_or_else(denied)?;
-            let event = match exports {
-                stream_cases::Exports::Metadata => "authorize-fixed-metadata",
-                stream_cases::Exports::Doctor | stream_cases::Exports::MalformedMetadataAndDoctor => {
-                    "authorize-fixed-doctor"
-                }
-                stream_cases::Exports::NoExports => "admit-fixed-no-exports",
-                stream_cases::Exports::Json | stream_cases::Exports::MalformedJson => "authorize-fixed-json",
-                stream_cases::Exports::Shape(_, _) => "authorize-fixed-shape",
-                stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => "authorize-fixed-stream",
-            };
-            let mut contracts = Vec::new();
-            for (signature, streaming) in exports.signatures() {
-                if !signatures.contains(&signature.to_json()) {
+            if let Some(case) = d.signature_probe.as_deref() {
+                let rows = stream_cases::negative_signature_rows(case).ok_or_else(denied)?;
+                if requested != case || *signatures != rows {
                     return Err(denied());
                 }
-                let contract = if streaming {
-                    WorkerExportContract::StringStream
-                } else {
-                    WorkerExportContract::StringIoString
+                // This is the genuine ABI from the sealed fixture, not the
+                // deliberately absent or contradictory manifest metadata.
+                audit(&format!("authorize-fixed-signature-probe-{requested}"));
+                vec![(stream_cases::JSON_COMMAND.into(), WorkerExportContract::StringIoString)]
+            } else {
+                let (_, exports) = stream_cases::CASES
+                    .iter()
+                    .find(|(names, _)| names.contains(&requested.as_str()))
+                    .ok_or_else(denied)?;
+                let event = match exports {
+                    stream_cases::Exports::Metadata => "authorize-fixed-metadata",
+                    stream_cases::Exports::Doctor | stream_cases::Exports::MalformedMetadataAndDoctor => {
+                        "authorize-fixed-doctor"
+                    }
+                    stream_cases::Exports::NoExports => "admit-fixed-no-exports",
+                    stream_cases::Exports::Json | stream_cases::Exports::MalformedJson => "authorize-fixed-json",
+                    stream_cases::Exports::Shape(_, _) => "authorize-fixed-shape",
+                    stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => {
+                        "authorize-fixed-stream"
+                    }
                 };
-                contracts.push((signature.symbol().to_owned(), contract));
+                let mut contracts = Vec::new();
+                for (signature, streaming) in exports.signatures() {
+                    if !signatures.contains(&signature.to_json()) {
+                        return Err(denied());
+                    }
+                    let contract = if streaming {
+                        WorkerExportContract::StringStream
+                    } else {
+                        WorkerExportContract::StringIoString
+                    };
+                    contracts.push((signature.symbol().to_owned(), contract));
+                }
+                // With NoExports this records image admission only; the attested table is empty.
+                audit(&format!("{event}-{requested}"));
+                contracts
             }
-            // With NoExports this records image admission only; the attested table is empty.
-            audit(&format!("{event}-{requested}"));
-            contracts
         } else {
             let export = if d.typed_session {
                 if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
@@ -525,8 +538,9 @@ impl WorkerAuthority for MetadataApp {
             vec![(export.into(), WorkerExportContract::StringIoString)]
         };
         // SAFETY: Held checks the exact sealed images, initializer and runtime.
-        // Each named interop case selects only its exact checked contracts,
-        // or no contracts for the missing-export case.
+        // Each named interop case selects only its exact genuine contracts.
+        // A negative signature probe grants the real String ABI; the SDK still
+        // checks the deliberately invalid metadata before symbol binding.
         Ok(unsafe { AuthorizedWorkerSnapshot::attest(runtime, path.into(), bytes.to_vec(), contracts, held.clone()) })
     }
     fn host(

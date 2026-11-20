@@ -216,19 +216,34 @@ fn prepare_typed_session(
         "worker-json-capability.json"
     });
     let shim_json: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
+    let signature_probe = match env::var("LEAN_RS_TEST_SIGNATURE_PROBE") {
+        Ok(case) => Some(case),
+        Err(env::VarError::NotPresent) => None,
+        Err(err) => return Err(err.into()),
+    };
+    let negative_rows = if let Some(case) = signature_probe.as_deref() {
+        if !stream {
+            return Err("signature probe requires the sealed interop profile".into());
+        }
+        Some(stream_cases::negative_signature_rows(case).ok_or("unknown signature probe")?)
+    } else {
+        None
+    };
     let mut seen = std::collections::BTreeSet::new();
     let (package, module, dependencies, signatures) = if stream {
         (
             "lean_rs_interop_consumer",
             "LeanRsInteropConsumer",
             shim_json["dependencies"].clone(),
-            stream_cases::CASES
-                .iter()
-                .flat_map(|(_, exports)| exports.signatures())
-                .map(|(signature, _)| signature)
-                .filter(|signature| seen.insert(signature.symbol().to_owned()))
-                .map(|sig| sig.to_json())
-                .collect::<Vec<_>>(),
+            negative_rows.unwrap_or_else(|| {
+                stream_cases::CASES
+                    .iter()
+                    .flat_map(|(_, exports)| exports.signatures())
+                    .map(|(signature, _)| signature)
+                    .filter(|signature| seen.insert(signature.symbol().to_owned()))
+                    .map(|sig| sig.to_json())
+                    .collect::<Vec<_>>()
+            }),
         )
     } else {
         (
@@ -266,6 +281,7 @@ fn prepare_typed_session(
     roots.sort();
     let record = serde_json::json!({
         "broken_import": false, "typed_session": true, "stream": stream, "verification": false,
+        "signature_probe": signature_probe,
         "consumer_manifest": manifest_path, "consumer_json": manifest,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": image,

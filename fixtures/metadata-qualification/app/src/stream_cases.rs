@@ -1,8 +1,20 @@
 //! The existing fixture commands each named test may call.
 use lean_rs_worker_protocol::worker_exports::{
-    doctor_signature, json_command_signature, metadata_signature, streaming_command_signature,
+    doctor_signature, fixture_mul_signature, json_command_signature, metadata_signature, streaming_command_signature,
 };
 use lean_toolchain::LeanExportSignature;
+
+pub(crate) const JSON_COMMAND: &str = "lean_rs_interop_consumer_worker_json_command";
+
+pub(crate) fn negative_signature_rows(case: &str) -> Option<Vec<serde_json::Value>> {
+    match case {
+        "manifest_missing_worker_export_signature_fails_before_dispatch" => Some(Vec::new()),
+        "manifest_wrong_worker_export_signature_fails_before_dispatch" => {
+            Some(vec![fixture_mul_signature(JSON_COMMAND).to_json()])
+        }
+        _ => None,
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum Exports {

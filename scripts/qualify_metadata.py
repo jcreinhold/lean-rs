@@ -1209,6 +1209,7 @@ def check_typed_children_closed(
                     b"authorize-fixed-stream-",
                     b"authorize-fixed-metadata-",
                     b"authorize-fixed-doctor-",
+                    b"authorize-fixed-signature-probe-",
                     b"authorize-fixed-json-",
                     b"authorize-fixed-shape-",
                     b"admit-fixed-no-exports-",
@@ -1315,12 +1316,17 @@ INTEROP_DOCTOR_EVENTS = {
     "malformed_metadata_and_doctor_json_are_typed": "authorize-fixed-doctor",
     NO_EXPORTS_CASE: "admit-fixed-no-exports",
 }
+INTEROP_SIGNATURE_CASES = (
+    "manifest_missing_worker_export_signature_fails_before_dispatch",
+    "manifest_wrong_worker_export_signature_fails_before_dispatch",
+)
 INTEROP_TESTS = (
     *STREAM_TESTS,
     *INTEROP_METADATA_TESTS,
     *(("pool", name) for name in POOL_BATCH_GRANTS),
     ("pool", "distinct_session_key_respects_fixed_pool_limit"),
     *(("metadata_doctor", name) for name in INTEROP_DOCTOR_EVENTS),
+    *(("capability_builder", name) for name in INTEROP_SIGNATURE_CASES),
     *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
 
@@ -1344,12 +1350,24 @@ def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=N
     require(project.resolve(strict=True) == project, "aliased stream project")
     owner = project.stat()
     require(owner.st_uid == os.geteuid(), "stream project requires its checkout owner")
+    selected = cases or [name for _, name in INTEROP_TESTS]
+    regular = [name for name in selected if name not in INTEROP_SIGNATURE_CASES]
+    probes = [(name,) for name in selected if name in INTEROP_SIGNATURE_CASES]
+    cohorts = ([regular] if regular else []) + probes
+    if pinned_selection is not None:
+        project.chmod(0o700)
+    for index, cohort in enumerate(cohorts):
+        # Each negative manifest has its own seal, with closure between seals.
+        run_stream_group(
+            release,
+            profile,
+            shim_manifest,
+            cohort,
+            pinned_selection=pinned_selection,
+            build_provider=index == 0,
+        )
     if pinned_selection is None:
-        return run_stream_group(release, profile, shim_manifest, cases)
-    project.chmod(0o700)
-    run_stream_group(
-        release, profile, shim_manifest, cases, pinned_selection=pinned_selection
-    )
+        return
     current = project.stat()
     require(
         (current.st_dev, current.st_ino) == (owner.st_dev, owner.st_ino),
@@ -1360,7 +1378,17 @@ def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=N
     project.chmod(owner.st_mode & 0o7777)
 
 
-def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection=None):
+def run_stream_group(
+    release,
+    profile,
+    shim_manifest,
+    cases,
+    *,
+    pinned_selection=None,
+    build_provider=True,
+):
+    probes = [name for name in cases if name in INTEROP_SIGNATURE_CASES]
+    require(not probes or len(cases) == 1, "each signature probe requires its own seal")
     project = SDK / "fixtures/interop-worker"
     require(project.resolve(strict=True) == project, "aliased stream project")
     require(
@@ -1437,24 +1465,29 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
         # The typed workers have closed and this job holds the qualification lock.
         # The probe and image checks detect changes; they do not block writes.
         verify_provider()
-        lake = release / "bin/lake"
-        run(
-            [lake, "--no-cache", "--no-build", "build", "LeanRsInterop:shared"], interop
-        )
-        run(
-            [
-                lake,
-                "--no-cache",
-                "--fail-fast",
-                "build",
-                "LeanRsInteropConsumer:shared",
-            ],
-            project,
-        )
+        if build_provider:
+            lake = release / "bin/lake"
+            run(
+                [lake, "--no-cache", "--no-build", "build", "LeanRsInterop:shared"],
+                interop,
+            )
+            run(
+                [
+                    lake,
+                    "--no-cache",
+                    "--fail-fast",
+                    "build",
+                    "LeanRsInteropConsumer:shared",
+                ],
+                project,
+            )
         verify_provider()
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
     run([*cargo, "--bin", "prepare"], APP)
+    if probes:
+        env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
     run([TARGET / "debug/prepare", state, "--interop-stream"], APP)
+    env.pop("LEAN_RS_TEST_SIGNATURE_PROBE", None)
     record = state / "deployment.json"
     env.update(
         LEAN_RS_METADATA_ORDINARY_TYPED="1",
@@ -1500,7 +1533,9 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             ],
             SDK,
         )
-        if name in POOL_BATCH_GRANTS:
+        if name in INTEROP_SIGNATURE_CASES:
+            marker = "authorize-fixed-signature-probe"
+        elif name in POOL_BATCH_GRANTS:
             marker = "admit-fixed-no-exports"
         elif name in INTEROP_DOCTOR_EVENTS:
             marker = INTEROP_DOCTOR_EVENTS[name]

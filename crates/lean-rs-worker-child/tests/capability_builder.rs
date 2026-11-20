@@ -1040,22 +1040,41 @@ fn metadata_validation_failure_is_typed() {
     }
 }
 
-#[test]
-fn manifest_missing_worker_export_signature_fails_before_dispatch() {
-    let built = CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
+fn signature_probe_fixture(wrong_signature: bool) -> (LeanWorkerConfig, LeanWorkerSessionConfig) {
+    if let Some(selected) = ordinary_typed_selection::ordinary_stream_selection() {
+        let worker = LeanWorkerConfig::new(&selected.worker)
+            .checked_native_loader_environment()
+            .env("LEAN_SYSROOT", selected.sysroot.as_os_str());
+        let session = LeanWorkerSessionConfig::manifest_backed(
+            &selected.fixture,
+            "lean_rs_interop_consumer",
+            "LeanRsInteropConsumer",
+            &selected.json_manifest,
+            ["LeanRsInteropConsumer.Callback"],
+        );
+        return (worker, session);
+    }
+    let mut builder = CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
         .package("lean_rs_interop_consumer")
-        .module("LeanRsInteropConsumer")
-        .build_quiet()
-        .expect("interop capability manifest builds without worker command signatures");
-
-    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
-    let config = LeanWorkerSessionConfig::manifest_backed(
+        .module("LeanRsInteropConsumer");
+    if wrong_signature {
+        builder = builder.export_signature(fixture_mul_signature("lean_rs_interop_consumer_worker_json_command"));
+    }
+    let built = builder.build_quiet().expect("interop capability manifest builds");
+    let session = LeanWorkerSessionConfig::manifest_backed(
         interop_root(),
         "lean_rs_interop_consumer",
         "LeanRsInteropConsumer",
         built.manifest_path(),
         ["LeanRsInteropConsumer.Callback"],
     );
+    (LeanWorkerConfig::new(worker_binary()), session)
+}
+
+#[test]
+fn manifest_missing_worker_export_signature_fails_before_dispatch() {
+    let (worker, config) = signature_probe_fixture(false);
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     let mut session = worker
         .open_session(&config, None, None)
         .expect("manifest-backed session opens");
@@ -1078,6 +1097,10 @@ fn manifest_missing_worker_export_signature_fails_before_dispatch() {
                 message.contains("json command String -> IO String"),
                 "diagnostic should name operation shape: {message}",
             );
+            assert!(
+                message.contains("missing trusted export signature metadata for symbol"),
+                "expected the SDK signature check, got: {message}",
+            );
         }
         other => panic!("expected checked binding worker error, got {other:?}"),
     }
@@ -1085,21 +1108,8 @@ fn manifest_missing_worker_export_signature_fails_before_dispatch() {
 
 #[test]
 fn manifest_wrong_worker_export_signature_fails_before_dispatch() {
-    let built = CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
-        .package("lean_rs_interop_consumer")
-        .module("LeanRsInteropConsumer")
-        .export_signature(fixture_mul_signature("lean_rs_interop_consumer_worker_json_command"))
-        .build_quiet()
-        .expect("interop capability manifest builds with intentionally wrong worker command signature");
-
-    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
-    let config = LeanWorkerSessionConfig::manifest_backed(
-        interop_root(),
-        "lean_rs_interop_consumer",
-        "LeanRsInteropConsumer",
-        built.manifest_path(),
-        ["LeanRsInteropConsumer.Callback"],
-    );
+    let (worker, config) = signature_probe_fixture(true);
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     let mut session = worker
         .open_session(&config, None, None)
         .expect("manifest-backed session opens");
@@ -1121,6 +1131,10 @@ fn manifest_wrong_worker_export_signature_fails_before_dispatch() {
             assert!(
                 message.contains("json command String -> IO String"),
                 "diagnostic should name expected operation shape: {message}",
+            );
+            assert!(
+                message.contains("export signature mismatch for symbol"),
+                "expected the SDK signature check, got: {message}",
             );
         }
         other => panic!("expected checked binding worker error, got {other:?}"),

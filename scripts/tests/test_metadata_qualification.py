@@ -957,6 +957,47 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(good, expected)
 
+    def test_signature_probes_get_separate_seals_without_rebuilding_provider(self):
+        project = self.sdk / "fixtures/interop-worker"
+        project.mkdir(parents=True, exist_ok=True)
+        release = self.target
+        manifest = self.target / "shim.json"
+        regular = "successful_stream_delivers_rows_with_per_stream_sequences"
+        missing, wrong = qualification.INTEROP_SIGNATURE_CASES
+        pinned = ({}, [])
+        with patch.object(qualification, "run_stream_group") as run:
+            qualification.qualify_stream(
+                release,
+                qualification.DARWIN_ARM64_PINS,
+                manifest,
+                [regular, missing, wrong],
+                pinned_selection=pinned,
+            )
+        self.assertEqual(
+            [args[3] for args, _ in run.call_args_list],
+            [[regular], (missing,), (wrong,)],
+        )
+        self.assertEqual(
+            [kwargs for _, kwargs in run.call_args_list],
+            [
+                {"pinned_selection": pinned, "build_provider": True},
+                {"pinned_selection": pinned, "build_provider": False},
+                {"pinned_selection": pinned, "build_provider": False},
+            ],
+        )
+        with (
+            patch.object(
+                qualification,
+                "run_stream_group",
+                side_effect=ValueError("first did not close"),
+            ) as run,
+            self.assertRaisesRegex(ValueError, "first did not close"),
+        ):
+            qualification.qualify_stream(
+                release, qualification.DARWIN_ARM64_PINS, manifest, [missing, wrong]
+            )
+        run.assert_called_once()
+
     def test_missing_doctor_exports_audit_requires_admission_without_a_grant(self):
         case = qualification.NO_EXPORTS_CASE
         marker = f"admit-fixed-no-exports-{case}".encode()
