@@ -220,7 +220,10 @@ def main():
         )
     project_symbols = ["initialize_" + stem]
     if stream:
-        project_symbols.append("lean_rs_interop_consumer_worker_data_stream")
+        exports = json.loads(rec["consumer_json"])["exports"]
+        symbols = [export["symbol"] for export in exports]
+        assert 0 < len(symbols) <= 16 and len(set(symbols)) == len(symbols)
+        project_symbols.extend(symbols)
         for source in (
             "LeanRsInteropConsumer.lean",
             "LeanRsInteropConsumer/Callback.lean",

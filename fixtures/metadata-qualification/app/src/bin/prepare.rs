@@ -1,3 +1,6 @@
+#[path = "../stream_cases.rs"]
+mod stream_cases;
+
 use lean_rs_worker_protocol::worker_exports::{json_command_signature, metadata_signature};
 use lean_toolchain::{CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, ToolchainFingerprint};
 use std::io::Write as _;
@@ -210,21 +213,26 @@ fn prepare_typed_session(
         "worker-json-capability.json"
     });
     let shim_json: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
-    let (package, module, dependencies, signature) = if stream {
+    let (package, module, dependencies, signatures) = if stream {
         (
             "lean_rs_interop_consumer",
             "LeanRsInteropConsumer",
             shim_json["dependencies"].clone(),
-            lean_rs_worker_protocol::worker_exports::streaming_command_signature(
-                "lean_rs_interop_consumer_worker_data_stream",
-            ),
+            stream_cases::CASES
+                .iter()
+                .flat_map(|(_, suffixes)| suffixes.iter())
+                .map(|suffix| {
+                    lean_rs_worker_protocol::worker_exports::streaming_command_signature(stream_cases::symbol(suffix))
+                        .to_json()
+                })
+                .collect::<Vec<_>>(),
         )
     } else {
         (
             "lean_rs_fixture",
             "LeanRsFixture.Effects",
             serde_json::json!([]),
-            json_command_signature("lean_rs_interop_consumer_worker_json_command"),
+            vec![json_command_signature("lean_rs_interop_consumer_worker_json_command").to_json()],
         )
     };
     let manifest = serde_json::to_string(&serde_json::json!({
@@ -239,7 +247,7 @@ fn prepare_typed_session(
             "resolved_version": fingerprint.resolved_version,
             "header_sha256": fingerprint.header_sha256,
         },
-        "exports": [signature.to_json()],
+        "exports": signatures,
     }))?;
     fs::OpenOptions::new()
         .write(true)

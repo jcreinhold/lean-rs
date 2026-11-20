@@ -334,7 +334,7 @@ fn typed_streaming_command_decodes_rows_and_summary() {
 
 #[test]
 fn helper_chunked_stream_delivers_rows_diagnostics_progress_and_metadata() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream_chunked",
@@ -401,7 +401,7 @@ fn helper_chunked_stream_delivers_rows_diagnostics_progress_and_metadata() {
 
 #[test]
 fn helper_chunked_stream_reports_bounded_chunk_errors() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream_chunk_error",
@@ -442,7 +442,7 @@ fn helper_chunked_stream_reports_bounded_chunk_errors() {
 
 #[test]
 fn helper_completion_order_stream_uses_same_typed_surface() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream_chunked_completion",
@@ -544,7 +544,7 @@ fn typed_streaming_command_summary_decode_error_is_typed() {
 
 #[test]
 fn typed_streaming_command_decodes_large_payload_from_performance_path() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, LargeFixtureRow, FixtureSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream_large_payload",

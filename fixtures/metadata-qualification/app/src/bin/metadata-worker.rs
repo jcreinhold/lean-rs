@@ -1,3 +1,6 @@
+#[path = "../stream_cases.rs"]
+mod stream_cases;
+
 use lean_rs::host_bridge::{
     HostCachedModuleBatch, HostModuleBatch, HostModuleQuery, HostSourceOptions, TrustedHostKernelRequest,
     TrustedHostTerm, TrustedModuleSource,
@@ -17,8 +20,8 @@ use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceCont
 use std::path::Path;
 
 use metadata_qualification::{
-    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_EXPORT,
-    STREAM_MANIFEST_NAME, audit, module_syntax_case,
+    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_MANIFEST_NAME, audit,
+    module_syntax_case,
 };
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
@@ -436,33 +439,44 @@ impl WorkerAuthority for MetadataApp {
         if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
-        let contract = if d.stream {
-            (STREAM_EXPORT, WorkerExportContract::StringStream)
-        } else if d.typed_session {
-            if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
-                return Err(denied());
+        let contracts = if d.stream {
+            let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
+            let (_, suffixes) = stream_cases::CASES
+                .iter()
+                .find(|(names, _)| names.contains(&requested.as_str()))
+                .ok_or_else(denied)?;
+            let manifest: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
+            let signatures = manifest
+                .get("exports")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(denied)?;
+            let mut contracts = Vec::new();
+            for suffix in *suffixes {
+                let symbol = stream_cases::symbol(suffix);
+                let signature = lean_rs_worker_protocol::worker_exports::streaming_command_signature(&symbol);
+                if !signatures.contains(&signature.to_json()) {
+                    return Err(denied());
+                }
+                contracts.push((symbol, WorkerExportContract::StringStream));
             }
-            (JSON_COMMAND_EXPORT, WorkerExportContract::StringIoString)
+            audit(&format!("authorize-fixed-stream-{requested}"));
+            contracts
         } else {
-            (EXPORT, WorkerExportContract::StringIoString)
+            let export = if d.typed_session {
+                if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
+                    return Err(denied());
+                }
+                JSON_COMMAND_EXPORT
+            } else {
+                EXPORT
+            };
+            audit("authorize-consumer-load");
+            vec![(export.into(), WorkerExportContract::StringIoString)]
         };
-        audit(if d.stream {
-            "authorize-fixed-stream"
-        } else {
-            "authorize-consumer-load"
-        });
-        // SAFETY: the seal and Held verified the exact images, initializer, runtime
-        // and the one named owned String -> IO String export, which ignores its input.
-        // Held pins the images, dependencies and imports for the worker generation.
-        Ok(unsafe {
-            AuthorizedWorkerSnapshot::attest(
-                runtime,
-                path.into(),
-                bytes.to_vec(),
-                vec![(contract.0.into(), contract.1)],
-                held.clone(),
-            )
-        })
+        // SAFETY: Held checks the exact sealed images, initializer and runtime.
+        // For streams the named fixture case selects only its exact checked
+        // StringStream contracts, never other exports from the same image.
+        Ok(unsafe { AuthorizedWorkerSnapshot::attest(runtime, path.into(), bytes.to_vec(), contracts, held.clone()) })
     }
     fn host(
         &self,

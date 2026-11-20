@@ -1169,6 +1169,21 @@ STREAM_TESTS = (
     ("typed_command", "raw_row_streaming_remains_available"),
     ("streaming_runner", "row_sink_cancellation_cycles_child_and_invalidates_session"),
     ("streaming_runner", "diagnostic_sink_panic_is_typed"),
+    ("streaming_runner", "malformed_row_json_is_typed"),
+    ("streaming_runner", "missing_stream_or_payload_is_typed"),
+    ("streaming_runner", "nonzero_export_status_is_typed"),
+    ("streaming_runner", "callback_status_error_is_typed"),
+    ("streaming_runner", "large_stream_records_live_forwarding_throughput_and_rss"),
+    (
+        "typed_command",
+        "helper_chunked_stream_delivers_rows_diagnostics_progress_and_metadata",
+    ),
+    ("typed_command", "helper_chunked_stream_reports_bounded_chunk_errors"),
+    ("typed_command", "helper_completion_order_stream_uses_same_typed_surface"),
+    (
+        "typed_command",
+        "typed_streaming_command_decodes_large_payload_from_performance_path",
+    ),
 )
 
 
@@ -1317,6 +1332,7 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
     selected = {name: target for target, name in STREAM_TESTS}
     for name in cases or selected:
         target = selected[name]
+        env["LEAN_RS_METADATA_STREAM_CASE"] = name
         run(
             [
                 "cargo",
@@ -1344,7 +1360,7 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             expected_counts=((2, 1),)
             if name in STREAM_READY_REPLACEMENT
             else ((1, 1),),
-            grant_event=b"authorize-fixed-stream",
+            grant_event=f"authorize-fixed-stream-{name}".encode(),
         )
         events.unlink()
     remove_owned_state(state, owner)

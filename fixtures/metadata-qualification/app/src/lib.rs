@@ -122,7 +122,6 @@ fn runtime_image_names() -> (&'static str, &'static str, &'static str) {
 
 pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
 pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_command";
-pub const STREAM_EXPORT: &str = "lean_rs_interop_consumer_worker_data_stream";
 pub const STREAM_MANIFEST_NAME: &str = "worker-stream-capability.json";
 pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";

@@ -224,12 +224,10 @@ fn successful_stream_delivers_rows_with_per_stream_sequences() {
 
 #[test]
 fn malformed_row_json_is_typed() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(
@@ -253,12 +251,10 @@ fn malformed_row_json_is_typed() {
 
 #[test]
 fn missing_stream_or_payload_is_typed() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(
@@ -298,12 +294,10 @@ fn missing_stream_or_payload_is_typed() {
 
 #[test]
 fn nonzero_export_status_is_typed() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(
@@ -324,12 +318,10 @@ fn nonzero_export_status_is_typed() {
 
 #[test]
 fn callback_status_error_is_typed() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(
@@ -575,15 +567,13 @@ fn diagnostic_sink_panic_is_typed() {
 
 #[test]
 fn large_stream_records_live_forwarding_throughput_and_rss() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     let rss_before = worker.rss_kib();
     let started = Instant::now();
     let summary = {
-        let mut session = worker
-            .open_session(&stream_session_config(), None, None)
-            .expect("worker session opens");
+        let mut session = worker.open_session(&config, None, None).expect("worker session opens");
         session
             .run_data_stream(
                 "lean_rs_interop_consumer_worker_data_stream_many",
