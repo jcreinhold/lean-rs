@@ -89,8 +89,9 @@ startup handshake. This local command does not use GitHub Actions.
 
 ## Tuning
 
-The workspace's [`.config/nextest.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.config/nextest.toml) caps concurrent test processes at **1**. The
-workspace's [`.cargo/config.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
+The workspace's [`.config/nextest.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.config/nextest.toml) runs **two** independent test processes by default. Memory tests and tests that build or load the shipped template reserve
+all slots. The named Lean 4.36 checks and older release checks stay serial. Use `NEXTEST_TEST_THREADS=1` for an
+unprepared checkout or a small container. The workspace's [`.cargo/config.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
 `LEAN_RS_NUM_THREADS=1`, and a default `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
 defaults make normal `cargo nextest`, worker examples, and profiling examples use the local low-memory shape without
 manual shell exports. Focused same-process `cargo test` runs that open full host sessions now fail before Lean import
@@ -335,7 +336,7 @@ Use this inventory when adding or selecting tests:
 | `crates/lean-rs-host/tests/session_leak_loop.rs` small tests | bounded per-test imports or pool reuse | `cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci` | Each selected test process resets Lean state. |
 | `session_create_drop_loop_long`, `pool_acquire_release_loop_long` | import-heavy diagnostic | ignored plus `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1` | Explicitly budgeted diagnostics; not part of the current ASan job or routine smoke tests. |
 | `crates/lean-rs-host/tests/batching_and_pool.rs` | many host-session service tests | `cargo nextest run -p lean-rs-host --test batching_and_pool --profile ci` | Do not run the whole integration binary through plain `cargo test`; use nextest isolation. |
-| `long_session_memory` example and profiling collectors | profiling-only | `cargo check` locally; run with explicit `LEAN_RS_LONG_SESSION_MAX_RSS_KIB` when measuring | Runtime profiling must be capped and opt-in. |
+| `long_session_memory` example and profiling collectors | profiling-only | `cargo check` locally; default RSS cap is 1,572,864 KiB; tune with `LEAN_RS_LONG_SESSION_MAX_RSS_KIB` | Runtime profiling must be capped and opt-in. |
 | Worker child/parent pool and capability tests | worker process boundary | `cargo test -p lean-rs-worker-child pool`, `cargo test -p lean-rs-worker-child capability_builder`, or nextest | Fresh imports happen in worker children or isolated test processes. |
 
 ## Per-process Lean threads

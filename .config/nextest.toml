@@ -10,22 +10,10 @@
 # developer workflow.
 
 [profile.default]
-# Cap parallel test processes. Two factors set the bound:
-#   1. Each test that opens a `LeanHost` and imports
-#      `LeanRsFixture.Handles` commits several hundred MB of resident
-#      memory (the Lean compiler environment).
-#   2. The `lean-rs-worker-child` integration tests in
-#      `capability_builder` and `loader_regressions` shell out to
-#      `cargo build` on the `shipped-lean-crate` template. Each of
-#      those `cargo build` invocations is itself capped at `--jobs 1`,
-#      but the *outer* concurrency multiplies that swarm: with N test
-#      threads you can see up to `N × 1` rustc workers compiling
-#      Lean-linked code in addition to the Lean compiler driven by the
-#      template's `build.rs`.
-# Net: keep this conservative. One test process, one Lean worker, and one
-# rustc/link job is the default local-safe shape. Override locally with
-# `NEXTEST_TEST_THREADS=N cargo nextest run ...`.
-test-threads = 1
+# Run two independent test processes. A full Lean import can retain
+# several hundred MiB, so do not use all CPUs as the default on a Mac.
+# Cargo and each Lean worker still have their own single-job defaults.
+test-threads = 2
 
 # We want full visibility into all failures in a single run rather than
 # stopping at the first.
@@ -36,11 +24,42 @@ fail-fast = false
 # without progress (~4 minutes).
 slow-timeout = { period = "60s", terminate-after = 4 }
 
-# Env vars (Lean/thread/memory guardrails and RUST_LOG=warn) are set in
-# `.cargo/config.toml` under `[env]` so they apply uniformly to every
+# Lean thread and memory limits are set in `.cargo/config.toml`
+# under `[env]` so they apply uniformly to every
 # cargo invocation (cargo test, cargo nextest, cargo run --example).
 # nextest's own env-var keys differ between versions; the cargo
 # `[env]` table is the stable single source of truth.
+
+# These tests measure memory or build and load the shared test template.
+# Reserve every slot, even when callers change the job count.
+[[profile.default.overrides]]
+filter = """
+(package(=lean-rs-host) & (
+    binary(=session_leak_loop)
+    | (binary(=batching_and_pool) & test(/^session_pool_memory_policy_/))
+))
+| (package(=lean-rs-worker-child) & (
+    (binary(=session_reuse) & (
+        test(=repeated_identical_opens_do_not_grow_the_child)
+        | test(=alternating_two_pooled_profiles_does_not_grow_the_child)
+    ))
+    | (binary(=pool) & (
+        test(=memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted)
+        | test(=per_worker_rss_policy_invalidates_old_lease_before_work)
+        | test(=rss_snapshot_records_available_samples_on_supported_platforms)
+    ))
+    | (binary(=supervisor) & test(=rss_policy_restarts_or_records_unavailable_sample))
+    | (binary(=capability_builder) & (
+        test(=app_owned_worker_child_locator_accepts_explicit_binary)
+        | test(=manifest_backed_builder_uses_manifest_capability_identity)
+        | test(=stale_fingerprint_is_reported_by_bootstrap_preflight)
+        | test(=handshake_failure_is_a_bootstrap_diagnostic)
+        | test(=restart_policy_override_is_applied_during_builder_startup)
+    ))
+    | binary(=loader_regressions)
+))
+"""
+threads-required = "num-test-threads"
 
 [profile.ci]
 # CI inherits all default thresholds and adds a single automatic retry

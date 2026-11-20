@@ -111,7 +111,7 @@ jobs:
           chmod 700 fixtures/lean fixtures/interop-shims crates/lean-rs/shims/lean-rs-interop-shims
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
           (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
-          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake -R -KleanRsGeneratedShims=true build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -193,7 +193,7 @@ jobs:
             test -n "${LEAN_RS_TEST_REMAINING_FILTER-}"
             cargo nextest run --workspace --profile ci -E "$LEAN_RS_TEST_REMAINING_FILTER"
           else
-            cargo nextest run --workspace --profile ci
+            cargo nextest run --workspace --profile ci -j1
           fi
 
       - name: cargo test --doc
@@ -310,7 +310,7 @@ jobs:
         run: |
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
           (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
-          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake -R -KleanRsGeneratedShims=true build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
           if [ "$RUNNER_OS" = "Linux" ]; then

@@ -294,6 +294,13 @@ trap restore_toolchains EXIT
 
 for path in "${TOOLCHAIN_FILES[@]}"; do
 	if [[ -f "$path" ]]; then
+		# A byte-identical pin should not invalidate Cargo or Lake outputs.
+		if cmp -s "$path" <(printf 'leanprover/lean4:v%s\n' "$LEAN_VERSION"); then
+			continue
+		elif [[ "$?" != 1 ]]; then
+			log_err "Could not compare Lean pin: $path"
+			exit 2
+		fi
 		cp "$path" "${path}.bak"
 		BACKED_UP+=("$path")
 	fi
@@ -442,7 +449,7 @@ for dir in \
 	"$REPO_ROOT/fixtures/lean" \
 	"$REPO_ROOT/fixtures/interop-shims"; do
 	log_step "lake build ($(basename "$dir"))"
-	if [[ "$dir" == "$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-interop-shims" ]]; then
+	if [[ "$dir" == "$REPO_ROOT/crates/lean-rs-host/shims/"* ]]; then
 		(cd "$dir" && lake -R -KleanRsGeneratedShims=true build)
 	else
 		(cd "$dir" && lake build)
@@ -524,15 +531,7 @@ fi
 # workflow hardcodes the x86_64 path; we resolve via the dynamic loader
 # instead so the script also works on aarch64 hosts.
 #
-# Inside a Docker container we serialise the suite. The nextest config
-# defaults to 4 concurrent test processes × ~1.5 GiB per Lean import,
-# and the leak-loop integration tests double up further. CI runners
-# get away with parallel runs because the host kernel is generous with
-# overcommit; Docker Desktop's Linux VM enforces stricter cgroup
-# memory accounting on a smaller pool (~8 GiB) and OOM-kills the leak
-# loops mid-import. test-threads=1 keeps the gate authoritative at the
-# cost of wall time (~5 min vs ~1.5 min). The pre-release pass is not
-# run often enough for the parallelism to matter.
+# Keep Docker runs serial to stay within their VM memory limit.
 run_nextest() {
 	if [[ "$LEAN_VERSION" == "4.36.0" && -z "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
 		log_err "Worker test setup failed; workspace tests did not start"
@@ -555,7 +554,7 @@ run_nextest() {
 	if [[ -n "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
 		"${env_args[@]}" cargo nextest run --workspace --profile ci -E "$LEAN_RS_TEST_REMAINING_FILTER"
 	else
-		"${env_args[@]}" cargo nextest run --workspace --profile ci
+		"${env_args[@]}" cargo nextest run --workspace --profile ci -j1
 	fi
 }
 
@@ -623,7 +622,7 @@ if [[ "$RUN_PUBLIC_API" == 1 ]]; then
 				log_err "Could not create temporary API output for $crate"
 				return 1
 			fi
-			if ! cargo "+${PUBLIC_API_NIGHTLY}" public-api --simplified -p "$crate" >"$actual"; then
+			if ! CARGO_INCREMENTAL=0 cargo "+${PUBLIC_API_NIGHTLY}" public-api --simplified -p "$crate" >"$actual"; then
 				log_err "Public-API generation failed for $crate"
 				fail=1
 			elif ! diff -u "$baseline" "$actual"; then
