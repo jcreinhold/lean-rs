@@ -12,23 +12,22 @@
 
 #[path = "support/fixed_fixture.rs"]
 mod fixture;
-use std::path::PathBuf;
-
 use lean_rs::LeanRuntime;
 use lean_rs_host::{EvidenceStatus, LeanHost, LeanKernelOutcome};
-
-fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
-}
 
 #[test]
 fn curated_surface_drives_full_happy_path() {
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
 
-    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("fixture Lake project opens cleanly");
-    let caps = fixture::capabilities(&host).expect("fixture capability loads cleanly");
+    let host = LeanHost::from_lake_project(runtime, fixture::native_fixture_root())
+        .expect("fixture Lake project opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("fixture capability loads cleanly");
     let mut session = caps
-        .session(&fixture::imports(&caps, "LeanRsHostShims.Elaboration"), None, None)
+        .session(
+            &fixture::native_imports(&caps, "LeanRsHostShims.Elaboration"),
+            None,
+            None,
+        )
         .expect("LeanRsHostShims.Elaboration module imports cleanly");
 
     let _decl = session

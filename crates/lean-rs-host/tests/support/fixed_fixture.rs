@@ -804,7 +804,13 @@ pub(super) fn term<'lean, 'c>(
     session: &lean_rs_host::LeanSession<'lean, '_>,
     source: &str,
 ) -> lean_rs::host_bridge::TrustedHostTerm<'lean, 'c> {
-    term_with_paths(caps, session, source, resolution)
+    term_with_paths(caps, session, source, || {
+        if source == "(1 + 1 : Nat)" && native_fixture_selected() {
+            native_elaboration_paths(caps, session)
+        } else {
+            resolution()
+        }
+    })
 }
 
 #[allow(dead_code, reason = "used only by diagnostics tests")]
@@ -1078,7 +1084,9 @@ pub(super) fn curated_theorem<'lean, 'c>(
     session: &lean_rs_host::LeanSession<'lean, '_>,
 ) -> lean_rs::host_bridge::TrustedHostKernelRequest<'lean, 'c> {
     let (env, imports) = session.source_context();
-    let theorem = if imports.matches_request(&caps.import_search_paths(), &["LeanRsHostShims.Elaboration".into()]) {
+    let elaboration_only =
+        imports.matches_request(&caps.import_search_paths(), &["LeanRsHostShims.Elaboration".into()]);
+    let theorem = if elaboration_only {
         "theorem lean_rs_curated : 1 + 1 = 2 := rfl"
     } else {
         assert!(imports.matches_request(
@@ -1088,13 +1096,18 @@ pub(super) fn curated_theorem<'lean, 'c>(
         "theorem lean_rs_session_workflow_rfl : 1 + 1 = 2 := rfl"
     };
     assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
+    let paths = if elaboration_only && native_fixture_selected() {
+        native_elaboration_paths(caps, session)
+    } else {
+        resolution()
+    };
     #[allow(unsafe_code, reason = "one fixed reflexivity theorem in the admitted test context")]
     // SAFETY: the exact source and default settings use the pinned elaborator and kernel.
     unsafe {
         caps.shim_capability().kernel_scope(
             env,
             imports,
-            resolution(),
+            paths,
             theorem.into(),
             lean_rs_host::LeanElabOptions::new().source_options(),
         )
