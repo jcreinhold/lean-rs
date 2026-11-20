@@ -17,17 +17,11 @@ mod ordinary_typed_selection;
 #[path = "support/ordinary_typed_worker.rs"]
 mod ordinary_typed_worker;
 
+#[path = "support/sealed_stream_builder.rs"]
+mod sealed_stream_builder;
+
 fn stream_builder() -> LeanWorkerCapabilityBuilder {
-    ordinary_typed_selection::ordinary_stream_selection().map_or_else(builder, |selection| {
-        let child = lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&selection.worker, &selection.sysroot)
-            .checked_native_loader_environment();
-        LeanWorkerCapabilityBuilder::from_built_capability(
-            &lean_rs::LeanBuiltCapability::manifest_path(&selection.json_manifest),
-            ["LeanRsInteropConsumer.Callback"],
-        )
-        .expect("select sealed stream capability")
-        .worker_child(child)
-    })
+    sealed_stream_builder::selected().unwrap_or_else(builder)
 }
 
 fn worker_binary() -> PathBuf {
@@ -252,7 +246,7 @@ fn typed_json_command_decodes_response() {
 
 #[test]
 fn typed_json_command_decode_error_is_typed() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerJsonCommand::<FixtureRequest, FixtureResponse>::new(
         "lean_rs_interop_consumer_worker_json_command_malformed",

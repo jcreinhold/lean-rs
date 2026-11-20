@@ -339,6 +339,9 @@ ORDINARY_WIDE_REUSE_CASES = frozenset(
     }
 )
 ORDINARY_GRANTS_BY_WORKER = {
+    "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker": (1, 1),
+    "cancellation_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
+    "timeout_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
     "request_timeout_cycles_child_and_invalidates_session": (1, 0),
     "cancellation_during_backpressure_invalidates_lease": (1, 0),
     "typed_streaming_command_row_decode_error_names_stream_and_sequence": (1, 0),
@@ -1228,6 +1231,10 @@ STREAM_TESTS = (
         "observability_backpressure",
         "fatal_exit_after_buffered_rows_records_failure_without_commit",
     ),
+    ("pool", "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker"),
+    ("pool", "cancellation_invalidates_current_lease_but_future_lease_can_continue"),
+    ("pool", "timeout_invalidates_current_lease_but_future_lease_can_continue"),
+    ("typed_command", "typed_json_command_decode_error_is_typed"),
 )
 
 
@@ -1246,6 +1253,12 @@ STREAM_READY_REPLACEMENT = {
     "row_sink_cancellation_cycles_child_and_invalidates_session",
     "request_timeout_cycles_child_and_invalidates_session",
     "cancellation_during_backpressure_invalidates_lease",
+}
+
+STREAM_REACQUIRE = {
+    "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker",
+    "cancellation_invalidates_current_lease_but_future_lease_can_continue",
+    "timeout_invalidates_current_lease_but_future_lease_can_continue",
 }
 
 
@@ -1410,13 +1423,21 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             ],
             SDK,
         )
-        grant_kind = "metadata" if name in INTEROP_METADATA_CASES else "stream"
+        if name in INTEROP_METADATA_CASES:
+            grant_kind = "metadata"
+        elif name == "typed_json_command_decode_error_is_typed":
+            grant_kind = "json"
+        else:
+            grant_kind = "stream"
+        counts = (1, 1)
+        if name in STREAM_READY_REPLACEMENT:
+            counts = (2, 1)
+        elif name in STREAM_REACQUIRE:
+            counts = (2, 2)
         check_typed_children_closed(
             typed_audit(events),
             case=name,
-            expected_counts=((2, 1),)
-            if name in STREAM_READY_REPLACEMENT
-            else ((1, 1),),
+            expected_counts=(counts,),
             grant_event=f"authorize-fixed-{grant_kind}-{name}".encode(),
         )
         events.unlink()

@@ -460,15 +460,21 @@ impl WorkerAuthority for MetadataApp {
                 .get("exports")
                 .and_then(serde_json::Value::as_array)
                 .ok_or_else(denied)?;
-            let (contract, audit_kind) = match exports {
-                stream_cases::Exports::Streams(_) => (WorkerExportContract::StringStream, "stream"),
-                stream_cases::Exports::Metadata => (WorkerExportContract::StringIoString, "metadata"),
+            let audit_kind = match exports {
+                stream_cases::Exports::Metadata => "metadata",
+                stream_cases::Exports::MalformedJson => "json",
+                stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => "stream",
             };
             let mut contracts = Vec::new();
-            for signature in exports.signatures() {
+            for (signature, streaming) in exports.signatures() {
                 if !signatures.contains(&signature.to_json()) {
                     return Err(denied());
                 }
+                let contract = if streaming {
+                    WorkerExportContract::StringStream
+                } else {
+                    WorkerExportContract::StringIoString
+                };
                 contracts.push((signature.symbol().to_owned(), contract));
             }
             audit(&format!("authorize-fixed-{audit_kind}-{requested}"));

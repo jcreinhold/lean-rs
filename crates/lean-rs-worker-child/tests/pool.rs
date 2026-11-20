@@ -52,6 +52,10 @@ fn builder() -> LeanWorkerCapabilityBuilder {
 #[path = "support/sealed_stream_builder.rs"]
 mod sealed_stream_builder;
 
+fn stream_and_json_builder() -> LeanWorkerCapabilityBuilder {
+    sealed_stream_builder::selected().unwrap_or_else(builder)
+}
+
 fn json_builder() -> LeanWorkerCapabilityBuilder {
     ordinary_typed_json::json_builder().unwrap_or_else(builder)
 }
@@ -454,7 +458,7 @@ fn child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker() {
     let sink = RecordingLooseRows::default();
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(stream_and_json_builder()).expect("pool opens lease");
         let err = lease
             .run_streaming_command(
                 &loose_stream_command("lean_rs_interop_consumer_worker_data_stream_row_then_panic"),
@@ -475,7 +479,7 @@ fn child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker() {
     }
 
     let mut replacement = pool
-        .acquire_lease(builder())
+        .acquire_lease(stream_and_json_builder())
         .expect("pool replaces the dead compatible worker");
     let response = replacement
         .run_json_command(&json_command(), &request("pool-after-fatal"), None, None)
@@ -496,7 +500,7 @@ fn cancellation_invalidates_current_lease_but_future_lease_can_continue() {
     let sink = RecordingLooseRows::with_cancellation(token.clone());
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(stream_and_json_builder()).expect("pool opens lease");
         let err = lease
             .run_streaming_command(
                 &loose_stream_command("lean_rs_interop_consumer_worker_data_stream_slow_after_row"),
@@ -522,7 +526,7 @@ fn cancellation_invalidates_current_lease_but_future_lease_can_continue() {
     }
 
     let mut lease = pool
-        .acquire_lease(builder())
+        .acquire_lease(stream_and_json_builder())
         .expect("fresh lease opens after cancellation cycle");
     let response = lease
         .run_json_command(&json_command(), &request("pool-after-cancel"), None, None)
@@ -536,7 +540,7 @@ fn timeout_invalidates_current_lease_but_future_lease_can_continue() {
     let sink = RecordingLooseRows::default();
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(stream_and_json_builder()).expect("pool opens lease");
         lease
             .set_request_timeout(Duration::from_millis(150))
             .expect("lease timeout can be set after session startup");
@@ -564,7 +568,7 @@ fn timeout_invalidates_current_lease_but_future_lease_can_continue() {
     }
 
     let mut lease = pool
-        .acquire_lease(builder())
+        .acquire_lease(stream_and_json_builder())
         .expect("fresh lease opens after timeout cycle");
     let response = lease
         .run_json_command(&json_command(), &request("pool-after-timeout"), None, None)

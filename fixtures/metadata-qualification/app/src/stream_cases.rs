@@ -1,28 +1,56 @@
 //! The existing fixture commands each named test may call.
-use lean_rs_worker_protocol::worker_exports::{metadata_signature, streaming_command_signature};
+use lean_rs_worker_protocol::worker_exports::{
+    json_command_signature, metadata_signature, streaming_command_signature,
+};
 use lean_toolchain::LeanExportSignature;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Exports {
     Streams(&'static [&'static str]),
     Metadata,
+    MalformedJson,
+    StreamAndJson(&'static str),
 }
 
 impl Exports {
-    pub(crate) fn signatures(self) -> Vec<LeanExportSignature> {
+    pub(crate) fn signatures(self) -> Vec<(LeanExportSignature, bool)> {
+        let stream = |suffix: &str| {
+            (
+                streaming_command_signature(format!("lean_rs_interop_consumer_worker_data_stream{suffix}")),
+                true,
+            )
+        };
         match self {
-            Self::Streams(suffixes) => suffixes
-                .iter()
-                .map(|suffix| {
-                    streaming_command_signature(format!("lean_rs_interop_consumer_worker_data_stream{suffix}"))
-                })
-                .collect(),
-            Self::Metadata => vec![metadata_signature("lean_rs_interop_consumer_worker_metadata")],
+            Self::Streams(suffixes) => suffixes.iter().map(|suffix| stream(suffix)).collect(),
+            Self::Metadata => vec![(metadata_signature("lean_rs_interop_consumer_worker_metadata"), false)],
+            Self::MalformedJson => vec![(
+                json_command_signature("lean_rs_interop_consumer_worker_json_command_malformed"),
+                false,
+            )],
+            Self::StreamAndJson(suffix) => vec![
+                stream(suffix),
+                (
+                    json_command_signature("lean_rs_interop_consumer_worker_json_command"),
+                    false,
+                ),
+            ],
         }
     }
 }
 
 pub(crate) const CASES: &[(&[&str], Exports)] = &[
+    (&["typed_json_command_decode_error_is_typed"], Exports::MalformedJson),
+    (
+        &["child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker"],
+        Exports::StreamAndJson("_row_then_panic"),
+    ),
+    (
+        &[
+            "cancellation_invalidates_current_lease_but_future_lease_can_continue",
+            "timeout_invalidates_current_lease_but_future_lease_can_continue",
+        ],
+        Exports::StreamAndJson("_slow_after_row"),
+    ),
     (
         &[
             "builder_opens_worker_capability_and_validates_metadata",

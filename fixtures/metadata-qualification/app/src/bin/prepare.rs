@@ -213,6 +213,7 @@ fn prepare_typed_session(
         "worker-json-capability.json"
     });
     let shim_json: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
+    let mut seen = std::collections::BTreeSet::new();
     let (package, module, dependencies, signatures) = if stream {
         (
             "lean_rs_interop_consumer",
@@ -221,6 +222,8 @@ fn prepare_typed_session(
             stream_cases::CASES
                 .iter()
                 .flat_map(|(_, exports)| exports.signatures())
+                .map(|(signature, _)| signature)
+                .filter(|signature| seen.insert(signature.symbol().to_owned()))
                 .map(|sig| sig.to_json())
                 .collect::<Vec<_>>(),
         )
