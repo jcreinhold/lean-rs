@@ -209,6 +209,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
                     | "protected_domains"
                     | "capacity_slot"
                     | "recovery_claim"
+                    | "original_worker_boot"
             )
         })
     }) {
@@ -224,15 +225,22 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             .validate()?;
     }
     let phase = field(value, "phase");
-    // A claim changes the registry schema. Older SDKs reject version 3
-    // before interpreting the record as an ordinary unclaimed generation.
+    let original_boot = value.get("original_worker_boot");
+    let claim = value.get("recovery_claim");
     if version == 3 {
-        if phase != "running" {
-            return Err(invalid("native recovery claim requires a running guarded owner"));
+        if phase != "running" || (original_boot.is_none() && claim.is_none()) {
+            return Err(invalid(
+                "private native owner must be running and carry recovery evidence",
+            ));
         }
-        recovery_claim(value)?;
-    } else if value.get("recovery_claim").is_some() {
-        return Err(invalid("native recovery claim requires owner version 3"));
+        if let Some(boot) = original_boot {
+            validate_boot_uuid(boot.as_str().ok_or_else(|| invalid("invalid original worker boot"))?)?;
+        }
+        if claim.is_some() {
+            recovery_claim(value)?;
+        }
+    } else if original_boot.is_some() || claim.is_some() {
+        return Err(invalid("native recovery evidence requires owner version 3"));
     }
     if phase == "preparing" || phase == "preparing_closed" || phase == "dispatching" {
         if version != 2
@@ -370,7 +378,56 @@ pub fn publish_startup_owner(record: &Path, value: &Value, expected: &str, timeo
     {
         return Err(invalid("startup publication no longer owns this phase"));
     }
-    super::persist_owner_at(record, value, "write")
+    if expected == "dispatching" {
+        return super::persist_owner_at(record, value, "write");
+    }
+
+    let worker = checked_identity(field(&current, "process"))?;
+    if field(value, "version") != 2
+        || field(value, "process") != field(&current, "process")
+        || field(value, "guardian") != field(&current, "guardian")
+        || NativeProcessIdentity::capture(worker.pid)?.as_ref() != Some(&worker)
+        || !worker.is_live()?
+    {
+        return Err(invalid("native startup worker identity changed before Running"));
+    }
+    let boot = match native::boot_session() {
+        Ok(boot) => boot,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound | io::ErrorKind::Unsupported
+            ) =>
+        {
+            // Ordinary startup can proceed without future recovery authority.
+            return super::persist_owner_at(record, value, "write");
+        }
+        Err(error) => return Err(error),
+    };
+    validate_boot_uuid(&boot)?;
+    if NativeProcessIdentity::capture(worker.pid)?.as_ref() != Some(&worker) || !worker.is_live()? {
+        return Err(invalid("native startup worker changed during boot observation"));
+    }
+    let mut running = value.clone();
+    let object = running
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?;
+    object.insert("version".to_owned(), json!(3));
+    object.insert("scope".to_owned(), json!("inherited-process-group-v3"));
+    object.insert("original_worker_boot".to_owned(), json!(boot));
+    validate_owner_header(&running)?;
+    super::persist_owner_at(record, &running, "write")
+}
+
+pub(super) fn verify_original_worker_boot(value: &Value) -> io::Result<()> {
+    validate_owner_header(value)?;
+    let original = field(value, "original_worker_boot")
+        .as_str()
+        .ok_or_else(|| invalid("original worker boot was never witnessed"))?;
+    if !original.eq_ignore_ascii_case(&native::boot_session()?) {
+        return Err(invalid("original worker belongs to another boot"));
+    }
+    Ok(())
 }
 pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<File> {
     let root = record
@@ -411,7 +468,12 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     }
     let boot = native::boot_session()?;
     validate_boot_uuid(&boot)?;
-    if field(&value, "version") == 3 {
+    if let Some(original) = field(&value, "original_worker_boot").as_str()
+        && !original.eq_ignore_ascii_case(&boot)
+    {
+        return Err(invalid("original worker belongs to another boot"));
+    }
+    if value.get("recovery_claim").is_some() {
         let prior = recovery_claim(&value)?;
         if !prior.boot.eq_ignore_ascii_case(&boot) {
             return Err(invalid("native recovery claim belongs to another boot"));

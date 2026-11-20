@@ -557,9 +557,11 @@ Claimed records use registry version 3, which older registry readers refuse. Sta
 A committed intent carries no signal, descriptor, or launch authority. A replacement must observe the same kernel
 boot session, a non-live exact claimant, and the original live worker anchor under the admission lock. A failed boot
 or process observation keeps the previous intent. Interrupted intent publication still requires a recovery transition.
-The first claim on a legacy version 2 record stores the claimant's boot UUID. That UUID cannot establish the original
-worker's boot. Any future signaling or custody reclamation requires an independently verified original-worker boot
-binding.
+On guarded startup, the original launcher can publish a boot witness with Running after matching the worker birth
+in Bootstrap and checking that same live worker across the boot observation. The private version 3 Running record
+keeps the witness when a recovery claim is added. Without an observable boot UUID, ordinary startup can continue
+with a version 2 record. Its first claim stores only the claimant's boot UUID. Any future signaling or custody
+reclamation requires the original-worker boot witness and a matching current boot.
 
 Physical capacity recovery never changes an unknown request into a proof result. A failed guardian does not authorize
 signaling a serialized numeric PID: a surviving parent uses only its still-owned unreaped child pin. If both the server

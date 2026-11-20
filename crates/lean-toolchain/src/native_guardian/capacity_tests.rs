@@ -749,3 +749,66 @@ fn exact_native_recovery_intent_has_one_winner() {
         NativeProcessIdentity::capture(std::process::id()).unwrap().unwrap()
     );
 }
+
+#[test]
+fn guarded_running_publication_witnesses_original_worker_boot() {
+    let fixture = CollectorFixture::new();
+    let budget = Duration::from_secs(2);
+    let record = reserve_owner_record(&fixture.registry, NONCE, budget).unwrap();
+    let mut child = private_group();
+    let mut running = read_owner(&record).unwrap();
+    ownership::dispatch_owner_record(&record, NONCE).unwrap();
+    let worker = NativeProcessIdentity::capture(child.id()).unwrap().unwrap();
+    running["phase"] = json!("bootstrap");
+    running["process"] = json!(worker);
+    running["guardian"] = json!(NativeProcessIdentity {
+        version: 1,
+        pid: std::process::id(),
+        start: "fixture-guardian-header".to_owned(),
+        session: child.id(),
+        process_group: std::process::id(),
+    });
+    ownership::publish_startup_owner(&record, &running, "dispatching", budget).unwrap();
+    running["phase"] = json!("running");
+    let mut crossed = running.clone();
+    crossed["process"]["start"] = json!("wrong-worker-birth");
+    assert!(ownership::publish_startup_owner(&record, &crossed, "bootstrap", budget).is_err());
+    assert_eq!(read_owner(&record).unwrap()["phase"], "bootstrap");
+    ownership::publish_startup_owner(&record, &running, "bootstrap", budget).unwrap();
+
+    let bound = read_owner(&record).unwrap();
+    assert_eq!(bound["version"], 3);
+    assert_eq!(bound["process"], json!(worker));
+    ownership::verify_original_worker_boot(&bound).unwrap();
+    assert!(
+        ownership::verify_original_worker_boot(&running).is_err(),
+        "legacy Running is unbound"
+    );
+
+    let mut crossed_boot = bound.clone();
+    let boot = bound["original_worker_boot"].as_str().unwrap();
+    let different = if boot.starts_with('0') {
+        "10000000-0000-0000-0000-000000000000"
+    } else {
+        "00000000-0000-0000-0000-000000000000"
+    };
+    crossed_boot["original_worker_boot"] = json!(different);
+    assert!(ownership::verify_original_worker_boot(&crossed_boot).is_err());
+    persist_owner(&record, &crossed_boot).unwrap();
+    assert_eq!(
+        claim_native_recovery(&record, &worker, budget).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(read_owner(&record).unwrap(), crossed_boot);
+
+    // Test-only owner-loss cut. The claim preserves the original boot witness.
+    let mut lost = bound.clone();
+    lost["parent"]["start"] = json!("synthetic-previous-service");
+    persist_owner(&record, &lost).unwrap();
+    claim_native_recovery(&record, &worker, budget).unwrap();
+    let claimed = read_owner(&record).unwrap();
+    assert_eq!(claimed["original_worker_boot"], bound["original_worker_boot"]);
+    assert!(claimed.get("recovery_claim").is_some());
+    assert!(child.wait().unwrap().success());
+    collect_closed_owner_records(&fixture.registry, budget).unwrap();
+}

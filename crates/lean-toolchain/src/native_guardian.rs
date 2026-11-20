@@ -588,7 +588,11 @@ impl Guardian {
             return Err(invalid("ACK changed bootstrap owner path"));
         }
         let value = read_owner(&record)?;
-        if field(&value, "version") != 2
+        ownership::validate_owner_header(&value)?;
+        if field(&value, "version") == 3 {
+            ownership::verify_original_worker_boot(&value)?;
+        }
+        if !matches!(field(&value, "version").as_u64(), Some(2 | 3))
             || field(&value, "generation_id") != self.nonce.as_str()
             || pid(field(field(&value, "process"), "pid")) != Some(self.worker)
             || pid(field(field(&value, "guardian"), "pid")) != Some(std::process::id())
