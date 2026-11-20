@@ -11,6 +11,7 @@ pub(crate) enum Exports {
     Doctor,
     MalformedMetadataAndDoctor,
     NoExports,
+    Json,
     MalformedJson,
     StreamAndJson(&'static str),
     Shape(&'static [&'static str], &'static [&'static str]),
@@ -39,6 +40,10 @@ impl Exports {
                 ),
             ],
             Self::NoExports => Vec::new(),
+            Self::Json => vec![(
+                json_command_signature("lean_rs_interop_consumer_worker_json_command"),
+                false,
+            )],
             Self::MalformedJson => vec![(
                 json_command_signature("lean_rs_interop_consumer_worker_json_command_malformed"),
                 false,
@@ -70,6 +75,15 @@ impl Exports {
 }
 
 pub(crate) const CASES: &[(&[&str], Exports)] = &[
+    (&["distinct_session_key_respects_fixed_pool_limit"], Exports::Json),
+    (
+        &[
+            "lease_module_query_batch_reuses_one_warm_session",
+            "lease_module_query_batch_preserves_item_level_budget_failures",
+            "lease_module_query_batch_pre_cancelled_token_sends_no_request",
+        ],
+        Exports::NoExports,
+    ),
     (
         &["metadata_doctor_and_version_use_generic_capability_shapes"],
         Exports::Shape(&["metadata", "doctor", "version"], &[]),

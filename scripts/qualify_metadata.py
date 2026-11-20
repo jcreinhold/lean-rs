@@ -378,6 +378,11 @@ ORDINARY_GRANTS_BY_WORKER = {
     "a_capacity_eviction_clears_the_snapshot_cache": (2, 2),
 }
 
+POOL_BATCH_GRANTS = {
+    "lease_module_query_batch_reuses_one_warm_session": 3,
+    "lease_module_query_batch_preserves_item_level_budget_failures": 1,
+    "lease_module_query_batch_pre_cancelled_token_sends_no_request": 0,
+}
 ORDINARY_MIXED_GRANTS = {
     "attempt_proof_bad_candidate_returns_diagnostics_and_session_survives": (
         PROOF_GRANT,
@@ -1160,7 +1165,7 @@ def typed_audit(events):
 
 
 def check_typed_children_closed(
-    data, *, case=None, expected_counts=(), grant_event=JSON_GRANT
+    data, *, case=None, expected_counts=(), grant_event=JSON_GRANT, grant_order=None
 ):
     started = []
     admitted = set()
@@ -1206,7 +1211,9 @@ def check_typed_children_closed(
             and (grant_event != JSON_GRANT or len(granted) == len(admitted)),
             f"{case}: wrong started worker / {grant_event.decode()} counts",
         )
-        expected = ORDINARY_MIXED_GRANTS.get(case, (grant_event,) * len(granted))
+        expected = grant_order or ORDINARY_MIXED_GRANTS.get(
+            case, (grant_event,) * len(granted)
+        )
         require(
             tuple(granted) == expected,
             f"{case}: wrong started worker / {grant_event.decode()} counts or grant order",
@@ -1291,6 +1298,8 @@ INTEROP_DOCTOR_EVENTS = {
 INTEROP_TESTS = (
     *STREAM_TESTS,
     *INTEROP_METADATA_TESTS,
+    *(("pool", name) for name in POOL_BATCH_GRANTS),
+    ("pool", "distinct_session_key_respects_fixed_pool_limit"),
     *(("metadata_doctor", name) for name in INTEROP_DOCTOR_EVENTS),
     *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
@@ -1471,18 +1480,28 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             ],
             SDK,
         )
-        if name in INTEROP_DOCTOR_EVENTS:
+        if name in POOL_BATCH_GRANTS:
+            marker = "admit-fixed-no-exports"
+        elif name in INTEROP_DOCTOR_EVENTS:
             marker = INTEROP_DOCTOR_EVENTS[name]
         elif name in SDK_SHAPE_GRANTS_BY_WORKER:
             marker = "authorize-fixed-shape"
         elif name in INTEROP_METADATA_CASES:
             marker = "authorize-fixed-metadata"
-        elif name == "typed_json_command_decode_error_is_typed":
+        elif name in {
+            "typed_json_command_decode_error_is_typed",
+            "distinct_session_key_respects_fixed_pool_limit",
+        }:
             marker = "authorize-fixed-json"
         else:
             marker = "authorize-fixed-stream"
         counts = (1, 1)
-        if shape_grants := SDK_SHAPE_GRANTS_BY_WORKER.get(name):
+        grant_event = f"{marker}-{name}".encode()
+        grant_order = None
+        if name in POOL_BATCH_GRANTS:
+            grant_order = (grant_event,) + (BATCH_GRANT,) * POOL_BATCH_GRANTS[name]
+            counts = (1, 1 + POOL_BATCH_GRANTS[name])
+        elif shape_grants := SDK_SHAPE_GRANTS_BY_WORKER.get(name):
             counts = (len(shape_grants), sum(shape_grants))
         elif name in STREAM_READY_REPLACEMENT:
             counts = (2, 1)
@@ -1492,7 +1511,8 @@ def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection
             typed_audit(events),
             case=name,
             expected_counts=(counts,),
-            grant_event=f"{marker}-{name}".encode(),
+            grant_event=grant_event,
+            grant_order=grant_order,
         )
         events.unlink()
     remove_owned_state(state, owner)

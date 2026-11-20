@@ -208,6 +208,33 @@ struct FixedBatchPolicy {
     audit: bool,
 }
 
+fn pool_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -> Option<FixedBatchPolicy> {
+    if file != "<elaborate>"
+        || imports != ["LeanRsInteropConsumer.Callback"]
+        || batch.source != "theorem poolBatchProbe (h : True) : True := by\n  exact h\n"
+    {
+        return None;
+    }
+    use ModuleQuerySelector::{Diagnostics, ProofState};
+    let allowed = match std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() {
+        Ok("lease_module_query_batch_reuses_one_warm_session") => {
+            batch.budgets.per_field_bytes == 8192
+                && batch.budgets.total_bytes == 65536
+                && matches!(batch.selectors.as_slice(), [Diagnostics { id: diagnostics }, ProofState { id: state, line: 2, column: 4 }] if diagnostics == "diagnostics" && state == "state")
+        }
+        Ok("lease_module_query_batch_preserves_item_level_budget_failures") => {
+            batch.budgets.per_field_bytes == 128
+                && batch.budgets.total_bytes == 0
+                && matches!(batch.selectors.as_slice(), [ProofState { id: state, line: 2, column: 4 }] if state == "state")
+        }
+        _ => false,
+    };
+    allowed.then_some(FixedBatchPolicy {
+        limits: ["4", "300000", "67108864"],
+        audit: true,
+    })
+}
+
 fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -> Option<FixedBatchPolicy> {
     use ModuleQuerySelector::{
         DeclarationOutline, DeclarationTarget, Diagnostics, ProofState, ProofStateInDeclaration, References,
@@ -466,7 +493,7 @@ impl WorkerAuthority for MetadataApp {
                     "authorize-fixed-doctor"
                 }
                 stream_cases::Exports::NoExports => "admit-fixed-no-exports",
-                stream_cases::Exports::MalformedJson => "authorize-fixed-json",
+                stream_cases::Exports::Json | stream_cases::Exports::MalformedJson => "authorize-fixed-json",
                 stream_cases::Exports::Shape(_, _) => "authorize-fixed-shape",
                 stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => "authorize-fixed-stream",
             };
@@ -756,7 +783,6 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
-            || d.stream
             || d.verification
             || !options.namespace.is_empty()
             || options.options_json != "{}"
@@ -767,7 +793,12 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         let names = session.imports.imports();
-        let fixed = fixed_batch_policy(&options.file, &request.batch, names).ok_or_else(denied)?;
+        let fixed = if d.stream {
+            pool_batch_policy(&options.file, &request.batch, names)
+        } else {
+            fixed_batch_policy(&options.file, &request.batch, names)
+        }
+        .ok_or_else(denied)?;
         let [entries, ttl, bytes] = fixed.limits;
         let paths = d
             .import_roots
@@ -867,7 +898,12 @@ impl WorkerAuthority for MetadataApp {
         let roots = d.verification_roots();
         if d.broken_import
             || !d.typed_session
-            || d.stream
+            || (d.stream
+                && !matches!(
+                    std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref(),
+                    Ok("lease_module_query_batch_reuses_one_warm_session"
+                        | "lease_module_query_batch_preserves_item_level_budget_failures")
+                ))
             || (!d.verification && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1"))
             || context.capability.library_path() != d.host_image
             || observed != Some(roots.as_slice())

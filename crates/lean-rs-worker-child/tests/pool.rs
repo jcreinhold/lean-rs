@@ -54,7 +54,7 @@ mod ordinary_typed_selection;
 #[path = "support/sealed_stream_builder.rs"]
 mod sealed_stream_builder;
 
-fn stream_and_json_builder() -> LeanWorkerCapabilityBuilder {
+fn interop_builder() -> LeanWorkerCapabilityBuilder {
     sealed_stream_builder::selected().unwrap_or_else(builder)
 }
 
@@ -232,7 +232,7 @@ fn lease_module_query_batch_reuses_one_warm_session() {
     let options = LeanWorkerElabOptions::new();
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens first lease");
         let before = lease.snapshot();
         let first = lease
             .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
@@ -258,7 +258,9 @@ fn lease_module_query_batch_reuses_one_warm_session() {
     let imports = pool.snapshot().imports;
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool reuses compatible lease");
+        let mut lease = pool
+            .acquire_lease(interop_builder())
+            .expect("pool reuses compatible lease");
         let outcome = lease
             .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
             .expect("reacquired warm batch succeeds");
@@ -292,7 +294,7 @@ fn lease_module_query_batch_preserves_item_level_budget_failures() {
     };
     let options = LeanWorkerElabOptions::new();
 
-    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens lease");
     let outcome = lease
         .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
         .expect("budget exhaustion is a normal batch outcome");
@@ -320,7 +322,7 @@ fn lease_module_query_batch_pre_cancelled_token_sends_no_request() {
     let token = LeanWorkerCancellationToken::new();
     token.cancel();
 
-    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens lease");
     let before = lease.snapshot();
     let err = lease
         .process_module_query_batch(
@@ -356,20 +358,23 @@ fn distinct_session_key_respects_fixed_pool_limit() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
 
     {
-        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens first lease");
         let response = lease
             .run_json_command(&json_command(), &request("pool-capacity"), None, None)
             .expect("typed command succeeds");
         assert!(response.accepted);
     }
 
-    let different_imports = LeanWorkerCapabilityBuilder::new(
-        interop_root(),
-        "lean_rs_interop_consumer",
-        "LeanRsInteropConsumer",
-        ["LeanRsInteropConsumer.Callback", "LeanRsInteropConsumer.Extra"],
-    )
-    .worker_executable(worker_binary());
+    let imports = ["LeanRsInteropConsumer.Callback", "LeanRsInteropConsumer.Extra"];
+    let different_imports = sealed_stream_builder::selected_with_imports(imports).unwrap_or_else(|| {
+        LeanWorkerCapabilityBuilder::new(
+            interop_root(),
+            "lean_rs_interop_consumer",
+            "LeanRsInteropConsumer",
+            imports,
+        )
+        .worker_executable(worker_binary())
+    });
 
     let err = pool
         .acquire_lease(different_imports)
@@ -460,7 +465,7 @@ fn child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker() {
     let sink = RecordingLooseRows::default();
 
     {
-        let mut lease = pool.acquire_lease(stream_and_json_builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens lease");
         let err = lease
             .run_streaming_command(
                 &loose_stream_command("lean_rs_interop_consumer_worker_data_stream_row_then_panic"),
@@ -481,7 +486,7 @@ fn child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker() {
     }
 
     let mut replacement = pool
-        .acquire_lease(stream_and_json_builder())
+        .acquire_lease(interop_builder())
         .expect("pool replaces the dead compatible worker");
     let response = replacement
         .run_json_command(&json_command(), &request("pool-after-fatal"), None, None)
@@ -502,7 +507,7 @@ fn cancellation_invalidates_current_lease_but_future_lease_can_continue() {
     let sink = RecordingLooseRows::with_cancellation(token.clone());
 
     {
-        let mut lease = pool.acquire_lease(stream_and_json_builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens lease");
         let err = lease
             .run_streaming_command(
                 &loose_stream_command("lean_rs_interop_consumer_worker_data_stream_slow_after_row"),
@@ -528,7 +533,7 @@ fn cancellation_invalidates_current_lease_but_future_lease_can_continue() {
     }
 
     let mut lease = pool
-        .acquire_lease(stream_and_json_builder())
+        .acquire_lease(interop_builder())
         .expect("fresh lease opens after cancellation cycle");
     let response = lease
         .run_json_command(&json_command(), &request("pool-after-cancel"), None, None)
@@ -542,7 +547,7 @@ fn timeout_invalidates_current_lease_but_future_lease_can_continue() {
     let sink = RecordingLooseRows::default();
 
     {
-        let mut lease = pool.acquire_lease(stream_and_json_builder()).expect("pool opens lease");
+        let mut lease = pool.acquire_lease(interop_builder()).expect("pool opens lease");
         lease
             .set_request_timeout(Duration::from_millis(150))
             .expect("lease timeout can be set after session startup");
@@ -570,7 +575,7 @@ fn timeout_invalidates_current_lease_but_future_lease_can_continue() {
     }
 
     let mut lease = pool
-        .acquire_lease(stream_and_json_builder())
+        .acquire_lease(interop_builder())
         .expect("fresh lease opens after timeout cycle");
     let response = lease
         .run_json_command(&json_command(), &request("pool-after-timeout"), None, None)
