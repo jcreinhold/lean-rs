@@ -988,6 +988,9 @@ mod tests {
             .ok_or_else(|| io::Error::other("worker-parent workspace root missing"))?
             .join("target")
             .canonicalize()?;
+        // A long checkout path can hold the registry but not a Unix socket.
+        // Use the same private IPC base as the shared-reader tests.
+        let socket_root = std::env::var_os("LEAN_RS_TEST_IPC_BASE").map(PathBuf::from);
         for collide in [false, true] {
             let name = format!("og{}{}", std::process::id(), usize::from(collide));
             let path = target.join(name);
@@ -1001,7 +1004,7 @@ mod tests {
             };
             let mut lifetime = ParentLifetime::prepare_with_socket_directory(
                 &registry,
-                Some(&root.0),
+                Some(socket_root.as_deref().unwrap_or(&root.0)),
                 true,
                 Duration::from_secs(1),
                 Some(&slot),
