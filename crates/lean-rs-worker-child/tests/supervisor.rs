@@ -1,11 +1,17 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+#[path = "support/ordinary_typed_worker.rs"]
+mod ordinary_typed_worker;
+
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStatus,
+    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerProcessTracker, LeanWorkerRestartPolicy,
+    LeanWorkerRestartReason, LeanWorkerSessionConfig, LeanWorkerStatus,
 };
 
 fn worker_binary() -> PathBuf {
@@ -128,18 +134,35 @@ fn max_request_policy_restarts_before_next_request() {
 
 #[test]
 fn max_import_policy_restarts_before_next_import() {
-    ensure_fixture_built();
-    let fixture = fixture_root();
-    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().max_imports(1));
+    let base = ordinary_typed_worker::worker_config();
+    if base.is_none() {
+        ensure_fixture_built();
+    }
+    let tracker = LeanWorkerProcessTracker::new();
+    let config = base
+        .unwrap_or_else(worker_config)
+        .restart_policy(LeanWorkerRestartPolicy::default().max_imports(1))
+        .process_tracker(tracker.clone());
     let mut worker = LeanWorker::spawn(&config).expect("worker starts");
-    worker
-        .load_fixture_capability(&fixture)
-        .expect("first import-like request succeeds");
+    let first = worker.__child_pid_for_test().expect("first worker PID");
+    let import = |worker: &mut LeanWorker, module| {
+        if let Some(selected) = ordinary_typed_selection::ordinary_typed_selection() {
+            let request = LeanWorkerSessionConfig::new(&selected.fixture, "lean_rs_fixture", "LeanRsFixture", [module]);
+            let _session = worker.open_session(&request, None, None).expect("session opens");
+        } else {
+            worker
+                .load_fixture_capability(fixture_root())
+                .expect("fixture capability loads");
+        }
+    };
+
+    import(&mut worker, "LeanRsFixture.Handles");
+    assert_eq!(worker.__child_pid_for_test(), Some(first));
     assert_eq!(worker.stats().restarts, 0);
 
-    worker
-        .load_fixture_capability(&fixture)
-        .expect("second import-like request succeeds after policy restart");
+    // A repeat of the same key can reuse its session without a new import.
+    import(&mut worker, "LeanRsHostShims.Elaboration");
+    assert_ne!(worker.__child_pid_for_test().expect("replacement PID"), first);
     let stats = worker.stats();
     assert_eq!(stats.imports, 2);
     assert_eq!(stats.import_like_admission_attempts, 2);
@@ -160,6 +183,13 @@ fn max_import_policy_restarts_before_next_import() {
     assert_eq!(timing.replacement_budget_status, "synchronous-no-overlap");
     let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after import policy restart");
+    assert_eq!(tracker.active_processes(), 0, "both worker generations must be reaped");
+    assert_eq!(
+        LeanWorkerRestartPolicy::memory_bounded(1, 1_073_741_824),
+        LeanWorkerRestartPolicy::default()
+            .max_imports(1)
+            .max_rss_kib(1_073_741_824)
+    );
 }
 
 #[test]

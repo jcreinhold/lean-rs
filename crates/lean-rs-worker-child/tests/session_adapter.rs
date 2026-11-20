@@ -79,7 +79,7 @@ fn stop_selected_worker(worker: LeanWorker, tracker: Option<LeanWorkerProcessTra
 
 fn elaboration_session_config() -> LeanWorkerSessionConfig {
     LeanWorkerSessionConfig::new(
-        fixture_root(),
+        ordinary_typed_selection().map_or_else(fixture_root, |selected| selected.fixture.clone()),
         "lean_rs_fixture",
         "LeanRsFixture",
         ["LeanRsHostShims.Elaboration"],
@@ -260,10 +260,8 @@ fn shims_only_session_opens_without_user_dylib() {
 
 #[test]
 fn elaboration_and_kernel_adapter_match_status_shape() {
-    ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new();
-
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let (mut worker, tracker) = declaration_worker();
     let mut session = worker
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
@@ -303,16 +301,49 @@ fn elaboration_and_kernel_adapter_match_status_shape() {
         rejected.summary
     );
 
-    let host = direct_host();
-    let caps = fixture::capabilities(&host).expect("fixture capability loads");
-    let mut direct = caps
-        .session(&fixture::imports(&caps, "LeanRsHostShims.Elaboration"), None, None)
-        .expect("direct session opens");
+    let selected = tracker.is_some();
+    let host = if selected {
+        LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("selected host opens")
+    } else {
+        direct_host()
+    };
+    let caps = if selected {
+        fixture::native_capabilities(&host)
+    } else {
+        fixture::capabilities(&host)
+    }
+    .expect("fixture capability loads");
+    let imports = if selected {
+        fixture::native_imports_for(&caps, &["LeanRsHostShims.Elaboration"], Default::default())
+    } else {
+        fixture::imports(&caps, "LeanRsHostShims.Elaboration")
+    };
+    let mut direct = caps.session(&imports, None, None).expect("direct session opens");
+    let theorem = if selected {
+        let paths = fixture::native_elaboration_paths(&caps, &direct);
+        let (environment, scope) = direct.source_context();
+        #[allow(unsafe_code, reason = "one fixed theorem in the held elaboration fixture")]
+        // SAFETY: only the existing curated theorem with default options can run
+        // against these exact held elaboration imports.
+        unsafe {
+            caps.shim_capability().kernel_scope(
+                environment,
+                scope,
+                paths,
+                "theorem lean_rs_curated : 1 + 1 = 2 := rfl".into(),
+                lean_rs_host::LeanElabOptions::new().source_options(),
+            )
+        }
+        .expect("attest curated theorem")
+    } else {
+        fixture::curated_theorem(&caps, &direct)
+    };
     let direct_status = direct
-        .kernel_check(&fixture::curated_theorem(&caps, &direct), None, None)
+        .kernel_check(&theorem, None, None)
         .expect("direct kernel check succeeds")
         .status();
     assert_eq!(direct_status, EvidenceStatus::Checked);
+    stop_selected_worker(worker, tracker);
 }
 
 #[test]

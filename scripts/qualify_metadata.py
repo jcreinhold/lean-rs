@@ -138,8 +138,15 @@ ORDINARY_ADAPTER_TESTS = (
         "parent_can_cancel_long_worker_request_at_progress_boundary",
         ((2, 1),),
     ),
+    ("supervisor", "max_import_policy_restarts_before_next_import", ((2, 2),)),
 )
-ORDINARY_ADAPTER_CASES = frozenset(name for _, name, _ in ORDINARY_ADAPTER_TESTS)
+ORDINARY_ADAPTER_KERNEL_GRANT = b"authorize-adapter-elaboration"
+ORDINARY_ADAPTER_KERNEL_TESTS = (
+    ("session_adapter", "elaboration_and_kernel_adapter_match_status_shape", ((1, 1),)),
+)
+ORDINARY_ADAPTER_CASES = frozenset(
+    name for _, name, _ in (*ORDINARY_ADAPTER_TESTS, *ORDINARY_ADAPTER_KERNEL_TESTS)
+)
 ORDINARY_MODULE_SYNTAX_CASE = (
     "process_module_query_handles_module_system_header_through_worker"
 )
@@ -400,6 +407,7 @@ ORDINARY_AUDITED_TESTS = (
             (ORDINARY_JSON_TESTS, JSON_GRANT),
             (ORDINARY_META_TESTS, META_TERM_GRANT),
             (ORDINARY_ADAPTER_TESTS, ADAPTER_IMPORT_GRANT),
+            (ORDINARY_ADAPTER_KERNEL_TESTS, ORDINARY_ADAPTER_KERNEL_GRANT),
             (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
             (ORDINARY_PROOF_TESTS, PROOF_GRANT),
             (ORDINARY_BATCH_TESTS, BATCH_GRANT),

@@ -587,6 +587,8 @@ impl WorkerAuthority for MetadataApp {
             audit(event);
         } else if held.record.adapter_handles_case() {
             audit("authorize-adapter-handles");
+        } else if held.record.adapter_kernel_case() {
+            audit("authorize-adapter-elaboration");
         } else if !held.record.broken_import {
             audit(if held.record.typed_session {
                 if names == ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"] {
@@ -641,7 +643,13 @@ impl WorkerAuthority for MetadataApp {
                     "LeanRsFixture.SourceRanges".to_owned(),
                 ],
             );
-        let meta = matches!(request.as_str(), "(1 + 1 : Nat)" | "(2 : Nat)" | "(Nat.succ 0 : Nat)")
+        let adapter = d.adapter_kernel_case()
+            && matches!(request.as_str(), "(1 + 1 : Nat)" | "1 +")
+            && session
+                .imports
+                .matches_request(&paths, &["LeanRsHostShims.Elaboration".to_owned()]);
+        let meta = !d.adapter_kernel_case()
+            && matches!(request.as_str(), "(1 + 1 : Nat)" | "(2 : Nat)" | "(Nat.succ 0 : Nat)")
             && session
                 .imports
                 .matches_request(&paths, &["LeanRsHostShims.Elaboration".to_owned()]);
@@ -650,7 +658,7 @@ impl WorkerAuthority for MetadataApp {
             || !d.typed_session
             || d.stream
             || d.verification
-            || !(recovery || meta)
+            || !(recovery || meta || adapter)
             || *session.imports.options() != HostImportOptions::default()
             || !options.namespace.is_empty()
             || options.file != "<elaborate>"
@@ -680,11 +688,41 @@ impl WorkerAuthority for MetadataApp {
     }
     fn kernel<'cap>(
         &self,
-        _session: WorkerSourceContext<'_, 'cap>,
-        _request: String,
-        _options: HostSourceOptions,
+        session: WorkerSourceContext<'_, 'cap>,
+        request: String,
+        options: HostSourceOptions,
     ) -> LeanResult<TrustedHostKernelRequest<'static, 'cap>> {
-        Err(denied())
+        let d = &self.deployment()?.record;
+        let paths: Vec<_> = d.import_roots.iter().map(|path| path.display().to_string()).collect();
+        if !d.adapter_kernel_case()
+            || !matches!(
+                request.as_str(),
+                "theorem lean_rs_worker_checked : 1 + 1 = 2 := rfl"
+                    | "theorem lean_rs_worker_rejected : 1 + 1 = 3 := rfl"
+            )
+            || !session
+                .imports
+                .matches_request(&paths, &["LeanRsHostShims.Elaboration".to_owned()])
+            || *session.imports.options() != HostImportOptions::default()
+            || !options.namespace.is_empty()
+            || options.file != "<elaborate>"
+            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
+            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+            || options.options_json != "{}"
+        {
+            return Err(denied());
+        }
+        // SAFETY: Both fixed declarations and default options are reviewed
+        // against the exact Elaboration import and its retained deployment.
+        unsafe {
+            session.capability.kernel_scope(
+                session.environment,
+                session.imports,
+                d.verification_roots(),
+                request,
+                options,
+            )
+        }
     }
     fn query<'cap>(
         &self,

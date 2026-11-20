@@ -283,8 +283,19 @@ impl Record {
                 std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref(),
                 Ok("declaration_bulk_adapter_matches_in_process_session"
                     | "progress_events_cross_worker_boundary_in_order"
-                    | "parent_can_cancel_long_worker_request_at_progress_boundary")
+                    | "parent_can_cancel_long_worker_request_at_progress_boundary"
+                    | "max_import_policy_restarts_before_next_import")
             )
+    }
+
+    pub fn adapter_kernel_case(&self) -> bool {
+        self.typed_session
+            && !self.stream
+            && !self.broken_import
+            && !self.verification
+            && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
+            && std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref()
+                == Ok("elaboration_and_kernel_adapter_match_status_shape")
     }
 
     pub fn check_order(
@@ -332,7 +343,12 @@ impl Record {
             (if self.host_builder_case.is_some() {
                 self.host_builder_import_event(names).is_some()
             } else if std::env::var_os("LEAN_RS_TEST_ADAPTER_CASE").is_some() {
-                self.adapter_handles_case() && names == ["LeanRsFixture.Handles"]
+                (self.adapter_handles_case()
+                    && (names == ["LeanRsFixture.Handles"]
+                        || (names == ["LeanRsHostShims.Elaboration"]
+                            && std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref()
+                                == Ok("max_import_policy_restarts_before_next_import"))))
+                    || (self.adapter_kernel_case() && names == ["LeanRsHostShims.Elaboration"])
             } else {
                 names == expected || reuse_imports
             }) && *options == Default::default(),
