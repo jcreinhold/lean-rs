@@ -367,18 +367,19 @@ struct Admission {
 fn digest(path: &Path) -> String {
     hex_digest(&fs::read(path).expect("read controlled fixture input"))
 }
-#[allow(
-    clippy::option_env_unwrap,
-    reason = "unprovisioned builds must compile and fail closed when qualification is attempted"
-)]
+fn reviewed_input<'a>(value: Option<&'a str>, required: &str) -> &'a str {
+    let Some(value) = value else { panic!("{required}") };
+    value
+}
+
 fn admission() -> &'static Admission {
     static INSTANCE: OnceLock<Admission> = OnceLock::new();
     INSTANCE.get_or_init(|| {
-        let record: Record = serde_json::from_str(
-            option_env!("LEAN_RS_TEST_REVIEWED_RECORD")
-                .expect("qualification build requires a protected fixture record"),
-        )
-        .expect("valid fixture record");
+        let reviewed_record = reviewed_input(
+            option_env!("LEAN_RS_TEST_REVIEWED_RECORD"),
+            "qualification build requires a protected fixture record",
+        );
+        let record: Record = serde_json::from_str(reviewed_record).expect("valid fixture record");
         let header = Path::new(lean_toolchain::LEAN_HEADER_PATH);
         assert_eq!(Some(record.prefix.as_path()), header.ancestors().nth(3));
         assert_eq!(
@@ -402,7 +403,7 @@ fn admission() -> &'static Admission {
         // guarantee from the runtime environment or from matching file hashes.
         assert_eq!(
             option_env!("LEAN_RS_TEST_EXCLUSIVE_FIXTURE_RECORD_SHA256"),
-            Some(text_digest(option_env!("LEAN_RS_TEST_REVIEWED_RECORD").expect("selected fixture")).as_str()),
+            Some(text_digest(reviewed_record).as_str()),
             "launcher must independently select the exclusively owned fixture record"
         );
         let linked = roots[4].join("host-services-linked-review.json");
@@ -416,7 +417,10 @@ fn admission() -> &'static Admission {
         assert!(executable.starts_with(&roots[3]));
         assert_eq!(executable, review.executable);
         assert_eq!(digest(&executable), review.executable_sha256);
-        let source = option_env!("LEAN_RS_TEST_SOURCE_SHA256").expect("reviewed source closure identity");
+        let source = reviewed_input(
+            option_env!("LEAN_RS_TEST_SOURCE_SHA256"),
+            "reviewed source closure identity",
+        );
         assert!(source.len() == 64 && source.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_eq!(source, review.source_sha256);
         let inventory_path = roots[4].join("release-inventory.json");
@@ -424,8 +428,10 @@ fn admission() -> &'static Admission {
             inventory_path.canonicalize().expect("held release inventory"),
             inventory_path
         );
-        let expected = option_env!("LEAN_RS_TEST_RELEASE_INVENTORY_SHA256")
-            .expect("authenticated transitive release inventory digest");
+        let expected = reviewed_input(
+            option_env!("LEAN_RS_TEST_RELEASE_INVENTORY_SHA256"),
+            "authenticated transitive release inventory digest",
+        );
         assert_eq!(digest(&inventory_path), expected);
         assert_eq!(review.release_inventory_sha256, expected);
         let release: BTreeMap<PathBuf, String> =
@@ -442,7 +448,10 @@ fn admission() -> &'static Admission {
             assert_eq!(path.canonicalize().expect("release input"), path);
             assert_eq!(digest(&path), expected, "release closure input {}", path.display());
         }
-        let graph_policy = option_env!("LEAN_RS_TEST_APPROVED_GRAPHS").expect("independent graph and request policy");
+        let graph_policy = reviewed_input(
+            option_env!("LEAN_RS_TEST_APPROVED_GRAPHS"),
+            "independent graph and request policy",
+        );
         assert_eq!(text_digest(graph_policy), review.graph_policy_sha256);
         let approved_rows = serde_json::from_str(graph_policy).expect("valid approved rows");
         for (p, h) in &record.artifact_sha256 {
@@ -452,10 +461,10 @@ fn admission() -> &'static Admission {
         }
         // Include every file in each ordered import directory (including sidecars).
         // Unlisted new oleans could otherwise shadow an admitted transitive import.
-        let mut inventory: BTreeMap<PathBuf, String> = serde_json::from_str(
-            option_env!("LEAN_RS_TEST_REVIEWED_IMPORT_FILES")
-                .expect("qualification build requires a complete reviewed import inventory"),
-        )
+        let mut inventory: BTreeMap<PathBuf, String> = serde_json::from_str(reviewed_input(
+            option_env!("LEAN_RS_TEST_REVIEWED_IMPORT_FILES"),
+            "qualification build requires a complete reviewed import inventory",
+        ))
         .expect("valid import inventory");
         let mut pending = roots[..3]
             .iter()
@@ -938,10 +947,11 @@ fn native_module_syntax_paths(caps: &LeanCapabilities<'_, '_>, names: &[&str], s
         native_source_paths(caps, names).expect("ordinary module syntax fixture selected")
     } else {
         #[cfg(all(test, unix))]
-        let paths = native_import_paths(caps, names);
+        {
+            native_import_paths(caps, names).expect("ordinary module syntax fixture selected")
+        }
         #[cfg(not(all(test, unix)))]
-        let paths: Option<Vec<String>> = None;
-        paths.expect("ordinary module syntax fixture selected")
+        panic!("ordinary module syntax fixture selected")
     }
 }
 
