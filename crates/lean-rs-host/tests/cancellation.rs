@@ -18,7 +18,7 @@ use lean_rs::{LeanDiagnosticCode, LeanError, LeanRuntime};
 use lean_rs_host::{LeanCancellationToken, LeanHost, SessionPool};
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -54,9 +54,9 @@ fn cancellation_token_is_send_sync() {
 #[test]
 fn pre_cancelled_session_call_returns_cancelled_without_ffi() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = caps
-        .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
+        .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly");
     let token = LeanCancellationToken::new();
     token.cancel();
@@ -77,9 +77,9 @@ fn pre_cancelled_session_call_returns_cancelled_without_ffi() {
 #[test]
 fn never_cancelled_token_preserves_successful_call() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = caps
-        .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
+        .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly");
     let token = LeanCancellationToken::new();
 
@@ -96,9 +96,9 @@ fn bulk_query_observes_cancellation_from_another_thread() {
     const ITEMS: usize = 100_000;
 
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = caps
-        .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
+        .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly");
     let names = vec!["LeanRsFixture.Handles.nameAnonymous"; ITEMS];
     let token = LeanCancellationToken::new();
@@ -134,7 +134,7 @@ fn bulk_query_observes_cancellation_from_another_thread() {
 fn pool_acquire_cancelled_before_import_does_not_update_stats() {
     let runtime = runtime();
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime, 1);
     let token = LeanCancellationToken::new();
     token.cancel();
@@ -142,7 +142,7 @@ fn pool_acquire_cancelled_before_import_does_not_update_stats() {
     let err = pool
         .acquire(
             &caps,
-            &fixture::imports(&caps, "LeanRsFixture.Handles"),
+            &fixture::native_imports(&caps, "LeanRsFixture.Handles"),
             Some(&token),
             None,
         )

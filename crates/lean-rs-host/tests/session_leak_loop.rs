@@ -25,7 +25,7 @@ use lean_rs::LeanRuntime;
 use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession, LeanSessionImportProfile, SessionPool};
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -37,7 +37,7 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
+    caps.session(&fixture::native_imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly")
 }
 
@@ -70,7 +70,7 @@ fn session_create_drop_loop_small() {
     // not share state on the Rust side—so a leak would multiply
     // linearly with `n` under the sanitizer's longer override.
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
 
     for _ in 0..iters(8) {
         let session = session_over_handles(&caps);
@@ -81,7 +81,7 @@ fn session_create_drop_loop_small() {
 #[test]
 fn session_leak_loop_import_stats_reports_fixture_shape() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let session = session_over_handles(&caps);
     let stats = session.import_stats();
 
@@ -125,10 +125,10 @@ fn session_leak_loop_import_stats_reports_fixture_shape() {
 #[test]
 fn session_leak_loop_import_stats_reports_explicit_full_private_compat() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let session = caps
         .session_with_profile(
-            &fixture::imports_for(
+            &fixture::native_imports_for(
                 &caps,
                 &["LeanRsFixture.Handles"],
                 LeanSessionImportProfile::FullPrivateCompat,
@@ -156,7 +156,7 @@ fn session_create_drop_loop_long() {
     }
 
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
 
     let n = iters(512);
     for _ in 0..n {
@@ -171,9 +171,9 @@ fn pool_acquire_release_loop_small() {
     // imports, every subsequent acquire must be a cache hit, so the
     // total import count stays bounded even as the acquire count grows.
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime(), 4);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     let n = iters(16);
     for _ in 0..n {
@@ -215,9 +215,9 @@ fn pool_acquire_release_loop_long() {
     }
 
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime(), 4);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     let n = iters(2048);
     for _ in 0..n {
@@ -246,9 +246,9 @@ fn pool_overflow_eviction_loop_small() {
     // the path most likely to leak if the wrapper forgets a
     // `lean_dec`.
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let pool = SessionPool::with_capacity(runtime(), 1);
-    let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
+    let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
 
     let n = iters(4);
     for _ in 0..n {

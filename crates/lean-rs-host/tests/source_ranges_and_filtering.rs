@@ -12,7 +12,7 @@ use lean_rs::{LeanDiagnosticCode, LeanError, LeanRuntime};
 use lean_rs_host::{LeanCancellationToken, LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession};
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
 }
 
 fn source_fixture_path() -> PathBuf {
@@ -28,7 +28,7 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_source_ranges<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixture::imports(caps, "LeanRsFixture.SourceRanges"), None, None)
+    caps.session(&fixture::native_imports(caps, "LeanRsFixture.SourceRanges"), None, None)
         .expect("session imports source-range fixture")
 }
 
@@ -53,7 +53,7 @@ fn assert_cancelled(err: LeanError) {
 #[test]
 fn declaration_source_range_returns_known_one_based_fixture_range() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_source_ranges(&caps);
 
     let range = session
@@ -75,7 +75,7 @@ fn declaration_source_range_returns_known_one_based_fixture_range() {
 #[test]
 fn declaration_source_range_returns_none_for_synthetic_and_missing_names() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_source_ranges(&caps);
 
     let synthetic = session
@@ -95,7 +95,7 @@ fn declaration_source_range_returns_none_for_synthetic_and_missing_names() {
 #[test]
 fn list_declarations_filtered_applies_each_flag_in_lean() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_source_ranges(&caps);
 
     let unfiltered = session.list_declarations(None).expect("unfiltered list").len();
@@ -157,7 +157,7 @@ fn list_declarations_filtered_applies_each_flag_in_lean() {
 #[test]
 fn list_declarations_filtered_records_one_dispatch() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_source_ranges(&caps);
 
     let before = session.stats();
@@ -174,7 +174,7 @@ fn list_declarations_filtered_records_one_dispatch() {
 #[test]
 fn pre_cancelled_token_cancels_before_source_range_or_filter_dispatch() {
     let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_source_ranges(&caps);
     let token = LeanCancellationToken::new();
     token.cancel();
