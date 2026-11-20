@@ -95,6 +95,9 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
 /// Internal CLI entry: one supervisor lifetime can execute adjacent writer stages.
 #[derive(Debug, clap::Args)]
 pub struct WriterArgs {
+    /// Explicit managed full-turn storage request.
+    #[arg(long, value_parser = storage::Request::parse)]
+    storage_request: Option<storage::Request>,
     root: PathBuf,
     lock: PathBuf,
     admission: f64,
@@ -1242,6 +1245,12 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     } else {
         Value::Null
     };
+    let admission = duration(args.admission)?;
+    let managed = args
+        .storage_request
+        .as_ref()
+        .map(|r| r.reserve(&args.root, &locks, admission))
+        .transpose()?;
     let paths: Vec<_> = locks.iter().map(|(path, _)| path.clone()).collect();
     let mut files = locks.into_iter().map(|(_, file)| file);
     let mut file = files.next().ok_or_else(|| invalid("writer primary loan missing"))?;
@@ -1264,11 +1273,19 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     )?;
     // Disarm filesystem deletion before exposing any path. A panic or helper
     // crash leaves safe orphan inputs instead of removing files beneath work.
-    let asset_dir = tempfile::Builder::new()
-        .prefix("lean-writer-assets-")
-        .tempdir()?
-        .keep()
-        .canonicalize()?;
+    let scratch = managed
+        .as_ref()
+        .map(|(parent, charge)| parent.create(charge.turn()))
+        .transpose()?;
+    let asset_dir = match &scratch {
+        Some(scratch) => scratch.verified_path()?,
+        None => tempfile::Builder::new()
+            .prefix("lean-writer-assets-")
+            .tempdir()?
+            .keep()
+            .canonicalize()?,
+    };
+    let mut confirmed_close = false;
     let result = (|| -> io::Result<()> {
         send(&json!({"state":"locked","owner":record,"lock_loans":receipt,"asset_dir":asset_dir}))?;
         while let Ok(message) = input.recv() {
@@ -1299,11 +1316,21 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                             return Err(invalid("native artifact readers remain unresolved before GO"));
                         }
                     }
+                    if let Some(scratch) = &scratch {
+                        scratch.verified_path()?;
+                        if let Some(request) = &args.storage_request {
+                            request.verify()?;
+                        }
+                    }
                     if !execute(&message, &args.root, &args.lock, &mut file, &loans, &record, &input)? {
                         break;
                     }
                 }
-                Some("close" | "cancel") => break,
+                Some("close") => {
+                    confirmed_close = true;
+                    break;
+                }
+                Some("cancel") => break,
                 _ => return Err(invalid("unsupported writer action")),
             }
         }
@@ -1311,8 +1338,24 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     })();
     // execute retains custody after every launch until actual group closure.
     // Idle or pre-GO failures have no command that could still need these inputs.
-    let cleanup = fs::remove_dir_all(&asset_dir);
-    result.and(cleanup)
+    if let Some(scratch) = scratch {
+        let certainty = result
+            .and_then(|()| {
+                if confirmed_close {
+                    Ok(())
+                } else {
+                    Err(invalid("turn closure unconfirmed"))
+                }
+            })
+            .and_then(|()| scratch.remove());
+        // Preserve the first error; dropping the charge retains the reservation.
+        certainty.map_err(|error| io::Error::new(error.kind(), format!("writer storage charge retained: {error}")))?;
+        let (_, charge) = managed.ok_or_else(|| invalid("missing writer storage admission"))?;
+        charge.settle_after_cleanup(&file, Ok(()), admission)
+    } else {
+        let cleanup = fs::remove_dir_all(&asset_dir);
+        result.and(cleanup)
+    }
 }
 
 #[cfg(test)]
@@ -1387,3 +1430,6 @@ mod lifecycle_tests;
 #[cfg(all(test, unix))]
 #[path = "shared_writer/sdk_contract_tests.rs"]
 mod sdk_contract_tests;
+
+mod scratch;
+mod storage;
