@@ -164,6 +164,12 @@ fn matches_fixed_proof(file: &str, request: &ProofAttemptRequest) -> bool {
             ordinary && one("exact", "exact Nat.add_zero n")
         }
         ("/attempt/unicode.lean", UNICODE, "unicodeSig", First) => ordinary && one("bad", BAD),
+        (
+            "/attempt/bad.lean",
+            "theorem t : True := by\n  skip\n/-- following docstring must remain parseable -/\ntheorem u : True := by\n  trivial\n",
+            "t",
+            First,
+        ) => ordinary && one("bad", "exact missingIdentifier"),
         ("/attempt/entry.lean", ENTRY_GOAL, "t", Entry | First) => {
             ordinary && one("from-scratch", "intro p hp; exact hp")
         }
@@ -221,6 +227,20 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
             }] if id == "state" && declaration == name && text == "missing tactic"
         )
     };
+    if batch.budgets != ModuleQueryOutputBudgets::default() {
+        return (file == "<elaborate>"
+            && source == BASE
+            && state_at(2)
+            && batch.budgets
+                == (ModuleQueryOutputBudgets {
+                    per_field_bytes: 128,
+                    total_bytes: 0,
+                }))
+        .then_some(FixedBatchPolicy {
+            limits: DEFAULT_LIMITS,
+            audit: true,
+        });
+    }
     let (limits, audit) = match (file, source, selectors) {
         ("/cache/reuse.lean" | "/cache/clear.lean" | "/cache/imports.lean", BASE, _)
         | ("/cache/rebuild.lean", BASE | CHANGED, _)
@@ -495,7 +515,7 @@ impl WorkerAuthority for MetadataApp {
                     "LeanRsFixture.SourceRanges".to_owned(),
                 ],
             );
-        let meta = matches!(request.as_str(), "(1 + 1 : Nat)" | "(2 : Nat)")
+        let meta = matches!(request.as_str(), "(1 + 1 : Nat)" | "(2 : Nat)" | "(Nat.succ 0 : Nat)")
             && session
                 .imports
                 .matches_request(&paths, &["LeanRsHostShims.Elaboration".to_owned()]);
@@ -548,6 +568,7 @@ impl WorkerAuthority for MetadataApp {
         let d = &self.deployment()?.record;
         let exact_request = match (request.source.as_str(), &request.query, options.file.as_str()) {
             ("import Lean\n\ntheorem ok : True := by trivial\n", ModuleQuery::Diagnostics, "<elaborate>")
+            | ("theorem u : True := by\n  trivial\n", ModuleQuery::Diagnostics, "<elaborate>")
             | (
                 "theorem bad : True := by\n  exact missingIdentifier\n",
                 ModuleQuery::Diagnostics,
@@ -622,7 +643,6 @@ impl WorkerAuthority for MetadataApp {
             || options.options_json != "{}"
             || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
             || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
-            || request.batch.budgets != ModuleQueryOutputBudgets::default()
             || *session.imports.options() != HostImportOptions::default()
         {
             return Err(denied());

@@ -251,19 +251,36 @@ PROOF_GRANT = b"authorize-fixed-proof-attempt"
 BATCH_GRANT = b"authorize-fixed-module-batch"
 VERIFICATION_GRANT = b"authorize-fixed-declaration-verification"
 VERIFICATION_BATCH_GRANT = b"authorize-fixed-verification-batch"
-ORDINARY_AUDITED_TESTS = tuple(
-    (target, name, counts, event)
-    for cases, event in (
-        (ORDINARY_JSON_TESTS, JSON_GRANT),
-        (ORDINARY_META_TESTS, META_TERM_GRANT),
-        (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
-        (ORDINARY_PROOF_TESTS, PROOF_GRANT),
-        (ORDINARY_BATCH_TESTS, BATCH_GRANT),
-        (ORDINARY_VERIFICATION_TESTS, VERIFICATION_GRANT),
-        (ORDINARY_VERIFICATION_BATCH_TESTS, VERIFICATION_BATCH_GRANT),
-    )
-    for target, name, counts in cases
+ORDINARY_MIXED_GRANTS = {
+    "attempt_proof_bad_candidate_returns_diagnostics_and_session_survives": (
+        PROOF_GRANT,
+        MODULE_QUERY_GRANT,
+    ),
+    "process_module_query_batch_obeys_total_budget_without_killing_worker": (
+        BATCH_GRANT,
+        META_TERM_GRANT,
+    ),
+}
+ORDINARY_AUDITED_TESTS = (
+    *(
+        (target, name, counts, event)
+        for cases, event in (
+            (ORDINARY_JSON_TESTS, JSON_GRANT),
+            (ORDINARY_META_TESTS, META_TERM_GRANT),
+            (ORDINARY_MODULE_QUERY_TESTS, MODULE_QUERY_GRANT),
+            (ORDINARY_PROOF_TESTS, PROOF_GRANT),
+            (ORDINARY_BATCH_TESTS, BATCH_GRANT),
+            (ORDINARY_VERIFICATION_TESTS, VERIFICATION_GRANT),
+            (ORDINARY_VERIFICATION_BATCH_TESTS, VERIFICATION_BATCH_GRANT),
+        )
+        for target, name, counts in cases
+    ),
+    *(
+        ("typed_session", name, ((1, len(events)),), events[0])
+        for name, events in ORDINARY_MIXED_GRANTS.items()
+    ),
 )
+ORDINARY_GRANT_EVENTS = frozenset(event for *_, event in ORDINARY_AUDITED_TESTS)
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
@@ -1014,15 +1031,8 @@ def check_typed_children_closed(
     started = []
     admitted = set()
     workers = set()
-    grants = {
-        JSON_GRANT: [],
-        META_TERM_GRANT: [],
-        MODULE_QUERY_GRANT: [],
-        PROOF_GRANT: [],
-        BATCH_GRANT: [],
-        VERIFICATION_GRANT: [],
-        VERIFICATION_BATCH_GRANT: [],
-    }
+    granted = []
+    grant_pids = set()
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
@@ -1032,23 +1042,27 @@ def check_typed_children_closed(
             started.append(pid)
         if event == b"verified-deployment":
             admitted.add(pid)
-        if event in grants:
-            grants[event].append(pid)
+        if event in ORDINARY_GRANT_EVENTS:
+            granted.append(event)
+            grant_pids.add(pid)
     if case is None:
         require(
             len(admitted) >= ORDINARY_APP_TEST_COUNT,
             "typed tests did not start the expected admitted workers",
         )
     else:
-        recorded = grants[grant_event]
         require(
-            (len(started), len(recorded)) in expected_counts
+            (len(started), len(granted)) in expected_counts
             and len(started) == len(workers)
             and set(started) == workers
-            and admitted == set(recorded) <= workers
-            and (grant_event != JSON_GRANT or len(recorded) == len(admitted))
-            and not any(pids for event, pids in grants.items() if event != grant_event),
+            and admitted == grant_pids <= workers
+            and (grant_event != JSON_GRANT or len(granted) == len(admitted)),
             f"{case}: wrong started worker / {grant_event.decode()} counts",
+        )
+        expected = ORDINARY_MIXED_GRANTS.get(case, (grant_event,) * len(granted))
+        require(
+            tuple(granted) == expected,
+            f"{case}: wrong started worker / {grant_event.decode()} counts or grant order",
         )
     for pid in workers:
         try:

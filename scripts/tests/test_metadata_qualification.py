@@ -520,7 +520,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 self.assertFalse(
                     audit.exists(), "already checked audit was not cleared"
                 )
-                target, _name, (counts, *_), event = next(
+                target, name, (counts, *_), event = next(
                     case
                     for case in qualification.ORDINARY_AUDITED_TESTS
                     if command[-1] == qualification.scoped_tests(case[0], (case[1],))
@@ -534,14 +534,16 @@ class MetadataQualificationTest(unittest.TestCase):
                     for index in range(started):
                         pid = 51 + index
                         stream.write(f"{pid} worker-started\n")
-                        count = (
-                            grants
-                            if event != qualification.JSON_GRANT
-                            else int(index < grants)
-                        )
-                        if count:
+                        if event == qualification.JSON_GRANT:
+                            granted = (event,) if index < grants else ()
+                        else:
+                            granted = qualification.ORDINARY_MIXED_GRANTS.get(
+                                name, (event,) * grants
+                            )
+                        if granted:
                             stream.write(f"{pid} verified-deployment\n")
-                            stream.write(f"{pid} {event.decode()}\n" * count)
+                            for marker in granted:
+                                stream.write(f"{pid} {marker.decode()}\n")
 
         output = io.StringIO()
         with (
@@ -733,6 +735,8 @@ class MetadataQualificationTest(unittest.TestCase):
                 f"(binary(=typed_session) & (test(={name})))"
                 for name in verification_cases
             ),
+            "(binary(=typed_session) & (test(=attempt_proof_bad_candidate_returns_diagnostics_and_session_survives)))",
+            "(binary(=typed_session) & (test(=process_module_query_batch_obeys_total_budget_without_killing_worker)))",
         ]
         self.assertNotIn("LEAN_RS_TEST_AUDIT_WORKER_START", run_env)
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)
@@ -819,6 +823,24 @@ class MetadataQualificationTest(unittest.TestCase):
                 grant_event=qualification.MODULE_QUERY_GRANT,
             )
         probe.assert_not_called()
+
+    def test_mixed_cases_refuse_swapped_grants_on_the_expected_pid(self):
+        for case, events in qualification.ORDINARY_MIXED_GRANTS.items():
+            with self.subTest(case=case):
+                audit = b"51 worker-started\n51 verified-deployment\n" + b"".join(
+                    b"51 " + marker + b"\n" for marker in reversed(events)
+                )
+                with (
+                    patch.object(qualification.os, "kill") as probe,
+                    self.assertRaisesRegex(ValueError, "grant order"),
+                ):
+                    qualification.check_typed_children_closed(
+                        audit,
+                        case=case,
+                        expected_counts=((1, 2),),
+                        grant_event=events[0],
+                    )
+                probe.assert_not_called()
 
     def test_typed_group_with_live_worker_retains_only_typed_state(self):
         self.run_typed_selection(live_pid=True)
