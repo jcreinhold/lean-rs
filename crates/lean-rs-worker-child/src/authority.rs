@@ -106,6 +106,21 @@ pub trait WorkerAuthority: Send + Sync {
         path: &Path,
         snapshot: &[u8],
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>>;
+    /// Select generated imports for this exact admitted project capability.
+    ///
+    /// Ordinary sessions use default Lake roots unless the application opts in.
+    /// Opt in only if the complete ordered import graph uses the same generated
+    /// output slot as this image. This does not grant import authority.
+    ///
+    /// # Errors
+    /// Returns an error if application policy cannot select the import layout.
+    fn use_generated_project_imports(
+        &self,
+        _project: &Path,
+        _capability: &lean_rs::module::TrustedWorkerCapability<'static>,
+    ) -> LeanResult<bool> {
+        Ok(false)
+    }
     /// Establish the exact import graph, ordered roots and profile.
     ///
     /// # Errors

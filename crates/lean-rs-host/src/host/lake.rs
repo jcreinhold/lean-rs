@@ -185,6 +185,43 @@ impl LakeProject {
         paths
     }
 
+    pub(crate) fn validate_generated_import_layout(&self, key: &str, image: &Path) -> LeanResult<()> {
+        fn invalid_layout(error: impl std::fmt::Display) -> lean_rs::LeanError {
+            lean_rs::__host_internals::host_module_init(format!("invalid generated project import layout: {error}"))
+        }
+
+        let root = self.root.canonicalize().map_err(invalid_layout)?;
+        let lib = root.join(".lake/lean-rs-generated").join(key).join("lib");
+        if image.parent() != Some(lib.as_path()) || image.canonicalize().map_err(invalid_layout)? != image {
+            return Err(invalid_layout("admitted image is not in the exact project output slot"));
+        }
+        let manifest = fs::read(root.join("lake-manifest.json")).map_err(invalid_layout)?;
+        let manifest: Value = serde_json::from_slice(&manifest).map_err(invalid_layout)?;
+        let packages = manifest
+            .get("packages")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid_layout("missing project package list"))?;
+        let packages_dir = manifest
+            .get("packagesDir")
+            .and_then(Value::as_str)
+            .unwrap_or(".lake/packages");
+        let mut roots = vec![root];
+        for package in packages {
+            let package = manifest_package_root(&self.root, packages_dir, package)
+                .ok_or_else(|| invalid_layout("invalid dependency root"))?;
+            roots.push(package.canonicalize().map_err(invalid_layout)?);
+        }
+        for root in roots {
+            let path = project_olean_search_path_for_output(&root, Some(key));
+            if path.canonicalize().map_err(invalid_layout)? != path || !path.is_dir() {
+                return Err(invalid_layout(
+                    "generated import root is not its canonical output directory",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Source roots passed to the source-range shim.
     ///
     /// Lean's declaration-range extension stores positions, not a stable

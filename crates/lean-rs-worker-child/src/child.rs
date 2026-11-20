@@ -1659,6 +1659,15 @@ impl HostAnchor {
         } else {
             None
         };
+        let selected;
+        let prepared = if let (None, Some(image)) = (admission, &worker_capability)
+            && authority.use_generated_project_imports(Path::new(project_root), image)?
+        {
+            selected = prepared.clone().for_generated_project(host, image)?;
+            &selected
+        } else {
+            prepared
+        };
         let shim = authority.host(runtime, prepared)?;
         let capabilities = match mode {
             HostSessionMode::Capability {

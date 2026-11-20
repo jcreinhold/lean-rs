@@ -375,6 +375,25 @@ impl LeanPreparedHostArtifacts {
         Ok(self)
     }
 
+    /// Select the matching generated slot for a verified ordinary capability.
+    ///
+    /// # Errors
+    /// Returns an error for a foreign image or incomplete generated import roots.
+    #[doc(hidden)]
+    pub fn for_generated_project(
+        self,
+        host: &LeanHost<'_>,
+        capability: &lean_rs::module::TrustedWorkerCapability<'_>,
+    ) -> LeanResult<Self> {
+        let selected = self.with_project_generated_output_matching_shims()?;
+        let key = selected.project_generated_output_key.as_deref().ok_or_else(|| {
+            lean_rs::__host_internals::host_module_init("generated project imports have no selected key")
+        })?;
+        host.project()
+            .validate_generated_import_layout(key, capability.library_path())?;
+        Ok(selected)
+    }
+
     #[doc(hidden)]
     #[must_use]
     pub fn project_uses_generated_output(&self) -> bool {
