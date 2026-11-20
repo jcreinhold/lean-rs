@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broken_import = match profile.as_deref() {
         None => false,
         Some("--typed-session" | "--interop-stream") if env::args().len() == 3 => false,
-        Some("--broken-import") if env::args().len() == 3 => true,
+        Some("--broken-import" | "--host-builder-lazy" | "--host-builder-shims-only") if env::args().len() == 3 => true,
         _ => return Err("unknown metadata qualification profile".into()),
     };
     let typed_session = profile.as_deref() == Some("--typed-session");
@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream);
     }
     if broken_import {
-        return prepare_broken_import(app, &state, &sysroot, generated_output_key);
+        return prepare_broken_import(app, &state, &sysroot, generated_output_key, profile.as_deref());
     }
     let project = sdk.join("fixtures/metadata-qualification/lean");
     let socket_root = target.join("ws");
@@ -278,33 +278,68 @@ fn prepare_broken_import(
     state: &Path,
     sysroot: &Path,
     key: &str,
+    profile: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).is_some() {
         return Err("private broken-import fixture must not inherit a writer executable".into());
     }
-    let project = state.join("lean");
+    let (directory, package, umbrella, good, bad_target, case) = match profile {
+        Some("--host-builder-lazy") => (
+            "lean-lazy",
+            "worker_host_lazy",
+            "import Demo.Good\n",
+            true,
+            None,
+            Some("a_host_handle_built_without_imports_opens_no_session"),
+        ),
+        Some("--host-builder-shims-only") => (
+            "lean-shims-only",
+            "worker_host_handle",
+            "import Demo.Good\nimport Demo.Broken\n",
+            true,
+            Some("Demo:shared"),
+            Some("shims_only_host_handle_skips_user_shared_build"),
+        ),
+        _ => (
+            "lean",
+            "worker_host_broken",
+            "import Demo.Broken\n",
+            false,
+            Some("Demo.Broken"),
+            None,
+        ),
+    };
+    let project = state.join(directory);
     fs::DirBuilder::new().mode(0o700).create(&project)?;
     fs::create_dir(project.join("Demo"))?;
     fs::write(
         project.join("lakefile.lean"),
-        "import Lake\nopen Lake DSL\npackage worker_host_broken\nlean_lib Demo\n",
+        format!("import Lake\nopen Lake DSL\npackage {package}\nlean_lib Demo\n"),
     )?;
     fs::write(project.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
-    fs::write(project.join("Demo.lean"), "import Demo.Broken\n")?;
-    fs::write(
-        project.join("Demo/Broken.lean"),
-        "theorem broken : True := sorry_that_doesnt_exist\n",
-    )?;
-    // Let the caller see the actual Lean error without buffering its output.
-    // The checkout-local smoke runner supplies the outer process deadline.
-    let bad = std::process::Command::new(sysroot.join("bin/lake"))
-        .arg("build")
-        .arg("Demo.Broken")
-        .current_dir(&project)
-        .stdin(std::process::Stdio::null())
-        .status()?;
-    if bad.code() != Some(1) {
-        return Err("expected the selected Lean to reject Demo.Broken".into());
+    fs::write(project.join("Demo.lean"), umbrella)?;
+    // Keep the real build outcome and stream Lean's diagnostic without a log.
+    let build = |target: &str| {
+        std::process::Command::new(sysroot.join("bin/lake"))
+            .args(["build", target])
+            .current_dir(&project)
+            .stdin(std::process::Stdio::null())
+            .status()
+    };
+    if good {
+        fs::write(project.join("Demo/Good.lean"), "def goodValue : Nat := 41\n")?;
+        if !build("Demo.Good")?.success() {
+            return Err("expected the selected Lean to build Demo.Good".into());
+        }
+    }
+    if let Some(target) = bad_target {
+        fs::write(
+            project.join("Demo/Broken.lean"),
+            "theorem broken : True := sorry_that_doesnt_exist\n",
+        )?;
+        if build(target)?.code() != Some(1) {
+            return Err(format!("expected the selected Lean to reject {target}").into());
+        }
     }
     fs::create_dir_all(project.join(".lake/build/lib/lean"))?;
     let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
@@ -320,6 +355,7 @@ fn prepare_broken_import(
     scopes.sort();
     let record = serde_json::json!({
         "broken_import": true,
+        "host_builder_case": case,
         "typed_session": false,
         "verification": false,
         "generated_output_key": key,

@@ -30,6 +30,26 @@ STATE = TARGET / "metadata-qualification/ordinary"
 STATE_LOCK = TARGET / "metadata-qualification/.ordinary.lock"
 SOCKET_ROOT = TARGET / "ws"
 BROKEN_IMPORT_TEST = "a_host_handle_built_with_a_broken_import_still_fails_at_open"
+HOST_BUILDER_CASES = (
+    (
+        "a_host_handle_built_without_imports_opens_no_session",
+        "--host-builder-lazy",
+        "lean-lazy",
+        ((b"authorize-builder-good",), (b"authorize-builder-empty",)),
+    ),
+    (
+        "shims_only_host_handle_skips_user_shared_build",
+        "--host-builder-shims-only",
+        "lean-shims-only",
+        (
+            (
+                b"authorize-builder-good",
+                b"authorize-builder-good",
+                b"authorize-builder-broken",
+            ),
+        ),
+    ),
+)
 ORDINARY_TYPED_TESTS = (
     "describe_returns_row_for_known_declaration",
     "describe_returns_none_for_unknown_declaration",
@@ -1464,6 +1484,105 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     remove_owned_state(state, owner)
 
 
+def check_host_builder_children_closed(data, expected):
+    by_pid = {}
+    for line in data.splitlines():
+        raw, event = line.split(b" ", 1)
+        require(raw.isdigit() and int(raw) > 0, "invalid host builder PID")
+        by_pid.setdefault(int(raw), []).append(event)
+    require(
+        list(by_pid.values())
+        == [
+            [b"worker-started", b"verified-deployment", *events] for events in expected
+        ],
+        "wrong worker count, custody or ordered imports for host builder",
+    )
+    for pid in by_pid:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        raise ValueError(
+            f"host builder worker PID {pid} remains; keeping fixture state"
+        )
+
+
+def launch_host_builder(case, mode, project, state, release, profile, run, env, cargo):
+    run([TARGET / "debug/prepare", state, mode], APP)
+    record = state / "deployment.json"
+    require(
+        record == record.resolve(strict=True) and record.is_file(),
+        "missing exact host builder record",
+    )
+    env.update(
+        LEAN_RS_METADATA_BROKEN_IMPORT="1",
+        LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
+        LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
+    )
+    if case != BROKEN_IMPORT_TEST:
+        env.update(
+            LEAN_RS_METADATA_AUDIT_PATH=str(state / "native-events.log"),
+            LEAN_RS_TEST_AUDIT_WORKER_START="1",
+            LEAN_RS_TEST_HOST_BUILDER_CASE=case,
+        )
+    run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
+    worker = TARGET / "debug/metadata-worker"
+    selection = {
+        "project": str(state / project),
+        "worker": str(worker),
+        "sysroot": str(release),
+        "worker_sha256": fixture_worker_digest(worker),
+    }
+    if case == BROKEN_IMPORT_TEST:
+        env["LEAN_RS_TEST_BROKEN_IMPORT"] = json.dumps(selection)
+    else:
+        env["LEAN_RS_TEST_HOST_BUILDER"] = json.dumps({"case": case, **selection})
+    select_nextest_runner(env, profile)
+    run(
+        [
+            "cargo",
+            "nextest",
+            "run",
+            "--locked",
+            "--offline",
+            "-j1",
+            "--no-tests",
+            "fail",
+            "--retries",
+            "0",
+            "-p",
+            "lean-rs-worker-child",
+            "--test",
+            "capability_builder",
+            "-E",
+            f"test(={case})",
+        ],
+        SDK,
+    )
+    return record
+
+
+def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
+    state = parent / "broken-import"
+    for case, mode, project, imports in HOST_BUILDER_CASES:
+        # Each graph has the original sources, its own seal and a checked close.
+        # Refuse an incomplete previous run before touching this state.
+        state.mkdir(mode=0o700)
+        owner = state.stat()
+        scratch = state / "tmp"
+        scratch.mkdir(mode=0o700)
+        env.clear()
+        env.update(build_environment(release, scratch))
+        launch_host_builder(
+            case, mode, project, state, release, profile, run, env, cargo
+        )
+        check_host_builder_children_closed(
+            typed_audit(state / "native-events.log"), imports
+        )
+        remove_owned_state(state, owner)
+    env.clear()
+
+
 def qualify_broken_import(
     release, profile, *, emit_host_selection=False, run_typed=False, run_stream=False
 ):
@@ -1505,48 +1624,16 @@ def qualify_broken_import(
 
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
     run([*cargo, "--bin", "prepare"], APP)
-    run([TARGET / "debug/prepare", state, "--broken-import"], APP)
-    record = state / "deployment.json"
-    require(
-        record == record.resolve(strict=True) and record.is_file(),
-        "missing exact fixture record",
-    )
-    env.update(
-        LEAN_RS_METADATA_BROKEN_IMPORT="1",
-        LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
-        LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
-    )
-    run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
-    worker = TARGET / "debug/metadata-worker"
-    env["LEAN_RS_TEST_BROKEN_IMPORT"] = json.dumps(
-        {
-            "project": str(state / "lean"),
-            "worker": str(worker),
-            "sysroot": str(release),
-            "worker_sha256": fixture_worker_digest(worker),
-        }
-    )
-    select_nextest_runner(env, profile)
-    run(
-        [
-            "cargo",
-            "nextest",
-            "run",
-            "--locked",
-            "--offline",
-            "-j1",
-            "--no-tests",
-            "fail",
-            "--retries",
-            "0",
-            "-p",
-            "lean-rs-worker-child",
-            "--test",
-            "capability_builder",
-            "-E",
-            f"test(={BROKEN_IMPORT_TEST})",
-        ],
-        SDK,
+    record = launch_host_builder(
+        BROKEN_IMPORT_TEST,
+        "--broken-import",
+        "lean",
+        state,
+        release,
+        profile,
+        run,
+        env,
+        cargo,
     )
 
     # The named test confirms both workers were reaped. On a failure or
@@ -1601,6 +1688,7 @@ def qualify_broken_import(
     remove_owned_state(state, owner)
     if run_typed:
         qualify_typed_group(parent, release, profile, run, env, cargo, typed_descriptor)
+        qualify_host_builder_cases(parent, release, profile, run, env, cargo)
     if run_stream:
         qualify_stream(
             release,
@@ -1622,7 +1710,10 @@ def qualify_broken_import(
                     ),
                 ]
             )
-            broken = scoped_tests("capability_builder", (BROKEN_IMPORT_TEST,))
+            broken = scoped_tests(
+                "capability_builder",
+                (BROKEN_IMPORT_TEST, *(case for case, *_ in HOST_BUILDER_CASES)),
+            )
             completed = [broken, typed]
             if run_stream:
                 completed.extend(

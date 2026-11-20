@@ -364,21 +364,117 @@ fn builder_opens_worker_capability_and_validates_metadata() {
     assert_eq!(metadata.commands.len(), 2);
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostBuilderSelection {
+    #[serde(default)]
+    case: Option<String>,
+    project: PathBuf,
+    worker: PathBuf,
+    sysroot: PathBuf,
+    worker_sha256: String,
+}
+
+fn checked_host_builder_selection(selection: &str, expected_case: Option<&str>) -> HostBuilderSelection {
+    use sha2::{Digest, Sha256};
+    let selected: HostBuilderSelection = serde_json::from_str(selection).expect("checked fixture selection");
+    assert_eq!(
+        selected.case.as_deref(),
+        expected_case,
+        "selected host builder test differs"
+    );
+    assert_eq!(
+        selected.project.canonicalize().expect("canonical fixture"),
+        selected.project
+    );
+    assert_eq!(
+        selected.worker.canonicalize().expect("canonical worker"),
+        selected.worker
+    );
+    use std::fmt::Write as _;
+    use std::io::Read as _;
+    const MAX_WORKER_BYTES: u64 = 256 * 1024 * 1024;
+    let metadata = fs::symlink_metadata(&selected.worker).expect("selected worker metadata");
+    assert!(metadata.is_file() && metadata.len() <= MAX_WORKER_BYTES);
+    let mut file = fs::File::open(&selected.worker).expect("open selected worker");
+    let opened = file.metadata().expect("opened worker metadata");
+    assert!(opened.is_file() && opened.len() == metadata.len());
+    let mut remaining = opened.len();
+    let mut digest = Sha256::new();
+    let mut chunk = [0_u8; 16 * 1024];
+    loop {
+        let count = file.read(&mut chunk).expect("read selected worker");
+        if count == 0 {
+            break;
+        }
+        remaining = remaining.checked_sub(count as u64).expect("selected worker grew");
+        digest.update(chunk.get(..count).expect("bytes read fit the buffer"));
+    }
+    assert_eq!(remaining, 0, "selected worker shrank");
+    assert_eq!(file.metadata().expect("final worker metadata").len(), opened.len());
+    let mut actual = String::new();
+    for byte in digest.finalize() {
+        write!(&mut actual, "{byte:02x}").expect("encode digest");
+    }
+    assert_eq!(actual, selected.worker_sha256, "selected worker changed");
+    assert!(std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE").is_none());
+    assert!(std::env::var_os("LEAN_PATH").is_none());
+    selected
+}
+
+fn selected_host_builder_fixture(case: &str) -> Option<(PathBuf, LeanWorkerChild)> {
+    let selection = option_env!("LEAN_RS_TEST_HOST_BUILDER")?;
+    let selected = checked_host_builder_selection(selection, Some(case));
+    assert_eq!(
+        std::env::var_os("LEAN_RS_TEST_HOST_BUILDER_CASE").as_deref(),
+        Some(std::ffi::OsStr::new(case)),
+        "runtime launch must match the selected host builder test"
+    );
+    let name = match case {
+        "a_host_handle_built_without_imports_opens_no_session" => "lean-lazy",
+        "shims_only_host_handle_skips_user_shared_build" => "lean-shims-only",
+        _ => panic!("unrecognized selected host builder test"),
+    };
+    let root = workspace_root()
+        .canonicalize()
+        .expect("canonical SDK checkout")
+        .join("target");
+    assert_eq!(
+        selected.project,
+        root.join("metadata-qualification/broken-import").join(name),
+        "expected the exact sealed project for this host builder test"
+    );
+    assert_eq!(
+        selected.worker,
+        root.join("debug/metadata-worker"),
+        "expected the exact fixture worker"
+    );
+    let child = LeanWorkerChild::for_toolchain(selected.worker, selected.sysroot).checked_native_loader_environment();
+    Some((selected.project, child))
+}
+
 #[test]
 fn shims_only_host_handle_skips_user_shared_build() {
-    let project = TempLakeProject::new("host-handle-shims-only");
-    project.write(
-        "lakefile.lean",
-        "import Lake\nopen Lake DSL\npackage worker_host_handle\nlean_lib Demo\n",
-    );
-    project.write("Demo.lean", "import Demo.Good\nimport Demo.Broken\n");
-    project.write("Demo/Good.lean", "def goodValue : Nat := 41\n");
-    project.write("Demo/Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
-    project.lake_build_ok("Demo.Good");
-    project.lake_build_err("Demo:shared");
+    let mut temporary = None;
+    let (project, child) =
+        if let Some(selected) = selected_host_builder_fixture("shims_only_host_handle_skips_user_shared_build") {
+            selected
+        } else {
+            let project = temporary.insert(TempLakeProject::new("host-handle-shims-only"));
+            project.write(
+                "lakefile.lean",
+                "import Lake\nopen Lake DSL\npackage worker_host_handle\nlean_lib Demo\n",
+            );
+            project.write("Demo.lean", "import Demo.Good\nimport Demo.Broken\n");
+            project.write("Demo/Good.lean", "def goodValue : Nat := 41\n");
+            project.write("Demo/Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
+            project.lake_build_ok("Demo.Good");
+            project.lake_build_err("Demo:shared");
+            (project.path().to_path_buf(), LeanWorkerChild::path(worker_binary()))
+        };
 
-    let mut handle = LeanWorkerHostHandleBuilder::shims_only(project.path(), ["Demo.Good"])
-        .worker_executable(worker_binary())
+    let mut handle = LeanWorkerHostHandleBuilder::shims_only(&project, ["Demo.Good"])
+        .worker_child(child)
         .open()
         .expect("shims-only host handle opens without building Demo:shared");
 
@@ -414,17 +510,24 @@ fn shims_only_host_handle_skips_user_shared_build() {
 /// the one the caller's commands go on to reuse.
 #[test]
 fn a_host_handle_built_without_imports_opens_no_session() {
-    let project = TempLakeProject::new("host-handle-no-bootstrap-import");
-    project.write(
-        "lakefile.lean",
-        "import Lake\nopen Lake DSL\npackage worker_host_lazy\nlean_lib Demo\n",
-    );
-    project.write("Demo.lean", "import Demo.Good\n");
-    project.write("Demo/Good.lean", "def goodValue : Nat := 41\n");
-    project.lake_build_ok("Demo.Good");
+    let mut temporary = None;
+    let (project, child) =
+        if let Some(selected) = selected_host_builder_fixture("a_host_handle_built_without_imports_opens_no_session") {
+            selected
+        } else {
+            let project = temporary.insert(TempLakeProject::new("host-handle-no-bootstrap-import"));
+            project.write(
+                "lakefile.lean",
+                "import Lake\nopen Lake DSL\npackage worker_host_lazy\nlean_lib Demo\n",
+            );
+            project.write("Demo.lean", "import Demo.Good\n");
+            project.write("Demo/Good.lean", "def goodValue : Nat := 41\n");
+            project.lake_build_ok("Demo.Good");
+            (project.path().to_path_buf(), LeanWorkerChild::path(worker_binary()))
+        };
 
-    let mut handle = LeanWorkerHostHandleBuilder::shims_only(project.path(), std::iter::empty::<String>())
-        .worker_executable(worker_binary())
+    let mut handle = LeanWorkerHostHandleBuilder::shims_only(&project, std::iter::empty::<String>())
+        .worker_child(child.clone())
         .open()
         .expect("a shims-only handle with no imports opens");
     assert_eq!(
@@ -446,8 +549,8 @@ fn a_host_handle_built_without_imports_opens_no_session() {
 
     // `check` still opens one, which is what keeps deployment validation
     // available up front rather than deferred to the caller's first session.
-    let report = LeanWorkerHostHandleBuilder::shims_only(project.path(), std::iter::empty::<String>())
-        .worker_executable(worker_binary())
+    let report = LeanWorkerHostHandleBuilder::shims_only(project, std::iter::empty::<String>())
+        .worker_child(child)
         .check();
     assert!(
         report.first_error().is_none(),
@@ -459,55 +562,9 @@ fn a_host_handle_built_without_imports_opens_no_session() {
 /// An import set the builder *was* given still fails at `open`, as before.
 #[test]
 fn a_host_handle_built_with_a_broken_import_still_fails_at_open() {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Selection {
-        project: PathBuf,
-        worker: PathBuf,
-        sysroot: PathBuf,
-        worker_sha256: String,
-    }
-
     let mut temporary = None;
     let (project, child) = if let Some(selection) = option_env!("LEAN_RS_TEST_BROKEN_IMPORT") {
-        use sha2::{Digest, Sha256};
-        let selected: Selection = serde_json::from_str(selection).expect("checked fixture selection");
-        assert_eq!(
-            selected.project.canonicalize().expect("canonical fixture"),
-            selected.project
-        );
-        assert_eq!(
-            selected.worker.canonicalize().expect("canonical worker"),
-            selected.worker
-        );
-        use std::fmt::Write as _;
-        use std::io::Read as _;
-        const MAX_WORKER_BYTES: u64 = 256 * 1024 * 1024;
-        let metadata = fs::symlink_metadata(&selected.worker).expect("selected worker metadata");
-        assert!(metadata.is_file() && metadata.len() <= MAX_WORKER_BYTES);
-        let mut file = fs::File::open(&selected.worker).expect("open selected worker");
-        let opened = file.metadata().expect("opened worker metadata");
-        assert!(opened.is_file() && opened.len() == metadata.len());
-        let mut remaining = opened.len();
-        let mut digest = Sha256::new();
-        let mut chunk = [0_u8; 16 * 1024];
-        loop {
-            let count = file.read(&mut chunk).expect("read selected worker");
-            if count == 0 {
-                break;
-            }
-            remaining = remaining.checked_sub(count as u64).expect("selected worker grew");
-            digest.update(chunk.get(..count).expect("bytes read fit the buffer"));
-        }
-        assert_eq!(remaining, 0, "selected worker shrank");
-        assert_eq!(file.metadata().expect("final worker metadata").len(), opened.len());
-        let mut actual = String::new();
-        for byte in digest.finalize() {
-            write!(&mut actual, "{byte:02x}").expect("encode digest");
-        }
-        assert_eq!(actual, selected.worker_sha256, "selected worker changed");
-        assert!(std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE").is_none());
-        assert!(std::env::var_os("LEAN_PATH").is_none());
+        let selected = checked_host_builder_selection(selection, None);
         let bare_tracker = lean_rs_worker_parent::LeanWorkerProcessTracker::new();
         match LeanWorkerHostHandleBuilder::shims_only(&selected.project, ["Demo.Broken"])
             .worker_child(LeanWorkerChild::for_toolchain(worker_binary(), &selected.sysroot))

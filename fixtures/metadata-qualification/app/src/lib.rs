@@ -137,6 +137,8 @@ fn require(ok: bool, detail: &str) -> R<()> {
 pub struct Record {
     #[serde(default)]
     pub broken_import: bool,
+    #[serde(default)]
+    pub host_builder_case: Option<String>,
     pub typed_session: bool,
     #[serde(default)]
     pub stream: bool,
@@ -254,6 +256,23 @@ impl Record {
             .map(|p| p.display().to_string())
             .collect()
     }
+    pub fn host_builder_import_event(&self, names: &[String]) -> Option<&'static str> {
+        match (self.host_builder_case.as_deref(), names) {
+            (Some("a_host_handle_built_without_imports_opens_no_session"), []) => Some("authorize-builder-empty"),
+            (Some("shims_only_host_handle_skips_user_shared_build"), [name]) if name == "Demo.Broken" => {
+                Some("authorize-builder-broken")
+            }
+            (
+                Some(
+                    "a_host_handle_built_without_imports_opens_no_session"
+                    | "shims_only_host_handle_skips_user_shared_build",
+                ),
+                [name],
+            ) if name == "Demo.Good" => Some("authorize-builder-good"),
+            _ => None,
+        }
+    }
+
     pub fn check_order(
         &self,
         paths: &[String],
@@ -296,7 +315,11 @@ impl Record {
                 .iter()
                 .any(|allowed| names == *allowed));
         require(
-            (names == expected || reuse_imports) && *options == Default::default(),
+            (if self.host_builder_case.is_some() {
+                self.host_builder_import_event(names).is_some()
+            } else {
+                names == expected || reuse_imports
+            }) && *options == Default::default(),
             "wrong module or import profile",
         )?;
         require(

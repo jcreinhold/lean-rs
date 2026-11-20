@@ -40,9 +40,19 @@ impl MetadataApp {
                 {
                     return Err("worker and record select different fixture profiles".to_owned());
                 }
+                if record.host_builder_case.as_deref() != option_env!("LEAN_RS_TEST_HOST_BUILDER_CASE")
+                    || record.host_builder_case.as_deref()
+                        != std::env::var("LEAN_RS_TEST_HOST_BUILDER_CASE").ok().as_deref()
+                    || (record.host_builder_case.is_some() && !record.broken_import)
+                {
+                    return Err("worker and record select different host builder tests".to_owned());
+                }
                 Held::acquire(record)
                     .and_then(|held| {
                         held.verify()?;
+                        if held.record.host_builder_case.is_some() {
+                            audit("verified-deployment");
+                        }
                         Ok(Arc::new(held))
                     })
                     .map_err(|error| {
@@ -532,7 +542,9 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         held.record.check_order(&paths, &names, &options).map_err(ioerr)?;
-        if !held.record.broken_import {
+        if let Some(event) = held.record.host_builder_import_event(&names) {
+            audit(event);
+        } else if !held.record.broken_import {
             audit(if held.record.typed_session {
                 if names == ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"] {
                     "authorize-Handles-SourceRanges-import"
@@ -943,7 +955,8 @@ impl WorkerAuthority for MetadataApp {
 }
 fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
     // A policy restart can shut down before the replacement receives any request.
-    if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
+    if (option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
+        || (broken_import_profile() && option_env!("LEAN_RS_TEST_HOST_BUILDER_CASE").is_some()))
         && std::env::var_os("LEAN_RS_TEST_AUDIT_WORKER_START").as_deref() == Some(std::ffi::OsStr::new("1"))
     {
         audit("worker-started");

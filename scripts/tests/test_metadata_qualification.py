@@ -561,6 +561,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 side_effect=None if live_pid else ProcessLookupError,
             ) as probe,
             patch("sys.stdout", output),
+            patch.object(qualification, "qualify_host_builder_cases") as host_builder,
         ):
             if live_pid:
                 with self.assertRaisesRegex(
@@ -611,6 +612,10 @@ class MetadataQualificationTest(unittest.TestCase):
                         for _, _, counts, _ in qualification.ORDINARY_AUDITED_TESTS
                     ),
                 )
+        if live_pid or extra_json_worker:
+            host_builder.assert_not_called()
+        else:
+            host_builder.assert_called_once()
         self.assertFalse(broken.exists())
         self.assertEqual(
             len(seen),
@@ -811,9 +816,15 @@ class MetadataQualificationTest(unittest.TestCase):
             str(self.state.with_name("typed-session") / "worker-json-capability.json"),
         )
         remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
+        builder_cases = (
+            "a_host_handle_built_with_a_broken_import_still_fails_at_open",
+            "a_host_handle_built_without_imports_opens_no_session",
+            "shims_only_host_handle_skips_user_shared_build",
+        )
+        builder_filter = " | ".join(f"test(={name})" for name in builder_cases)
         self.assertEqual(
             remaining,
-            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & (test(={qualification.BROKEN_IMPORT_TEST}))) | {selection} | {' | '.join(audited_filters)}))",
+            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & ({builder_filter})) | {selection} | {' | '.join(audited_filters)}))",
         )
 
     def test_typed_group_extra_pool_worker_keeps_state_and_skips_json_smoke(self):
@@ -862,6 +873,36 @@ class MetadataQualificationTest(unittest.TestCase):
                 grant_event=qualification.META_TERM_GRANT,
             )
         probe.assert_not_called()
+
+    def test_host_builder_audit_requires_each_pid_and_ordered_scope(self):
+        expected = ((b"authorize-builder-good",), (b"authorize-builder-empty",))
+        good = (
+            b"51 worker-started\n51 verified-deployment\n51 authorize-builder-good\n"
+            b"52 worker-started\n52 verified-deployment\n52 authorize-builder-empty\n"
+        )
+        with patch.object(
+            qualification.os, "kill", side_effect=ProcessLookupError
+        ) as probe:
+            qualification.check_host_builder_children_closed(good, expected)
+        self.assertEqual(probe.call_count, 2)
+        wrong = good.replace(
+            b"52 authorize-builder-empty", b"51 authorize-builder-empty"
+        )
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(
+                ValueError, "wrong worker count, custody or ordered imports"
+            ),
+        ):
+            qualification.check_host_builder_children_closed(wrong, expected)
+        probe.assert_not_called()
+        with (
+            patch.object(
+                qualification.os, "kill", side_effect=[ProcessLookupError, None]
+            ),
+            self.assertRaisesRegex(ValueError, "PID 52 remains"),
+        ):
+            qualification.check_host_builder_children_closed(good, expected)
 
     def test_module_query_audit_refuses_an_unexpected_term_grant(self):
         audit = (

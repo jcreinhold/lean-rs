@@ -108,8 +108,27 @@ def main():
     assert not stream or typed
     if typed:
         assert rec.get("verification") is False
+    host_builder_case = rec.get("host_builder_case")
+    builder_profiles = {
+        "a_host_handle_built_without_imports_opens_no_session": (
+            "lean-lazy",
+            "worker_host_lazy",
+            "import Demo.Good\n",
+            False,
+        ),
+        "shims_only_host_handle_skips_user_shared_build": (
+            "lean-shims-only",
+            "worker_host_handle",
+            "import Demo.Good\nimport Demo.Broken\n",
+            True,
+        ),
+    }
+    assert host_builder_case is None or (
+        broken and host_builder_case in builder_profiles
+    )
+    builder = builder_profiles.get(host_builder_case)
     project = (
-        state / "lean"
+        state / (builder[0] if builder else "lean")
         if broken
         else sdk
         / (
@@ -256,15 +275,27 @@ def main():
         assert packages == []
     elif broken:
         assert packages == []
-        assert (
-            project / "Demo/Broken.lean"
-        ).read_text() == "theorem broken : True := sorry_that_doesnt_exist\n"
-        for source in (
-            "lakefile.lean",
-            "Demo.lean",
-            "Demo/Broken.lean",
-            "lean-toolchain",
-        ):
+        sources = ["lakefile.lean", "Demo.lean", "lean-toolchain"]
+        if builder:
+            _, package, umbrella, has_broken = builder
+            assert (project / "lakefile.lean").read_text() == (
+                f"import Lake\nopen Lake DSL\npackage {package}\nlean_lib Demo\n"
+            )
+            assert (project / "Demo.lean").read_text() == umbrella
+            assert (
+                project / "Demo/Good.lean"
+            ).read_text() == "def goodValue : Nat := 41\n"
+            sources.append("Demo/Good.lean")
+        else:
+            has_broken = True
+        if has_broken:
+            assert (
+                project / "Demo/Broken.lean"
+            ).read_text() == "theorem broken : True := sorry_that_doesnt_exist\n"
+            sources.append("Demo/Broken.lean")
+        else:
+            assert not (project / "Demo/Broken.lean").exists()
+        for source in sources:
             pin_content(project / source)
     else:
         assert len(packages) == 1
@@ -305,6 +336,13 @@ def main():
         for r in [project_oleans, *shims]:
             assert not (r / prefix).exists() and not (r / (prefix + ".olean")).exists()
     if broken:
+        if builder:
+            assert str(project_oleans / "Demo/Good.olean") in filepins
+            assert not any(
+                (r / "Demo/Good.olean").exists() for r in [*shims, release / "lib/lean"]
+            )
+            for stem in ("Demo", f"{builder[1].replace('_', '__')}_Demo"):
+                assert not (project / ".lake/build/lib" / native_name(stem)).exists()
         assert not any(
             (r / "Demo/Broken.olean").exists() or (r / "Demo.olean").exists()
             for r in [project_oleans, *shims, release / "lib/lean"]
