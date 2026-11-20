@@ -10,7 +10,7 @@ use lean_rs::LeanRuntime;
 use lean_rs_host::LeanHost;
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
 }
 
 #[test]
@@ -24,10 +24,10 @@ fn host_loads_with_no_consumer_shim_require() {
 
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
     let host = LeanHost::from_lake_project(runtime, &lake_root).expect("host opens cleanly");
-    let caps = fixture::capabilities(&host).expect("capabilities load with bundled shims");
+    let caps = fixture::native_capabilities(&host).expect("capabilities load with bundled shims");
     let mut session = caps
         .session(
-            &fixture::imports_for(
+            &fixture::native_imports_for(
                 &caps,
                 &["LeanRsFixture.Handles", "LeanRsHostShims.Meta"],
                 lean_rs_host::LeanSessionImportProfile::Private,
@@ -65,10 +65,10 @@ fn the_extension_registry_epoch_moves_only_when_a_module_registers() {
     // `LeanRsFixtureLateExtension`'s initializer eagerly, after
     // `lean_io_mark_end_initialization`, where registration throws. The
     // registration under test has to happen inside `Lean.importModules`.
-    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
+    let caps = fixture::native_shims_only(&host).expect("shim-only capabilities load");
 
     let baseline = caps
-        .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
+        .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
         .expect("baseline session imports cleanly");
     let before = baseline.extension_registry_epoch();
     assert_eq!(
@@ -80,7 +80,7 @@ fn the_extension_registry_epoch_moves_only_when_a_module_registers() {
     );
 
     let inert = caps
-        .session(&fixture::imports(&caps, "LeanRsFixture.Meta"), None, None)
+        .session(&fixture::native_imports(&caps, "LeanRsFixture.Meta"), None, None)
         .expect("inert session imports cleanly");
     assert_eq!(
         inert.extension_registry_epoch(),
@@ -96,7 +96,11 @@ fn the_extension_registry_epoch_moves_only_when_a_module_registers() {
     );
 
     let registrar = caps
-        .session(&fixture::imports(&caps, "LeanRsFixtureLateExtension"), None, None)
+        .session(
+            &fixture::native_imports(&caps, "LeanRsFixtureLateExtension"),
+            None,
+            None,
+        )
         .expect("late-extension session imports cleanly");
     let after = registrar.extension_registry_epoch();
     assert!(
