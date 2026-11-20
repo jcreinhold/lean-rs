@@ -27,11 +27,9 @@ xtest = "nextest run --workspace"
 xtest-ci = "nextest run --workspace --profile ci"
 
 [env]
-# Pin the Lean task manager to a single worker thread per process.
-# Combined with the `test-threads = 1` cap in `.config/nextest.toml`
-# this bounds total Lean worker threads at 1 across the whole test
-# run. `LeanRuntime::init` reads this once at first init; later
-# changes are ignored. Override locally (e.g. for a benchmark run
+# Give each Lean runtime one task-manager thread. Nextest limits test
+# processes separately, and one test may launch several Lean workers.
+# `LeanRuntime::init` reads this once at first init; later changes are ignored. Override locally (e.g. for a benchmark run
 # that legitimately wants Lean parallelism) with `LEAN_RS_NUM_THREADS=8
 # cargo bench ...`; `[env]` defaults are overridden by the process
 # environment unless they are marked `force = true`.
@@ -42,18 +40,6 @@ LEAN_RS_NUM_THREADS = "1"
 # inside one harness by default.
 RUST_TEST_THREADS = "1"
 
-# Default local memory guardrails for worker children and profiling examples.
-# These are fail-fast caps, not reclamation; process exit is still the reset.
+# Default local Lean memory cap for each worker child, not a total RSS cap.
+# This is a fail-fast limit, not reclamation; process exit is still the reset.
 LEAN_RS_LEAN_MAX_MEMORY_KIB = "1572864"
-LEAN_RS_LONG_SESSION_IMPORTS = "1"
-LEAN_RS_LONG_SESSION_MAX_RSS_KIB = "1572864"
-LEAN_RS_POOL_MEMORY_MAX_IMPORTS = "1"
-LEAN_RS_POOL_MEMORY_MAX_WORKERS = "1"
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB = "1572864"
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB = "1572864"
-LEAN_RS_WORKER_MEMORY_MAX_IMPORTS = "1"
-LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB = "1572864"
-
-# Quieter `tracing` output by default; override per-invocation with
-# `RUST_LOG=lean_rs=debug cargo ...`.
-RUST_LOG = "warn"

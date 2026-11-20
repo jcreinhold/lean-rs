@@ -19,7 +19,7 @@ use std::time::Instant;
 use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig};
 
 const DEFAULT_IMPORTS: u64 = 8;
-const DEFAULT_MAX_IMPORTS: u64 = 2;
+const DEFAULT_MAX_IMPORTS: u64 = 1;
 const DEFAULT_MAX_RSS_KIB: u64 = 1_572_864;
 
 fn main() -> ExitCode {

@@ -64,12 +64,10 @@ cd fixtures/lean && lake build && cd -
 LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
-The example's fallback workload is bounded. Repository Cargo configuration overrides the import count to one; inspect
-[`.cargo/config.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.cargo/config.toml) and explicit environment
-overrides when reproducing a result:
+The example sets its own defaults, including a 1,572,864 KiB RSS cap. The default workload is:
 
-- 4 fresh import/drop acquisitions through a zero-capacity pool with `max_fresh_imports=4`.
-- 4 bounded-pool acquisitions through a pool with capacity 1 and the same fresh-import budget.
+- One fresh import/drop acquisition through a zero-capacity pool with `max_fresh_imports=1`.
+- One bounded-pool acquisition through a pool with capacity 1 and the same fresh-import budget.
 - 64 `query_declarations_bulk` calls over 16 fixture names.
 - 64 elaboration calls, 50/50 success vs. diagnostic-producing terms.
 - Snapshots before/after runtime init, host/capability load, import loops, bulk introspection, elaboration, drop, and a
@@ -77,7 +75,7 @@ overrides when reproducing a result:
 
 The old crash-shaped workload remains opt-in: raise `LEAN_RS_LONG_SESSION_IMPORTS`, `LEAN_RS_LONG_SESSION_BULK`, and
 `LEAN_RS_LONG_SESSION_ELAB` only after the previous run's peak RSS is acceptable. Set `LEAN_RS_LONG_SESSION_MAX_RSS_KIB`
-to make the same-process pool refuse the next fresh import before crossing a local RSS ceiling.
+to change the RSS threshold at which the same-process pool refuses the next fresh import.
 
 Environment overrides:
 
@@ -249,8 +247,9 @@ Historical local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LO
 ## Measured Shape
 
 Post-reduction rebaseline on 2026-06-08, macOS aarch64, Lean 4.31.0-rc1, profiling profile, `LEAN_RS_NUM_THREADS=1`, and
-a local `2,097,152` KiB RSS budget. Current repo defaults are stricter: `test-threads=1`, `build.jobs=1`,
-`RUST_TEST_THREADS=1`, `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864`, and profiling RSS caps of 1,572,864 KiB.
+a local `2,097,152` KiB RSS budget. The profiling examples now default to 1,572,864 KiB RSS caps. Nextest
+allows two test processes, but memory-heavy cases reserve both slots. Cargo and libtest still default to one job or
+thread, and `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` limits each worker's Lean runtime.
 
 | Workload | Command/env shape | Status | Peak RSS KiB | Import profile | Imported bytes | Regions | Ext entries |
 | --- | --- | --- | ---: | --- | ---: | ---: | ---: |

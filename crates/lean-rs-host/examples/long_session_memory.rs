@@ -33,7 +33,8 @@ use lean_rs_host::{
 };
 use lean_toolchain::LEAN_VERSION;
 
-const DEFAULT_IMPORTS: usize = 4;
+const DEFAULT_IMPORTS: usize = 1;
+const DEFAULT_MAX_RSS_KIB: u64 = 1_572_864;
 const DEFAULT_ROUNDS: usize = 4;
 const DEFAULT_BULK: usize = 64;
 const DEFAULT_ELAB: usize = 64;
@@ -257,7 +258,7 @@ impl Config {
             elab: env_usize("LEAN_RS_LONG_SESSION_ELAB", DEFAULT_ELAB),
             pool_capacity: env_usize("LEAN_RS_LONG_SESSION_POOL_CAPACITY", DEFAULT_POOL_CAPACITY),
             checkpoint_every: env_usize("LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY", DEFAULT_CHECKPOINT_EVERY).max(1),
-            max_rss_kib: env_u64_optional("LEAN_RS_LONG_SESSION_MAX_RSS_KIB"),
+            max_rss_kib: env_u64_optional("LEAN_RS_LONG_SESSION_MAX_RSS_KIB", DEFAULT_MAX_RSS_KIB),
         }
     }
 }
@@ -348,11 +349,12 @@ fn env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-fn env_u64_optional(name: &str) -> Option<u64> {
-    std::env::var(name)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .map(|value| value.max(1))
+fn env_u64_optional(name: &str, default: u64) -> Option<u64> {
+    match std::env::var(name) {
+        Ok(raw) => raw.trim().parse::<u64>().ok().map(|value| value.max(1)),
+        Err(std::env::VarError::NotPresent) => Some(default),
+        Err(std::env::VarError::NotUnicode(_)) => None,
+    }
 }
 
 fn run_fresh_import_drop_loop(
