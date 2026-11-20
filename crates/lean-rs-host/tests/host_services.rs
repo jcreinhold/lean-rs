@@ -14,14 +14,30 @@ mod fixture;
 #[path = "support/service_requests.rs"]
 mod service_requests;
 
+// Only the two option regressions use the held elaboration fixture for these
+// calls. Their sources, targets, selectors, cache policy and options are fixed
+// at the call sites; other requests still need the independent policy record.
+macro_rules! service_paths {
+    ($caps:ident, $session:ident, $operation:literal, $payload:expr, $options:ident) => {
+        service_requests::approved_paths(&$caps, &$session, $operation, $payload, &$options)
+    };
+    ($caps:ident, $session:ident, $operation:literal, $payload:expr, $options:ident, option_regression) => {
+        if fixture::native_fixture_selected() {
+            fixture::native_elaboration_paths(&$caps, &$session)
+        } else {
+            service_paths!($caps, $session, $operation, $payload, $options)
+        }
+    };
+}
+
 // Capture exact typed requests before taking the mutable session borrow. The policy
 // encoding uses derived Debug for closed SDK request enums (including every field).
 macro_rules! call_service {
-    ($caps:ident, $session:ident, kernel_check, $source:expr, $options:expr, $cancel:expr, $progress:expr $(,)?) => {{
+    ($caps:ident, $session:ident, kernel_check, $source:expr, $options:expr, $cancel:expr, $progress:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request: String = ($source).to_owned();
         let options = ($options).source_options();
         let paths =
-            service_requests::approved_paths(&$caps, &$session, "kernel_check", &format!("{request:?}"), &options);
+            service_paths!($caps, $session, "kernel_check", &format!("{request:?}"), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -56,19 +72,14 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.elaborate(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query, $source:expr, $query:expr, $options:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query, $source:expr, $query:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = lean_rs::host_bridge::HostModuleQuery {
             source: ($source).to_owned(),
             query: ($query).clone(),
         };
         let options = ($options).source_options();
-        let paths = service_requests::approved_paths(
-            &$caps,
-            &$session,
-            "process_module_query",
-            &format!("{:?}", (&request.source, &request.query)),
-            &options,
-        );
+        let paths = service_paths!($caps, $session, "process_module_query",
+            &format!("{:?}", (&request.source, &request.query)), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -84,7 +95,7 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query_batch, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query_batch, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let batch = lean_rs::host_bridge::HostModuleBatch {
             source: ($source).to_owned(),
             selectors: ($selectors).to_vec(),
@@ -92,13 +103,8 @@ macro_rules! call_service {
         };
         let request = batch;
         let options = ($options).source_options();
-        let paths = service_requests::approved_paths(
-            &$caps,
-            &$session,
-            "process_module_query_batch",
-            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)),
-            &options,
-        );
+        let paths = service_paths!($caps, $session, "process_module_query_batch",
+            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -114,7 +120,7 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query_batch(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, process_module_query_batch_cached, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $policy:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, process_module_query_batch_cached, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $policy:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let batch = lean_rs::host_bridge::HostModuleBatch {
             source: ($source).to_owned(),
             selectors: ($selectors).to_vec(),
@@ -129,10 +135,7 @@ macro_rules! call_service {
             ),
         };
         let options = ($options).source_options();
-        let paths = service_requests::approved_paths(
-            &$caps,
-            &$session,
-            "process_module_query_batch_cached",
+        let paths = service_paths!($caps, $session, "process_module_query_batch_cached",
             &format!(
                 "{:?}",
                 (
@@ -141,9 +144,7 @@ macro_rules! call_service {
                     &request.batch.budgets,
                     &request.policy
                 )
-            ),
-            &options,
-        );
+            ), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -159,16 +160,11 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.process_module_query_batch_cached(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, verify_declaration_batch, $input:expr, $options:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, verify_declaration_batch, $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = ($input).clone();
         let options = ($options).source_options();
-        let paths = service_requests::approved_paths(
-            &$caps,
-            &$session,
-            "verify_declaration_batch",
-            &format!("{request:?}"),
-            &options,
-        );
+        let paths = service_paths!($caps, $session, "verify_declaration_batch",
+            &format!("{request:?}"), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -184,16 +180,11 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.verify_declaration_batch(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, verify_declaration, $input:expr, $options:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, verify_declaration, $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = ($input).clone();
         let options = ($options).source_options();
-        let paths = service_requests::approved_paths(
-            &$caps,
-            &$session,
-            "verify_declaration",
-            &format!("{request:?}"),
-            &options,
-        );
+        let paths = service_paths!($caps, $session, "verify_declaration",
+            &format!("{request:?}"), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -209,11 +200,11 @@ macro_rules! call_service {
         .expect("admit reviewed request");
         $session.verify_declaration(&admitted, $cancel)
     }};
-    ($caps:ident, $session:ident, attempt_proof, $input:expr, $options:expr, $cancel:expr $(,)?) => {{
+    ($caps:ident, $session:ident, attempt_proof, $input:expr, $options:expr, $cancel:expr $(; $policy_kind:ident)? $(,)?) => {{
         let request = ($input).clone();
         let options = ($options).source_options();
         let paths =
-            service_requests::approved_paths(&$caps, &$session, "attempt_proof", &format!("{request:?}"), &options);
+            service_paths!($caps, $session, "attempt_proof", &format!("{request:?}"), options $(, $policy_kind)?);
         let (env, scope) = $session.source_context();
         #[allow(
             unsafe_code,
@@ -3868,8 +3859,8 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
     };
     use lean_toolchain::LeanOptionValue;
 
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let source = "module\n@[expose] public section\nuniverse u\ndef before (A : Type u) := A\nend\n@[expose] public section\ndef after (A : Type u) := A\nend\n";
     let default = LeanElabOptions::new().file_label("option-regression.lean");
@@ -3932,7 +3923,7 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             source,
             &ModuleQuery::Diagnostics,
             options,
-            None
+            None; option_regression
         )
         .expect("query")
         else {
@@ -3954,7 +3945,7 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             &budgets,
             options,
             &policy,
-            None
+            None; option_regression
         )
         .expect("cached query") else {
             panic!("expected cached diagnostics");
@@ -3973,7 +3964,8 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             should_error
         );
         let DeclarationVerificationOutcome::Ok { status, .. } =
-            call_service!(caps, session, verify_declaration, &request, options, None).expect("verification")
+            call_service!(caps, session, verify_declaration, &request, options, None; option_regression)
+                .expect("verification")
         else {
             panic!("expected verification")
         };
@@ -3989,7 +3981,8 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             budgets: budgets.clone(),
         };
         let DeclarationVerificationBatchOutcome::Ok { results, .. } =
-            call_service!(caps, session, verify_declaration_batch, &batch, options, None).expect("batch verification")
+            call_service!(caps, session, verify_declaration_batch, &batch, options, None; option_regression)
+                .expect("batch verification")
         else {
             panic!("expected batch verification");
         };
@@ -4005,7 +3998,7 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             &selectors,
             &budgets,
             options,
-            None
+            None; option_regression
         )
         .expect("uncached batch") else {
             panic!("expected batch diagnostics");
@@ -4039,7 +4032,7 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
         &local,
         &ModuleQuery::Diagnostics,
         &strict,
-        None
+        None; option_regression
     )
     .expect("local option")
     else {
@@ -4055,8 +4048,8 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
         ProofAttemptRequest, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
     };
     use lean_toolchain::LeanOptionValue;
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let strict =
         LeanElabOptions::new().lean_options([("autoImplicit".to_owned(), LeanOptionValue::Bool(false))].into());
@@ -4073,7 +4066,7 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
         budgets: ModuleQueryOutputBudgets::default(),
     };
     let ProofAttemptOutcome::Ok { result, .. } =
-        call_service!(caps, session, attempt_proof, &request, &strict, None).expect("trial")
+        call_service!(caps, session, attempt_proof, &request, &strict, None; option_regression).expect("trial")
     else {
         panic!("expected trial result");
     };
@@ -4092,7 +4085,7 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
         "def undeclaredUniverse (A : Type u) := A",
         &strict,
         None,
-        None
+        None; option_regression
     )
     .expect("kernel check");
     assert!(matches!(kernel, LeanKernelOutcome::Rejected(_)));
@@ -4106,7 +4099,7 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
             "def x := 1",
             &ModuleQuery::Diagnostics,
             &invalid,
-            None
+            None; option_regression
         )
         .is_err()
     );
@@ -4133,7 +4126,7 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
         source,
         &ModuleQuery::Diagnostics,
         &bounded,
-        None
+        None; option_regression
     )
     .expect("bounded query")
     else {
