@@ -165,11 +165,14 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
                 .map(|root| lean_toolchain::shared_writer::project_lock_path(root).expect("ordinary host lock domain"))
                 .collect::<Vec<_>>();
             lock_paths.sort();
-            let deadline = Instant::now() + Duration::from_secs(1);
+            let started = Instant::now();
             let intent = loop {
                 match lean_toolchain::writer_demand::ReadAdmission::try_acquire(&lock_paths) {
                     // A competing reader holds a transient gate. Our partial gates have been dropped.
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    Err(err)
+                        if err.kind() == std::io::ErrorKind::WouldBlock
+                            && started.elapsed() < Duration::from_secs(1) =>
+                    {
                         std::thread::sleep(Duration::from_millis(5));
                     }
                     result => {
