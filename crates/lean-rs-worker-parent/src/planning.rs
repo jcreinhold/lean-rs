@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use lean_toolchain::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
@@ -17,7 +17,7 @@ use lean_rs_worker_protocol::types::{LeanWorkerCapabilityMetadata, LeanWorkerSes
 
 use crate::capability::LeanWorkerCapabilityBuilder;
 use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
-use crate::supervisor::LeanWorkerRestartPolicy;
+use crate::supervisor::{LeanWorkerError, LeanWorkerRestartPolicy};
 
 /// Capability and session requirements used to plan worker batches.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -171,13 +171,44 @@ impl LeanWorkerPlannedBatch {
     /// worker executable. The batch supplies the stable session material.
     #[must_use]
     pub fn capability_builder(&self) -> LeanWorkerCapabilityBuilder {
-        let mut builder = LeanWorkerCapabilityBuilder::new(
+        self.apply_plan(LeanWorkerCapabilityBuilder::new(
             self.project_root.clone(),
             self.package.clone(),
             self.lib_name.clone(),
             self.imports.clone(),
-        )
-        .import_profile(self.import_profile);
+        ))
+    }
+
+    /// Use a prebuilt capability manifest for this planned batch.
+    ///
+    /// The embedding app must hold the manifest, library and dependencies
+    /// stable from this call through all worker and pool use. To replace an image, publish a
+    /// new manifest path. The pool keys by manifest path, not its contents.
+    /// Opening still runs normal preflight and worker admission.
+    ///
+    /// # Errors
+    /// Rejects a missing or invalid manifest, or a manifest for a different
+    /// canonical Lake project, package or target.
+    pub fn capability_builder_with_manifest(
+        &self,
+        manifest: impl AsRef<Path>,
+    ) -> Result<LeanWorkerCapabilityBuilder, LeanWorkerError> {
+        let path = manifest.as_ref();
+        let canonical = path.canonicalize().map_err(|err| LeanWorkerError::Setup {
+            message: format!("cannot resolve prebuilt manifest '{}': {err}", path.display()),
+        })?;
+        let builder = LeanWorkerCapabilityBuilder::from_planned_manifest(
+            &canonical,
+            &self.project_root,
+            &self.package,
+            &self.lib_name,
+            self.imports.clone(),
+        )?;
+        Ok(self.apply_plan(builder))
+    }
+
+    fn apply_plan(&self, builder: LeanWorkerCapabilityBuilder) -> LeanWorkerCapabilityBuilder {
+        let mut builder = builder.import_profile(self.import_profile);
         if let Some(policy) = &self.restart_policy {
             builder = builder.restart_policy(policy.clone());
         }
@@ -504,6 +535,83 @@ name = "FixtureLib"
             }
             other => panic!("expected UnresolvedCapabilityTarget for fallback project, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn prebuilt_builder_keeps_the_actual_plan_and_rejects_other_targets() {
+        use lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile;
+        use serde_json::json;
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                drop(fs::remove_dir_all(&self.0));
+            }
+        }
+
+        let root = Cleanup(temp_project("prebuilt-builder"));
+        write_file(
+            &root.0.join("lakefile.toml"),
+            "name = \"demo\"\n[[lean_lib]]\nname = \"FixtureLib\"\n",
+        );
+        write_file(&root.0.join("FixtureLib.lean"), "#check Nat\n");
+        let canonical_root = root.0.canonicalize().expect("canonical test project");
+        let image = canonical_root.join(".lake/build/lib/fixture.dylib");
+        write_file(&image, "");
+        let manifest = root.0.join("capability.json");
+        let write_manifest = |image: &Path, package: &str, module: &str, target: &str| {
+            let document = json!({
+                "schema_version": lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
+                "primary_dylib": image,
+                "package": package,
+                "module": module,
+                "target_name": target,
+            })
+            .to_string();
+            write_file(&manifest, &document);
+            document
+        };
+        let initial = write_manifest(&image, "demo", "FixtureLib", "FixtureLib");
+        let planner = LeanWorkerImportPlanner::new(
+            LeanWorkerImportPlanConfig::new(&root.0, "demo", "FixtureLib")
+                .base_imports(["Init", "Std"])
+                .import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat)
+                .restart_policy(super::LeanWorkerRestartPolicy::default().max_requests(7))
+                .validate_metadata("metadata", json!({"from": "planner", "order": ["Init", "Std"]})),
+        );
+        let batch = planner
+            .plan_lake_project()
+            .expect("plan")
+            .into_iter()
+            .next()
+            .expect("planned batch");
+        let plain = batch.capability_builder();
+        assert_eq!(plain.session_key(), batch.session_key);
+        let built = batch
+            .capability_builder_with_manifest(&manifest)
+            .expect("same planned target");
+        assert_eq!(
+            built.session_key(),
+            plain.session_key().with_built_manifest_path(&manifest)
+        );
+        assert_eq!(fs::read_to_string(&manifest).expect("manifest bytes"), initial);
+
+        let foreign = canonical_root.join("foreign/.lake/build/lib/fixture.dylib");
+        write_file(&foreign, "");
+        for (candidate, package, module, target) in [
+            (image.as_path(), "another_package", "FixtureLib", "FixtureLib"),
+            (image.as_path(), "demo", "WrongModule", "FixtureLib"),
+            (image.as_path(), "demo", "FixtureLib", "WrongTarget"),
+            (foreign.as_path(), "demo", "FixtureLib", "FixtureLib"),
+        ] {
+            drop(write_manifest(candidate, package, module, target));
+            assert!(batch.capability_builder_with_manifest(&manifest).is_err());
+        }
+        assert!(
+            batch
+                .capability_builder_with_manifest(root.0.join("absent.json"))
+                .is_err()
+        );
     }
 
     fn temp_project(name: &str) -> PathBuf {

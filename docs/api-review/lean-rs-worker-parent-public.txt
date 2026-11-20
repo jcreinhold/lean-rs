@@ -1082,6 +1082,7 @@ pub lean_rs_worker_parent::LeanWorkerPlannedBatch::session_key: lean_rs_worker_p
 pub lean_rs_worker_parent::LeanWorkerPlannedBatch::source_root: alloc::string::String
 impl lean_rs_worker_parent::LeanWorkerPlannedBatch
 pub fn lean_rs_worker_parent::LeanWorkerPlannedBatch::capability_builder(&self) -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder
+pub fn lean_rs_worker_parent::LeanWorkerPlannedBatch::capability_builder_with_manifest(&self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerCapabilityBuilder, lean_rs_worker_parent::LeanWorkerError>
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerPlannedBatch
 pub fn lean_rs_worker_parent::LeanWorkerPlannedBatch::clone(&self) -> lean_rs_worker_parent::LeanWorkerPlannedBatch
 impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerPlannedBatch
