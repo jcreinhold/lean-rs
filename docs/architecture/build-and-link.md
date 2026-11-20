@@ -7,6 +7,7 @@ mangling.
 ## Build Script Contract
 
 Every build call acquires writer custody before cache inspection, including cache hits. Bind a shared-writer helper
+such as the standalone `lean-rs-writer` executable by canonical path
 with `.writer_executable(...)` or `LEAN_HOST_MCP_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap`
 when its Lean root and all dependencies lie strictly below the owning Cargo package:
 
