@@ -128,11 +128,34 @@ Set a positive `LEAN_RS_NUM_THREADS` to select benchmark parallelism. For Lean's
 Cargo command with `LEAN_RS_NUM_THREADS=`; the current parser warns about the empty value and falls back. Merely unsetting
 the shell variable lets Cargo restore the configured value `1`.
 
-## Worker fixture qualification on macOS arm64
+## Worker fixture qualification
 
-The named runner builds the tracked ordinary application in `fixtures/metadata-qualification/app`. Its default mode
-runs the metadata positive and mismatch selectors in `capability_builder`. Typed, verification and disposable-clean
-routes are currently unavailable in this runner rather than sharing the ordinary fixture's authority.
+Use the SDK-owned fixture for focused Lean 4.36 tests on macOS arm64 or Linux x86-64. It needs no
+`lean-host-mcp` writer. From the repository root, run the broken-import control:
+
+```sh
+python3 scripts/qualify_metadata.py broken-import --emit-host-selection
+```
+
+For stream or metadata changes, test the affected cases and one control. Set `SHIM_MANIFEST` to the
+absolute path of the prepared `*.lean-rs-capability.json` file reported in the shim descriptor above.
+The stream fixture must already be built by the normal qualification command; this shortcut does not rebuild it.
+
+```sh
+python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \
+  --case successful_stream_delivers_rows_with_per_stream_sequences \
+  --case request_timeout_cycles_child_and_invalidates_session
+```
+
+Repeat `--case` for each test. Run `interop-stream --help` to see the accepted names. The runner
+checks the fixture and verifies that each case's workers exit. These focused checks do not replace
+`scripts/prerelease.sh`, which prepares the fixtures and runs the release checks.
+
+### Reviewed-writer metadata checks on macOS arm64
+
+The separate `prepare` and `run` commands use a reviewed writer and run the metadata positive and
+mismatch selectors in `capability_builder`. Their typed, verification and disposable-clean modes
+are not available; use the ordinary SDK qualification above for release checks.
 
 Use a Git checkout, Python 3.12 or later, a trusted Rust toolchain, and the installed release selected by the repository
 `lean-toolchain` pin. Select
