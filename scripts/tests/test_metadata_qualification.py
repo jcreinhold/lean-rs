@@ -872,6 +872,7 @@ class MetadataQualificationTest(unittest.TestCase):
             "a_host_handle_built_with_a_broken_import_still_fails_at_open",
             "a_host_handle_built_without_imports_opens_no_session",
             "shims_only_host_handle_skips_user_shared_build",
+            "shims_only_host_handle_imports_transitive_lake_package_oleans",
         )
         builder_filter = " | ".join(f"test(={name})" for name in builder_cases)
         self.assertEqual(

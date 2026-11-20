@@ -258,6 +258,11 @@ impl Record {
     }
     pub fn host_builder_import_event(&self, names: &[String]) -> Option<&'static str> {
         match (self.host_builder_case.as_deref(), names) {
+            (Some("shims_only_host_handle_imports_transitive_lake_package_oleans"), [name]) => match name.as_str() {
+                "Consumer" => Some("authorize-builder-consumer"),
+                "Dep.NonExistent" => Some("authorize-builder-missing-dependency"),
+                _ => None,
+            },
             (Some("a_host_handle_built_without_imports_opens_no_session"), []) => Some("authorize-builder-empty"),
             (Some("shims_only_host_handle_skips_user_shared_build"), [name]) if name == "Demo.Broken" => {
                 Some("authorize-builder-broken")

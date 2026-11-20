@@ -49,6 +49,18 @@ HOST_BUILDER_CASES = (
             ),
         ),
     ),
+    (
+        "shims_only_host_handle_imports_transitive_lake_package_oleans",
+        "--host-builder-transitive",
+        "lean-transitive",
+        (
+            (
+                b"authorize-builder-consumer",
+                b"authorize-builder-consumer",
+                b"authorize-builder-missing-dependency",
+            ),
+        ),
+    ),
 )
 ORDINARY_TYPED_TESTS = (
     "describe_returns_row_for_known_declaration",

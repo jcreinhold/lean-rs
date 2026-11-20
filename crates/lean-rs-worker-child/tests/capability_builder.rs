@@ -438,6 +438,7 @@ fn selected_host_builder_fixture(case: &str) -> Option<(PathBuf, LeanWorkerChild
     let name = match case {
         "a_host_handle_built_without_imports_opens_no_session" => "lean-lazy",
         "shims_only_host_handle_skips_user_shared_build" => "lean-shims-only",
+        "shims_only_host_handle_imports_transitive_lake_package_oleans" => "lean-transitive",
         _ => panic!("unrecognized selected host builder test"),
     };
     let root = workspace_root()
@@ -613,11 +614,19 @@ fn a_host_handle_built_with_a_broken_import_still_fails_at_open() {
 
 #[test]
 fn shims_only_host_handle_imports_transitive_lake_package_oleans() {
-    let project = TempLakeProject::new("host-handle-transitive-oleans");
-    write_transitive_dependency_fixture(&project);
+    let mut temporary = None;
+    let (project, child) = if let Some(selected) =
+        selected_host_builder_fixture("shims_only_host_handle_imports_transitive_lake_package_oleans")
+    {
+        selected
+    } else {
+        let project = temporary.insert(TempLakeProject::new("host-handle-transitive-oleans"));
+        write_transitive_dependency_fixture(project);
+        (project.path().to_path_buf(), LeanWorkerChild::path(worker_binary()))
+    };
 
-    let mut handle = LeanWorkerHostHandleBuilder::shims_only(project.path(), ["Consumer"])
-        .worker_executable(worker_binary())
+    let mut handle = LeanWorkerHostHandleBuilder::shims_only(&project, ["Consumer"])
+        .worker_child(child)
         .open()
         .expect("shims-only host handle opens over consumer");
 

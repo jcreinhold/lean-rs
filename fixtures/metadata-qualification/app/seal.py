@@ -123,12 +123,15 @@ def main():
             True,
         ),
     }
+    transitive = host_builder_case == (
+        "shims_only_host_handle_imports_transitive_lake_package_oleans"
+    )
     assert host_builder_case is None or (
-        broken and host_builder_case in builder_profiles
+        broken and (transitive or host_builder_case in builder_profiles)
     )
     builder = builder_profiles.get(host_builder_case)
     project = (
-        state / (builder[0] if builder else "lean")
+        state / ("lean-transitive" if transitive else builder[0] if builder else "lean")
         if broken
         else sdk
         / (
@@ -168,7 +171,10 @@ def main():
     if not broken:
         assert Path(rec["consumer_image"]) == ci
     assert list(map(Path, rec["shim_paths"])) == shims
-    assert list(map(Path, rec["roots"])) == sorted([project, dep, host])
+    user_dep = project / ".lake/packages/dep"
+    assert list(map(Path, rec["roots"])) == sorted(
+        [project, dep, host, *([user_dep] if transitive else [])]
+    )
     assert list(map(Path, rec["shim_roots"])) == sorted([dep, host])
     filepins = {}
     contentpins = {}
@@ -273,6 +279,46 @@ def main():
     project_deps = []
     if typed and not stream:
         assert packages == []
+    elif transitive:
+        assert packages == [
+            {
+                "type": "path",
+                "scope": "",
+                "name": "dep",
+                "manifestFile": "lake-manifest.json",
+                "inherited": False,
+                "dir": "./.lake/packages/dep",
+                "configFile": "lakefile.lean",
+            }
+        ]
+        inputs = {
+            project / "lakefile.lean": (
+                "import Lake\nopen Lake DSL\npackage consumer\n"
+                'require dep from "./.lake/packages/dep"\nlean_lib Consumer\n'
+            ),
+            project / "Consumer.lean": (
+                "import Dep.Hello\ndef Consumer.value : Nat := Dep.hello + 1\n"
+            ),
+            user_dep
+            / "lakefile.lean": "import Lake\nopen Lake DSL\npackage dep\nlean_lib Dep\n",
+            user_dep / "Dep/Hello.lean": "def Dep.hello : Nat := 41\n",
+            **{
+                root / "lean-toolchain": "leanprover/lean4:v4.36.0\n"
+                for root in (project, user_dep)
+            },
+        }
+        for path, text in inputs.items():
+            assert path.read_text() == text
+            pin_content(path)
+        dep_manifest = user_dep / "lake-manifest.json"
+        assert json.loads(dep_manifest.read_text())["packages"] == []
+        pin_content(dep_manifest)
+        project_deps = [user_dep / ".lake/build/lib/lean"]
+        for root in (project, user_dep):
+            assert not any(
+                f.suffix in {".dylib", ".so", ".dll"}
+                for f in (root / ".lake/build/lib").rglob("*")
+            )
     elif broken:
         assert packages == []
         sources = ["lakefile.lean", "Demo.lean", "lean-toolchain"]
@@ -318,7 +364,12 @@ def main():
         filepins[str(release / "include/lean/lean.h")][2]
         == "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4"
     )
-    for r in [project_oleans, *shims, release / "lib/lean"]:
+    for r in [
+        project_oleans,
+        *(project_deps if transitive else []),
+        *shims,
+        release / "lib/lean",
+    ]:
         tree(r)
     if typed and not stream:
         for module in ("LeanRsFixtureLateExtension.olean", "LeanRsFixture/Meta.olean"):
@@ -333,9 +384,26 @@ def main():
             )
     # Verify original transitive import selection and refuse local shadows of builtin namespaces.
     for prefix in ["Init", "Lean", "Lake", "Std"]:
-        for r in [project_oleans, *shims]:
+        for r in [project_oleans, *(project_deps if transitive else []), *shims]:
             assert not (r / prefix).exists() and not (r / (prefix + ".olean")).exists()
-    if broken:
+    if transitive:
+        for relative, selected in (
+            ("Consumer.olean", project_oleans),
+            ("Dep/Hello.olean", project_deps[0]),
+            ("Dep/NonExistent.olean", None),
+        ):
+            found = [
+                root
+                for root in [
+                    project_oleans,
+                    *project_deps,
+                    *shims,
+                    release / "lib/lean",
+                ]
+                if (root / relative).exists()
+            ]
+            assert found == ([selected] if selected else [])
+    elif broken:
         if builder:
             assert str(project_oleans / "Demo/Good.olean") in filepins
             assert not any(

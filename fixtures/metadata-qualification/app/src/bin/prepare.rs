@@ -24,12 +24,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let target = sdk.join("target").canonicalize()?;
     let profile = env::args().nth(2);
-    let broken_import = match profile.as_deref() {
-        None => false,
-        Some("--typed-session" | "--interop-stream") if env::args().len() == 3 => false,
-        Some("--broken-import" | "--host-builder-lazy" | "--host-builder-shims-only") if env::args().len() == 3 => true,
-        _ => return Err("unknown metadata qualification profile".into()),
-    };
+    let broken_import =
+        match profile.as_deref() {
+            None => false,
+            Some("--typed-session" | "--interop-stream") if env::args().len() == 3 => false,
+            Some(
+                "--broken-import" | "--host-builder-lazy" | "--host-builder-shims-only" | "--host-builder-transitive",
+            ) if env::args().len() == 3 => true,
+            _ => return Err("unknown metadata qualification profile".into()),
+        };
     let typed_session = profile.as_deref() == Some("--typed-session");
     let stream = profile.as_deref() == Some("--interop-stream");
     let state_name = if stream {
@@ -283,6 +286,19 @@ fn prepare_broken_import(
     if env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).is_some() {
         return Err("private broken-import fixture must not inherit a writer executable".into());
     }
+    if profile == Some("--host-builder-transitive") {
+        let project = state.join("lean-transitive");
+        fs::DirBuilder::new().mode(0o700).create(&project)?;
+        build_transitive_fixture(&project, sysroot)?;
+        return seal_shims_only(
+            app,
+            state,
+            sysroot,
+            key,
+            project,
+            Some("shims_only_host_handle_imports_transitive_lake_package_oleans"),
+        );
+    }
     let (directory, package, umbrella, good, bad_target, case) = match profile {
         Some("--host-builder-lazy") => (
             "lean-lazy",
@@ -342,16 +358,65 @@ fn prepare_broken_import(
         }
     }
     fs::create_dir_all(project.join(".lake/build/lib/lean"))?;
-    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(lock)?;
+    seal_shims_only(app, state, sysroot, key, project, case)
+}
 
+fn build_transitive_fixture(project: &Path, sysroot: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let dep = project.join(".lake/packages/dep");
+    fs::create_dir_all(dep.join("Dep"))?;
+    for root in [project, &dep] {
+        fs::write(root.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
+    }
+    fs::write(
+        dep.join("lakefile.lean"),
+        "import Lake\nopen Lake DSL\npackage dep\nlean_lib Dep\n",
+    )?;
+    fs::write(dep.join("Dep/Hello.lean"), "def Dep.hello : Nat := 41\n")?;
+    fs::write(
+        project.join("lakefile.lean"),
+        "import Lake\nopen Lake DSL\npackage consumer\nrequire dep from \"./.lake/packages/dep\"\nlean_lib Consumer\n",
+    )?;
+    fs::write(
+        project.join("Consumer.lean"),
+        "import Dep.Hello\ndef Consumer.value : Nat := Dep.hello + 1\n",
+    )?;
+    fs::write(
+        project.join("lake-manifest.json"),
+        r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"./.lake/packages/dep","configFile":"lakefile.lean"}],"name":"consumer","lakeDir":".lake"}"#,
+    )?;
+    for (root, target) in [(dep.as_path(), "Dep.Hello"), (project, "Consumer")] {
+        if !std::process::Command::new(sysroot.join("bin/lake"))
+            .args(["build", target])
+            .current_dir(root)
+            .stdin(std::process::Stdio::null())
+            .status()?
+            .success()
+        {
+            return Err(format!("expected the selected Lean to build {target}").into());
+        }
+    }
+    Ok(())
+}
+
+fn seal_shims_only(
+    app: &Path,
+    state: &Path,
+    sysroot: &Path,
+    key: &str,
+    project: PathBuf,
+    case: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut scopes = lean_toolchain::shared_writer::project_artifact_root_union(std::slice::from_ref(&project))?;
+    for root in &scopes {
+        let lock = lean_toolchain::shared_writer::project_lock_path(root)?;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(lock)?;
+    }
     let shim = lean_rs_host::host::prepare_host_artifacts()?;
-    let mut scopes = shim.artifact_roots().to_vec();
-    scopes.push(project.clone());
+    scopes.extend_from_slice(shim.artifact_roots());
     scopes.sort();
     let record = serde_json::json!({
         "broken_import": true,
