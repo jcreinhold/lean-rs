@@ -78,9 +78,9 @@ Dispatch the Release workflow with `dry_run: true` (the default). It runs verifi
 [`scripts/publish-workspace.sh --dry-run`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/publish-workspace.sh) without uploading crates or creating a
 GitHub Release. Manual runs of Release cannot upload crates; use the tag for a live release.
 
-A dry run cannot resolve an unpublished workspace dependency from crates.io. It can therefore fail at a downstream crate
-even when the real ordered upload would succeed. Inspect the failure rather than treating it as a successful publish
-rehearsal.
+Cargo builds all nine publishable tarballs from a temporary registry. Sibling crates do not need to be
+published for this check, but external dependencies still have to resolve. A real release runs the same
+check before its first upload, then publishes crates in dependency order.
 
 ## Tag and watch
 
@@ -107,8 +107,8 @@ For a separate publish-only run, dispatch [Release recovery](https://github.com/
 release commit with its version, without the `v` prefix. It uses the same publish script and ensures the GitHub Release
 exists. A live recovery requires the existing release tag to point to that commit. Recovery does not repeat
 the full verification gates; use it only for contents
-already verified for that release. Recovery defaults to `dry_run: true`, with the same dependency-resolution
-limit described above. Set it to `false` only when you intend to resume the upload.
+already verified for that release. Recovery defaults to `dry_run: true`, which builds the tarballs without uploading. Set it to `false` only when
+you intend to resume the upload.
 
 Published crate versions are immutable. If crate contents need a fix, prepare and verify a patch release. Do not move an
 existing release tag or use `--allow-dirty` to publish changed contents under it.

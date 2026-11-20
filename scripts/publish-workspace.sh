@@ -22,10 +22,9 @@
 # Usage: scripts/publish-workspace.sh [--dry-run]
 #   The version is the workspace version (read from `cargo metadata`). crates.io
 #   versions are immutable, so this only ever fills gaps, never overwrites.
-#   --dry-run runs each missing crate's verify build without uploading. Note:
-#   with a chain of unpublished interdependent crates, a dry run of a downstream
-#   crate cannot resolve its not-yet-uploaded workspace dependency from the
-#   index and will fail — that failure is a dry-run artifact, not a real defect.
+# Cargo verifies all publishable tarballs together in a temporary registry.
+# Unpublished workspace dependencies resolve there. --dry-run stops after
+# verification and never needs a publish token.
 set -euo pipefail
 
 dry_run=false
@@ -70,32 +69,43 @@ if [ "$publishable" != "$expected" ]; then
   exit 1
 fi
 
+# Select only the packages we ship, not internal workspace members.
+packages=()
+for c in "${order[@]}"; do
+  packages+=(-p "$c")
+done
+cargo package --locked "${packages[@]}"
+if "$dry_run"; then
+  exit 0
+fi
+
 version=$(cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
 
-echo "Publishing workspace at version $version (dry_run=$dry_run)"
+echo "Publishing workspace at version $version"
 published=0
 skipped=0
 for c in "${order[@]}"; do
-  # crates.io returns 200 for an existing version, 404 otherwise.
-  if curl -sf -o /dev/null \
-       -H "User-Agent: lean-rs-release (github.com/jcreinhold/lean-rs)" \
-       "https://crates.io/api/v1/crates/$c/$version"; then
-    echo "✓ $c@$version already on crates.io — skipping"
-    skipped=$((skipped + 1))
-    continue
-  fi
-  echo "→ $c@$version is missing — publishing"
-  if [ "$dry_run" = "true" ]; then
-    cargo publish -p "$c" --dry-run
-  else
-    # Single-crate publish waits for the upload to land in the index before
-    # returning, so the next crate's verify build resolves it.
-    cargo publish -p "$c"
-  fi
+  status=$(curl --silent --show-error --retry 2 --max-time 30 --output /dev/null --write-out '%{http_code}' \
+    -H "User-Agent: lean-rs-release (github.com/jcreinhold/lean-rs)" \
+    "https://crates.io/api/v1/crates/$c/$version") || {
+      echo "Could not check $c@$version on crates.io; no upload attempted for that crate." >&2
+      exit 1
+    }
+  case "$status" in
+    200)
+      echo "$c@$version is already published; skipping"
+      skipped=$((skipped + 1))
+      continue ;;
+    404) ;;
+    *)
+      echo "Unexpected crates.io response HTTP $status for $c@$version; no upload attempted for that crate." >&2
+      exit 1 ;;
+  esac
+  cargo publish -p "$c"
   published=$((published + 1))
 done
-echo "Publish summary: published=$published skipped=$skipped (dry_run=$dry_run)"
-if [ "$dry_run" != "true" ] && [ "$published" = "0" ]; then
+echo "Publish summary: published=$published skipped=$skipped"
+if [ "$published" = "0" ]; then
   echo "Nothing to publish — $version was already complete on crates.io."
 fi
