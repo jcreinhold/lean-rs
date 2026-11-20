@@ -14,9 +14,7 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionFields,
@@ -141,73 +139,6 @@ fn assert_batch_has_state(outcome: &LeanWorkerModuleQueryBatchOutcome) {
         "expected proof-state selector item, got {:?}",
         result.items,
     );
-}
-
-struct TempLakeProject {
-    root: PathBuf,
-}
-
-impl TempLakeProject {
-    fn new(name: &str) -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock is after Unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("lean-rs-worker-{name}-{}-{nonce}", std::process::id()));
-        fs::create_dir_all(&root).expect("create temporary Lake project");
-        fs::write(
-            root.join("lean-toolchain"),
-            fs::read_to_string(workspace_root().join("lean-toolchain")).expect("read workspace Lean toolchain"),
-        )
-        .expect("write temporary Lean toolchain pin");
-        Self { root }
-    }
-
-    fn path(&self) -> &Path {
-        &self.root
-    }
-
-    fn write(&self, relative: &str, content: &str) {
-        let path = self.root.join(relative);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("create parent directory");
-        }
-        fs::write(path, content).expect("write temporary Lake project file");
-    }
-
-    fn lake_build_ok(&self, target: &str) {
-        let output = Command::new("lake")
-            .arg("build")
-            .arg(target)
-            .current_dir(&self.root)
-            .output()
-            .expect("lake command starts");
-        assert!(
-            output.status.success(),
-            "`lake build {target}` failed\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-    }
-}
-
-impl Drop for TempLakeProject {
-    fn drop(&mut self) {
-        drop(fs::remove_dir_all(&self.root));
-    }
-}
-
-fn write_module_syntax_fixture(project: &TempLakeProject) {
-    project.write(
-        "lakefile.lean",
-        "import Lake\nopen Lake DSL\npackage module_syntax_fixture\nlean_lib Fixture\n",
-    );
-    project.write("Fixture/Imported.lean", "module\n\npublic def imported : Nat := 2\n");
-    project.write("Fixture/Internal.lean", "module\n\ndef internalSecret : Nat := 40\n");
-    project.write("Fixture/PrivateScope.lean", "module\n\ndef privateOnly : Nat := 7\n");
-    project.lake_build_ok("Fixture.Imported");
-    project.lake_build_ok("Fixture.Internal");
-    project.lake_build_ok("Fixture.PrivateScope");
 }
 
 #[test]
@@ -2688,14 +2619,14 @@ fn process_module_query_batch_tiny_cache_still_returns_correct_query() {
 
 #[test]
 fn process_module_query_handles_module_system_header_through_worker() {
-    let project = TempLakeProject::new("module-system-header-typed-session");
-    write_module_syntax_fixture(&project);
+    let root = fixture_root();
+    if ordinary_typed_selection().is_none() {
+        lean_toolchain::build_lake_target_quiet(&root, "Fixture").expect("module header fixture builds");
+    }
     let opts = LeanWorkerElabOptions::new();
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let config = LeanWorkerSessionConfig::shims_only(
-        project.path().to_path_buf(),
-        ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"],
-    );
+    let config =
+        LeanWorkerSessionConfig::shims_only(root, ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"]);
     let mut session = worker
         .open_session(&config, None, None)
         .expect("worker shims-only session opens");

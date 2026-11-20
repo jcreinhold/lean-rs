@@ -669,6 +669,7 @@ class MetadataQualificationTest(unittest.TestCase):
             "is_def_eq_recognises_equal_terms",
         )
         module_query_cases = (
+            "process_module_query_handles_module_system_header_through_worker",
             "process_module_query_returns_diagnostics_through_worker",
             "process_module_query_diagnostics_keep_original_source_coordinates",
             "process_module_query_returns_cursor_type_and_goal_through_worker",
@@ -769,6 +770,7 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertEqual([cmd[-1] for cmd, _ in audited_cases], audited_filters)
         self.assertNotIn("LEAN_RS_TEST_WIDE_REUSE_CASE", run_env)
         self.assertNotIn("LEAN_RS_TEST_STALENESS_PROFILE", run_env)
+        self.assertNotIn("LEAN_RS_TEST_MODULE_SYNTAX_CASE", run_env)
         for cmd, case_env in audited_cases:
             self.assertEqual(cmd[cmd.index("--retries") + 1], "0")
             wide_case = case_env.get("LEAN_RS_TEST_WIDE_REUSE_CASE")
@@ -788,6 +790,15 @@ class MetadataQualificationTest(unittest.TestCase):
             self.assertEqual(
                 case_env.get("LEAN_RS_TEST_STALENESS_PROFILE"),
                 "1" if staleness else None,
+            )
+            module_syntax = (
+                "process_module_query_handles_module_system_header_through_worker"
+            )
+            self.assertEqual(
+                case_env.get("LEAN_RS_TEST_MODULE_SYNTAX_CASE"),
+                module_syntax
+                if cmd[-1] == f"(binary(=typed_session) & (test(={module_syntax})))"
+                else None,
             )
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")

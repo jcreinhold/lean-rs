@@ -11,6 +11,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub const MODULE_SYNTAX_IMPORTS: [&str; 3] = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
+
+pub fn module_syntax_case() -> bool {
+    std::env::var_os("LEAN_RS_TEST_MODULE_SYNTAX_CASE")
+        .is_some_and(|name| name == "process_module_query_handles_module_system_header_through_worker")
+}
+
 struct MappedImage {
     path: PathBuf,
     #[cfg(target_os = "linux")]
@@ -274,6 +281,7 @@ impl Record {
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
             && (wide_reuse
                 || staleness_probe
+                || (module_syntax_case() && names == MODULE_SYNTAX_IMPORTS)
                 || [
                     &["LeanRsHostShims.Elaboration"][..],
                     &["LeanRsHostShims.Elaboration", "Lean"][..],

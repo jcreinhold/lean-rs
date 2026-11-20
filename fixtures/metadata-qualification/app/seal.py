@@ -269,6 +269,11 @@ def main():
             assert str(required) in filepins, (
                 f"missing sealed registration/control artifact: {required}"
             )
+        for module in ("Imported", "Internal", "PrivateScope"):
+            required = project_oleans / f"Fixture/{module}.olean"
+            assert str(required) in filepins, (
+                f"missing sealed module-syntax artifact: {required}"
+            )
     # Verify original transitive import selection and refuse local shadows of builtin namespaces.
     for prefix in ["Init", "Lean", "Lake", "Std"]:
         for r in [project_oleans, *shims]:

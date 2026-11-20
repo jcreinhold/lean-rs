@@ -24,3 +24,8 @@ lean_lib «LeanRsFixture» where
 lean_lib «LeanRsFixtureLateExtension» where
   leanOptions := leanRsLeanOptions
   defaultFacets := #[LeanLib.sharedFacet]
+
+-- Keep the module-header inputs independent: ordinary and `all` imports differ.
+@[default_target]
+lean_lib Fixture where
+  roots := #[`Fixture.Imported, `Fixture.Internal, `Fixture.PrivateScope]

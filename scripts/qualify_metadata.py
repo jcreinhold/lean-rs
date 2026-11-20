@@ -105,7 +105,11 @@ ORDINARY_META_TESTS = (
     ("typed_session", "whnf_reduces_known_term", ((1, 1),)),
     ("typed_session", "is_def_eq_recognises_equal_terms", ((1, 2),)),
 )
+ORDINARY_MODULE_SYNTAX_CASE = (
+    "process_module_query_handles_module_system_header_through_worker"
+)
 ORDINARY_MODULE_QUERY_TESTS = (
+    ("typed_session", ORDINARY_MODULE_SYNTAX_CASE, ((1, 1),)),
     (
         "typed_session",
         "process_module_query_returns_diagnostics_through_worker",
@@ -1234,7 +1238,10 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
             env["LEAN_RS_TEST_WIDE_REUSE_CASE"] = name
         if name in ORDINARY_STALENESS_CASES:
             env["LEAN_RS_TEST_STALENESS_PROFILE"] = "1"
+        if name == ORDINARY_MODULE_SYNTAX_CASE:
+            env["LEAN_RS_TEST_MODULE_SYNTAX_CASE"] = name
         nextest(target, selection=scoped_tests(target, (name,)))
+        env.pop("LEAN_RS_TEST_MODULE_SYNTAX_CASE", None)
         env.pop("LEAN_RS_TEST_WIDE_REUSE_CASE", None)
         env.pop("LEAN_RS_TEST_STALENESS_PROFILE", None)
         check_typed_children_closed(

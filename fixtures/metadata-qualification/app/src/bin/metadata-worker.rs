@@ -16,7 +16,9 @@ use lean_rs_host::host::LeanPreparedHostArtifacts;
 use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceContext};
 use std::path::Path;
 
-use metadata_qualification::{EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, Record, audit};
+use metadata_qualification::{
+    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, audit, module_syntax_case,
+};
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
 impl MetadataApp {
@@ -617,17 +619,34 @@ impl WorkerAuthority for MetadataApp {
             ("def x := 1\n#check x\n", ModuleQuery::References { name }, "<elaborate>") => name == "x",
             _ => false,
         };
+        const MODULE_SYNTAX_SOURCE: &str = concat!(
+            "module\n\n",
+            "public import Fixture.Imported\n",
+            "import all Fixture.Internal\n",
+            "import Fixture.PrivateScope\n\n",
+            "def moduleSyntaxFoo : Nat := imported + internalSecret\n",
+        );
+        let module_syntax = module_syntax_case()
+            && matches!(
+                (request.source.as_str(), &request.query, options.file.as_str()),
+                (MODULE_SYNTAX_SOURCE, ModuleQuery::Diagnostics, "<elaborate>")
+            );
+        let exact_imports: &[&str] = if module_syntax {
+            &MODULE_SYNTAX_IMPORTS
+        } else {
+            &["LeanRsHostShims.Elaboration"]
+        };
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
             || d.verification
-            || !exact_request
+            || !(exact_request || module_syntax)
             || !session.imports.matches_request(
                 &d.import_roots
                     .iter()
                     .map(|path| path.display().to_string())
                     .collect::<Vec<_>>(),
-                &["LeanRsHostShims.Elaboration".to_owned()],
+                &exact_imports.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>(),
             )
             || *session.imports.options() != HostImportOptions::default()
             || !options.namespace.is_empty()
@@ -638,8 +657,8 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source checked the complete search path and ruled out plugins.
-        // Held retains the sealed images and imports. Only the five exact combinations
-        // above may run in the fixed Elaboration scope, with unchanged resource limits.
+        // Held retains the sealed images and imports. Each exact query above is tied
+        // to its own fixed import scope, with unchanged resource limits.
         let grant = unsafe {
             session.capability.module_query_scope(
                 session.environment,
