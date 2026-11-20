@@ -26,27 +26,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let target = sdk.join("target").canonicalize()?;
     let profile = env::args().nth(2);
-    let broken_import = match profile.as_deref() {
-        None => false,
-        Some("--typed-session" | "--interop-stream" | "--interop-legacy" | "--scalar-entry")
-            if env::args().len() == 3 =>
-        {
-            false
-        }
-        Some(
-            "--broken-import"
-            | "--host-builder-lazy"
-            | "--host-builder-shims-only"
-            | "--host-builder-transitive"
-            | "--host-builder-good"
-            | "--direct-host-broken-shared",
-        ) if env::args().len() == 3 => true,
-        _ => return Err("unknown metadata qualification profile".into()),
-    };
+    let broken_import =
+        match profile.as_deref() {
+            None => false,
+            Some(
+                "--typed-session" | "--interop-stream" | "--interop-legacy" | "--scalar-entry" | "--optional-whnf",
+            ) if env::args().len() == 3 => false,
+            Some(
+                "--broken-import"
+                | "--host-builder-lazy"
+                | "--host-builder-shims-only"
+                | "--host-builder-transitive"
+                | "--host-builder-good"
+                | "--direct-host-broken-shared",
+            ) if env::args().len() == 3 => true,
+            _ => return Err("unknown metadata qualification profile".into()),
+        };
     let typed_session = profile.as_deref() == Some("--typed-session");
     let legacy = profile.as_deref() == Some("--interop-legacy");
     let stream = legacy || profile.as_deref() == Some("--interop-stream");
     let scalar = profile.as_deref() == Some("--scalar-entry");
+    let optional_whnf = profile.as_deref() == Some("--optional-whnf");
     let state_name = if stream {
         "interop-stream"
     } else if broken_import {
@@ -56,7 +56,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "ordinary"
     };
-    let expected_state = if scalar {
+    let expected_state = if optional_whnf {
+        app.join("target/optional-whnf")
+    } else if scalar {
         app.join("target/scalar-entry")
     } else {
         target.join("metadata-qualification").join(state_name)
@@ -70,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if scalar {
         return prepare_scalar(app, &state, &sysroot, generated_output_key);
     }
-    if typed_session || stream {
+    if typed_session || stream || optional_whnf {
         return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream, legacy);
     }
     if broken_import {
@@ -216,6 +218,77 @@ fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result
     seal(app, state)
 }
 
+fn selected_host_artifacts() -> Result<lean_rs_host::host::LeanPreparedHostArtifacts, Box<dyn std::error::Error>> {
+    let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
+    if raw.len() > 64 * 1024 {
+        return Err("prepared descriptor exceeds limit".into());
+    }
+    let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts = serde_json::from_str(&raw)?;
+    if selected.protocol != 2 {
+        return Err("unexpected prepared descriptor protocol".into());
+    }
+    Ok(lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(
+        selected.shim_manifest_path.into(),
+        selected.shim_manifest_json,
+        selected.artifact_roots.into_iter().map(PathBuf::from).collect(),
+        selected.shim_search_paths.into_iter().map(PathBuf::from).collect(),
+    )?)
+}
+
+fn prepare_optional_whnf_shims(
+    app: &Path,
+    state: &Path,
+    sysroot: &Path,
+    key: &str,
+) -> Result<lean_rs_host::host::LeanPreparedHostArtifacts, Box<dyn std::error::Error>> {
+    use lean_toolchain::shared_writer::{PrivateLakeBootstrap, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots};
+    if env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_some() || env::var_os("OUT_DIR").is_some() {
+        return Err("optional WHNF fixture requires its private bootstrap".into());
+    }
+    let metadata = fs::symlink_metadata(state)?;
+    if !metadata.is_dir() || metadata.uid() != rustix::process::geteuid().as_raw() || metadata.mode() & 0o7777 != 0o700
+    {
+        return Err("optional WHNF state is not job-owned and private".into());
+    }
+    let bundle = state.join("shims");
+    let host = bundle.join("lean-rs-host-shims");
+    let interop = bundle.join("lean-rs-interop-shims");
+    let roots = project_artifact_roots(&host)?;
+    if roots != [host.clone(), interop.clone()]
+        || [&bundle, &host, &interop]
+            .into_iter()
+            .any(|p| p.canonicalize().as_ref().ok() != Some(p))
+        || host.join(".lake").try_exists()?
+        || interop.join(".lake").try_exists()?
+    {
+        return Err("optional WHNF requires two unbuilt, private shim roots".into());
+    }
+    let mut builder = CargoLeanCapability::new(&host, "LeanRsHostShims")
+        .package("lean_rs_host_shims")
+        .module("LeanRsHostShims")
+        .lean_sysroot(sysroot)
+        .lean_num_threads(2)
+        .generated_output_key(key)
+        .private_bootstrap(PrivateLakeBootstrap::new(app, &host)?);
+    // Keep the real call shape. The checked loader must reach MissingSymbol,
+    // not the fatal MissingSignatureMetadata branch.
+    for signature in lean_toolchain::host_shim_abi::compiled_host_binding_signatures().into_values() {
+        builder = builder.export_signature(signature);
+    }
+    let built = builder.build_quiet()?;
+    let manifest = built.manifest_path().canonicalize()?;
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    fs::File::open(&manifest)?.take(64 * 1024 + 1).read_to_end(&mut bytes)?;
+    let search = [interop, host].map(|root| root.join(".lake/lean-rs-generated").join(key).join("lib/lean"));
+    Ok(lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(
+        manifest,
+        String::from_utf8(bytes)?,
+        roots,
+        search.into(),
+    )?)
+}
+
 fn prepare_typed_session(
     app: &Path,
     sdk: &Path,
@@ -225,21 +298,13 @@ fn prepare_typed_session(
     stream: bool,
     legacy: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Reuse the same run's prepared shims; never rebuild the capability here.
-    let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
-    if raw.len() > 64 * 1024 {
-        return Err("prepared descriptor exceeds limit".into());
-    }
-    let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts = serde_json::from_str(&raw)?;
-    if selected.protocol != 2 {
-        return Err("unexpected prepared descriptor protocol".into());
-    }
-    let shim = lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(
-        selected.shim_manifest_path.into(),
-        selected.shim_manifest_json,
-        selected.artifact_roots.into_iter().map(PathBuf::from).collect(),
-        selected.shim_search_paths.into_iter().map(PathBuf::from).collect(),
-    )?;
+    let optional_whnf = state == app.join("target/optional-whnf");
+    let shim = if optional_whnf {
+        prepare_optional_whnf_shims(app, state, sysroot, key)?
+    } else {
+        // Reuse the same run's normal prepared shims.
+        selected_host_artifacts()?
+    };
     let expected_project = if legacy {
         state.join("legacy")
     } else {
@@ -397,6 +462,7 @@ fn prepare_typed_session(
     roots.sort();
     let record = serde_json::json!({
         "broken_import": false, "typed_session": true, "stream": stream, "verification": false,
+        "optional_whnf": optional_whnf,
         "signature_probe": signature_probe,
         "foreign_workspace": foreign_workspace,
         "consumer_manifest": manifest_path, "consumer_json": manifest,

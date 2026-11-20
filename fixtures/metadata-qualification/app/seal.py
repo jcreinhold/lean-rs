@@ -8,6 +8,70 @@ import subprocess
 import sys
 from pathlib import Path
 
+OPTIONAL_META = "lean-rs-host-shims/LeanRsHostShims/Meta.lean"
+WHNF = "lean_rs_host_meta_whnf"
+OPTIONAL_SHIM_SOURCES = (
+    "lean-rs-host-shims/LeanRsHostShims.lean",
+    "lean-rs-host-shims/LeanRsHostShims/Elaboration.lean",
+    "lean-rs-host-shims/LeanRsHostShims/Environment.lean",
+    "lean-rs-host-shims/LeanRsHostShims/InfoTree.lean",
+    "lean-rs-host-shims/LeanRsHostShims/Interop.lean",
+    "lean-rs-host-shims/LeanRsHostShims/Meta.lean",
+    "lean-rs-host-shims/lake-manifest.json",
+    "lean-rs-host-shims/lakefile.lean",
+    "lean-rs-host-shims/lean-toolchain",
+    "lean-rs-interop-shims/LeanRsInterop.lean",
+    "lean-rs-interop-shims/LeanRsInterop/Callback.lean",
+    "lean-rs-interop-shims/LeanRsInterop/Callback/String.lean",
+    "lean-rs-interop-shims/LeanRsInterop/Callback/Tick.lean",
+    "lean-rs-interop-shims/LeanRsInterop/Worker/Stream.lean",
+    "lean-rs-interop-shims/c/interop_callback.c",
+    "lean-rs-interop-shims/lake-manifest.json",
+    "lean-rs-interop-shims/lakefile.lean",
+    "lean-rs-interop-shims/lean-toolchain",
+)
+
+
+def optional_shim_source(sdk, name):
+    path = sdk / "crates/lean-rs-host/shims" / name
+    assert path == path.resolve(strict=True) and path.is_file()
+    with path.open("rb") as stream:
+        data = stream.read(144 * 1024 + 1)
+    assert len(data) <= 144 * 1024
+    if name == OPTIONAL_META:
+        attribute = f"@[export {WHNF}]\n".encode()
+        assert data.count(attribute) == 1
+        data = data.replace(attribute, b"", 1)
+    return data
+
+
+def stage_optional_shims(sdk, state):
+    assert state == sdk / "fixtures/metadata-qualification/app/target/optional-whnf"
+    bundle = state / "shims"
+    subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            sdk,
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            *(f"crates/lean-rs-host/shims/{name}" for name in OPTIONAL_SHIM_SOURCES),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    bundle.mkdir(mode=0o700)
+    total = 0
+    for name in OPTIONAL_SHIM_SOURCES:
+        path = bundle / name
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        data = optional_shim_source(sdk, name)
+        total += len(data)
+        assert total <= 512 * 1024
+        with path.open("xb") as stream:
+            stream.write(data)
+
 
 def native_name(name, system=None):
     system = platform.system() if system is None else system
@@ -106,6 +170,10 @@ def main():
     scalar = rec.get("scalar_entry", False)
     typed = rec.get("typed_session", False)
     stream = rec.get("stream", False)
+    optional_whnf = rec.get("optional_whnf", False)
+    assert not optional_whnf or (
+        typed and not stream and state == a / "target/optional-whnf"
+    )
     assert not (broken and typed)
     assert not scalar or (state == a / "target/scalar-entry" and not (broken or typed))
     assert not stream or typed
@@ -181,7 +249,7 @@ def main():
         owner = foreign.stat()
         assert owner.st_uid == os.geteuid() and owner.st_mode & 0o7777 == 0o700
     release = Path(rec["sysroot"])
-    bundle = sdk / "crates/lean-rs-host/shims"
+    bundle = state / "shims" if optional_whnf else sdk / "crates/lean-rs-host/shims"
     dep = bundle / "lean-rs-interop-shims"
     host = bundle / "lean-rs-host-shims"
     if legacy:
@@ -273,7 +341,7 @@ def main():
                 else "worker-json-capability.json"
             )
             pin(path)
-        elif not broken and not typed:
+        elif optional_whnf or (not broken and not typed):
             pin(path)
         v = json.loads(path.read_text())
         p, m, i = (
@@ -282,6 +350,8 @@ def main():
             else ("lean_rs_host_shims", "LeanRsHostShims", hi)
         )
         assert (v["package"], v["module"], v["primary_dylib"]) == (p, m, str(i))
+        if optional_whnf and manifest == "shim":
+            assert [row["symbol"] for row in v["exports"]].count(WHNF) == 1
         if stream and manifest == "consumer":
             assert v["target_name"] == "LeanRsInteropConsumer"
         assert v["dependencies"] == (
@@ -362,7 +432,20 @@ def main():
         images.append((ci, project_symbols))
     for f, syms in images:
         pin(f)
+        if optional_whnf and f == hi:
+            syms.append("lean_rs_host_meta_infer_type")
         check_native_image(f, syms, release / "lib/lean")
+        if optional_whnf:
+            prefix = "_" if platform.system() == "Darwin" else ""
+            assert prefix + WHNF not in defined_exports(f), (
+                f"WHNF unexpectedly exported by {f}"
+            )
+    if optional_whnf:
+        for name in OPTIONAL_SHIM_SOURCES:
+            path = bundle / name
+            if path.name != "lake-manifest.json":
+                assert path.read_bytes() == optional_shim_source(sdk, name)
+            pin_content(path)
     for root in (dep, host, project):
         pin_content(root / "lake-manifest.json")
     packages = json.loads((project / "lake-manifest.json").read_text())["packages"]

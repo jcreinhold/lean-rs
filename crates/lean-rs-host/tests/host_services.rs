@@ -1976,16 +1976,8 @@ fn meta_missing_optional_symbol_returns_unsupported() {
     let mut session = session_over_meta(&caps);
 
     let expr = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
-    // The qualification build for this case must provide a reviewed shim with
-    // the optional WHNF symbol absent; use the supported descriptor as a real caller would.
-    let outcome = session
-        .run_meta(&whnf(), expr, &LeanMetaOptions::new(), None)
-        .expect("optional service dispatch");
-    assert_eq!(
-        outcome.status(),
-        MetaCallStatus::Unsupported,
-        "missing optional meta symbol must return Unsupported, got {outcome:?}",
-    );
+    // Use the supported descriptor as a caller would, under strict fixture selection.
+    good_shims_assertions::check_missing_whnf(&mut session, expr);
 }
 
 // -- process_module_query (bounded module projections) -------------------

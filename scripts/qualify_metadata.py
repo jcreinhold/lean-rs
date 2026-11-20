@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import runpy
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,12 @@ DIRECT_GOOD_TEST = "load_shims_only_opens_session_against_user_oleans"
 DIRECT_BROKEN_SHARED_TEST = (
     "load_shims_only_succeeds_when_user_shared_facet_does_not_build"
 )
+DIRECT_OPTIONAL_WHNF_TEST = "meta_missing_optional_symbol_returns_unsupported"
 DIRECT_BUILDER_TESTS = {
+    DIRECT_OPTIONAL_WHNF_TEST: (
+        DIRECT_OPTIONAL_WHNF_TEST,
+        b"direct-host-optional-whnf-passed",
+    ),
     DIRECT_BROKEN_SHARED_TEST: (
         DIRECT_BROKEN_SHARED_TEST,
         b"direct-host-broken-shared-passed",
@@ -2014,7 +2020,8 @@ def qualify_direct_builder_case(case, state, run, env):
         ],
         APP,
     )
-    check_host_builder_children_closed(typed_audit(events), ((marker,),), prefix=())
+    prefix = (b"verified-deployment",) if case == DIRECT_OPTIONAL_WHNF_TEST else ()
+    check_host_builder_children_closed(typed_audit(events), ((marker,),), prefix=prefix)
     return name
 
 
@@ -2050,6 +2057,40 @@ def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
         remove_owned_state(state, owner)
     env.clear()
     return tuple(direct_tests)
+
+
+def qualify_optional_whnf(release, profile, run, env):
+    parent = APP / "target"
+    parent.mkdir(exist_ok=True)
+    require(parent == parent.resolve(strict=True), "aliased optional WHNF parent")
+    state = parent / "optional-whnf"
+    state.mkdir(mode=0o700)
+    owner = state.stat()
+    scratch = state / "tmp"
+    scratch.mkdir(mode=0o700)
+    runpy.run_path(str(APP / "seal.py"))["stage_optional_shims"](SDK, state)
+    env.clear()
+    env.update(build_environment(release, scratch))
+    run([TARGET / "debug/prepare", state, "--optional-whnf"], APP)
+    require(
+        sum(path.lstat().st_size for path in (state / "shims").rglob("*"))
+        <= 64 * 1024**2,
+        "optional WHNF shim fixture exceeded its output bound",
+    )
+    record = state / "deployment.json"
+    require(
+        record == record.resolve(strict=True) and record.is_file(),
+        "missing exact optional WHNF deployment",
+    )
+    env.update(
+        LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
+        LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
+    )
+    select_nextest_runner(env, profile)
+    name = qualify_direct_builder_case(DIRECT_OPTIONAL_WHNF_TEST, state, run, env)
+    remove_owned_state(state, owner)
+    env.clear()
+    return (name,)
 
 
 SCALAR_ENTRY_TESTS = (
@@ -2179,6 +2220,10 @@ def qualify_broken_import(
             not os.path.lexists(APP / "target/scalar-entry"),
             "scalar fixture state already exists",
         )
+        require(
+            not os.path.lexists(APP / "target/optional-whnf"),
+            "optional WHNF state already exists",
+        )
         require(emit_host_selection, "--run-typed requires --emit-host-selection")
         typed = parent / "typed-session"
         require(
@@ -2254,6 +2299,7 @@ def qualify_broken_import(
             parent, release, profile, run, env, cargo
         )
         qualify_scalar_entry(release, profile, run, env, cargo, typed_descriptor)
+        direct_tests += qualify_optional_whnf(release, profile, run, env)
     if run_stream:
         qualify_stream(
             release,

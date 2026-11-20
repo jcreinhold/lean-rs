@@ -58,3 +58,15 @@ pub(super) fn check_broken_shared<'lean, 'cap>(
         LeanError::Cancelled(cancelled) => panic!("expected LeanException for broken import, got {cancelled:?}"),
     }
 }
+
+pub(super) fn check_missing_whnf<'lean>(session: &mut LeanSession<'lean, '_>, expr: lean_rs::LeanExpr<'lean>) {
+    use lean_rs_host::host::meta::whnf;
+    let outcome = session
+        .run_meta(&whnf(), expr, &LeanMetaOptions::new(), None)
+        .expect("optional service dispatch");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::Unsupported,
+        "missing optional meta symbol must return Unsupported, got {outcome:?}",
+    );
+}

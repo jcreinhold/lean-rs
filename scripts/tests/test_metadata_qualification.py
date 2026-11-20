@@ -584,9 +584,20 @@ class MetadataQualificationTest(unittest.TestCase):
             patch.object(
                 qualification,
                 "qualify_host_builder_cases",
-                return_value=direct_tests,
+                return_value=tuple(
+                    case
+                    for case in direct_tests
+                    if case != qualification.DIRECT_OPTIONAL_WHNF_TEST
+                ),
             ) as host_builder,
             patch.object(qualification, "qualify_scalar_entry") as scalar,
+            patch.object(
+                qualification,
+                "qualify_optional_whnf",
+                return_value=(qualification.DIRECT_OPTIONAL_WHNF_TEST,)
+                if qualification.DIRECT_OPTIONAL_WHNF_TEST in direct_tests
+                else (),
+            ),
         ):
             if live_pid:
                 with self.assertRaisesRegex(
@@ -947,6 +958,19 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertEqual(remaining.count(case), 1)
         self.assertNotIn(qualification.DIRECT_GOOD_TEST, remaining)
         self.assertNotIn(qualification.GOOD_WORKER_TEST, remaining)
+
+    def test_optional_whnf_replaces_only_its_original_host_case(self):
+        case = qualification.DIRECT_OPTIONAL_WHNF_TEST
+        _, output = self.run_typed_selection(direct_tests=(case,))
+        remaining = dict(line.split("=", 1) for line in output.splitlines())[
+            "LEAN_RS_TEST_REMAINING_FILTER"
+        ]
+        self.assertTrue(
+            remaining.endswith(
+                f" | (package(=lean-rs-host) & (binary(=host_services) & (test(={case})))))"
+            )
+        )
+        self.assertEqual(remaining.count(case), 1)
 
     def test_direct_transitive_receipt_requires_process_exit(self):
         marker = ((b"direct-host-transitive-passed",),)

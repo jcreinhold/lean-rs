@@ -147,8 +147,16 @@ fn with_direct_shims(
 
     let held = Arc::new(Held::acquire(Record::selected())?);
     let r = &held.record;
-    assert!(r.broken_import && !r.typed_session && !r.stream && !r.verification);
-    assert_eq!(r.host_builder_case.as_deref(), Some(case));
+    assert!(!r.stream && !r.verification);
+    if case == "meta_missing_optional_symbol_returns_unsupported" {
+        assert!(r.optional_whnf && r.typed_session && !r.broken_import && r.host_builder_case.is_none());
+        // Keep the exact private graph and existing fixture held through
+        // process exit, even if a native initializer or assertion fails.
+        let _until_exit = Box::leak(Box::new(Arc::clone(&held)));
+    } else {
+        assert!(r.broken_import && !r.typed_session && !r.optional_whnf);
+        assert_eq!(r.host_builder_case.as_deref(), Some(case));
+    }
     assert_eq!(r.project.file_name().and_then(|name| name.to_str()), Some(project));
     held.verify()?;
     held.check_interop_visibility(false)?;
@@ -174,6 +182,25 @@ fn with_direct_shims(
         )?
     };
     held.check_interop_visibility(true)?;
+    if r.optional_whnf {
+        use lean_rs::module::{LeanLibrary, LeanModuleInitializer};
+        // SAFETY: the ordinary fixture image is the existing selected SDK build,
+        // sealed with the same runtime and held alongside both variant shims.
+        let library = unsafe { LeanLibrary::open(runtime, &r.consumer_image) }?;
+        let caps = LeanCapabilities::from_prepared_capability(
+            &host,
+            &prepared,
+            loaded,
+            (library, LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture")),
+            "lean_rs_fixture",
+            "LeanRsFixture",
+        )?;
+        // The process can retain Lean registrations after the last local value.
+        let caps = std::mem::ManuallyDrop::new(caps);
+        assert_eq!(caps.artifact_roots(), r.roots);
+        held.check_optional_whnf_images()?;
+        return check(&caps, r);
+    }
     let caps = LeanCapabilities::from_prepared(&host, &prepared, loaded)?;
     assert_eq!(caps.artifact_roots(), r.roots);
     check(&caps, r)?;
@@ -283,5 +310,59 @@ fn load_shims_only_succeeds_when_user_shared_facet_does_not_build() -> Result<()
         },
     )?;
     metadata_qualification::audit("direct-host-broken-shared-passed");
+    Ok(())
+}
+
+#[test]
+fn meta_missing_optional_symbol_returns_unsupported() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_rs::module::HostImportOptions;
+    use lean_rs_host::LeanElabOptions;
+    use lean_rs_host::host::meta::{LeanMetaOptions, MetaCallStatus, infer_type};
+
+    with_direct_shims("meta_missing_optional_symbol_returns_unsupported", "lean", |caps, r| {
+        let paths = caps.import_search_paths();
+        assert!(
+            paths
+                .iter()
+                .map(std::path::Path::new)
+                .eq(r.import_roots.iter().map(std::path::PathBuf::as_path))
+        );
+        let names = ["LeanRsFixture.Meta".to_owned(), "LeanRsHostShims.Meta".to_owned()];
+        let options = HostImportOptions::default();
+        // SAFETY: these are the original two imports, in order and under
+        // default options, using only the independently held graph.
+        let imports = unsafe {
+            caps.shim_capability()
+                .import_scope_with_options(paths.clone(), names.to_vec(), options.clone())
+        };
+        let mut session = caps.session(&imports, None, None)?;
+        let (environment, scope) = session.source_context();
+        assert!(scope.matches_request(&paths, &names));
+        assert_eq!(scope.options(), &options);
+        // SAFETY: only the original fixed Nat request, the same checked
+        // environment and default options are used.
+        let term = unsafe {
+            caps.shim_capability().term_scope(
+                environment,
+                scope,
+                r.verification_roots(),
+                "Nat".into(),
+                None,
+                LeanElabOptions::new().source_options(),
+            )
+        }?;
+        let expr = session
+            .elaborate(&term, None)?
+            .expect("fixture Nat expression elaborates");
+        assert_eq!(
+            session
+                .run_meta(&infer_type(), expr.clone(), &LeanMetaOptions::new(), None)?
+                .status(),
+            MetaCallStatus::Ok,
+        );
+        good_shims_assertions::check_missing_whnf(&mut session, expr);
+        Ok(())
+    })?;
+    metadata_qualification::audit("direct-host-optional-whnf-passed");
     Ok(())
 }

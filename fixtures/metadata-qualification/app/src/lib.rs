@@ -151,6 +151,8 @@ pub struct Record {
     pub host_builder_case: Option<String>,
     pub typed_session: bool,
     #[serde(default)]
+    pub optional_whnf: bool,
+    #[serde(default)]
     pub stream: bool,
     #[serde(default)]
     pub signature_probe: Option<String>,
@@ -565,6 +567,30 @@ impl Held {
         }
         Ok(())
     }
+    // For the WHNF fixture, corroborate the exact mapped shim and fixture
+    // after ordinary loader admission. The sealed read union is still held.
+    pub fn check_optional_whnf_images(&self) -> R<()> {
+        require(self.record.optional_whnf, "wrong optional WHNF deployment")?;
+        let images = mapped_images()?;
+        for expected in [&self.record.host_image, &self.record.consumer_image] {
+            let image = images
+                .iter()
+                .find(|image| &image.path == expected)
+                .ok_or_else(|| err("selected optional WHNF image was not mapped"))?;
+            #[cfg(target_os = "linux")]
+            {
+                let metadata = image.path.metadata()?;
+                require(
+                    image.device == Some((rustix::fs::major(metadata.dev()), rustix::fs::minor(metadata.dev())))
+                        && image.inode == Some(metadata.ino()),
+                    "optional WHNF mapped image identity changed",
+                )?;
+            }
+            self.record.check_file(&image.path)?;
+        }
+        Ok(())
+    }
+
     pub fn verify(&self) -> R<()> {
         let d = &self.record;
         let unexpected_loader_selection = if cfg!(target_os = "macos") {
