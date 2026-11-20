@@ -68,6 +68,10 @@ ORDINARY_SESSION_REUSE_TESTS = (
     "an_explicit_child_environment_outranks_the_configured_capacity",
 )
 ORDINARY_APP_TEST_COUNT = len(ORDINARY_TYPED_TESTS) + len(ORDINARY_SESSION_REUSE_TESTS)
+ORDINARY_JSON_TESTS = (
+    ("pool", "compatible_session_key_reuses_one_worker"),
+    ("typed_command", "typed_json_command_decodes_response"),
+)
 MAX_FIXTURE_WORKER_BYTES = 256 * 1024**2
 GENERATED_OUTPUT_KEY = "lean-4.36.0"
 DARWIN_ARM64_PINS = {
@@ -802,15 +806,20 @@ def ordinary_app_tests():
     return f"{typed} | {reuse}"
 
 
-def check_typed_children_closed(events):
+def typed_audit(events):
     with events.open("rb") as stream:
         data = stream.read(16 * 1024 + 1)
     require(
         0 < len(data) <= 16 * 1024 and data.endswith(b"\n"),
         "missing or incomplete typed worker audit",
     )
+    return data
+
+
+def check_typed_children_closed(data, *, json_case=None):
     admitted = set()
     workers = set()
+    command_grants = []
     for line in data.splitlines():
         raw, event = line.split(b" ", 1)
         require(raw.isdigit() and int(raw) > 0, "invalid typed worker PID")
@@ -818,10 +827,20 @@ def check_typed_children_closed(events):
         workers.add(pid)
         if event == b"verified-deployment":
             admitted.add(pid)
-    require(
-        len(admitted) >= ORDINARY_APP_TEST_COUNT,
-        "typed tests did not start the expected admitted workers",
-    )
+        if event == b"authorize-consumer-load":
+            command_grants.append(pid)
+    if json_case is None:
+        require(
+            len(admitted) >= ORDINARY_APP_TEST_COUNT,
+            "typed tests did not start the expected admitted workers",
+        )
+    else:
+        require(
+            len(workers) == 1
+            and workers == admitted == set(command_grants)
+            and len(command_grants) == 1,
+            f"{json_case}: expected one admitted worker and one JSON capability grant",
+        )
     for pid in workers:
         try:
             os.kill(pid, 0)
@@ -846,6 +865,11 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
         record == record.resolve(strict=True) and record.is_file(),
         "missing exact typed fixture record",
     )
+    manifest = state / "worker-json-capability.json"
+    require(
+        manifest == manifest.resolve(strict=True) and manifest.is_file(),
+        "missing sealed typed JSON capability manifest",
+    )
     audit_dir = state / "app"
     audit_dir.mkdir(mode=0o700)
     events = audit_dir / "native-events.log"
@@ -862,6 +886,7 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
             "worker": str(worker),
             "worker_sha256": fixture_worker_digest(worker),
             "fixture": str(SDK / "fixtures/lean"),
+            "json_manifest": str(manifest),
             "sysroot": str(release),
             "prepared": json.loads(descriptor),
         },
@@ -872,31 +897,39 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     )
     env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"] = selection
     select_nextest_runner(env, profile)
-    run(
-        [
-            "cargo",
-            "nextest",
-            "run",
-            "--locked",
-            "--offline",
-            "-j1",
-            "--no-tests",
-            "fail",
-            "--retries",
-            "0",
-            "-p",
-            "lean-rs-worker-child",
-            "--test",
-            "typed_session",
-            "--test",
-            "session_reuse",
-            "-E",
-            ordinary_app_tests(),
-        ],
-        SDK,
-    )
+
+    def nextest(*targets, selection):
+        run(
+            [
+                "cargo",
+                "nextest",
+                "run",
+                "--locked",
+                "--offline",
+                "-j1",
+                "--no-tests",
+                "fail",
+                "--retries",
+                "0",
+                "-p",
+                "lean-rs-worker-child",
+                *[arg for target in targets for arg in ("--test", target)],
+                "-E",
+                selection,
+            ],
+            SDK,
+        )
+
+    nextest("typed_session", "session_reuse", selection=ordinary_app_tests())
+    before = typed_audit(events)
     # A failed run or unconfirmed closure leaves this one state in place.
-    check_typed_children_closed(events)
+    check_typed_children_closed(before)
+    for target, name in ORDINARY_JSON_TESTS:
+        nextest(target, selection=scoped_tests(target, (name,)))
+        after = typed_audit(events)
+        require(after.startswith(before), "typed worker audit changed")
+        check_typed_children_closed(after[len(before) :], json_case=name)
+        before = after
     remove_owned_state(state, owner)
 
 
@@ -1040,7 +1073,15 @@ def qualify_broken_import(
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
         print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)
         if run_typed:
-            typed = ordinary_app_tests()
+            typed = " | ".join(
+                [
+                    ordinary_app_tests(),
+                    *(
+                        scoped_tests(target, (name,))
+                        for target, name in ORDINARY_JSON_TESTS
+                    ),
+                ]
+            )
             broken = scoped_tests("capability_builder", (BROKEN_IMPORT_TEST,))
             print(
                 "LEAN_RS_TEST_REMAINING_FILTER="

@@ -480,7 +480,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
         run.assert_called_once()
 
-    def run_typed_selection(self, *, live_pid=False):
+    def run_typed_selection(self, *, live_pid=False, extra_json_worker=False):
         broken = self.state.with_name("broken-import")
         typed = self.state.with_name("typed-session")
         self.worker.chmod(0o500)
@@ -502,6 +502,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 (broken / "deployment.json").write_text(json.dumps(record))
             elif command[-1] == "--typed-session":
                 (typed / "deployment.json").write_text("{}")
+                (typed / "worker-json-capability.json").write_text("{}")
             elif "nextest" in command and "typed_session" in command:
                 Path(env["LEAN_RS_METADATA_AUDIT_PATH"]).write_text(
                     "".join(
@@ -509,6 +510,18 @@ class MetadataQualificationTest(unittest.TestCase):
                         for pid in range(10, 10 + qualification.ORDINARY_APP_TEST_COUNT)
                     )
                 )
+
+            elif "nextest" in command and "pool" in command:
+                audit = Path(env["LEAN_RS_METADATA_AUDIT_PATH"])
+                with audit.open("a") as stream:
+                    stream.write("51 verified-deployment\n51 authorize-consumer-load\n")
+                    if extra_json_worker:
+                        stream.write(
+                            "52 verified-deployment\n52 authorize-consumer-load\n"
+                        )
+            elif "nextest" in command and "typed_command" in command:
+                with Path(env["LEAN_RS_METADATA_AUDIT_PATH"]).open("a") as stream:
+                    stream.write("61 verified-deployment\n61 authorize-consumer-load\n")
 
         output = io.StringIO()
         with (
@@ -544,6 +557,16 @@ class MetadataQualificationTest(unittest.TestCase):
                         emit_host_selection=True,
                         run_typed=True,
                     )
+            elif extra_json_worker:
+                with self.assertRaisesRegex(ValueError, "expected one admitted worker"):
+                    qualification.qualify_broken_import(
+                        self.target,
+                        qualification.DARWIN_ARM64_PINS,
+                        emit_host_selection=True,
+                        run_typed=True,
+                    )
+                self.assertTrue(typed.exists())
+                self.assertEqual(output.getvalue(), "")
             else:
                 qualification.qualify_broken_import(
                     self.target,
@@ -553,15 +576,16 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
                 self.assertFalse(typed.exists())
                 self.assertEqual(
-                    probe.call_count, qualification.ORDINARY_APP_TEST_COUNT
+                    probe.call_count, qualification.ORDINARY_APP_TEST_COUNT + 2
                 )
         self.assertFalse(broken.exists())
-        self.assertEqual(len(seen), 7)
+        self.assertEqual(len(seen), 7 if live_pid else 8 if extra_json_worker else 9)
         return seen, output.getvalue()
 
     def test_typed_group_reuses_prepared_shims_and_excludes_only_completed_tests(self):
         seen, output = self.run_typed_selection()
-        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[-3:]
+        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[-5:-2]
+        json_cases = seen[-2:]
         assignments = dict(line.split("=", 1) for line in output.splitlines())
         descriptor = assignments["LEAN_RS_PREPARED_HOST_ARTIFACTS"]
         self.assertEqual(prepare[-1], "--typed-session")
@@ -589,11 +613,30 @@ class MetadataQualificationTest(unittest.TestCase):
             "test(=process_module_query_batch_changed_session_imports_rebuilds)",
             selection,
         )
+        json_filters = [
+            "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
+            "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
+        ]
+        self.assertEqual([cmd[-1] for cmd, _ in json_cases], json_filters)
+        for cmd, case_env in json_cases:
+            self.assertEqual(cmd[cmd.index("--retries") + 1], "0")
+            self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
+            self.assertEqual(
+                case_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"],
+                run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"],
+            )
+        self.assertEqual(
+            json.loads(run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"])["json_manifest"],
+            str(self.state.with_name("typed-session") / "worker-json-capability.json"),
+        )
         remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
         self.assertEqual(
             remaining,
-            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & (test(={qualification.BROKEN_IMPORT_TEST}))) | {selection}))",
+            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & (test(={qualification.BROKEN_IMPORT_TEST}))) | {selection} | {' | '.join(json_filters)}))",
         )
+
+    def test_typed_group_extra_pool_worker_keeps_state_and_skips_json_smoke(self):
+        self.run_typed_selection(extra_json_worker=True)
 
     def test_typed_group_with_live_worker_retains_only_typed_state(self):
         self.run_typed_selection(live_pid=True)

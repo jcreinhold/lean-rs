@@ -32,6 +32,8 @@ use lean_rs_worker_parent::{
 
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
+#[path = "support/ordinary_typed_worker.rs"]
+mod ordinary_typed_worker;
 use ordinary_typed_selection::ordinary_typed_selection;
 
 fn worker_binary() -> PathBuf {
@@ -78,7 +80,7 @@ fn ensure_late_extension_fixture_built() {
 /// The RSS guard is disabled so the snapshot-cache assertions describe reuse
 /// rather than whatever this machine's memory happens to be.
 fn worker_config() -> LeanWorkerConfig {
-    ordinary_typed_selection::worker_config()
+    ordinary_typed_worker::worker_config()
         .unwrap_or_else(|| LeanWorkerConfig::new(worker_binary()))
         .env("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", "0")
 }

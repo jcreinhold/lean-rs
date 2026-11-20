@@ -114,6 +114,8 @@ fn runtime_image_names() -> (&'static str, &'static str, &'static str) {
 }
 
 pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
+pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_command";
+pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
 type R<T> = io::Result<T>;
@@ -417,9 +419,7 @@ impl Held {
         }
         require(found, "selected libleanshared absent")?;
         require(
-            (d.typed_session && !d.verification && d.consumer_manifest.as_os_str().is_empty()
-                && d.consumer_json.is_empty())
-                || d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
+            d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
             "consumer manifest or initializer differs",
         )?;
         require(

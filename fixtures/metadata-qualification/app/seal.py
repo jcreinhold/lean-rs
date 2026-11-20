@@ -106,7 +106,12 @@ def main():
     assert not (broken and typed)
     if typed:
         assert rec.get("verification") is False
-    project = state / "lean" if broken else sdk / ("fixtures/lean" if typed else "fixtures/metadata-qualification/lean")
+    project = (
+        state / "lean"
+        if broken
+        else sdk
+        / ("fixtures/lean" if typed else "fixtures/metadata-qualification/lean")
+    )
     assert Path(rec["project"]) == project
     release = Path(rec["sysroot"])
     bundle = sdk / "crates/lean-rs-host/shims"
@@ -121,9 +126,17 @@ def main():
     package, module = ("lean_rs_interop_consumer", "LeanRsInteropConsumer")
     stem = package.replace("_", "__") + "_" + module
     if typed:
-        package, module = "lean_rs_fixture", "LeanRsFixture"
+        package, module = "lean_rs_fixture", "LeanRsFixture.Effects"
         stem = "lean__rs__fixture_LeanRsFixture"
-    ci = None if broken else (project / ".lake/build/lib" / native_name(stem) if typed else image(project, stem))
+    ci = (
+        None
+        if broken
+        else (
+            project / ".lake/build/lib" / native_name(stem)
+            if typed
+            else image(project, stem)
+        )
+    )
     shims = [out(dep) / "lean", out(host) / "lean"]
     if not broken:
         assert Path(rec["consumer_image"]) == ci
@@ -153,11 +166,15 @@ def main():
         with path.open("rb") as stream:
             contentpins[str(path)] = hashlib.file_digest(stream, "sha256").hexdigest()
 
-    for manifest in ["shim"] if broken or typed else ["consumer", "shim"]:
+    for manifest in ["shim"] if broken else ["consumer", "shim"]:
         path = Path(rec[manifest + "_manifest"])
         assert path.read_text() == rec[manifest + "_json"]
-        # Ordinary preparation republishes identical shim metadata by rename.
-        if not broken and not typed:
+        # Pin the typed capability manifest in the private state. The existing
+        # typed host-shim snapshot can be republished under its writer.
+        if typed and manifest == "consumer":
+            assert path == state / "worker-json-capability.json"
+            pin(path)
+        elif not broken and not typed:
             pin(path)
         v = json.loads(path.read_text())
         p, m, i = (
@@ -166,17 +183,21 @@ def main():
             else ("lean_rs_host_shims", "LeanRsHostShims", hi)
         )
         assert (v["package"], v["module"], v["primary_dylib"]) == (p, m, str(i))
-        assert v["dependencies"] == [
-            {
-                "name": "lean_rs_interop_shims",
-                "dylib_path": str(di),
-                "export_symbols_for_dependents": True,
-                "initializer": {
-                    "package": "lean_rs_interop_shims",
-                    "module": "LeanRsInterop",
-                },
-            }
-        ]
+        assert v["dependencies"] == (
+            []
+            if typed and manifest == "consumer"
+            else [
+                {
+                    "name": "lean_rs_interop_shims",
+                    "dylib_path": str(di),
+                    "export_symbols_for_dependents": True,
+                    "initializer": {
+                        "package": "lean_rs_interop_shims",
+                        "module": "LeanRsInterop",
+                    },
+                }
+            ]
+        )
         assert (
             v["build_toolchain"]["sysroot"] == str(release)
             and v["toolchain_fingerprint"]["lean_version"] == "4.36.0"
@@ -186,7 +207,14 @@ def main():
             == "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4"
         )
     project_symbols = ["initialize_" + stem]
-    if not typed:
+    if typed:
+        project_symbols.extend(
+            [
+                "initialize_lean__rs__fixture_LeanRsFixture_Effects",
+                "lean_rs_interop_consumer_worker_json_command",
+            ]
+        )
+    elif not broken:
         project_symbols.append("lean_rs_interop_consumer_worker_metadata")
     images = [
         (di, ["initialize_lean__rs__interop__shims_LeanRsInterop"]),

@@ -1,5 +1,4 @@
 //! Checked launch inputs shared by the named SDK-owned typed tests.
-use lean_rs_worker_parent::LeanWorkerConfig;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
@@ -9,11 +8,12 @@ use std::path::PathBuf;
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OrdinaryTypedSelection {
-    worker: PathBuf,
+    pub(super) worker: PathBuf,
     worker_sha256: String,
     pub(super) fixture: PathBuf,
-    sysroot: PathBuf,
-    prepared: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts,
+    pub(super) json_manifest: PathBuf,
+    pub(super) sysroot: PathBuf,
+    pub(super) prepared: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts,
 }
 
 pub(super) fn ordinary_typed_selection() -> Option<&'static OrdinaryTypedSelection> {
@@ -23,7 +23,12 @@ pub(super) fn ordinary_typed_selection() -> Option<&'static OrdinaryTypedSelecti
             let raw = option_env!("LEAN_RS_TEST_ORDINARY_TYPED_SESSION")?;
             assert!(raw.len() <= 64 * 1024, "typed selection exceeds launch limit");
             let selected: OrdinaryTypedSelection = serde_json::from_str(raw).expect("valid typed fixture selection");
-            for path in [&selected.worker, &selected.fixture, &selected.sysroot] {
+            for path in [
+                &selected.worker,
+                &selected.fixture,
+                &selected.sysroot,
+                &selected.json_manifest,
+            ] {
                 assert_eq!(path.canonicalize().expect("canonical typed input"), *path);
             }
             use sha2::{Digest, Sha256};
@@ -51,20 +56,4 @@ pub(super) fn ordinary_typed_selection() -> Option<&'static OrdinaryTypedSelecti
             Some(selected)
         })
         .as_ref()
-}
-
-pub(super) fn worker_config() -> Option<LeanWorkerConfig> {
-    if let Some(selected) = ordinary_typed_selection() {
-        assert!(std::env::var_os("LEAN_PATH").is_none());
-        return Some(
-            LeanWorkerConfig::new(&selected.worker)
-                .checked_native_loader_environment()
-                .env("LEAN_SYSROOT", selected.sysroot.as_os_str())
-                .env(
-                    "LEAN_RS_PREPARED_HOST_ARTIFACTS",
-                    serde_json::to_string(&selected.prepared).expect("prepared shim descriptor"),
-                ),
-        );
-    }
-    None
 }

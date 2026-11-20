@@ -18,6 +18,7 @@ use lean_rs::module::{
 use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
+use lean_rs_host::host::LeanPreparedHostArtifacts;
 use lean_rs_host::host::process::{
     DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationBatchItem,
     DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationBatchRow,
@@ -451,6 +452,9 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     // asked for. A linear scan, not a map: `HostSessionMode` is not `Hash`,
     // and a child serves one key in practice, so the list is length 1.
     let mut anchors: Vec<&'static HostAnchor> = Vec::new();
+    // The bundled fallback is fixed for this child's selected toolchain, not
+    // for a caller project. Later anchors can open while the first still holds shared locks.
+    let mut fallback_prepared = None;
     let plugin = GenerationPlugin::default();
     let mut session_import_bytes = 0_u64;
     let mut session_imports = 0_u64;
@@ -692,7 +696,14 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     )?;
                     continue;
                 }
-                let anchor = match ready_host_anchor(runtime, &mut anchors, &project_root, &mode, admission.as_ref()) {
+                let anchor = match ready_host_anchor(
+                    runtime,
+                    &mut anchors,
+                    &project_root,
+                    &mode,
+                    admission.as_ref(),
+                    &mut fallback_prepared,
+                ) {
                     Ok(anchor) => anchor,
                     Err(error) => {
                         read_admission_failed = shared_reads;
@@ -1573,11 +1584,12 @@ fn ready_host_anchor(
     project_root: &str,
     mode: &HostSessionMode,
     admission: Option<&SessionAdmission>,
+    fallback_prepared: &mut Option<LeanPreparedHostArtifacts>,
 ) -> LeanResult<&'static HostAnchor> {
     if let Some(anchor) = anchors.iter().find(|anchor| anchor.matches(project_root, mode)) {
         return Ok(*anchor);
     }
-    let anchor = HostAnchor::build(runtime, project_root, mode, admission)?;
+    let anchor = HostAnchor::build(runtime, project_root, mode, admission, fallback_prepared)?;
     anchors.push(anchor);
     Ok(anchor)
 }
@@ -1603,6 +1615,7 @@ impl HostAnchor {
         project_root: &str,
         mode: &HostSessionMode,
         admission: Option<&SessionAdmission>,
+        fallback_prepared: &mut Option<LeanPreparedHostArtifacts>,
     ) -> LeanResult<&'static Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
         let authority = worker_authority()?;
@@ -1610,6 +1623,15 @@ impl HostAnchor {
             HostSessionMode::Capability { manifest_path, .. } => manifest_path.as_deref(),
             HostSessionMode::ShimsOnly => None,
             _ => return Err(host_internal("unsupported host session loading mode")),
+        };
+        // Fallback preparation may take exclusive shim locks even on a cache hit.
+        // Prepare before the first grant and never rebuild under earlier grants.
+        // Managed admission carries its own descriptor; native load order below
+        // and the per-anchor authority checks are unchanged.
+        let prepared = match (admission, fallback_prepared) {
+            (Some(admission), _) => &admission.prepared,
+            (None, Some(prepared)) => prepared,
+            (None, missing) => missing.insert(lean_rs_host::host::prepare_host_artifacts()?),
         };
         let load = |path: &Path, bytes: &[u8]| {
             load_worker_snapshot(runtime, path, bytes, |p, b| authority.worker(runtime, p, b))
@@ -1624,13 +1646,6 @@ impl HostAnchor {
             Some(load_worker_manifest(runtime, Path::new(path))?)
         } else {
             None
-        };
-        let owned_prepared;
-        let prepared = if let Some(admission) = admission {
-            &admission.prepared
-        } else {
-            owned_prepared = lean_rs_host::host::prepare_host_artifacts()?;
-            &owned_prepared
         };
         let shim = authority.host(runtime, prepared)?;
         let capabilities = match mode {

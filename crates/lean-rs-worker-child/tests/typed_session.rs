@@ -52,6 +52,8 @@ fn workspace_root() -> PathBuf {
 
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
+#[path = "support/ordinary_typed_worker.rs"]
+mod ordinary_typed_worker;
 use ordinary_typed_selection::ordinary_typed_selection;
 
 fn fixture_root() -> PathBuf {
@@ -71,7 +73,7 @@ fn ensure_fixture_built() {
 }
 
 fn worker_config() -> LeanWorkerConfig {
-    if let Some(config) = ordinary_typed_selection::worker_config() {
+    if let Some(config) = ordinary_typed_worker::worker_config() {
         return config;
     }
     LeanWorkerConfig::new(worker_binary())

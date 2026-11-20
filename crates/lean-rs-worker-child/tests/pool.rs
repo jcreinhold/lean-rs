@@ -16,6 +16,9 @@ use lean_rs_worker_parent::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+#[path = "support/ordinary_typed_json.rs"]
+mod ordinary_typed_json;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -156,6 +159,7 @@ fn assert_batch_has_state(outcome: &LeanWorkerModuleQueryBatchOutcome) {
 
 #[test]
 fn compatible_session_key_reuses_one_worker() {
+    let builder = || ordinary_typed_json::json_builder().unwrap_or_else(builder);
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2));
 
     {

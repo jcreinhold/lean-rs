@@ -1,5 +1,6 @@
-use lean_rs_worker_protocol::worker_exports::metadata_signature;
-use lean_toolchain::CargoLeanCapability;
+use lean_rs_worker_protocol::worker_exports::{json_command_signature, metadata_signature};
+use lean_toolchain::{CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, ToolchainFingerprint};
+use std::io::Write as _;
 use std::{
     env, fs,
     os::unix::{
@@ -173,11 +174,46 @@ fn prepare_typed_session(
     if !metadata.is_file() || lock.canonicalize()? != lock || metadata.nlink() != 1 {
         return Err("invalid fixture project lock".into());
     }
+    // The ordinary job already built this dependency-free image. Only the metadata
+    // below is new; the app's existing seal and held read locks cover the image.
+    let state_metadata = fs::symlink_metadata(state)?;
+    if !state_metadata.is_dir()
+        || state_metadata.uid() != rustix::process::geteuid().as_raw()
+        || state_metadata.mode() & 0o7777 != 0o700
+    {
+        return Err("typed state is not a private job directory".into());
+    }
+    let fingerprint = ToolchainFingerprint::current();
+    let manifest_path = state.join("worker-json-capability.json");
+    let manifest = serde_json::to_string(&serde_json::json!({
+        "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
+        "package": "lean_rs_fixture",
+        "module": "LeanRsFixture.Effects",
+        "primary_dylib": image,
+        "dependencies": [],
+        "build_toolchain": {"sysroot": sysroot},
+        "toolchain_fingerprint": {
+            "lean_version": fingerprint.lean_version,
+            "resolved_version": fingerprint.resolved_version,
+            "header_sha256": fingerprint.header_sha256,
+        },
+        "exports": [json_command_signature("lean_rs_interop_consumer_worker_json_command").to_json()],
+    }))?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&manifest_path)?
+        .write_all(manifest.as_bytes())?;
+    if !lean_toolchain::manifest_validation::check_static(&manifest_path).is_ok() {
+        return Err("typed JSON capability manifest failed SDK preflight".into());
+    }
     let mut roots = shim.artifact_roots().to_vec();
     roots.push(project.clone());
     roots.sort();
     let record = serde_json::json!({
         "broken_import": false, "typed_session": true, "verification": false,
+        "consumer_manifest": manifest_path, "consumer_json": manifest,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": image,
         "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),

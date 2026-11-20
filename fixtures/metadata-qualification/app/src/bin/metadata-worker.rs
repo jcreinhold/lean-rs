@@ -15,7 +15,7 @@ use lean_rs_host::host::LeanPreparedHostArtifacts;
 use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceContext};
 use std::path::Path;
 
-use metadata_qualification::{EXPORT, Held, Record, audit};
+use metadata_qualification::{EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, Record, audit};
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
 impl MetadataApp {
@@ -65,10 +65,20 @@ impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || d.typed_session || path != d.consumer_manifest {
+        if d.broken_import || path != d.consumer_manifest {
             return Err(denied());
         }
-        Ok(WorkerManifestRead::new(d.project.clone(), path.into(), held.clone()))
+        let root = if d.typed_session {
+            if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
+                || path.file_name().and_then(|name| name.to_str()) != Some(JSON_MANIFEST_NAME)
+            {
+                return Err(denied());
+            }
+            path.parent().ok_or_else(denied)?
+        } else {
+            &d.project
+        };
+        Ok(WorkerManifestRead::new(root.into(), path.into(), held.clone()))
     }
     fn worker(
         &self,
@@ -78,19 +88,27 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || d.typed_session || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
+        if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
+        let export = if d.typed_session {
+            if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
+                return Err(denied());
+            }
+            JSON_COMMAND_EXPORT
+        } else {
+            EXPORT
+        };
         audit("authorize-consumer-load");
-        // SAFETY: the private producer checked the two exact images, initializer names, visibility,
-        // runtime and owned String -> IO String export. The compiled function ignores its input.
-        // The same guard pins those protected files and their import graph for this worker generation.
+        // SAFETY: the seal and Held verified the exact images, initializer, runtime
+        // and the one named owned String -> IO String export, which ignores its input.
+        // Held pins the images, dependencies and imports for the worker generation.
         Ok(unsafe {
             AuthorizedWorkerSnapshot::attest(
                 runtime,
                 path.into(),
                 bytes.to_vec(),
-                vec![(EXPORT.into(), WorkerExportContract::StringIoString)],
+                vec![(export.into(), WorkerExportContract::StringIoString)],
                 held.clone(),
             )
         })

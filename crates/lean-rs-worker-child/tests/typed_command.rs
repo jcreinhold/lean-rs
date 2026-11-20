@@ -5,12 +5,17 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use lean_rs_worker_parent::{
-    LeanWorkerCapabilityBuilder, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
+    LeanWorker, LeanWorkerCapabilityBuilder, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
     LeanWorkerDiagnosticSink, LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerProgressEvent, LeanWorkerProgressSink,
-    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
+    LeanWorkerSessionConfig, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+#[path = "support/ordinary_typed_worker.rs"]
+mod ordinary_typed_worker;
 
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
@@ -176,21 +181,52 @@ impl LeanWorkerProgressSink for RecordingProgress {
 
 #[test]
 fn typed_json_command_decodes_response() {
-    let mut capability = builder().open().expect("builder opens capability");
-    let mut session = capability.open_session(None, None).expect("session opens");
     let command =
         LeanWorkerJsonCommand::<FixtureRequest, FixtureResponse>::new("lean_rs_interop_consumer_worker_json_command");
+    let request = FixtureRequest {
+        source: "typed-command-test".to_owned(),
+    };
 
-    let response = session
-        .run_json_command(
-            &command,
-            &FixtureRequest {
-                source: "typed-command-test".to_owned(),
-            },
-            None,
-            None,
-        )
-        .expect("typed JSON command succeeds");
+    let response = if let Some(selected) = ordinary_typed_selection::ordinary_typed_selection() {
+        let config = ordinary_typed_worker::worker_config().expect("sealed ordinary worker configuration");
+        let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+        let pid = worker.__child_pid_for_test().expect("worker PID");
+        let imports = ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"];
+        let direct = LeanWorkerSessionConfig::new(&selected.fixture, "lean_rs_fixture", "LeanRsFixture", imports);
+        {
+            let mut session = worker.open_session(&direct, None, None).expect("direct anchor opens");
+            let row = session
+                .describe("Nat.add", None, None)
+                .expect("read-only declaration request succeeds")
+                .expect("Nat.add is present");
+            assert_eq!(row.name, "Nat.add");
+        }
+        assert_eq!(worker.__child_pid_for_test(), Some(pid));
+
+        // A different mode creates a new anchor on the same worker. The first
+        // anchor still holds its shim guards, so preparation must not take EX.
+        let manifest = LeanWorkerSessionConfig::manifest_backed(
+            &selected.fixture,
+            "lean_rs_fixture",
+            "LeanRsFixture.Effects",
+            &selected.json_manifest,
+            imports,
+        );
+        let response = worker
+            .open_session(&manifest, None, None)
+            .expect("distinct manifest anchor opens")
+            .run_json_command(&command, &request, None, None)
+            .expect("typed JSON command succeeds");
+        assert_eq!(worker.__child_pid_for_test(), Some(pid));
+        response
+    } else {
+        let mut capability = builder().open().expect("builder opens capability");
+        capability
+            .open_session(None, None)
+            .expect("session opens")
+            .run_json_command(&command, &request, None, None)
+            .expect("typed JSON command succeeds")
+    };
 
     assert_eq!(
         response,
