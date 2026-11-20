@@ -790,14 +790,34 @@ pub(super) fn resolution() -> Vec<String> {
     dead_code,
     reason = "this fixture entry is shared by separate test and profiling binaries"
 )]
-#[allow(
-    clippy::panic,
-    reason = "the test fixture must reject every unlisted source expression"
-)]
 pub(super) fn term<'lean, 'c>(
     caps: &'c LeanCapabilities<'lean, '_>,
     session: &lean_rs_host::LeanSession<'lean, '_>,
     source: &str,
+) -> lean_rs::host_bridge::TrustedHostTerm<'lean, 'c> {
+    term_with_paths(caps, session, source, resolution)
+}
+
+#[allow(dead_code, reason = "used only by diagnostics tests")]
+pub(super) fn native_parse_error_term<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    session: &lean_rs_host::LeanSession<'lean, '_>,
+) -> lean_rs::host_bridge::TrustedHostTerm<'lean, 'c> {
+    term_with_paths(caps, session, "(1 +", || {
+        if native_fixture_selected() {
+            native_elaboration_paths(caps, session)
+        } else {
+            resolution()
+        }
+    })
+}
+
+#[allow(clippy::panic, reason = "reject every unlisted source expression")]
+fn term_with_paths<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    session: &lean_rs_host::LeanSession<'lean, '_>,
+    source: &str,
+    paths: impl FnOnce() -> Vec<String>,
 ) -> lean_rs::host_bridge::TrustedHostTerm<'lean, 'c> {
     let modules = match source {
         "(1 + 1 : Nat)" | "(1 +" => vec!["LeanRsHostShims.Elaboration".into()],
@@ -814,7 +834,7 @@ pub(super) fn term<'lean, 'c>(
         caps.shim_capability().term_scope(
             environment,
             imports,
-            resolution(),
+            paths(),
             source.to_owned(),
             None,
             lean_rs_host::LeanElabOptions::new().source_options(),

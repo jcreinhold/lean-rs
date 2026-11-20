@@ -26,7 +26,7 @@ use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession};
 // -- fixture setup -------------------------------------------------------
 
 fn fixture_lake_root() -> PathBuf {
-    fixture::fixture_root()
+    fixture::native_fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -38,16 +38,20 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn fixture_caps<'h>(host: &'h LeanHost<'static>) -> LeanCapabilities<'static, 'h> {
-    fixture::capabilities(host).expect("load caps")
+    fixture::native_capabilities(host).expect("load caps")
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixture::imports(caps, "LeanRsHostShims.Elaboration"), None, None)
-        .expect("session imports cleanly")
+    caps.session(
+        &fixture::native_imports(caps, "LeanRsHostShims.Elaboration"),
+        None,
+        None,
+    )
+    .expect("session imports cleanly")
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
+    caps.session(&fixture::native_imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly")
 }
 
@@ -121,7 +125,7 @@ fn elaboration_code_on_parse_error() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .elaborate(&fixture::term(&caps, &session, "(1 +"), None)
+        .elaborate(&fixture::native_parse_error_term(&caps, &session), None)
         .expect("host stack reports no exception while elaborating a malformed term");
     let failure = outcome.expect_err("malformed term must elaborate to a failure");
     assert_eq!(failure.code(), LeanDiagnosticCode::Elaboration);
@@ -158,7 +162,7 @@ fn unsupported_code_on_absent_meta_service() {
     // `None`, which is part of the contract surface this test pins.
     let mut session = caps
         .session(
-            &fixture::imports_for(
+            &fixture::native_imports_for(
                 &caps,
                 &["LeanRsFixture.Handles", "LeanRsHostShims.Meta"],
                 lean_rs_host::LeanSessionImportProfile::Private,
