@@ -1326,6 +1326,20 @@ INTEROP_BUILDER_IMPORT_CASES = (
     "capability_builder_session_import_profile_reaches_child_import",
     "open_session_with_imports_overrides_builder_imports",
 )
+INTEROP_FOREIGN_IMPORT_CASES = {
+    "manifest_capability_import_workspace_root_imports_external_workspace_only": (
+        "admit-fixed-no-exports",
+        (2, 2),
+    ),
+    "pooled_manifest_capability_reuses_external_import_workspace_session": (
+        "authorize-fixed-shape",
+        (1, 1),
+    ),
+    "external_import_workspace_root_preserves_timeout_and_fatal_errors": (
+        "authorize-fixed-shape",
+        (2, 2),
+    ),
+}
 INTEROP_TESTS = (
     *STREAM_TESTS,
     *INTEROP_METADATA_TESTS,
@@ -1336,6 +1350,7 @@ INTEROP_TESTS = (
         ("capability_builder", name)
         for name in (*INTEROP_SIGNATURE_CASES, *INTEROP_BUILDER_IMPORT_CASES)
     ),
+    *(("capability_builder", name) for name in INTEROP_FOREIGN_IMPORT_CASES),
     *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
 
@@ -1360,13 +1375,19 @@ def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=N
     owner = project.stat()
     require(owner.st_uid == os.geteuid(), "stream project requires its checkout owner")
     selected = cases or [name for _, name in INTEROP_TESTS]
-    regular = [name for name in selected if name not in INTEROP_SIGNATURE_CASES]
+    regular = [
+        name
+        for name in selected
+        if name not in INTEROP_SIGNATURE_CASES
+        and name not in INTEROP_FOREIGN_IMPORT_CASES
+    ]
+    foreign = [name for name in selected if name in INTEROP_FOREIGN_IMPORT_CASES]
     probes = [(name,) for name in selected if name in INTEROP_SIGNATURE_CASES]
-    cohorts = ([regular] if regular else []) + probes
+    cohorts = [group for group in (regular, foreign, *probes) if group]
     if pinned_selection is not None:
         project.chmod(0o700)
     for index, cohort in enumerate(cohorts):
-        # Each negative manifest has its own seal, with closure between seals.
+        # Foreign imports and each negative manifest have their own seal.
         run_stream_group(
             release,
             profile,
@@ -1398,6 +1419,11 @@ def run_stream_group(
 ):
     probes = [name for name in cases if name in INTEROP_SIGNATURE_CASES]
     require(not probes or len(cases) == 1, "each signature probe requires its own seal")
+    foreign = any(name in INTEROP_FOREIGN_IMPORT_CASES for name in cases)
+    require(
+        not foreign or all(name in INTEROP_FOREIGN_IMPORT_CASES for name in cases),
+        "foreign imports require their own seal",
+    )
     project = SDK / "fixtures/interop-worker"
     require(project.resolve(strict=True) == project, "aliased stream project")
     require(
@@ -1495,7 +1521,10 @@ def run_stream_group(
     run([*cargo, "--bin", "prepare"], APP)
     if probes:
         env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
+    if foreign:
+        env["LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE"] = "1"
     run([TARGET / "debug/prepare", state, "--interop-stream"], APP)
+    env.pop("LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE", None)
     env.pop("LEAN_RS_TEST_SIGNATURE_PROBE", None)
     record = state / "deployment.json"
     env.update(
@@ -1512,6 +1541,7 @@ def run_stream_group(
             "worker": str(worker),
             "worker_sha256": fixture_worker_digest(worker),
             "fixture": str(project),
+            **({"foreign_workspace": str(state / "foreign")} if foreign else {}),
             "json_manifest": str(state / "worker-stream-capability.json"),
             "sysroot": str(release),
         }
@@ -1542,7 +1572,10 @@ def run_stream_group(
             ],
             SDK,
         )
-        if name in INTEROP_SIGNATURE_CASES:
+        counts = (1, 1)
+        if name in INTEROP_FOREIGN_IMPORT_CASES:
+            marker, counts = INTEROP_FOREIGN_IMPORT_CASES[name]
+        elif name in INTEROP_SIGNATURE_CASES:
             marker = "authorize-fixed-signature-probe"
         elif name in POOL_BATCH_GRANTS or name in INTEROP_BUILDER_IMPORT_CASES:
             marker = "admit-fixed-no-exports"
@@ -1559,7 +1592,6 @@ def run_stream_group(
             marker = "authorize-fixed-json"
         else:
             marker = "authorize-fixed-stream"
-        counts = (1, 1)
         grant_event = f"{marker}-{name}".encode()
         grant_order = None
         if name in POOL_BATCH_GRANTS:

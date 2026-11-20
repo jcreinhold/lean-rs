@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -149,6 +150,14 @@ def main():
     if scalar:
         project = state / "lean"
     assert Path(rec["project"]) == project
+    foreign = Path(rec["foreign_workspace"]) if rec.get("foreign_workspace") else None
+    if foreign:
+        assert (
+            stream and not rec.get("signature_probe") and foreign == state / "foreign"
+        )
+        assert foreign == foreign.resolve(strict=True)
+        owner = foreign.stat()
+        assert owner.st_uid == os.geteuid() and owner.st_mode & 0o7777 == 0o700
     release = Path(rec["sysroot"])
     bundle = sdk / "crates/lean-rs-host/shims"
     dep = bundle / "lean-rs-interop-shims"
@@ -182,7 +191,13 @@ def main():
     assert list(map(Path, rec["shim_paths"])) == shims
     user_dep = project / ".lake/packages/dep"
     assert list(map(Path, rec["roots"])) == sorted(
-        [project, dep, host, *([user_dep] if transitive else [])]
+        [
+            project,
+            dep,
+            host,
+            *([user_dep] if transitive else []),
+            *([foreign] if foreign else []),
+        ]
     )
     assert list(map(Path, rec["shim_roots"])) == sorted([dep, host])
     filepins = {}
@@ -408,6 +423,32 @@ def main():
         release / "lib/lean",
     ]:
         tree(r)
+    if foreign:
+        foreign_oleans = foreign / ".lake/build/lib/lean"
+        inputs = {
+            "lakefile.lean": "import Lake\nopen Lake DSL\npackage audited_workspace\nlean_lib B\n",
+            "B.lean": "import B.Mod\n",
+            "B/Mod.lean": "def B.Mod.externalValue : Nat := 7\n",
+            "lean-toolchain": "leanprover/lean4:v4.36.0\n",
+        }
+        for name, text in inputs.items():
+            source = foreign / name
+            assert source.read_text() == text
+            pin_content(source)
+        manifest = foreign / "lake-manifest.json"
+        assert json.loads(manifest.read_text())["packages"] == []
+        pin_content(manifest)
+        tree(foreign_oleans)
+        assert str(foreign_oleans / "B/Mod.olean") in filepins
+        assert not any(
+            (root / "B").exists() or (root / "B.olean").exists()
+            for root in [project_oleans, *project_deps, *shims, release / "lib/lean"]
+        )
+        assert not any(
+            (root / "LeanRsInteropConsumer").exists()
+            or (root / "LeanRsInteropConsumer.olean").exists()
+            for root in [foreign_oleans, *shims, release / "lib/lean"]
+        )
     if typed and not stream:
         for module in ("LeanRsFixtureLateExtension.olean", "LeanRsFixture/Meta.olean"):
             required = project_oleans / module

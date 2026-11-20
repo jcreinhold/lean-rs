@@ -21,7 +21,7 @@ use std::path::Path;
 
 use metadata_qualification::{
     EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_MANIFEST_NAME, audit,
-    module_syntax_case,
+    foreign_import_case, module_syntax_case,
 };
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
@@ -501,6 +501,9 @@ impl WorkerAuthority for MetadataApp {
             ]
         } else if d.stream {
             let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
+            if foreign_import_case(&requested) != d.foreign_workspace.is_some() {
+                return Err(denied());
+            }
             let manifest: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
             let signatures = manifest
                 .get("exports")

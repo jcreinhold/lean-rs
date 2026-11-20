@@ -94,6 +94,18 @@ pub(crate) const CASES: &[(&[&str], Exports)] = &[
         ],
         Exports::NoExports,
     ),
+    (
+        &["manifest_capability_import_workspace_root_imports_external_workspace_only"],
+        Exports::NoExports,
+    ),
+    (
+        &["pooled_manifest_capability_reuses_external_import_workspace_session"],
+        Exports::Shape(&[], &["index"]),
+    ),
+    (
+        &["external_import_workspace_root_preserves_timeout_and_fatal_errors"],
+        Exports::Shape(&[], &["timeout_after_row", "panic_after_row"]),
+    ),
     (&["distinct_session_key_respects_fixed_pool_limit"], Exports::Json),
     (
         &[

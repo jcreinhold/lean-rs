@@ -125,6 +125,13 @@ pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_comm
 pub const STREAM_MANIFEST_NAME: &str = "worker-stream-capability.json";
 pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
+pub const FOREIGN_ISOLATION_CASE: &str = "manifest_capability_import_workspace_root_imports_external_workspace_only";
+pub const FOREIGN_POOL_CASE: &str = "pooled_manifest_capability_reuses_external_import_workspace_session";
+pub const FOREIGN_FAULT_CASE: &str = "external_import_workspace_root_preserves_timeout_and_fatal_errors";
+pub fn foreign_import_case(case: &str) -> bool {
+    matches!(case, FOREIGN_ISOLATION_CASE | FOREIGN_POOL_CASE | FOREIGN_FAULT_CASE)
+}
+
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
 type R<T> = io::Result<T>;
 fn err(s: impl Into<String>) -> io::Error {
@@ -146,6 +153,8 @@ pub struct Record {
     pub stream: bool,
     #[serde(default)]
     pub signature_probe: Option<String>,
+    #[serde(default)]
+    pub foreign_workspace: Option<PathBuf>,
     pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]
@@ -343,12 +352,44 @@ impl Record {
         Some(require(allowed, "wrong sealed interop builder import or profile"))
     }
 
+    fn check_foreign_imports(
+        &self,
+        workspace: &Path,
+        paths: &[String],
+        names: &[String],
+        options: &lean_rs::module::HostImportOptions,
+    ) -> R<()> {
+        let case = std::env::var("LEAN_RS_METADATA_STREAM_CASE");
+        let isolation = case.as_deref() == Ok(FOREIGN_ISOLATION_CASE);
+        let foreign_path = workspace.join(".lake/build/lib/lean");
+        let foreign_paths = paths
+            .iter()
+            .map(Path::new)
+            .eq(std::iter::once(foreign_path.as_path()).chain(self.shim_paths.iter().map(PathBuf::as_path)));
+        let native_paths = paths
+            .iter()
+            .map(Path::new)
+            .eq(self.import_roots.iter().map(PathBuf::as_path));
+        let allowed = if isolation {
+            (foreign_paths && (names == ["B.Mod"] || names == [MODULE])) || (native_paths && names == ["B.Mod"])
+        } else {
+            matches!(case.as_deref(), Ok(FOREIGN_POOL_CASE | FOREIGN_FAULT_CASE)) && foreign_paths && names == ["B.Mod"]
+        };
+        require(
+            allowed && *options == Default::default(),
+            "wrong sealed foreign workspace imports",
+        )
+    }
+
     pub fn check_order(
         &self,
         paths: &[String],
         names: &[String],
         options: &lean_rs::module::HostImportOptions,
     ) -> R<()> {
+        if let Some(workspace) = self.foreign_workspace.as_deref() {
+            return self.check_foreign_imports(workspace, paths, names, options);
+        }
         let expected: &[&str] = if self.broken_import {
             &["Demo.Broken"]
         } else if self.typed_session && !self.stream {

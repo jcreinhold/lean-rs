@@ -215,7 +215,7 @@ fn prepare_typed_session(
     key: &str,
     stream: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Reuse the same run's prepared shims. This path never invokes Lake or a writer.
+    // Reuse the same run's prepared shims; never rebuild the capability here.
     let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
     if raw.len() > 64 * 1024 {
         return Err("prepared descriptor exceeds limit".into());
@@ -286,6 +286,11 @@ fn prepare_typed_session(
     {
         return Err("typed state is not a private job directory".into());
     }
+    let foreign_workspace = match env::var("LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE").as_deref() {
+        Err(env::VarError::NotPresent) => None,
+        Ok("1") if stream => Some(build_foreign_workspace(state, sysroot)?),
+        _ => return Err("invalid foreign workspace preparation selection".into()),
+    };
     let fingerprint = ToolchainFingerprint::current();
     let manifest_path = state.join(if stream {
         "worker-stream-capability.json"
@@ -355,10 +360,12 @@ fn prepare_typed_session(
     }
     let mut roots = shim.artifact_roots().to_vec();
     roots.push(project.clone());
+    roots.extend(foreign_workspace.iter().cloned());
     roots.sort();
     let record = serde_json::json!({
         "broken_import": false, "typed_session": true, "stream": stream, "verification": false,
         "signature_probe": signature_probe,
+        "foreign_workspace": foreign_workspace,
         "consumer_manifest": manifest_path, "consumer_json": manifest,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": image,
@@ -367,6 +374,35 @@ fn prepare_typed_session(
     });
     fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
     seal(app, state)
+}
+
+fn build_foreign_workspace(state: &Path, sysroot: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let project = state.join("foreign");
+    fs::DirBuilder::new().mode(0o700).create(&project)?;
+    fs::create_dir(project.join("B"))?;
+    fs::write(
+        project.join("lakefile.lean"),
+        "import Lake\nopen Lake DSL\npackage audited_workspace\nlean_lib B\n",
+    )?;
+    fs::write(project.join("B.lean"), "import B.Mod\n")?;
+    fs::write(project.join("B/Mod.lean"), "def B.Mod.externalValue : Nat := 7\n")?;
+    fs::write(project.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(lean_toolchain::shared_writer::project_lock_path(&project)?)?;
+    lock.try_lock()?;
+    if !std::process::Command::new(sysroot.join("bin/lake"))
+        .args(["--no-cache", "--fail-fast", "build", "B.Mod"])
+        .current_dir(&project)
+        .stdin(std::process::Stdio::null())
+        .status()?
+        .success()
+    {
+        return Err("expected the selected Lean to build the separate B.Mod".into());
+    }
+    Ok(project)
 }
 
 fn prepare_broken_import(
