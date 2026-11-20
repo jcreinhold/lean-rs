@@ -91,6 +91,7 @@ struct OrdinaryFixture {
 fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
     use std::io::Read as _;
     use std::os::unix::fs::MetadataExt as _;
+    use std::time::{Duration, Instant};
     let marker = "LEAN_RS_TEST_SCALAR_PRIVATE_JOB";
     let compiled = option_env!("LEAN_RS_TEST_SCALAR_PRIVATE_JOB");
     let runtime = std::env::var(marker).ok();
@@ -164,9 +165,20 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
                 .map(|root| lean_toolchain::shared_writer::project_lock_path(root).expect("ordinary host lock domain"))
                 .collect::<Vec<_>>();
             lock_paths.sort();
-            let intent = lean_toolchain::writer_demand::ReadAdmission::try_acquire(&lock_paths)
-                .expect("inspect ordinary host writer demand")
-                .expect("no competing host writer");
+            let deadline = Instant::now() + Duration::from_secs(1);
+            let intent = loop {
+                match lean_toolchain::writer_demand::ReadAdmission::try_acquire(&lock_paths) {
+                    // A competing reader holds a transient gate. Our partial gates have been dropped.
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    result => {
+                        break result
+                            .expect("inspect ordinary host writer demand")
+                            .expect("no competing host writer");
+                    }
+                }
+            };
             for path in lock_paths {
                 assert_eq!(path.canonicalize().expect("canonical lock"), path);
                 let lock = fs::File::open(&path).expect("open prepared host lock");
