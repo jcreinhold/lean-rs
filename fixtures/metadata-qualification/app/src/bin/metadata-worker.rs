@@ -20,8 +20,8 @@ use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceCont
 use std::path::Path;
 
 use metadata_qualification::{
-    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_MANIFEST_NAME, audit,
-    foreign_import_case, module_syntax_case,
+    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, LEGACY_INTEROP_CASE, MODULE_SYNTAX_IMPORTS, Record,
+    STREAM_MANIFEST_NAME, audit, foreign_import_case, module_syntax_case,
 };
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
@@ -445,7 +445,7 @@ impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || path != d.consumer_manifest {
+        if d.broken_import || d.legacy_interop || path != d.consumer_manifest {
             return Err(denied());
         }
         let root = if d.scalar_entry {
@@ -475,7 +475,7 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
+        if d.broken_import || d.legacy_interop || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
         let contracts = if d.scalar_entry {
@@ -586,7 +586,7 @@ impl WorkerAuthority for MetadataApp {
             }
             return Err(denied());
         }
-        if !d.broken_import && (!d.typed_session || d.stream) {
+        if !d.broken_import && !d.legacy_interop && (!d.typed_session || d.stream) {
             held.check_interop_visibility(true).map_err(ioerr)?;
         }
         if !d.broken_import {
@@ -652,6 +652,21 @@ impl WorkerAuthority for MetadataApp {
         requested: &LeanModuleInitializer,
     ) -> LeanResult<(LeanLibrary<'static>, LeanModuleInitializer)> {
         let held = self.deployment()?;
+        if held.record.legacy_interop {
+            let expected = LeanModuleInitializer::new("lean_rs_interop_consumer", "LeanRsInteropConsumer");
+            if std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() != Ok(LEGACY_INTEROP_CASE)
+                || path != held.record.consumer_image
+                || requested != &expected
+            {
+                return Err(denied());
+            }
+            held.check_interop_visibility(true).map_err(ioerr)?;
+            // SAFETY: Held checked the exact direct native image, pinned provider and runtime.
+            // Only this initializer is returned; neither manifest reads nor exports are authorized.
+            let library = unsafe { LeanLibrary::open(runtime, path) }?;
+            audit(&format!("admit-fixed-direct-interop-{LEGACY_INTEROP_CASE}"));
+            return Ok((library, expected));
+        }
         let expected = LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture");
         if held.record.broken_import
             || !held.record.typed_session

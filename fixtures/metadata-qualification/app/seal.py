@@ -109,6 +109,8 @@ def main():
     assert not (broken and typed)
     assert not scalar or (state == a / "target/scalar-entry" and not (broken or typed))
     assert not stream or typed
+    legacy = rec.get("legacy_interop", False)
+    assert not legacy or stream
     signature_probe = rec.get("signature_probe")
     assert signature_probe is None or stream
     if typed:
@@ -157,7 +159,9 @@ def main():
             else "fixtures/metadata-qualification/lean"
         )
     )
-    if scalar:
+    if legacy:
+        project = state / "legacy"
+    elif scalar:
         project = state / "lean"
     assert Path(rec["project"]) == project
     foreign = Path(rec["foreign_workspace"]) if rec.get("foreign_workspace") else None
@@ -172,6 +176,16 @@ def main():
     bundle = sdk / "crates/lean-rs-host/shims"
     dep = bundle / "lean-rs-interop-shims"
     host = bundle / "lean-rs-host-shims"
+    if legacy:
+        legacy_provider = dep / ".lake/build/lib/lean"
+        assert not os.path.lexists(legacy_provider), (
+            "ordinary Lake import root would shadow the pinned provider"
+        )
+        rec["legacy_provider_root"] = str(legacy_provider)
+        assert not any(
+            field in rec
+            for field in ("consumer_manifest", "consumer_json", "signature_probe")
+        )
     key = rec["generated_output_key"]
     assert key == "lean-4.36.0"
     out = lambda p: p / ".lake/lean-rs-generated" / key / "lib"
@@ -191,7 +205,7 @@ def main():
         if broken
         else (
             project / ".lake/build/lib" / native_name(stem)
-            if scalar or (typed and not stream)
+            if legacy or scalar or (typed and not stream)
             else image(project, stem)
         )
     )
@@ -233,7 +247,7 @@ def main():
         with path.open("rb") as stream:
             contentpins[str(path)] = hashlib.file_digest(stream, "sha256").hexdigest()
 
-    for manifest in ["shim"] if broken else ["consumer", "shim"]:
+    for manifest in ["shim"] if broken or legacy else ["consumer", "shim"]:
         path = Path(rec[manifest + "_manifest"])
         assert path.read_text() == rec[manifest + "_json"]
         # Pin the typed capability manifest in the private state. The existing
@@ -284,7 +298,10 @@ def main():
             == "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4"
         )
     project_symbols = ["initialize_" + stem]
-    if stream:
+    if legacy:
+        project_symbols.append("lean_rs_interop_consumer_worker_json_command")
+        pin_content(project / "lean-toolchain")
+    elif stream:
         exports = json.loads(rec["consumer_json"])["exports"]
         symbols = [export["symbol"] for export in exports]
         if signature_probe is None:
@@ -305,12 +322,6 @@ def main():
                 assert symbols == [real_symbol]
             # Check the actual export, even when its manifest row is absent.
             project_symbols.append(real_symbol)
-        for source in (
-            "LeanRsInteropConsumer.lean",
-            "LeanRsInteropConsumer/Callback.lean",
-        ):
-            pin_content(sdk / "fixtures/interop-shims" / source)
-        pin_content(project / "lakefile.lean")
     elif scalar:
         expected = ["lean_rs_fixture_u64_mul", "lean_rs_fixture_panic_unit"]
         assert [
@@ -326,6 +337,13 @@ def main():
         )
     elif not broken:
         project_symbols.append("lean_rs_interop_consumer_worker_metadata")
+    if stream:
+        pin_content(project / "lakefile.lean")
+        for source in (
+            "LeanRsInteropConsumer.lean",
+            "LeanRsInteropConsumer/Callback.lean",
+        ):
+            pin_content(sdk / "fixtures/interop-shims" / source)
     images = [
         (di, ["initialize_lean__rs__interop__shims_LeanRsInterop"]),
         (hi, ["initialize_lean__rs__host__shims_LeanRsHostShims"]),
@@ -422,10 +440,17 @@ def main():
         assert len(packages) == 1
         newdir = packages[0]["dir"]
         assert (project / newdir).resolve() == dep
-        project_deps = [project / newdir / ".lake/lean-rs-generated" / key / "lib/lean"]
+        if legacy:
+            assert newdir == str(dep), (
+                "direct consumer must use the canonical provider workspace"
+            )
+        else:
+            project_deps = [
+                project / newdir / ".lake/lean-rs-generated" / key / "lib/lean"
+            ]
     project_oleans = (
         project / ".lake/build/lib/lean"
-        if scalar or broken or (typed and not stream)
+        if legacy or scalar or broken or (typed and not stream)
         else out(project) / "lean"
     )
     # Both built packages must actually select the same source package.

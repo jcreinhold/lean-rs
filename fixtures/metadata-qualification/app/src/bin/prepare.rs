@@ -28,7 +28,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let profile = env::args().nth(2);
     let broken_import = match profile.as_deref() {
         None => false,
-        Some("--typed-session" | "--interop-stream" | "--scalar-entry") if env::args().len() == 3 => false,
+        Some("--typed-session" | "--interop-stream" | "--interop-legacy" | "--scalar-entry")
+            if env::args().len() == 3 =>
+        {
+            false
+        }
         Some(
             "--broken-import"
             | "--host-builder-lazy"
@@ -39,7 +43,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("unknown metadata qualification profile".into()),
     };
     let typed_session = profile.as_deref() == Some("--typed-session");
-    let stream = profile.as_deref() == Some("--interop-stream");
+    let legacy = profile.as_deref() == Some("--interop-legacy");
+    let stream = legacy || profile.as_deref() == Some("--interop-stream");
     let scalar = profile.as_deref() == Some("--scalar-entry");
     let state_name = if stream {
         "interop-stream"
@@ -65,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return prepare_scalar(app, &state, &sysroot, generated_output_key);
     }
     if typed_session || stream {
-        return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream);
+        return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream, legacy);
     }
     if broken_import {
         return prepare_broken_import(app, &state, &sysroot, generated_output_key, profile.as_deref());
@@ -217,6 +222,7 @@ fn prepare_typed_session(
     sysroot: &Path,
     key: &str,
     stream: bool,
+    legacy: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Reuse the same run's prepared shims; never rebuild the capability here.
     let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
@@ -233,11 +239,15 @@ fn prepare_typed_session(
         selected.artifact_roots.into_iter().map(PathBuf::from).collect(),
         selected.shim_search_paths.into_iter().map(PathBuf::from).collect(),
     )?;
-    let expected_project = sdk.join(if stream {
-        "fixtures/interop-worker"
+    let expected_project = if legacy {
+        state.join("legacy")
     } else {
-        "fixtures/lean"
-    });
+        sdk.join(if stream {
+            "fixtures/interop-worker"
+        } else {
+            "fixtures/lean"
+        })
+    };
     let project = expected_project.canonicalize()?;
     // The trusted job already built this exact checkout fixture once and keeps
     // it unchanged until tests exit. This is not protection from same-user writes.
@@ -249,7 +259,12 @@ fn prepare_typed_session(
     {
         return Err("typed fixture is not the job-owned private checkout fixture".into());
     }
-    let (image_dir, stem) = if stream {
+    let (image_dir, stem) = if legacy {
+        (
+            ".lake/build/lib".into(),
+            "lean__rs__interop__consumer_LeanRsInteropConsumer",
+        )
+    } else if stream {
         (
             format!(".lake/lean-rs-generated/{key}/lib"),
             "lean__rs__interop__consumer_LeanRsInteropConsumer",
@@ -288,6 +303,19 @@ fn prepare_typed_session(
         || state_metadata.mode() & 0o7777 != 0o700
     {
         return Err("typed state is not a private job directory".into());
+    }
+    if legacy {
+        let mut roots = shim.artifact_roots().to_vec();
+        roots.push(project.clone());
+        roots.sort();
+        let record = serde_json::json!({
+            "typed_session": true, "stream": true, "verification": false, "legacy_interop": true,
+            "generated_output_key": key, "project": project, "sysroot": sysroot, "consumer_image": image,
+            "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),
+            "shim_roots": shim.artifact_roots(), "shim_paths": shim.shim_search_paths(), "roots": roots,
+        });
+        fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
+        return seal(app, state);
     }
     let foreign_workspace = match env::var("LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE").as_deref() {
         Err(env::VarError::NotPresent) => None,

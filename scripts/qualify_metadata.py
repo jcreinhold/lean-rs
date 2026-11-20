@@ -1227,6 +1227,7 @@ def check_typed_children_closed(
                     b"authorize-fixed-json-",
                     b"authorize-fixed-shape-",
                     b"admit-fixed-no-exports-",
+                    b"admit-fixed-direct-interop-",
                 )
             )
         ):
@@ -1352,6 +1353,9 @@ INTEROP_FOREIGN_IMPORT_CASES = {
         (2, 2),
     ),
 }
+INTEROP_LEGACY_CASE = (
+    "no_manifest_worker_session_rejects_worker_command_as_checked_binding"
+)
 INTEROP_TESTS = (
     *STREAM_TESTS,
     *INTEROP_METADATA_TESTS,
@@ -1363,6 +1367,7 @@ INTEROP_TESTS = (
         for name in (*INTEROP_SIGNATURE_CASES, *INTEROP_BUILDER_IMPORT_CASES)
     ),
     *(("capability_builder", name) for name in INTEROP_FOREIGN_IMPORT_CASES),
+    ("capability_builder", INTEROP_LEGACY_CASE),
     *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
 
@@ -1392,14 +1397,20 @@ def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=N
         for name in selected
         if name not in INTEROP_SIGNATURE_CASES
         and name not in INTEROP_FOREIGN_IMPORT_CASES
+        and name != INTEROP_LEGACY_CASE
     ]
     foreign = [name for name in selected if name in INTEROP_FOREIGN_IMPORT_CASES]
     probes = [(name,) for name in selected if name in INTEROP_SIGNATURE_CASES]
-    cohorts = [group for group in (regular, foreign, *probes) if group]
+    legacy = [INTEROP_LEGACY_CASE] if INTEROP_LEGACY_CASE in selected else []
+    cohorts = [group for group in (regular, foreign, *probes, legacy) if group]
+    if legacy:
+        require_no_legacy_provider_shadow(
+            SDK / "crates/lean-rs-host/shims/lean-rs-interop-shims"
+        )
     if pinned_selection is not None:
         project.chmod(0o700)
     for index, cohort in enumerate(cohorts):
-        # Foreign imports and each negative manifest have their own seal.
+        # Foreign imports, legacy direct loading and each negative manifest have separate seals.
         run_stream_group(
             release,
             profile,
@@ -1420,6 +1431,58 @@ def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=N
     project.chmod(owner.st_mode & 0o7777)
 
 
+def require_no_legacy_provider_shadow(provider):
+    require(
+        not os.path.lexists(provider / ".lake/build/lib/lean"),
+        "legacy interop test needs a clean bundled provider: ordinary .lake/build/lib/lean would shadow the pinned provider",
+    )
+
+
+def build_legacy_interop_project(run, release, state, provider):
+    project = state / "legacy"
+    project.mkdir(mode=0o700)
+    (project / "lean-toolchain").write_text("leanprover/lean4:v4.36.0\n")
+    source = json.dumps(str(SDK / "fixtures/interop-shims"), ensure_ascii=False)
+    dependency = json.dumps(str(provider), ensure_ascii=False)
+    (project / "lakefile.lean").write_text(
+        f"""import Lake
+open Lake DSL
+
+package «lean_rs_interop_consumer»
+
+require «lean_rs_interop_shims» from {dependency} with
+  (Lean.mkNameMap String).insert `leanRsGeneratedShims "true"
+
+@[default_target]
+lean_lib «LeanRsInteropConsumer» where
+  srcDir := {source}
+  leanOptions := #[
+    ⟨`autoImplicit, false⟩,
+    ⟨`maxSynthPendingDepth, .ofNat 3⟩,
+    ⟨`pp.unicode.fun, true⟩,
+  ]
+  defaultFacets := #[LeanLib.sharedFacet]
+"""
+    )
+    lake = release / "bin/lake"
+    run(
+        [
+            lake,
+            "--no-cache",
+            "--no-build",
+            "-KleanRsGeneratedShims=true",
+            "build",
+            "LeanRsInterop:shared",
+        ],
+        provider,
+    )
+    run(
+        [lake, "--no-cache", "--fail-fast", "build", "LeanRsInteropConsumer:shared"],
+        project,
+    )
+    require_no_legacy_provider_shadow(provider)
+
+
 def run_stream_group(
     release,
     profile,
@@ -1429,6 +1492,8 @@ def run_stream_group(
     pinned_selection=None,
     build_provider=True,
 ):
+    legacy = INTEROP_LEGACY_CASE in cases
+    require(not legacy or len(cases) == 1, "legacy interop requires its own seal")
     probes = [name for name in cases if name in INTEROP_SIGNATURE_CASES]
     require(not probes or len(cases) == 1, "each signature probe requires its own seal")
     foreign = any(name in INTEROP_FOREIGN_IMPORT_CASES for name in cases)
@@ -1447,6 +1512,8 @@ def run_stream_group(
     host, interop = (
         bundle / name for name in ("lean-rs-host-shims", "lean-rs-interop-shims")
     )
+    if legacy:
+        require_no_legacy_provider_shadow(interop)
     output = Path(".lake/lean-rs-generated/lean-4.36.0")
     manifest = shim_manifest.resolve(strict=True)
     require(
@@ -1512,7 +1579,7 @@ def run_stream_group(
         # The typed workers have closed and this job holds the qualification lock.
         # The probe and image checks detect changes; they do not block writes.
         verify_provider()
-        if build_provider:
+        if build_provider and not legacy:
             lake = release / "bin/lake"
             run(
                 [lake, "--no-cache", "--no-build", "build", "LeanRsInterop:shared"],
@@ -1529,13 +1596,24 @@ def run_stream_group(
                 project,
             )
         verify_provider()
+    if legacy:
+        build_legacy_interop_project(run, release, state, interop)
+        if pinned_selection is not None:
+            verify_provider()
     cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
     run([*cargo, "--bin", "prepare"], APP)
     if probes:
         env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
     if foreign:
         env["LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE"] = "1"
-    run([TARGET / "debug/prepare", state, "--interop-stream"], APP)
+    run(
+        [
+            TARGET / "debug/prepare",
+            state,
+            "--interop-legacy" if legacy else "--interop-stream",
+        ],
+        APP,
+    )
     env.pop("LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE", None)
     env.pop("LEAN_RS_TEST_SIGNATURE_PROBE", None)
     record = state / "deployment.json"
@@ -1548,16 +1626,19 @@ def run_stream_group(
     )
     run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
     worker = TARGET / "debug/metadata-worker"
-    env["LEAN_RS_TEST_ORDINARY_STREAM"] = json.dumps(
-        {
-            "worker": str(worker),
-            "worker_sha256": fixture_worker_digest(worker),
-            "fixture": str(project),
-            **({"foreign_workspace": str(state / "foreign")} if foreign else {}),
-            "json_manifest": str(state / "worker-stream-capability.json"),
-            "sysroot": str(release),
-        }
-    )
+    launch = {
+        "worker": str(worker),
+        "worker_sha256": fixture_worker_digest(worker),
+        "fixture": str(state / "legacy" if legacy else project),
+        "sysroot": str(release),
+    }
+    if legacy:
+        env["LEAN_RS_TEST_DIRECT_INTEROP"] = json.dumps(launch)
+    else:
+        launch["json_manifest"] = str(state / "worker-stream-capability.json")
+        if foreign:
+            launch["foreign_workspace"] = str(state / "foreign")
+        env["LEAN_RS_TEST_ORDINARY_STREAM"] = json.dumps(launch)
     select_nextest_runner(env, profile)
     selected = {name: target for target, name in INTEROP_TESTS}
     for name in cases or selected:
@@ -1585,7 +1666,9 @@ def run_stream_group(
             SDK,
         )
         counts = (1, 1)
-        if name in INTEROP_FOREIGN_IMPORT_CASES:
+        if name == INTEROP_LEGACY_CASE:
+            marker = "admit-fixed-direct-interop"
+        elif name in INTEROP_FOREIGN_IMPORT_CASES:
             marker, counts = INTEROP_FOREIGN_IMPORT_CASES[name]
         elif name in INTEROP_SIGNATURE_CASES:
             marker = "authorize-fixed-signature-probe"

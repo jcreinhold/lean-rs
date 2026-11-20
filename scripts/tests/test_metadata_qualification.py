@@ -1021,6 +1021,24 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(good, expected)
 
+    def test_legacy_provider_preflight_refuses_stale_outputs_and_broken_aliases(self):
+        provider = self.target / "provider"
+        root = provider / ".lake/build/lib/lean"
+        root.parent.mkdir(parents=True)
+        qualification.require_no_legacy_provider_shadow(provider)
+
+        root.symlink_to(provider / "missing")
+        with self.assertRaisesRegex(ValueError, "would shadow the pinned provider"):
+            qualification.require_no_legacy_provider_shadow(provider)
+        self.assertTrue(root.is_symlink())
+        root.unlink()
+
+        root.mkdir()
+        (root / "LeanRsInterop.olean").touch()
+        with self.assertRaisesRegex(ValueError, "would shadow the pinned provider"):
+            qualification.require_no_legacy_provider_shadow(provider)
+        self.assertTrue((root / "LeanRsInterop.olean").is_file())
+
     def test_foreign_and_signature_cases_get_separate_seals_without_rebuilding_provider(
         self,
     ):
@@ -1031,23 +1049,25 @@ class MetadataQualificationTest(unittest.TestCase):
         regular = "successful_stream_delivers_rows_with_per_stream_sequences"
         missing, wrong = qualification.INTEROP_SIGNATURE_CASES
         foreign = list(qualification.INTEROP_FOREIGN_IMPORT_CASES)
+        legacy = qualification.INTEROP_LEGACY_CASE
         pinned = ({}, [])
         with patch.object(qualification, "run_stream_group") as run:
             qualification.qualify_stream(
                 release,
                 qualification.DARWIN_ARM64_PINS,
                 manifest,
-                [regular, foreign[0], missing, *foreign[1:], wrong],
+                [regular, foreign[0], missing, legacy, *foreign[1:], wrong],
                 pinned_selection=pinned,
             )
         self.assertEqual(
             [args[3] for args, _ in run.call_args_list],
-            [[regular], foreign, (missing,), (wrong,)],
+            [[regular], foreign, (missing,), (wrong,), [legacy]],
         )
         self.assertEqual(
             [kwargs for _, kwargs in run.call_args_list],
             [
                 {"pinned_selection": pinned, "build_provider": True},
+                {"pinned_selection": pinned, "build_provider": False},
                 {"pinned_selection": pinned, "build_provider": False},
                 {"pinned_selection": pinned, "build_provider": False},
                 {"pinned_selection": pinned, "build_provider": False},

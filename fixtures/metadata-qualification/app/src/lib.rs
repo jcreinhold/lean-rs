@@ -125,6 +125,7 @@ pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_comm
 pub const STREAM_MANIFEST_NAME: &str = "worker-stream-capability.json";
 pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
+pub const LEGACY_INTEROP_CASE: &str = "no_manifest_worker_session_rejects_worker_command_as_checked_binding";
 pub const FOREIGN_ISOLATION_CASE: &str = "manifest_capability_import_workspace_root_imports_external_workspace_only";
 pub const FOREIGN_POOL_CASE: &str = "pooled_manifest_capability_reuses_external_import_workspace_session";
 pub const FOREIGN_FAULT_CASE: &str = "external_import_workspace_root_preserves_timeout_and_fatal_errors";
@@ -155,6 +156,10 @@ pub struct Record {
     pub signature_probe: Option<String>,
     #[serde(default)]
     pub foreign_workspace: Option<PathBuf>,
+    #[serde(default)]
+    pub legacy_interop: bool,
+    #[serde(default)]
+    legacy_provider_root: Option<PathBuf>,
     pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]
@@ -390,6 +395,25 @@ impl Record {
         names: &[String],
         options: &lean_rs::module::HostImportOptions,
     ) -> R<()> {
+        if self.legacy_interop {
+            let provider = self
+                .legacy_provider_root
+                .as_deref()
+                .ok_or_else(|| err("missing legacy provider root"))?;
+            let (project, shims) = self
+                .import_roots
+                .split_first()
+                .ok_or_else(|| err("missing direct import root"))?;
+            return require(
+                std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() == Ok(LEGACY_INTEROP_CASE)
+                    && names == [MODULE]
+                    && *options == Default::default()
+                    && paths.iter().map(Path::new).eq([project.as_path(), provider]
+                        .into_iter()
+                        .chain(shims.iter().map(PathBuf::as_path))),
+                "wrong direct interop import or ordered roots",
+            );
+        }
         if let Some(workspace) = self.foreign_workspace.as_deref() {
             return self.check_foreign_imports(workspace, paths, names, options);
         }
@@ -594,7 +618,7 @@ impl Held {
         }
         require(found, "selected libleanshared absent")?;
         require(
-            d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
+            d.broken_import || d.legacy_interop || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
             "consumer manifest or initializer differs",
         )?;
         require(
@@ -610,6 +634,16 @@ impl Held {
             require(
                 dir.is_dir() && (dir.dev(), dir.ino()) == *id,
                 &format!("wrong ordered import directory identity {}", path.display()),
+            )?;
+        }
+        if d.legacy_interop {
+            let provider = d
+                .legacy_provider_root
+                .as_ref()
+                .ok_or_else(|| err("missing legacy provider root"))?;
+            require(
+                fs::symlink_metadata(provider).is_err_and(|error| error.kind() == io::ErrorKind::NotFound),
+                "ordinary Lake import root would shadow the pinned provider",
             )?;
         }
         d.check_file(&d.interop_image)?;

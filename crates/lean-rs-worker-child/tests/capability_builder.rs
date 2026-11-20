@@ -1164,9 +1164,20 @@ fn manifest_wrong_worker_export_signature_fails_before_dispatch() {
 
 #[test]
 fn no_manifest_worker_session_rejects_worker_command_as_checked_binding() {
-    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
+    let (worker, project) = option_env!("LEAN_RS_TEST_DIRECT_INTEROP")
+        .map(ordinary_typed_selection::parse_ordinary_direct_selection)
+        .map_or_else(
+            || (LeanWorkerConfig::new(worker_binary()), interop_root()),
+            |selected| {
+                (
+                    LeanWorkerConfig::new(&selected.worker).checked_native_loader_environment(),
+                    selected.fixture.clone(),
+                )
+            },
+        );
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     let config = LeanWorkerSessionConfig::new(
-        interop_root(),
+        project,
         "lean_rs_interop_consumer",
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
@@ -1190,6 +1201,10 @@ fn no_manifest_worker_session_rejects_worker_command_as_checked_binding() {
             assert!(
                 message.contains("json command String -> IO String"),
                 "diagnostic should name operation shape: {message}",
+            );
+            assert!(
+                message.contains("this session has no capability manifest"),
+                "expected the missing identity binding diagnostic: {message}",
             );
         }
         other => panic!("expected checked binding worker error, got {other:?}"),

@@ -71,23 +71,23 @@ pub(super) struct OrdinaryScalarSelection {
 pub(super) fn ordinary_scalar_selection() -> Option<&'static OrdinaryScalarSelection> {
     static SELECTED: std::sync::OnceLock<Option<OrdinaryScalarSelection>> = std::sync::OnceLock::new();
     SELECTED
-        .get_or_init(|| {
-            option_env!("LEAN_RS_TEST_ORDINARY_SCALAR").map(|raw| {
-                assert!(raw.len() <= 64 * 1024, "scalar selection exceeds launch limit");
-                let selected: OrdinaryScalarSelection = serde_json::from_str(raw).expect("valid scalar selection");
-                for path in [&selected.worker, &selected.fixture, &selected.sysroot] {
-                    assert_eq!(path.canonicalize().expect("canonical scalar input"), *path);
-                }
-                assert_eq!(
-                    std::env::var_os("LEAN_SYSROOT").as_deref(),
-                    Some(selected.sysroot.as_os_str())
-                );
-                assert!(std::env::var_os("LEAN_PATH").is_none());
-                checked_worker(&selected.worker, &selected.worker_sha256);
-                selected
-            })
-        })
+        .get_or_init(|| option_env!("LEAN_RS_TEST_ORDINARY_SCALAR").map(parse_ordinary_direct_selection))
         .as_ref()
+}
+
+pub(super) fn parse_ordinary_direct_selection(raw: &str) -> OrdinaryScalarSelection {
+    assert!(raw.len() <= 64 * 1024, "direct selection exceeds launch limit");
+    let selected: OrdinaryScalarSelection = serde_json::from_str(raw).expect("valid direct fixture selection");
+    for path in [&selected.worker, &selected.fixture, &selected.sysroot] {
+        assert_eq!(path.canonicalize().expect("canonical direct input"), *path);
+    }
+    assert_eq!(
+        std::env::var_os("LEAN_SYSROOT").as_deref(),
+        Some(selected.sysroot.as_os_str())
+    );
+    assert!(std::env::var_os("LEAN_PATH").is_none());
+    checked_worker(&selected.worker, &selected.worker_sha256);
+    selected
 }
 
 fn checked_worker(worker: &std::path::Path, expected: &str) {
