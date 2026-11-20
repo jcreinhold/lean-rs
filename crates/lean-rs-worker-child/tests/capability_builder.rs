@@ -1171,7 +1171,7 @@ fn no_manifest_worker_session_rejects_worker_command_as_checked_binding() {
             |selected| {
                 (
                     LeanWorkerConfig::new(&selected.worker).checked_native_loader_environment(),
-                    selected.fixture.clone(),
+                    selected.fixture,
                 )
             },
         );

@@ -368,8 +368,7 @@ fn digest(path: &Path) -> String {
     hex_digest(&fs::read(path).expect("read controlled fixture input"))
 }
 fn reviewed_input<'a>(value: Option<&'a str>, required: &str) -> &'a str {
-    let Some(value) = value else { panic!("{required}") };
-    value
+    value.expect(required)
 }
 
 fn admission() -> &'static Admission {
