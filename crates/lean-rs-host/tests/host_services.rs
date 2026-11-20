@@ -2175,6 +2175,7 @@ enum ModuleBatchCase {
     OutlineWithDiagnostics,
     SmallOutlineBudget,
     ScanOutline,
+    PrivateOutline,
 }
 
 impl ModuleBatchCase {
@@ -2301,8 +2302,12 @@ end Outer
                     total_bytes: 200,
                 },
             ),
-            Self::ScanOutline => (
-                SCAN_FORMS_SOURCE,
+            Self::ScanOutline | Self::PrivateOutline => (
+                if matches!(self, Self::ScanOutline) {
+                    SCAN_FORMS_SOURCE
+                } else {
+                    PRIVATE_AXIOMS_SOURCE
+                },
                 vec![ModuleQuerySelector::DeclarationOutline {
                     id: "outline".to_owned(),
                 }],
@@ -2713,50 +2718,16 @@ def multiBy : Nat \u{2192} Nat \u{2192} Nat
 end ScanForms
 ";
 
-#[derive(Clone, Copy)]
-enum OutlineFixture {
-    NativeIfSelected,
-    Strict,
-}
-
-/// Outline the fixed scan forms so both callers check the same rows.
-fn outline_rows(fixture: OutlineFixture) -> Vec<lean_rs_host::host::process::DeclarationTargetInfo> {
+fn outline_rows() -> Vec<lean_rs_host::host::process::DeclarationTargetInfo> {
     use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
     };
 
-    let native = matches!(fixture, OutlineFixture::NativeIfSelected);
-    let host = if native {
-        LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly")
-    } else {
-        fixture_host()
-    };
-    let caps = if native {
-        fixture::native_capabilities(&host)
-    } else {
-        fixture::capabilities(&host)
-    }
-    .expect("load caps");
-    let mut session = if native {
-        session_over_elaboration(&caps)
-    } else {
-        caps.session(
-            &service_requests::imports(
-                &caps,
-                &["LeanRsHostShims.Elaboration"],
-                LeanSessionImportProfile::default(),
-            ),
-            None,
-            None,
-        )
-        .expect("session imports cleanly")
-    };
-    let outcome = if native {
-        fixture_module_batch(&caps, &mut session, ModuleBatchCase::ScanOutline)
-    } else {
-        strict_module_batch(&caps, &mut session, &ModuleBatchCase::ScanOutline.request())
-    }
-    .expect("host stack reports no exception");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let outcome = fixture_module_batch(&caps, &mut session, ModuleBatchCase::ScanOutline)
+        .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
     };
@@ -2776,7 +2747,7 @@ fn outline_rows(fixture: OutlineFixture) -> Vec<lean_rs_host::host::process::Dec
 
 #[test]
 fn declaration_outline_covers_multi_clause_where_structure_class_and_anonymous_instance() {
-    let declarations = outline_rows(OutlineFixture::NativeIfSelected);
+    let declarations = outline_rows();
     let rows: Vec<(&str, &str)> = declarations
         .iter()
         .map(|declaration| (declaration.short_name.as_str(), declaration.declaration_kind.as_str()))
@@ -2847,7 +2818,11 @@ fn declaration_target_resolves_the_new_scan_forms_by_name() {
     }
 }
 
-enum VerificationBatchCase {
+const PRIVATE_AXIOMS_SOURCE: &str = "module\npublic section\nnamespace PrivateAxioms\naxiom witness : False\nprivate theorem hidden : False := witness\nend PrivateAxioms\n";
+
+enum VerificationBatchCase<'a> {
+    AnonymousInstance(&'a str),
+    PrivateAxioms(&'a str),
     NamedScanForms,
     OrderedResults,
     MissingKernelConstant,
@@ -2855,13 +2830,38 @@ enum VerificationBatchCase {
     SmallTotalBudget,
 }
 
-impl VerificationBatchCase {
+impl VerificationBatchCase<'_> {
     fn request(self) -> lean_rs_host::host::process::DeclarationVerificationBatchRequest {
         use lean_rs_host::host::process::{
             DeclarationVerificationBatchItem, DeclarationVerificationBatchRequest, DeclarationVerificationTarget,
             ModuleQueryOutputBudgets, SorryPolicy,
         };
         match self {
+            Self::AnonymousInstance(generated) => DeclarationVerificationBatchRequest {
+                source: SCAN_FORMS_SOURCE.to_owned(),
+                targets: vec![DeclarationVerificationBatchItem {
+                    id: "anon".to_owned(),
+                    target: DeclarationVerificationTarget::Name {
+                        name: generated.to_owned(),
+                    },
+                }],
+                sorry_policy: SorryPolicy::Deny,
+                report_axioms: false,
+                budgets: ModuleQueryOutputBudgets::default(),
+            },
+            Self::PrivateAxioms(canonical) => DeclarationVerificationBatchRequest {
+                source: PRIVATE_AXIOMS_SOURCE.to_owned(),
+                targets: ["hidden", "PrivateAxioms.hidden", canonical]
+                    .into_iter()
+                    .map(|name| DeclarationVerificationBatchItem {
+                        id: name.to_owned(),
+                        target: DeclarationVerificationTarget::Name { name: name.to_owned() },
+                    })
+                    .collect(),
+                sorry_policy: SorryPolicy::Deny,
+                report_axioms: true,
+                budgets: ModuleQueryOutputBudgets::default(),
+            },
             Self::NamedScanForms => {
                 let targets = [
                     "ScanForms.multi",
@@ -2965,7 +2965,7 @@ theorem withSorry : True := by
 fn fixture_verify_declarations<'lean>(
     caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
     session: &mut LeanSession<'lean, '_>,
-    case: VerificationBatchCase,
+    case: VerificationBatchCase<'_>,
 ) -> lean_rs::LeanResult<lean_rs_host::host::process::DeclarationVerificationBatchOutcome> {
     let request = case.request();
     let options = LeanElabOptions::new();
@@ -2980,6 +2980,7 @@ fn fixture_verify_declarations<'lean>(
     )]
     // SAFETY: the cases fix the source, targets, policy and budgets. The
     // exact held native roots serve the same default elaboration environment.
+    // Generated targets come from the outline of the same fixed source.
     let admitted = unsafe {
         caps.shim_capability()
             .verification_batch_scope(env, scope, paths, request, options.source_options())
@@ -3011,13 +3012,10 @@ fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
 
 #[test]
 fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
-    use lean_rs_host::host::process::{
-        DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationStatus,
-        DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
-    };
+    use lean_rs_host::host::process::{DeclarationVerificationBatchOutcome, DeclarationVerificationStatus};
 
     // Phase 1: the outline reports the generated name the kernel recorded.
-    let declarations = outline_rows(OutlineFixture::Strict);
+    let declarations = outline_rows();
     let generated = &declarations
         .iter()
         .find(|declaration| declaration.declaration_name.contains("instDefaultPoint"))
@@ -3026,30 +3024,11 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
 
     // Phase 2: verifying that name reaches the declaration, exactly what the
     // kan-proofs field report could not do.
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let request = DeclarationVerificationBatchRequest {
-        source: SCAN_FORMS_SOURCE.to_owned(),
-        targets: vec![lean_rs_host::host::process::DeclarationVerificationBatchItem {
-            id: "anon".to_owned(),
-            target: DeclarationVerificationTarget::Name {
-                name: generated.clone(),
-            },
-        }],
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: false,
-        budgets: ModuleQueryOutputBudgets::default(),
-    };
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("host stack reports no exception");
+    let outcome = fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::AnonymousInstance(generated))
+        .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
     };
@@ -3294,29 +3273,14 @@ fn declaration_verification_batch_preserves_order_and_uses_one_dispatch() {
 #[test]
 fn private_declaration_verification_reports_real_axioms() {
     use lean_rs_host::host::process::{
-        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
-        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
-        ModuleQueryBatchResult, ModuleQueryOutputBudgets, ModuleQuerySelector, SorryPolicy,
+        DeclarationVerificationBatchOutcome, DeclarationVerificationStatus, ModuleQueryBatchItem,
+        ModuleQueryBatchOutcome, ModuleQueryBatchResult,
     };
-    let host = fixture_host();
-    let caps = fixture::capabilities(&host).expect("load caps");
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    // The module header shifts parser coordinates; the ordinary body-only
-    // test previously hid the private-name resolution failure.
-    let source = "module\npublic section\nnamespace PrivateAxioms\naxiom witness : False\nprivate theorem hidden : False := witness\nend PrivateAxioms\n";
-    let outline = call_service!(
-        caps,
-        session,
-        process_module_query_batch,
-        source,
-        &[ModuleQuerySelector::DeclarationOutline {
-            id: "outline".to_owned(),
-        }],
-        &ModuleQueryOutputBudgets::default(),
-        &LeanElabOptions::new(),
-        None,
-    )
-    .expect("outline");
+    // The module header shifts parser coordinates and exercises private-name resolution.
+    let outline = fixture_module_batch(&caps, &mut session, ModuleBatchCase::PrivateOutline).expect("outline");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outline else {
         panic!("{outline:?}")
     };
@@ -3331,28 +3295,8 @@ fn private_declaration_verification_reports_real_axioms() {
     };
     let canonical = &declaration.declaration_name;
     assert!(canonical.starts_with("_private."), "{canonical}");
-    let request = DeclarationVerificationBatchRequest {
-        source: source.to_owned(),
-        targets: ["hidden", "PrivateAxioms.hidden", canonical]
-            .into_iter()
-            .map(|name| DeclarationVerificationBatchItem {
-                id: name.to_owned(),
-                target: DeclarationVerificationTarget::Name { name: name.to_owned() },
-            })
-            .collect(),
-        sorry_policy: SorryPolicy::Deny,
-        report_axioms: true,
-        budgets: ModuleQueryOutputBudgets::default(),
-    };
-    let outcome = call_service!(
-        caps,
-        session,
-        verify_declaration_batch,
-        &request,
-        &LeanElabOptions::new(),
-        None
-    )
-    .expect("verify");
+    let outcome = fixture_verify_declarations(&caps, &mut session, VerificationBatchCase::PrivateAxioms(canonical))
+        .expect("verify");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("{outcome:?}")
     };
