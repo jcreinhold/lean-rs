@@ -136,6 +136,8 @@ fn require(ok: bool, detail: &str) -> R<()> {
 #[derive(Deserialize)]
 pub struct Record {
     #[serde(default)]
+    pub scalar_entry: bool,
+    #[serde(default)]
     pub broken_import: bool,
     #[serde(default)]
     pub host_builder_case: Option<String>,
@@ -456,7 +458,7 @@ impl Held {
                 b.is_file() && a.nlink() == 1 && (a.dev(), a.ino()) == (b.dev(), b.ino()),
                 "changed lock identity",
             )?;
-            if record.broken_import || record.typed_session {
+            if record.broken_import || record.typed_session || record.scalar_entry {
                 require(
                     lean_toolchain::shared_writer::previous_writer_stopped(&f)?,
                     "prior writer remains active",

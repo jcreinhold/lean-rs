@@ -448,7 +448,9 @@ impl WorkerAuthority for MetadataApp {
         if d.broken_import || path != d.consumer_manifest {
             return Err(denied());
         }
-        let root = if d.typed_session {
+        let root = if d.scalar_entry {
+            &d.project
+        } else if d.typed_session {
             if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
                 || path.file_name().and_then(|name| name.to_str())
                     != Some(if d.stream {
@@ -476,7 +478,28 @@ impl WorkerAuthority for MetadataApp {
         if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
-        let contracts = if d.stream {
+        let contracts = if d.scalar_entry {
+            if option_env!("LEAN_RS_TEST_SCALAR_ENTRY") != Some("1") {
+                return Err(denied());
+            }
+            use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
+            let data: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
+            let mul = "lean_rs_fixture_u64_mul";
+            let panic = "lean_rs_fixture_panic_unit";
+            if data["exports"]
+                != serde_json::json!([
+                    fixture_mul_signature(mul).to_json(),
+                    fixture_panic_signature(panic).to_json()
+                ])
+            {
+                return Err(denied());
+            }
+            audit("authorize-scalar-fixture");
+            vec![
+                (mul.into(), WorkerExportContract::U64Binary),
+                (panic.into(), WorkerExportContract::U8ToUnit),
+            ]
+        } else if d.stream {
             let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
             let manifest: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
             let signatures = manifest
@@ -1060,7 +1083,8 @@ impl WorkerAuthority for MetadataApp {
 fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
     // A policy restart can shut down before the replacement receives any request.
     if (option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
-        || (broken_import_profile() && option_env!("LEAN_RS_TEST_HOST_BUILDER_CASE").is_some()))
+        || (broken_import_profile() && option_env!("LEAN_RS_TEST_HOST_BUILDER_CASE").is_some())
+        || option_env!("LEAN_RS_TEST_SCALAR_ENTRY") == Some("1"))
         && std::env::var_os("LEAN_RS_TEST_AUDIT_WORKER_START").as_deref() == Some(std::ffi::OsStr::new("1"))
     {
         audit("worker-started");

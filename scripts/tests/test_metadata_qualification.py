@@ -586,6 +586,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 "qualify_host_builder_cases",
                 return_value=direct_transitive,
             ) as host_builder,
+            patch.object(qualification, "qualify_scalar_entry") as scalar,
         ):
             if live_pid:
                 with self.assertRaisesRegex(
@@ -638,8 +639,10 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
         if live_pid or extra_json_worker:
             host_builder.assert_not_called()
+            scalar.assert_not_called()
         else:
             host_builder.assert_called_once()
+            scalar.assert_called_once()
         self.assertFalse(broken.exists())
         self.assertEqual(
             len(seen),
@@ -881,9 +884,15 @@ class MetadataQualificationTest(unittest.TestCase):
             "shims_only_host_handle_imports_transitive_lake_package_oleans",
         )
         builder_filter = " | ".join(f"test(={name})" for name in builder_cases)
+        scalar_filters = [
+            "(binary(=protocol) & (test(=fixture_capability_loads_and_exported_call_succeeds)))",
+            "(binary(=supervisor) & (test(=public_fixture_export_call_succeeds)))",
+            "(binary(=protocol) & (test(=lean_internal_panic_kills_only_child)))",
+            "(binary(=supervisor) & (test(=child_crash_is_typed_and_parent_survives)))",
+        ]
         self.assertEqual(
             remaining,
-            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & ({builder_filter})) | {selection} | {' | '.join(audited_filters)}))",
+            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & ({builder_filter})) | {selection} | {' | '.join(audited_filters + scalar_filters)}))",
         )
 
     def test_direct_transitive_replaces_only_the_matching_host_test(self):

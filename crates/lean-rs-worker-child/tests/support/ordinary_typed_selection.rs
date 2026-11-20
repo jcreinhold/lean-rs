@@ -44,9 +44,47 @@ fn parse_selection(raw: &str, needs_prepared: bool) -> OrdinaryTypedSelection {
     ] {
         assert_eq!(path.canonicalize().expect("canonical typed input"), *path);
     }
+    checked_worker(&selected.worker, &selected.worker_sha256);
+    selected
+}
+
+#[allow(dead_code, reason = "scalar protocol and supervisor tests only")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct OrdinaryScalarSelection {
+    pub(super) worker: PathBuf,
+    worker_sha256: String,
+    pub(super) fixture: PathBuf,
+    sysroot: PathBuf,
+}
+
+#[allow(dead_code, reason = "scalar protocol and supervisor tests only")]
+pub(super) fn ordinary_scalar_selection() -> Option<&'static OrdinaryScalarSelection> {
+    static SELECTED: std::sync::OnceLock<Option<OrdinaryScalarSelection>> = std::sync::OnceLock::new();
+    SELECTED
+        .get_or_init(|| {
+            option_env!("LEAN_RS_TEST_ORDINARY_SCALAR").map(|raw| {
+                assert!(raw.len() <= 64 * 1024, "scalar selection exceeds launch limit");
+                let selected: OrdinaryScalarSelection = serde_json::from_str(raw).expect("valid scalar selection");
+                for path in [&selected.worker, &selected.fixture, &selected.sysroot] {
+                    assert_eq!(path.canonicalize().expect("canonical scalar input"), *path);
+                }
+                assert_eq!(
+                    std::env::var_os("LEAN_SYSROOT").as_deref(),
+                    Some(selected.sysroot.as_os_str())
+                );
+                assert!(std::env::var_os("LEAN_PATH").is_none());
+                checked_worker(&selected.worker, &selected.worker_sha256);
+                selected
+            })
+        })
+        .as_ref()
+}
+
+fn checked_worker(worker: &std::path::Path, expected: &str) {
     use sha2::{Digest, Sha256};
     use std::io::Read as _;
-    let mut file = fs::File::open(&selected.worker).expect("open selected typed worker");
+    let mut file = fs::File::open(worker).expect("open selected typed worker");
     let metadata = file.metadata().expect("selected worker metadata");
     assert!(metadata.is_file() && metadata.len() <= 256 * 1024 * 1024);
     let mut remaining = metadata.len();
@@ -65,6 +103,5 @@ fn parse_selection(raw: &str, needs_prepared: bool) -> OrdinaryTypedSelection {
     for byte in digest.finalize() {
         write!(&mut actual, "{byte:02x}").expect("digest text");
     }
-    assert_eq!(actual, selected.worker_sha256, "selected typed worker changed");
-    selected
+    assert_eq!(actual, expected, "selected fixture worker changed");
 }

@@ -2398,12 +2398,12 @@ impl LeanWorker {
     /// or protocol communication fails.
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
         let prepared = fixture_capability_manifest(fixture_root.as_ref());
-        let manifest_path = self.seal_dispatch_error(prepared)?;
+        let manifest = self.seal_dispatch_error(prepared)?;
         self.prepare_request(true, "load_fixture_capability", None)?;
         self.send_request(
             "load_fixture_capability",
             Request::LoadFixtureCapability {
-                manifest_path: path_string(&manifest_path),
+                manifest_path: path_string(&manifest.path),
             },
         )?;
         self.record_request(true);
@@ -2427,12 +2427,12 @@ impl LeanWorker {
         rhs: u64,
     ) -> Result<u64, LeanWorkerError> {
         let prepared = fixture_capability_manifest(fixture_root.as_ref());
-        let manifest_path = self.seal_dispatch_error(prepared)?;
+        let manifest = self.seal_dispatch_error(prepared)?;
         self.prepare_request(true, "call_fixture_mul", None)?;
         self.send_request(
             "call_fixture_mul",
             Request::CallFixtureMul {
-                manifest_path: path_string(&manifest_path),
+                manifest_path: path_string(&manifest.path),
                 lhs,
                 rhs,
             },
@@ -2747,12 +2747,12 @@ impl LeanWorker {
         fixture_root: impl AsRef<Path>,
     ) -> Result<LeanWorkerExit, LeanWorkerError> {
         let prepared = fixture_capability_manifest(fixture_root.as_ref());
-        let manifest_path = self.seal_dispatch_error(prepared)?;
+        let manifest = self.seal_dispatch_error(prepared)?;
         self.prepare_request(true, "trigger_lean_panic", None)?;
         self.send_request(
             "trigger_lean_panic",
             Request::TriggerLeanPanic {
-                manifest_path: path_string(&manifest_path),
+                manifest_path: path_string(&manifest.path),
             },
         )?;
         self.record_request(true);
@@ -5879,15 +5879,74 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn fixture_capability_manifest(fixture_root: &Path) -> Result<PathBuf, LeanWorkerError> {
-    let built = lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
-        .package("lean_rs_fixture")
-        .module("LeanRsFixture")
-        .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
-        .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
-        .build_quiet()
-        .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?;
-    Ok(built.manifest_path().to_path_buf())
+struct FixtureManifest {
+    path: PathBuf,
+    #[cfg(unix)]
+    _read: lean_toolchain::shared_writer::LocalArtifactRead,
+}
+
+fn fixture_capability_manifest(fixture_root: &Path) -> Result<FixtureManifest, LeanWorkerError> {
+    probe_fixture_manifest(fixture_root).map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })
+}
+
+fn probe_fixture_manifest(fixture_root: &Path) -> Result<FixtureManifest, lean_toolchain::LinkDiagnostics> {
+    let failure = |reason: String| lean_toolchain::LinkDiagnostics::LakeOutputUnresolved {
+        project_root: fixture_root.to_path_buf(),
+        target_name: "LeanRsFixture".into(),
+        reason,
+    };
+    #[cfg(not(unix))]
+    return Err(failure("fixture read custody is unsupported on this platform".into()));
+
+    #[cfg(unix)]
+    {
+        use lean_toolchain::shared_writer::{LocalArtifactRead, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots};
+        let roots = project_artifact_roots(fixture_root).map_err(|error| failure(error.to_string()))?;
+        let builder = || {
+            lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
+                .package("lean_rs_fixture")
+                .module("LeanRsFixture")
+                .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
+                .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
+        };
+        let ready = || -> std::io::Result<Option<FixtureManifest>> {
+            let read = LocalArtifactRead::try_acquire(&roots)?;
+            if project_artifact_roots(fixture_root)? != roots {
+                return Err(std::io::Error::other(
+                    "fixture artifact roots changed under read custody",
+                ));
+            }
+            let built = builder().probe_ready_strict().map_err(std::io::Error::other)?;
+            read.validate()?;
+            Ok(built.map(|built| FixtureManifest {
+                path: built.manifest_path().to_path_buf(),
+                _read: read,
+            }))
+        };
+        match ready() {
+            Ok(Some(manifest)) => return Ok(manifest),
+            Ok(None) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // A new project may not yet have locks. A lost lock beside
+                // an SDK cache is not cold; refuse instead of repairing it.
+                match std::fs::symlink_metadata(fixture_root.join(".lake/lean-rs-build-cache")) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    _ => return Err(failure(error.to_string())),
+                }
+            }
+            Err(error) => return Err(failure(error.to_string())),
+        }
+        if std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_none() {
+            return Err(failure(
+                "fixture cache is not ready; a configured writer is required".into(),
+            ));
+        }
+        // No reader is held while the existing writer builds a cold fixture.
+        drop(builder().build_quiet()?);
+        ready()
+            .map_err(|error| failure(error.to_string()))?
+            .ok_or_else(|| failure("fixture cache is not ready after the writer returned".into()))
+    }
 }
 
 /// Parent-side collector that decodes per-row JSON-string payloads from

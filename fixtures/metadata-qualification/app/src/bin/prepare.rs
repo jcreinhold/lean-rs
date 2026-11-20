@@ -1,7 +1,9 @@
 #[path = "../stream_cases.rs"]
 mod stream_cases;
 
-use lean_rs_worker_protocol::worker_exports::{json_command_signature, metadata_signature};
+use lean_rs_worker_protocol::worker_exports::{
+    fixture_mul_signature, fixture_panic_signature, json_command_signature, metadata_signature,
+};
 use lean_toolchain::{CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, ToolchainFingerprint};
 use std::io::Write as _;
 use std::{
@@ -27,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broken_import =
         match profile.as_deref() {
             None => false,
-            Some("--typed-session" | "--interop-stream") if env::args().len() == 3 => false,
+            Some("--typed-session" | "--interop-stream" | "--scalar-entry") if env::args().len() == 3 => false,
             Some(
                 "--broken-import" | "--host-builder-lazy" | "--host-builder-shims-only" | "--host-builder-transitive",
             ) if env::args().len() == 3 => true,
@@ -35,6 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     let typed_session = profile.as_deref() == Some("--typed-session");
     let stream = profile.as_deref() == Some("--interop-stream");
+    let scalar = profile.as_deref() == Some("--scalar-entry");
     let state_name = if stream {
         "interop-stream"
     } else if broken_import {
@@ -44,13 +47,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "ordinary"
     };
-    let expected_state = target.join("metadata-qualification").join(state_name);
+    let expected_state = if scalar {
+        app.join("target/scalar-entry")
+    } else {
+        target.join("metadata-qualification").join(state_name)
+    };
     if state != expected_state {
         return Err("deployment state is outside the ordinary metadata target".into());
     }
     let sysroot = PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
     let generated_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?
         .ok_or("installed Lean release does not use a generated-output slot")?;
+    if scalar {
+        return prepare_scalar(app, &state, &sysroot, generated_output_key);
+    }
     if typed_session || stream {
         return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream);
     }
@@ -128,6 +138,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     fs::write(state.join("prepared.json"), serde_json::to_vec_pretty(&record)?)?;
     seal(app, &state)
+}
+
+fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use lean_toolchain::shared_writer::{
+        LocalArtifactRead, PrivateLakeBootstrap, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots,
+    };
+    if env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_some() || env::var_os("OUT_DIR").is_some() {
+        return Err("scalar fixture requires its private builder and ordinary cache path".into());
+    }
+    let project = state.join("lean");
+    let metadata = fs::symlink_metadata(&project)?;
+    if project.canonicalize()? != project
+        || !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o7777 != 0o700
+        || project.join(".lake").try_exists()?
+    {
+        return Err("scalar fixture must be a fresh private source tree".into());
+    }
+    let builder = || {
+        CargoLeanCapability::new(&project, "LeanRsFixture")
+            .package("lean_rs_fixture")
+            .module("LeanRsFixture")
+            .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
+            .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
+    };
+    let roots = project_artifact_roots(&project)?;
+    if roots != [project.clone()] {
+        return Err("scalar fixture has unexpected dependencies".into());
+    }
+    let token = PrivateLakeBootstrap::new(app, &project)?;
+    let built = builder().private_bootstrap(token).build_quiet()?;
+    let read = LocalArtifactRead::try_acquire(&roots)?;
+    let warm = builder()
+        .probe_ready_strict()?
+        .ok_or("scalar build did not publish a warm cache")?;
+    if warm.manifest_path() != built.manifest_path() || warm.dylib_path() != built.dylib_path() {
+        return Err("scalar cache selected a different artifact after build".into());
+    }
+    read.validate()?;
+    let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
+    if raw.len() > 64 * 1024 {
+        return Err("prepared descriptor exceeds limit".into());
+    }
+    let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts = serde_json::from_str(&raw)?;
+    if selected.protocol != 2 {
+        return Err("unexpected prepared descriptor protocol".into());
+    }
+    let shim = lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(
+        selected.shim_manifest_path.into(),
+        selected.shim_manifest_json,
+        selected.artifact_roots.into_iter().map(PathBuf::from).collect(),
+        selected.shim_search_paths.into_iter().map(PathBuf::from).collect(),
+    )?;
+    let mut roots = shim.artifact_roots().to_vec();
+    roots.push(project.clone());
+    roots.sort();
+    let record = serde_json::json!({
+        "scalar_entry": true, "typed_session": false, "verification": false,
+        "consumer_manifest": warm.manifest_path(), "consumer_json": fs::read_to_string(warm.manifest_path())?,
+        "generated_output_key": key, "project": project, "sysroot": sysroot,
+        "consumer_image": warm.dylib_path(),
+        "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),
+        "shim_roots": shim.artifact_roots(), "shim_paths": shim.shim_search_paths(), "roots": roots,
+    });
+    fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
+    seal(app, state)
 }
 
 fn prepare_typed_session(

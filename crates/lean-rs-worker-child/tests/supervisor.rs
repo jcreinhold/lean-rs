@@ -40,6 +40,18 @@ fn worker_config() -> LeanWorkerConfig {
     LeanWorkerConfig::new(worker_binary())
 }
 
+fn scalar_fixture() -> (PathBuf, LeanWorkerConfig) {
+    ordinary_typed_selection::ordinary_scalar_selection().map_or_else(
+        || (fixture_root(), worker_config()),
+        |selected| {
+            (
+                selected.fixture.clone(),
+                LeanWorkerConfig::new(&selected.worker).checked_native_loader_environment(),
+            )
+        },
+    )
+}
+
 #[test]
 fn public_health_check_succeeds() {
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
@@ -51,9 +63,8 @@ fn public_health_check_succeeds() {
 
 #[test]
 fn public_fixture_export_call_succeeds() {
-    ensure_fixture_built();
-    let fixture = fixture_root();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let (fixture, config) = scalar_fixture();
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
     worker
         .load_fixture_capability(&fixture)
         .expect("fixture capability loads in worker");
@@ -271,9 +282,8 @@ fn dead_worker_use_is_typed() {
 
 #[test]
 fn child_crash_is_typed_and_parent_survives() {
-    ensure_fixture_built();
-    let fixture = fixture_root();
-    let worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let (fixture, config) = scalar_fixture();
+    let worker = LeanWorker::spawn(&config).expect("worker starts");
     let exit = worker
         .__trigger_lean_panic_fixture(&fixture)
         .expect("parent observes child fatal exit");

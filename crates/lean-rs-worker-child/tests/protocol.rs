@@ -1,5 +1,8 @@
 #![allow(unsafe_code, clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
@@ -26,9 +29,11 @@ fn fixture_root() -> PathBuf {
     workspace_root().join("fixtures").join("lean")
 }
 
-fn ensure_fixture_built() {
-    let fixture = fixture_root();
-    lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsFixture").expect("fixture Lake target builds");
+fn scalar_fixture() -> (PathBuf, PathBuf) {
+    ordinary_typed_selection::ordinary_scalar_selection().map_or_else(
+        || (fixture_root(), worker_binary()),
+        |selected| (selected.fixture.clone(), selected.worker.clone()),
+    )
 }
 
 struct RawWorker {
@@ -91,9 +96,8 @@ fn health_check_succeeds() {
 
 #[test]
 fn fixture_capability_loads_and_exported_call_succeeds() {
-    ensure_fixture_built();
-    let fixture = fixture_root();
-    let mut worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
+    let (fixture, binary) = scalar_fixture();
+    let mut worker = WorkerProcess::spawn(&binary).expect("worker starts");
     worker
         .load_fixture_capability(&fixture)
         .expect("fixture capability loads in worker");
@@ -232,9 +236,8 @@ fn wait_for_pid_to_disappear(pid: libc::pid_t, timeout: Duration) -> bool {
 
 #[test]
 fn lean_internal_panic_kills_only_child() {
-    ensure_fixture_built();
-    let fixture = fixture_root();
-    let worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
+    let (fixture, binary) = scalar_fixture();
+    let worker = WorkerProcess::spawn(&binary).expect("worker starts");
     let fatal = worker
         .trigger_lean_panic(&fixture)
         .expect("parent observes child fatal exit");

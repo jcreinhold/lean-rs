@@ -1860,6 +1860,115 @@ def qualify_host_builder_cases(parent, release, profile, run, env, cargo):
     return direct_transitive
 
 
+SCALAR_ENTRY_TESTS = (
+    ("protocol", "fixture_capability_loads_and_exported_call_succeeds", 2),
+    ("supervisor", "public_fixture_export_call_succeeds", 2),
+    ("protocol", "lean_internal_panic_kills_only_child", 1),
+    ("supervisor", "child_crash_is_typed_and_parent_survives", 1),
+)
+
+
+def qualify_scalar_entry(release, profile, run, env, cargo, descriptor):
+    parent = APP / "target"
+    parent.mkdir(exist_ok=True)
+    require(parent.resolve(strict=True) == parent, "aliased scalar fixture parent")
+    state = parent / "scalar-entry"
+    state.mkdir(mode=0o700)
+    owner = state.stat()
+    scratch = state / "tmp"
+    scratch.mkdir(mode=0o700)
+    project = state / "lean"
+    project.mkdir(mode=0o700)
+    sources = subprocess.check_output(
+        ["git", "ls-files", "-z", "fixtures/lean"], cwd=SDK
+    ).split(b"\0")
+    require(2 <= len(sources) <= 33, "unexpected scalar source count")
+    for raw in filter(None, sources):
+        source = SDK / os.fsdecode(raw)
+        relative = source.relative_to(SDK / "fixtures/lean")
+        if (
+            relative.suffix not in (".lean", ".json")
+            and relative.name != "lean-toolchain"
+        ):
+            continue
+        require(
+            source.resolve(strict=True) == source
+            and source.is_file()
+            and source.stat().st_size <= 256 * 1024,
+            "unapproved scalar source",
+        )
+        tracked = subprocess.check_output(
+            ["git", "show", f"HEAD:{source.relative_to(SDK)}"], cwd=SDK
+        )
+        require(
+            tracked == source.read_bytes(), "scalar source differs from tracked input"
+        )
+        destination = project / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(tracked)
+    env.clear()
+    env.update(
+        build_environment(release, scratch), LEAN_RS_PREPARED_HOST_ARTIFACTS=descriptor
+    )
+    run([TARGET / "debug/prepare", state, "--scalar-entry"], APP)
+    record = state / "deployment.json"
+    events = state / "native-events.log"
+    env.update(
+        LEAN_RS_TEST_SCALAR_ENTRY="1",
+        LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
+        LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
+        LEAN_RS_METADATA_AUDIT_PATH=str(events),
+        LEAN_RS_TEST_AUDIT_WORKER_START="1",
+    )
+    run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
+    worker = TARGET / "debug/metadata-worker"
+    env["LEAN_RS_TEST_ORDINARY_SCALAR"] = json.dumps(
+        {
+            "worker": str(worker),
+            "worker_sha256": fixture_worker_digest(worker),
+            "fixture": str(project),
+            "sysroot": str(release),
+        },
+        separators=(",", ":"),
+    )
+    # Nextest injects the test crate's Cargo OUT_DIR. The fixture is not a
+    # build script output: all callers must select the same project cache.
+    select_nextest_runner(
+        env, {**profile, "nextest_runner": profile["nextest_runner"] + " -u OUT_DIR"}
+    )
+    for target, case, grants in SCALAR_ENTRY_TESTS:
+        run(
+            [
+                "cargo",
+                "nextest",
+                "run",
+                "--locked",
+                "--offline",
+                "-j1",
+                "--no-tests",
+                "fail",
+                "--retries",
+                "0",
+                "-p",
+                "lean-rs-worker-child",
+                "--test",
+                target,
+                "-E",
+                scoped_tests(target, (case,)),
+            ],
+            SDK,
+        )
+        check_typed_children_closed(
+            typed_audit(events),
+            case=case,
+            expected_counts=((1, grants),),
+            grant_event=b"authorize-scalar-fixture",
+        )
+        events.unlink()
+    remove_owned_state(state, owner)
+    env.clear()
+
+
 def qualify_broken_import(
     release, profile, *, emit_host_selection=False, run_typed=False, run_stream=False
 ):
@@ -1874,6 +1983,10 @@ def qualify_broken_import(
     )
     require(timeout is not None, "GNU timeout is required for the broken-import check")
     if run_typed:
+        require(
+            not os.path.lexists(APP / "target/scalar-entry"),
+            "scalar fixture state already exists",
+        )
         require(emit_host_selection, "--run-typed requires --emit-host-selection")
         typed = parent / "typed-session"
         require(
@@ -1948,6 +2061,7 @@ def qualify_broken_import(
         direct_transitive = qualify_host_builder_cases(
             parent, release, profile, run, env, cargo
         )
+        qualify_scalar_entry(release, profile, run, env, cargo, typed_descriptor)
     if run_stream:
         qualify_stream(
             release,
@@ -1973,7 +2087,14 @@ def qualify_broken_import(
                 "capability_builder",
                 (BROKEN_IMPORT_TEST, *(case for case, *_ in HOST_BUILDER_CASES)),
             )
-            completed = [broken, typed]
+            completed = [
+                broken,
+                typed,
+                *(
+                    scoped_tests(target, (name,))
+                    for target, name, _ in SCALAR_ENTRY_TESTS
+                ),
+            ]
             if run_stream:
                 completed.extend(
                     scoped_tests(target, (name,)) for target, name in INTEROP_TESTS
