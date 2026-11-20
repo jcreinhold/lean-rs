@@ -23,12 +23,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let profile = env::args().nth(2);
     let broken_import = match profile.as_deref() {
         None => false,
-        Some("--typed-session") if env::args().len() == 3 => false,
+        Some("--typed-session" | "--interop-stream") if env::args().len() == 3 => false,
         Some("--broken-import") if env::args().len() == 3 => true,
         _ => return Err("unknown metadata qualification profile".into()),
     };
     let typed_session = profile.as_deref() == Some("--typed-session");
-    let state_name = if broken_import { "broken-import" } else if typed_session { "typed-session" } else { "ordinary" };
+    let stream = profile.as_deref() == Some("--interop-stream");
+    let state_name = if stream {
+        "interop-stream"
+    } else if broken_import {
+        "broken-import"
+    } else if typed_session {
+        "typed-session"
+    } else {
+        "ordinary"
+    };
     let expected_state = target.join("metadata-qualification").join(state_name);
     if state != expected_state {
         return Err("deployment state is outside the ordinary metadata target".into());
@@ -36,8 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sysroot = PathBuf::from(env::var_os("LEAN_SYSROOT").ok_or("missing sysroot")?).canonicalize()?;
     let generated_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?
         .ok_or("installed Lean release does not use a generated-output slot")?;
-    if typed_session {
-        return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key);
+    if typed_session || stream {
+        return prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream);
     }
     if broken_import {
         return prepare_broken_import(app, &state, &sysroot, generated_output_key);
@@ -121,49 +130,60 @@ fn prepare_typed_session(
     state: &Path,
     sysroot: &Path,
     key: &str,
+    stream: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Reuse the same run's prepared shims. This path never invokes Lake or a writer.
     let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
     if raw.len() > 64 * 1024 {
         return Err("prepared descriptor exceeds limit".into());
     }
-    let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts =
-        serde_json::from_str(&raw)?;
+    let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts = serde_json::from_str(&raw)?;
     if selected.protocol != 2 {
         return Err("unexpected prepared descriptor protocol".into());
     }
     let shim = lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(
         selected.shim_manifest_path.into(),
         selected.shim_manifest_json,
-        selected
-            .artifact_roots
-            .into_iter()
-            .map(PathBuf::from)
-            .collect(),
-        selected
-            .shim_search_paths
-            .into_iter()
-            .map(PathBuf::from)
-            .collect(),
+        selected.artifact_roots.into_iter().map(PathBuf::from).collect(),
+        selected.shim_search_paths.into_iter().map(PathBuf::from).collect(),
     )?;
-    let project = sdk.join("fixtures/lean").canonicalize()?;
+    let expected_project = sdk.join(if stream {
+        "fixtures/interop-worker"
+    } else {
+        "fixtures/lean"
+    });
+    let project = expected_project.canonicalize()?;
     // The trusted job already built this exact checkout fixture once and keeps
     // it unchanged until tests exit. This is not protection from same-user writes.
     let project_metadata = fs::symlink_metadata(&project)?;
-    if project != sdk.join("fixtures/lean") || !project_metadata.is_dir()
+    if project != expected_project
+        || !project_metadata.is_dir()
         || project_metadata.uid() != rustix::process::geteuid().as_raw()
-        || project_metadata.mode() & 0o7777 != 0o700 {
+        || project_metadata.mode() & 0o7777 != 0o700
+    {
         return Err("typed fixture is not the job-owned private checkout fixture".into());
     }
-    let image = project.join(".lake/build/lib").join(format!(
-        "liblean__rs__fixture_LeanRsFixture.{}",
-        env::consts::DLL_EXTENSION
-    ));
+    let (image_dir, stem) = if stream {
+        (
+            format!(".lake/lean-rs-generated/{key}/lib"),
+            "lean__rs__interop__consumer_LeanRsInteropConsumer",
+        )
+    } else {
+        (".lake/build/lib".into(), "lean__rs__fixture_LeanRsFixture")
+    };
+    let image = project
+        .join(image_dir)
+        .join(format!("lib{stem}.{}", env::consts::DLL_EXTENSION));
     if image.canonicalize()? != image || !fs::symlink_metadata(&image)?.is_file() {
         return Err("missing canonical built scalar image".into());
     }
     let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
-    match fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&lock) {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&lock)
+    {
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
@@ -184,20 +204,42 @@ fn prepare_typed_session(
         return Err("typed state is not a private job directory".into());
     }
     let fingerprint = ToolchainFingerprint::current();
-    let manifest_path = state.join("worker-json-capability.json");
+    let manifest_path = state.join(if stream {
+        "worker-stream-capability.json"
+    } else {
+        "worker-json-capability.json"
+    });
+    let shim_json: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
+    let (package, module, dependencies, signature) = if stream {
+        (
+            "lean_rs_interop_consumer",
+            "LeanRsInteropConsumer",
+            shim_json["dependencies"].clone(),
+            lean_rs_worker_protocol::worker_exports::streaming_command_signature(
+                "lean_rs_interop_consumer_worker_data_stream",
+            ),
+        )
+    } else {
+        (
+            "lean_rs_fixture",
+            "LeanRsFixture.Effects",
+            serde_json::json!([]),
+            json_command_signature("lean_rs_interop_consumer_worker_json_command"),
+        )
+    };
     let manifest = serde_json::to_string(&serde_json::json!({
         "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
-        "package": "lean_rs_fixture",
-        "module": "LeanRsFixture.Effects",
+        "package": package,
+        "module": module,
         "primary_dylib": image,
-        "dependencies": [],
+        "dependencies": dependencies,
         "build_toolchain": {"sysroot": sysroot},
         "toolchain_fingerprint": {
             "lean_version": fingerprint.lean_version,
             "resolved_version": fingerprint.resolved_version,
             "header_sha256": fingerprint.header_sha256,
         },
-        "exports": [json_command_signature("lean_rs_interop_consumer_worker_json_command").to_json()],
+        "exports": [signature.to_json()],
     }))?;
     fs::OpenOptions::new()
         .write(true)
@@ -212,7 +254,7 @@ fn prepare_typed_session(
     roots.push(project.clone());
     roots.sort();
     let record = serde_json::json!({
-        "broken_import": false, "typed_session": true, "verification": false,
+        "broken_import": false, "typed_session": true, "stream": stream, "verification": false,
         "consumer_manifest": manifest_path, "consumer_json": manifest,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": image,

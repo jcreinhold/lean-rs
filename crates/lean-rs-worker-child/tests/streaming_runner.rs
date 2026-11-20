@@ -12,6 +12,10 @@ use lean_rs_worker_parent::{
 };
 use serde_json::json;
 
+#[path = "support/ordinary_typed_selection.rs"]
+mod ordinary_typed_selection;
+use ordinary_typed_selection::ordinary_stream_selection;
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -140,15 +144,36 @@ impl LeanWorkerDataSink for CancelOnFirstRow<'_> {
     }
 }
 
+fn fixed_stream_configs() -> (LeanWorkerConfig, LeanWorkerSessionConfig) {
+    ordinary_stream_selection().map_or_else(
+        || {
+            ensure_interop_built();
+            (worker_config(), stream_session_config())
+        },
+        |selection| {
+            (
+                LeanWorkerConfig::new(&selection.worker)
+                    .checked_native_loader_environment()
+                    .env("LEAN_SYSROOT", selection.sysroot.as_os_str()),
+                LeanWorkerSessionConfig::manifest_backed(
+                    &selection.fixture,
+                    "lean_rs_interop_consumer",
+                    "LeanRsInteropConsumer",
+                    &selection.json_manifest,
+                    ["LeanRsInteropConsumer.Callback"],
+                ),
+            )
+        },
+    )
+}
+
 #[test]
 fn successful_stream_delivers_rows_with_per_stream_sequences() {
-    ensure_interop_built();
     let sink = RecordingDataSink::default();
     let diagnostics = RecordingDiagnosticSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let (worker, session) = fixed_stream_configs();
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&session, None, None).expect("worker session opens");
 
     let summary = session
         .run_data_stream(
@@ -359,17 +384,15 @@ fn child_fatal_exit_is_reported_to_parent() {
 
 #[test]
 fn row_sink_cancellation_cycles_child_and_invalidates_session() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let token = LeanWorkerCancellationToken::new();
     let sink = CancelOnFirstRow {
         token: &token,
         rows: Mutex::new(Vec::new()),
     };
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
     {
-        let mut session = worker
-            .open_session(&stream_session_config(), None, None)
-            .expect("worker session opens");
+        let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
         let err = session
             .run_data_stream(
@@ -523,12 +546,10 @@ fn row_before_child_panic_is_delivered_before_terminal_failure() {
 
 #[test]
 fn diagnostic_sink_panic_is_typed() {
-    ensure_interop_built();
+    let (worker, config) = fixed_stream_configs();
     let sink = RecordingDataSink::default();
-    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    let mut session = worker
-        .open_session(&stream_session_config(), None, None)
-        .expect("worker session opens");
+    let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
     let err = session
         .run_data_stream(

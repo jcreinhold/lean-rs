@@ -1,6 +1,6 @@
 use lean_rs::host_bridge::{
-    HostCachedModuleBatch, HostModuleBatch, HostModuleQuery, HostSourceOptions,
-    TrustedHostKernelRequest, TrustedHostTerm, TrustedModuleSource,
+    HostCachedModuleBatch, HostModuleBatch, HostModuleQuery, HostSourceOptions, TrustedHostKernelRequest,
+    TrustedHostTerm, TrustedModuleSource,
     module_requests::{
         DeclarationVerificationBatchRequest, DeclarationVerificationRequest, DeclarationVerificationTarget,
         ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, ProofEditTarget,
@@ -8,8 +8,8 @@ use lean_rs::host_bridge::{
     },
 };
 use lean_rs::module::{
-    AuthorizedWorkerSnapshot, HostImportOptions, LeanLibrary, LeanModuleInitializer,
-    LoadedHostArtifacts, TrustedHostCapability, TrustedHostImports, WorkerExportContract,
+    AuthorizedWorkerSnapshot, HostImportOptions, LeanLibrary, LeanModuleInitializer, LoadedHostArtifacts,
+    TrustedHostCapability, TrustedHostImports, TrustedWorkerCapability, WorkerExportContract,
 };
 use lean_rs::{LeanResult, LeanRuntime};
 use lean_rs_host::host::LeanPreparedHostArtifacts;
@@ -17,7 +17,8 @@ use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceCont
 use std::path::Path;
 
 use metadata_qualification::{
-    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, audit, module_syntax_case,
+    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_EXPORT,
+    STREAM_MANIFEST_NAME, audit, module_syntax_case,
 };
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
@@ -63,6 +64,7 @@ impl MetadataApp {
         let d = &self.deployment()?.record;
         if d.broken_import
             || !d.typed_session
+            || d.stream
             || d.verification
             || !session.imports.matches_request(
                 &d.import_roots
@@ -391,6 +393,15 @@ fn matches_ordinary_verification(file: &str, request: &DeclarationVerificationRe
         )
 }
 impl WorkerAuthority for MetadataApp {
+    fn use_generated_project_imports(
+        &self,
+        project: &Path,
+        capability: &TrustedWorkerCapability<'static>,
+    ) -> LeanResult<bool> {
+        let held = self.deployment()?;
+        let d = &held.record;
+        Ok(d.stream && project == d.project && capability.library_path() == d.consumer_image)
+    }
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
@@ -399,7 +410,12 @@ impl WorkerAuthority for MetadataApp {
         }
         let root = if d.typed_session {
             if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
-                || path.file_name().and_then(|name| name.to_str()) != Some(JSON_MANIFEST_NAME)
+                || path.file_name().and_then(|name| name.to_str())
+                    != Some(if d.stream {
+                        STREAM_MANIFEST_NAME
+                    } else {
+                        JSON_MANIFEST_NAME
+                    })
             {
                 return Err(denied());
             }
@@ -420,15 +436,21 @@ impl WorkerAuthority for MetadataApp {
         if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
-        let export = if d.typed_session {
+        let contract = if d.stream {
+            (STREAM_EXPORT, WorkerExportContract::StringStream)
+        } else if d.typed_session {
             if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
                 return Err(denied());
             }
-            JSON_COMMAND_EXPORT
+            (JSON_COMMAND_EXPORT, WorkerExportContract::StringIoString)
         } else {
-            EXPORT
+            (EXPORT, WorkerExportContract::StringIoString)
         };
-        audit("authorize-consumer-load");
+        audit(if d.stream {
+            "authorize-fixed-stream"
+        } else {
+            "authorize-consumer-load"
+        });
         // SAFETY: the seal and Held verified the exact images, initializer, runtime
         // and the one named owned String -> IO String export, which ignores its input.
         // Held pins the images, dependencies and imports for the worker generation.
@@ -437,7 +459,7 @@ impl WorkerAuthority for MetadataApp {
                 runtime,
                 path.into(),
                 bytes.to_vec(),
-                vec![(export.into(), WorkerExportContract::StringIoString)],
+                vec![(contract.0.into(), contract.1)],
                 held.clone(),
             )
         })
@@ -459,7 +481,7 @@ impl WorkerAuthority for MetadataApp {
             }
             return Err(denied());
         }
-        if !d.broken_import && !d.typed_session {
+        if !d.broken_import && (!d.typed_session || d.stream) {
             held.check_interop_visibility(true).map_err(ioerr)?;
         }
         if !d.broken_import {
@@ -522,6 +544,7 @@ impl WorkerAuthority for MetadataApp {
         let expected = LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture");
         if held.record.broken_import
             || !held.record.typed_session
+            || held.record.stream
             || path != held.record.consumer_image
             || requested != &expected
         {
@@ -556,6 +579,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
+            || d.stream
             || d.verification
             || !(recovery || meta)
             || *session.imports.options() != HostImportOptions::default()
@@ -639,6 +663,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
+            || d.stream
             || d.verification
             || !(exact_request || module_syntax)
             || !session.imports.matches_request(
@@ -689,6 +714,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
+            || d.stream
             || d.verification
             || !options.namespace.is_empty()
             || options.options_json != "{}"
@@ -757,6 +783,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
+            || d.stream
             || d.verification
             || !session.imports.matches_request(
                 &d.import_roots
@@ -796,7 +823,9 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<()> {
         let d = &self.deployment()?.record;
         let roots = d.verification_roots();
-        if d.broken_import || !d.typed_session
+        if d.broken_import
+            || !d.typed_session
+            || d.stream
             || (!d.verification && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1"))
             || context.capability.library_path() != d.host_image
             || observed != Some(roots.as_slice())
@@ -841,20 +870,10 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         let ordinary = defaults.per_field_bytes;
-        let event = match (
-            request.source.as_str(),
-            name.as_str(),
-            request.budgets.per_field_bytes,
-        ) {
-            ("theorem t : True := by\n  trivial\n", "t", n) if n == ordinary => {
-                "authorize-verify-proved"
-            }
-            ("theorem t : True := by\n  sorry\n", "t", n) if n == ordinary => {
-                "authorize-verify-sorry"
-            }
-            ("theorem absent : Nat := 0\n", "absent", n) if n == ordinary => {
-                "authorize-verify-unavailable"
-            }
+        let event = match (request.source.as_str(), name.as_str(), request.budgets.per_field_bytes) {
+            ("theorem t : True := by\n  trivial\n", "t", n) if n == ordinary => "authorize-verify-proved",
+            ("theorem t : True := by\n  sorry\n", "t", n) if n == ordinary => "authorize-verify-sorry",
+            ("theorem absent : Nat := 0\n", "absent", n) if n == ordinary => "authorize-verify-unavailable",
             ("theorem t : True := by\n  sorry\n", "t", 1) => "authorize-verify-truncated",
             _ => return Err(denied()),
         };
@@ -863,13 +882,9 @@ impl WorkerAuthority for MetadataApp {
         // before calling verify. Held retains the sealed libraries, modules and release throughout.
         // Only the four reviewed in-memory declarations and their exact options reach the shim.
         let grant = unsafe {
-            session.capability.verification_scope(
-                session.environment,
-                session.imports,
-                roots,
-                request,
-                options,
-            )?
+            session
+                .capability
+                .verification_scope(session.environment, session.imports, roots, request, options)?
         };
         audit(event);
         Ok(grant)

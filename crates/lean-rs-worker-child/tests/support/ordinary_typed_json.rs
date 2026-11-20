@@ -10,7 +10,7 @@ pub(super) fn json_builder() -> Option<LeanWorkerCapabilityBuilder> {
     assert!(std::env::var_os("LEAN_PATH").is_none());
     let child = LeanWorkerChild::for_toolchain(&selected.worker, &selected.sysroot)
         .checked_native_loader_environment()
-        .prepared_host_artifacts(selected.prepared.clone());
+        .prepared_host_artifacts(selected.prepared.clone().expect("prepared shim descriptor"));
     Some(
         LeanWorkerCapabilityBuilder::from_built_capability(
             &LeanBuiltCapability::manifest_path(&selected.json_manifest),

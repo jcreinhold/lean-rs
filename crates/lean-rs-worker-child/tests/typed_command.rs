@@ -17,6 +17,19 @@ mod ordinary_typed_selection;
 #[path = "support/ordinary_typed_worker.rs"]
 mod ordinary_typed_worker;
 
+fn stream_builder() -> LeanWorkerCapabilityBuilder {
+    ordinary_typed_selection::ordinary_stream_selection().map_or_else(builder, |selection| {
+        let child = lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&selection.worker, &selection.sysroot)
+            .checked_native_loader_environment();
+        LeanWorkerCapabilityBuilder::from_built_capability(
+            &lean_rs::LeanBuiltCapability::manifest_path(&selection.json_manifest),
+            ["LeanRsInteropConsumer.Callback"],
+        )
+        .expect("select sealed stream capability")
+        .worker_child(child)
+    })
+}
+
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -267,7 +280,7 @@ fn typed_json_command_decode_error_is_typed() {
 
 #[test]
 fn typed_streaming_command_decodes_rows_and_summary() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream",
@@ -456,7 +469,7 @@ fn helper_completion_order_stream_uses_same_typed_surface() {
 
 #[test]
 fn typed_streaming_command_row_decode_error_names_stream_and_sequence() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, WrongRow, FixtureSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream",
@@ -497,7 +510,7 @@ fn typed_streaming_command_row_decode_error_names_stream_and_sequence() {
 
 #[test]
 fn typed_streaming_command_summary_decode_error_is_typed() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, WrongSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream",
@@ -561,7 +574,7 @@ fn typed_streaming_command_decodes_large_payload_from_performance_path() {
 
 #[test]
 fn raw_row_streaming_remains_available() {
-    let mut capability = builder().open().expect("builder opens capability");
+    let mut capability = stream_builder().open().expect("builder opens capability");
     let mut session = capability.open_session(None, None).expect("session opens");
     let sink = RecordingRawSink::default();
 

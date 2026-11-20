@@ -122,6 +122,8 @@ fn runtime_image_names() -> (&'static str, &'static str, &'static str) {
 
 pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
 pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_command";
+pub const STREAM_EXPORT: &str = "lean_rs_interop_consumer_worker_data_stream";
+pub const STREAM_MANIFEST_NAME: &str = "worker-stream-capability.json";
 pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
@@ -137,6 +139,8 @@ pub struct Record {
     #[serde(default)]
     pub broken_import: bool,
     pub typed_session: bool,
+    #[serde(default)]
+    pub stream: bool,
     pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]
@@ -259,7 +263,7 @@ impl Record {
     ) -> R<()> {
         let expected: &[&str] = if self.broken_import {
             &["Demo.Broken"]
-        } else if self.typed_session {
+        } else if self.typed_session && !self.stream {
             &["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"]
         } else {
             &[MODULE]
@@ -276,6 +280,7 @@ impl Record {
             && (names == ["LeanRsHostShims.Elaboration", "LeanRsFixtureLateExtension"]
                 || names == ["LeanRsHostShims.Elaboration", "LeanRsFixture.Meta"]);
         let reuse_imports = self.typed_session
+            && !self.stream
             && !self.broken_import
             && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")

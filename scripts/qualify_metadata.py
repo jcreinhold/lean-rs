@@ -319,6 +319,8 @@ ORDINARY_WIDE_REUSE_CASES = frozenset(
     }
 )
 ORDINARY_GRANTS_BY_WORKER = {
+    "typed_streaming_command_row_decode_error_names_stream_and_sequence": (1, 0),
+    "row_sink_cancellation_cycles_child_and_invalidates_session": (1, 0),
     "a_mispredicted_reuse_restarts_before_the_actual_import": (3, 2),
     "a_capacity_eviction_clears_the_snapshot_cache": (2, 2),
 }
@@ -1156,6 +1158,198 @@ def check_typed_children_closed(
         raise ValueError(f"typed worker PID {pid} remains; keeping fixture state")
 
 
+STREAM_TESTS = (
+    ("streaming_runner", "successful_stream_delivers_rows_with_per_stream_sequences"),
+    ("typed_command", "typed_streaming_command_decodes_rows_and_summary"),
+    (
+        "typed_command",
+        "typed_streaming_command_row_decode_error_names_stream_and_sequence",
+    ),
+    ("typed_command", "typed_streaming_command_summary_decode_error_is_typed"),
+    ("typed_command", "raw_row_streaming_remains_available"),
+    ("streaming_runner", "row_sink_cancellation_cycles_child_and_invalidates_session"),
+    ("streaming_runner", "diagnostic_sink_panic_is_typed"),
+)
+
+
+STREAM_READY_REPLACEMENT = {
+    "typed_streaming_command_row_decode_error_names_stream_and_sequence",
+    "row_sink_cancellation_cycles_child_and_invalidates_session",
+}
+
+
+def qualify_stream(release, profile, shim_manifest, cases, *, pinned_selection=None):
+    project = SDK / "fixtures/interop-worker"
+    require(project.resolve(strict=True) == project, "aliased stream project")
+    owner = project.stat()
+    require(owner.st_uid == os.geteuid(), "stream project requires its checkout owner")
+    if pinned_selection is None:
+        return run_stream_group(release, profile, shim_manifest, cases)
+    project.chmod(0o700)
+    run_stream_group(
+        release, profile, shim_manifest, cases, pinned_selection=pinned_selection
+    )
+    current = project.stat()
+    require(
+        (current.st_dev, current.st_ino) == (owner.st_dev, owner.st_ino),
+        "stream project changed during qualification",
+    )
+    # Failure keeps the project private and the test state available to check
+    # closure. Restore the prior mode only after the run proves closure.
+    project.chmod(owner.st_mode & 0o7777)
+
+
+def run_stream_group(release, profile, shim_manifest, cases, *, pinned_selection=None):
+    project = SDK / "fixtures/interop-worker"
+    require(project.resolve(strict=True) == project, "aliased stream project")
+    require(
+        project.stat().st_uid == os.geteuid()
+        and project.stat().st_mode & 0o7777 == 0o700,
+        "stream project requires an exclusively owned checkout",
+    )
+    bundle = SDK / "crates/lean-rs-host/shims"
+    host, interop = (
+        bundle / name for name in ("lean-rs-host-shims", "lean-rs-interop-shims")
+    )
+    output = Path(".lake/lean-rs-generated/lean-4.36.0")
+    manifest = shim_manifest.resolve(strict=True)
+    require(
+        manifest == shim_manifest
+        and manifest.parent == host / output / "lean-rs-build-cache",
+        "select the canonical prepared host manifest",
+    )
+    with manifest.open("rb") as stream:
+        raw = stream.read(64 * 1024 + 1)
+    require(len(raw) <= 64 * 1024, "shim manifest exceeds wire bound")
+    descriptor = {
+        "protocol": 2,
+        "shim_manifest_path": str(manifest),
+        "shim_manifest_json": raw.decode(),
+        "artifact_roots": list(map(str, sorted((host, interop)))),
+        "shim_search_paths": [
+            str(root / output / "lib/lean") for root in (interop, host)
+        ],
+    }
+    parent = TARGET / "metadata-qualification"
+    require(parent == parent.resolve(strict=True), "aliased fixture directory")
+    state = parent / "interop-stream"
+    state.mkdir(mode=0o700)
+    owner = state.stat()
+    scratch = state / "tmp"
+    scratch.mkdir(mode=0o700)
+    audit_dir = state / "app"
+    audit_dir.mkdir(mode=0o700)
+    events = audit_dir / "native-events.log"
+    env = build_environment(release, scratch)
+    env["LEAN_RS_PREPARED_HOST_ARTIFACTS"] = json.dumps(descriptor)
+    timeout = shutil.which("gtimeout" if platform.system() == "Darwin" else "timeout")
+    require(timeout is not None, "GNU timeout is required for the stream check")
+
+    def run(args, cwd):
+        space(TARGET)
+        subprocess.run(
+            [timeout, "--signal=TERM", "--kill-after=15s", "8m", *args],
+            cwd=cwd,
+            env=env,
+            check=True,
+            **({"stdout": sys.stderr} if pinned_selection is not None else {}),
+        )
+
+    if pinned_selection is not None:
+        selected_descriptor, image_pins = pinned_selection
+        require(
+            selected_descriptor == descriptor,
+            "stream build does not use the verified host descriptor",
+        )
+
+        def verify_provider():
+            for path, dev, inode, sha256 in image_pins:
+                image = Path(path)
+                identity = image.stat()
+                require(
+                    image.resolve(strict=True) == image
+                    and (identity.st_dev, identity.st_ino) == (dev, inode)
+                    and digest(image) == sha256,
+                    f"stream build changed a verified shim image: {image}",
+                )
+
+        # The typed workers have closed and this job holds the qualification lock.
+        # The probe and image checks detect changes; they do not block writes.
+        verify_provider()
+        lake = release / "bin/lake"
+        run(
+            [lake, "--no-cache", "--no-build", "build", "LeanRsInterop:shared"], interop
+        )
+        run(
+            [
+                lake,
+                "--no-cache",
+                "--fail-fast",
+                "build",
+                "LeanRsInteropConsumer:shared",
+            ],
+            project,
+        )
+        verify_provider()
+    cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
+    run([*cargo, "--bin", "prepare"], APP)
+    run([TARGET / "debug/prepare", state, "--interop-stream"], APP)
+    record = state / "deployment.json"
+    env.update(
+        LEAN_RS_METADATA_ORDINARY_TYPED="1",
+        LEAN_RS_METADATA_DEPLOYMENT_RECORD=str(record),
+        LEAN_RS_METADATA_DEPLOYMENT_SHA256=digest(record),
+        LEAN_RS_METADATA_AUDIT_PATH=str(events),
+        LEAN_RS_TEST_AUDIT_WORKER_START="1",
+    )
+    run([*cargo, "--features", "admitted", "--bin", "metadata-worker"], APP)
+    worker = TARGET / "debug/metadata-worker"
+    env["LEAN_RS_TEST_ORDINARY_STREAM"] = json.dumps(
+        {
+            "worker": str(worker),
+            "worker_sha256": fixture_worker_digest(worker),
+            "fixture": str(project),
+            "json_manifest": str(state / "worker-stream-capability.json"),
+            "sysroot": str(release),
+        }
+    )
+    select_nextest_runner(env, profile)
+    selected = {name: target for target, name in STREAM_TESTS}
+    for name in cases or selected:
+        target = selected[name]
+        run(
+            [
+                "cargo",
+                "nextest",
+                "run",
+                "--locked",
+                "--offline",
+                "-j1",
+                "--no-tests",
+                "fail",
+                "--retries",
+                "0",
+                "-p",
+                "lean-rs-worker-child",
+                "--test",
+                target,
+                "-E",
+                scoped_tests(target, (name,)),
+            ],
+            SDK,
+        )
+        check_typed_children_closed(
+            typed_audit(events),
+            case=name,
+            expected_counts=((2, 1),)
+            if name in STREAM_READY_REPLACEMENT
+            else ((1, 1),),
+            grant_event=b"authorize-fixed-stream",
+        )
+        events.unlink()
+    remove_owned_state(state, owner)
+
+
 def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
     state = parent / "typed-session"
     state.mkdir(mode=0o700)
@@ -1255,7 +1449,7 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
 
 
 def qualify_broken_import(
-    release, profile, *, emit_host_selection=False, run_typed=False
+    release, profile, *, emit_host_selection=False, run_typed=False, run_stream=False
 ):
     """Run one ordinary SDK worker test, without the downstream host helper."""
     require(TARGET == TARGET.resolve(strict=True), "aliased SDK target")
@@ -1273,6 +1467,7 @@ def qualify_broken_import(
         require(
             not os.path.lexists(typed), f"typed fixture state already exists: {typed}"
         )
+    require(not run_stream or run_typed, "stream tests require the typed fixture first")
     check_tracked_fixture_sources()
     space(TARGET)
     state = parent / "broken-import"
@@ -1390,6 +1585,14 @@ def qualify_broken_import(
     remove_owned_state(state, owner)
     if run_typed:
         qualify_typed_group(parent, release, profile, run, env, cargo, typed_descriptor)
+    if run_stream:
+        qualify_stream(
+            release,
+            profile,
+            manifest,
+            None,
+            pinned_selection=(json.loads(typed_descriptor), image_pins),
+        )
     if emit_host_selection:
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
         print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)
@@ -1404,9 +1607,14 @@ def qualify_broken_import(
                 ]
             )
             broken = scoped_tests("capability_builder", (BROKEN_IMPORT_TEST,))
+            completed = [broken, typed]
+            if run_stream:
+                completed.extend(
+                    scoped_tests(target, (name,)) for target, name in STREAM_TESTS
+                )
             print(
                 "LEAN_RS_TEST_REMAINING_FILTER="
-                f"not (package(=lean-rs-worker-child) & ({broken} | {typed}))"
+                f"not (package(=lean-rs-worker-child) & ({' | '.join(completed)}))"
             )
 
 
@@ -1448,6 +1656,13 @@ def main():
     broken.add_argument(
         "--run-typed", action="store_true", help="also run the fixed typed SDK tests"
     )
+    stream = commands.add_parser(
+        "interop-stream", help="qualify the fixed-export stream tests"
+    )
+    stream.add_argument("shim_manifest", type=Path)
+    stream.add_argument(
+        "--case", action="append", choices=[name for _, name in STREAM_TESTS]
+    )
     run = commands.add_parser(
         "run", help="execute the selected tests against a reviewed deployment"
     )
@@ -1471,6 +1686,9 @@ def main():
             parser.error("broken-import does not use a writer helper")
         if args.run_typed and not args.emit_host_selection:
             parser.error("--run-typed requires --emit-host-selection")
+    elif args.command == "interop-stream":
+        if args.writer is not None or args.writer_sha256 is not None:
+            parser.error("interop-stream does not use a writer helper")
     elif args.writer is None or args.writer_sha256 is None:
         parser.error("prepare and run require --writer and --writer-sha256")
     if args.command == "run" and args.unknown_declaration and not args.typed_session:
@@ -1494,13 +1712,23 @@ def main():
         )
     try:
         refuse_inherited_loader_overrides()
-        profile = verified_platform(broken_import=args.command == "broken-import")
+        profile = verified_platform(
+            broken_import=args.command in ("broken-import", "interop-stream")
+        )
         release = installed_lean_release(profile)
+        if args.command == "interop-stream":
+            with ordinary_state_lock():
+                qualify_stream(release, profile, args.shim_manifest, args.case)
+            return
         if args.command == "broken-import":
             with ordinary_state_lock():
                 if args.run_typed:
                     qualify_broken_import(
-                        release, profile, emit_host_selection=True, run_typed=True
+                        release,
+                        profile,
+                        emit_host_selection=True,
+                        run_typed=True,
+                        run_stream=True,
                     )
                 elif args.emit_host_selection:
                     qualify_broken_import(release, profile, emit_host_selection=True)
