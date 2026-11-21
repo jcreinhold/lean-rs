@@ -136,13 +136,10 @@ impl Charge {
             .chain(self.secondary_locks.iter().map(|(path, dev, ino)| (path, *dev, *ino)))
     }
 
-    fn covers_lock(&self, path: &Path, dev: u64, ino: u64) -> bool {
-        path == self.primary
-            || (dev, ino) == (self.device, self.inode)
-            || self
-                .secondary_locks
-                .iter()
-                .any(|(prior, device, inode)| path == prior || (dev, ino) == (*device, *inode))
+    fn covers_lock(&self, path: &Path, device: u64, inode: u64) -> bool {
+        let identity = (device, inode);
+        self.lock_union()
+            .any(|(lock_path, lock_device, lock_inode)| path == lock_path || identity == (lock_device, lock_inode))
     }
 
     fn read(directory: &File, turn: &str) -> io::Result<Self> {

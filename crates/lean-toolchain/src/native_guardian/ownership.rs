@@ -81,6 +81,13 @@ impl NativeProcessIdentity {
         }
         Ok(native::snapshot(self.pid)?.is_some_and(|(start, live)| start == self.start && live))
     }
+    #[cfg_attr(
+        not(target_os = "macos"),
+        allow(
+            clippy::unused_self,
+            reason = "exact stopped-state observation is only supported on macOS"
+        )
+    )]
     fn is_stopped(&self) -> io::Result<bool> {
         #[cfg(target_os = "macos")]
         {
