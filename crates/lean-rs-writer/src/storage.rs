@@ -3,7 +3,7 @@ use super::scratch::{HANDOFF_NAME, Scratch, ScratchParent};
 use super::{Duration, File, MetadataExt, Path, PathBuf, invalid, io};
 use lean_toolchain::native_guardian::writer_storage::{
     StorageRoot, WriterStorageCharge, WriterStorageTurn, reclaim_idle_writer_storage, recover_disjoint_writer_storage,
-    reserve_writer_storage_with_handoff, try_reclaim_idle_writer_storage,
+    reserve_writer_storage_with_approval, try_reclaim_idle_writer_storage,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -21,6 +21,8 @@ pub(super) struct Request {
     command_only: bool,
     #[serde(default, deserialize_with = "present_digest")]
     handoff_sha256: Option<String>,
+    #[serde(default, deserialize_with = "present_generation")]
+    approval_generation: Option<String>,
     roots: Vec<Entry>,
 }
 
@@ -40,6 +42,20 @@ fn present_digest<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<S
         return Err(serde::de::Error::custom("expected a lowercase SHA-256 handoff digest"));
     }
     Ok(Some(digest))
+}
+
+fn present_generation<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
+    let generation = String::deserialize(input)?;
+    if generation.len() != 32
+        || !generation
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(serde::de::Error::custom(
+            "expected a 32-digit lowercase writer approval generation",
+        ));
+    }
+    Ok(Some(generation))
 }
 
 impl Entry {
@@ -126,6 +142,11 @@ impl Request {
         }
         if request.handoff_sha256.is_some() && !request.command_only {
             return Err(invalid("immutable handoff requires command-only storage"));
+        }
+        if request.handoff_sha256.is_some() != request.approval_generation.is_some() {
+            return Err(invalid(
+                "source-bound writer requires both handoff_sha256 and approval_generation",
+            ));
         }
         let mut roles = std::collections::BTreeSet::new();
         for entry in &request.roots {
@@ -229,14 +250,14 @@ impl Request {
             self.reclaim(&parent, locks, timeout)?;
         }
         let roots = self.roots.iter().map(Entry::root).collect::<Vec<_>>();
-        let charge = reserve_writer_storage_with_handoff(
+        let charge = reserve_writer_storage_with_approval(
             &self.entry("registry")?.root(),
             locks,
             &roots,
             self.floor_bytes,
             self.budget_bytes,
             timeout,
-            self.handoff_sha256.as_deref(),
+            self.handoff_sha256.as_deref().zip(self.approval_generation.as_deref()),
         )?;
         Ok((parent, charge))
     }

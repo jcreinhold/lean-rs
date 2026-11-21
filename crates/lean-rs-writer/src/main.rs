@@ -5,7 +5,8 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use lean_rs_writer::{self as writer, ReadProxyArgs, ReaderArgs, WriterArgs, WriterLockPathArgs};
-use lean_toolchain::native_guardian::writer_storage::StorageRoot;
+use lean_toolchain::native_guardian::writer_storage::{StorageRoot, approve_writer_handoff, revoke_writer_handoff};
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(version)]
@@ -22,7 +23,7 @@ enum Command {
 }
 
 #[derive(clap::Args)]
-struct Selection {
+struct RegistrySelection {
     /// Independently selected canonical registry directory.
     #[arg(long)]
     registry: PathBuf,
@@ -30,6 +31,21 @@ struct Selection {
     registry_device: u64,
     #[arg(long)]
     registry_inode: u64,
+}
+impl RegistrySelection {
+    fn binding(&self) -> StorageRoot {
+        StorageRoot {
+            path: self.registry.clone(),
+            device: self.registry_device,
+            inode: self.registry_inode,
+        }
+    }
+}
+
+#[derive(clap::Args)]
+struct Selection {
+    #[command(flatten)]
+    registry: RegistrySelection,
     /// Original 32-digit hexadecimal storage turn.
     #[arg(long, value_parser = parse_turn)]
     turn: String,
@@ -45,6 +61,10 @@ fn parse_turn(value: &str) -> Result<String, &'static str> {
 
 #[derive(clap::Subcommand)]
 enum StorageCommand {
+    /// Issue a fresh source-bound admission generation for the approved cohort.
+    ApproveHandoff(RegistrySelection),
+    /// Disable source-bound admission, then verify the registry has drained.
+    RevokeHandoff(RegistrySelection),
     /// Preview the reservation and any missing evidence without changing it.
     Inspect(Selection),
     /// Recheck Idle custody, clean the bound scratch and settle once.
@@ -60,6 +80,15 @@ enum StorageCommand {
 impl StorageCommand {
     fn run(&self) -> io::Result<()> {
         let (selection, recover) = match self {
+            Self::ApproveHandoff(registry) => {
+                let generation = approve_writer_handoff(&registry.binding(), Duration::from_secs(5))?;
+                return writeln!(
+                    io::stdout().lock(),
+                    "{}",
+                    serde_json::json!({"approval_generation":generation})
+                );
+            }
+            Self::RevokeHandoff(registry) => return revoke_writer_handoff(&registry.binding(), Duration::from_secs(5)),
             Self::Inspect(selection) => (selection, false),
             Self::Recover {
                 selection,
@@ -67,11 +96,7 @@ impl StorageCommand {
             } => (selection, true),
             Self::Recover { .. } => return Err(io::Error::other("acknowledge the unknown result before recovery")),
         };
-        let registry = StorageRoot {
-            path: selection.registry.clone(),
-            device: selection.registry_device,
-            inode: selection.registry_inode,
-        };
+        let registry = selection.registry.binding();
         let (report, ok) = if recover {
             writer::recover_idle_writer_storage_turn(&registry, &selection.turn)
         } else {

@@ -15,6 +15,9 @@ use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+mod approval;
+pub use approval::{approve_writer_handoff, revoke_writer_handoff};
+
 const CHARGES: &str = ".writer-storage-v1";
 const STAGED_CHARGE: &str = ".charge-write";
 const MAX_ROOTS: usize = 96;
@@ -1044,15 +1047,12 @@ pub fn reserve_writer_storage(
     budget: u64,
     timeout: Duration,
 ) -> io::Result<WriterStorageCharge> {
-    reserve_writer_storage_with_handoff(registry, locks, roots, floor, budget, timeout, None)
+    reserve_writer_storage_with_approval(registry, locks, roots, floor, budget, timeout, None)
 }
 
-/// Bind an optional caller-checked immutable handoff digest in the original
-/// reservation, under the full ordered EX union, before any work is admitted.
-/// For a handoff, the helper must exclusively stage the bytes in bound scratch
-/// and close its write descriptor before releasing any command.
+/// Legacy reservation entry. Source-bound turns require an approval generation.
 /// # Errors
-/// Refuses malformed digests and all admission failures of `reserve_writer_storage`.
+/// Refuses a digest without a generation and propagates ordinary admission failures.
 #[doc(hidden)]
 pub fn reserve_writer_storage_with_handoff(
     registry: &StorageRoot,
@@ -1062,6 +1062,28 @@ pub fn reserve_writer_storage_with_handoff(
     budget: u64,
     timeout: Duration,
     handoff: Option<&str>,
+) -> io::Result<WriterStorageCharge> {
+    if handoff.is_some() {
+        return Err(invalid("source-bound writer requires an approval generation"));
+    }
+    reserve_writer_storage(registry, locks, roots, floor, budget, timeout)
+}
+
+/// Reserve under the full ordered EX union. For a source-bound turn provide
+/// the immutable handoff SHA-256 and the operator-issued registry generation.
+/// The helper must exclusively stage the bytes in bound scratch and close its
+/// write descriptor before releasing any command.
+/// # Errors
+/// Refuses stale or absent approval, malformed digests and ordinary admission failures.
+#[doc(hidden)]
+pub fn reserve_writer_storage_with_approval(
+    registry: &StorageRoot,
+    locks: &[(PathBuf, File)],
+    roots: &[StorageRoot],
+    floor: u64,
+    budget: u64,
+    timeout: Duration,
+    handoff: Option<(&str, &str)>,
 ) -> io::Result<WriterStorageCharge> {
     reserve(
         &registry_directory()?,
@@ -1084,11 +1106,11 @@ fn reserve(
     registry: &StorageRoot,
     locks: &[(PathBuf, File)],
     approved: &[StorageRoot],
-    (floor, budget, handoff): (u64, u64, Option<&str>),
+    (floor, budget, handoff): (u64, u64, Option<(&str, &str)>),
     until: Instant,
     available: impl Fn(&File) -> io::Result<u64>,
 ) -> io::Result<WriterStorageCharge> {
-    if handoff.is_some_and(|s| !valid_digest(s)) {
+    if handoff.is_some_and(|(digest, _)| !valid_digest(digest)) {
         return Err(invalid("expected a lowercase SHA-256 handoff digest"));
     }
     if selected.as_os_str() != registry.path.as_os_str()
@@ -1102,8 +1124,12 @@ fn reserve(
     }
     ownership::validate_registry(selected)?;
     let root = registry.open()?;
-    let _lock = ownership::lock_admission_at(&root, until, true)
+    let admission = ownership::lock_admission_at(&root, until, true)
         .map_err(|e| io::Error::new(e.kind(), format!("locking writer storage registry: {e}")))?;
+    if let Some((_, generation)) = handoff {
+        approval::require_generation(&admission, generation)?;
+    }
+    let handoff = handoff.map(|(digest, _)| digest);
     for approved_root in approved {
         check_path(&approved_root.path)?;
     }

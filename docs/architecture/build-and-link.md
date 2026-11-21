@@ -299,9 +299,10 @@ admission. The opportunistic pass uses at most 250 ms of checked software time, 
 Filesystem calls can exceed that budget. Borrowed-lock writers skip this pass because their caller already holds
 a project lock union.
 
-Callers with an immutable source handoff must first find `command_only_handoff_v1` and the top-level integer
-`handoff_max_bytes: 262144` in the standalone helper's `writer-lock-path --capabilities` descriptor. A helper
-missing either cannot enroll. Pass the lowercase SHA-256 as `handoff_sha256` with `command_only: true`. The original
+Callers with an immutable source handoff require both `command_only_handoff_v1` and
+`command_only_handoff_approval_v1`, plus the top-level integer `handoff_max_bytes: 262144`, in the standalone
+helper's `writer-lock-path --capabilities` descriptor. Pass the operator-issued `approval_generation` beside
+the lowercase `handoff_sha256` with `command_only: true`. A missing or stale generation refuses admission. The original
 charge binds the digest to its generated turn and ordered lock paths, devices and inodes before the writer can send Ready.
 The `locked` reply adds `handoff` with `version: 1`, `turn`, `handoff_sha256` and `locks` in primary-first order.
 Encode the handoff in memory before admission. Refuse inputs over 262144 bytes or the full-turn storage
@@ -324,6 +325,30 @@ refuses the extended reservation. The ordinary v1 request and reply retain their
 that predate this capability reject the extended request and cannot read an outstanding extended charge.
 The earlier experimental Proofs client rejects the extra field in capability discovery before admission.
 Use matching clients and helpers across the participating registry when enabling the capability.
+
+Before the first approval, drain all launchers that could still use a source-bound helper predating the
+generation check, including version 0.10.4. Those binaries do not observe revocation. From the configured
+registry, the operator can issue an approval for the matched cohort:
+
+```sh
+lean-rs-writer writer-storage approve-handoff --registry "$registry" --registry-device "$device" --registry-inode "$inode"
+```
+
+Pin the returned 32-digit lowercase hex `approval_generation` with the cohort's helper and registry identities.
+Ordinary broker starts and requests must never issue or refresh approval. The writer compares the supplied
+generation while holding the registry admission lock through charge publication. The lock inode remains in
+place. Its small record holds a fresh random generation and an enable byte, synced in that order.
+
+For rollback, serialize operator cutover decisions, disable new launchers, then use the matched helper:
+
+```sh
+lean-rs-writer writer-storage revoke-handoff --registry "$registry" --registry-device "$device" --registry-inode "$inode"
+```
+
+Revocation syncs the disabled state before checking native owners and charges under the same lock. An admitted
+turn can therefore keep the drain busy while a paused broker's old generation is already unusable. On a busy or
+unknown result, retain the matched helper and retry revocation after custody closes. A successful exit confirms
+the registry drain. Re-enabling requires a fresh operator approval. Keep it disabled throughout the rollback.
 
 ### Inspecting and settling an interrupted turn
 

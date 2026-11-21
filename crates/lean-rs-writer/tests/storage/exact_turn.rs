@@ -52,13 +52,25 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     let secondary = lean_toolchain::shared_writer::project_lock_path(&dependency)?;
     // SHA-256 of the single byte 'x'.
     let digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881";
-    let request = json!({"version":1,"command_only":true,"handoff_sha256":digest,"floor_bytes":1,"budget_bytes":1,
+    let generation = approve(&registry.path)?;
+    let request = json!({"version":1,"command_only":true,"handoff_sha256":digest,"approval_generation":generation,"floor_bytes":1,"budget_bytes":1,
         "roots":[super::root("project",&project),super::root("registry",&registry.path),
             super::root("scratch_parent",&scratch_parent),super::root("outputs",&sibling)]});
-    for (marker, command_only) in [(Value::Null, true), (json!("bad digest"), true), (json!(digest), false)] {
+    for (field, replacement) in [
+        ("handoff_sha256", Some(Value::Null)),
+        ("handoff_sha256", Some(json!("bad digest"))),
+        ("command_only", Some(json!(false))),
+        ("approval_generation", None),
+        ("approval_generation", Some(Value::Null)),
+        ("approval_generation", Some(json!("bad generation"))),
+        ("handoff_sha256", None),
+    ] {
         let mut bad = request.clone();
-        bad["handoff_sha256"] = marker;
-        bad["command_only"] = json!(command_only);
+        if let Some(value) = replacement {
+            bad[field] = value;
+        } else {
+            bad.as_object_mut().expect("storage request").remove(field);
+        }
         let out = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"))
             .arg("writer")
             .arg(&project)
@@ -66,7 +78,7 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
             .args(["3", "--storage-request"])
             .arg(bad.to_string())
             .output()?;
-        assert!(!out.status.success());
+        assert_eq!(out.status.code(), Some(2));
         assert!(out.stdout.is_empty());
         assert!(!registry.path.join(".writer-storage-v1").exists());
     }

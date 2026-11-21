@@ -477,12 +477,13 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
     let (turn, scratch) = {
         let locks = [lock(&first_project), lock(&second_project)];
         let digest = "a".repeat(64);
+        let generation = approve_writer_handoff(&registry, TIMEOUT)?;
         let mut charge = reserve(
             &registry.path,
             &registry,
             &locks,
             &[expected(root.clone())],
-            (FLOOR, BUDGET, Some(&digest)),
+            (FLOOR, BUDGET, Some((&digest, &generation))),
             deadline(TIMEOUT)?,
             |_| Ok(CAPACITY),
         )?;

@@ -13,6 +13,7 @@ struct Fixture {
     project: PathBuf,
     registry: PathBuf,
     scratch: PathBuf,
+    approval: String,
 }
 
 impl Fixture {
@@ -26,15 +27,17 @@ impl Fixture {
             fs::create_dir(path)?;
         }
         fs::set_permissions(&registry, fs::Permissions::from_mode(0o700))?;
+        let approval = approve(&registry)?;
         Ok(Self {
             _temp: temp,
             project,
             registry,
             scratch,
+            approval,
         })
     }
 
-    fn open(&self, budget: usize, interrupt_write: bool) -> io::Result<(Child, BufReader<ChildStdout>, Value)> {
+    fn spawn(&self, budget: usize, interrupt_write: bool) -> io::Result<Child> {
         let bin = env!("CARGO_BIN_EXE_lean-rs-writer");
         let mut command = if interrupt_write {
             // Only this child inherits the limit. No debugger, timing race, or
@@ -46,10 +49,10 @@ impl Fixture {
             Command::new(bin)
         };
         let lock = lean_toolchain::shared_writer::project_lock_path(&self.project)?;
-        let request = json!({"version":1,"command_only":true,"handoff_sha256":DIGEST,
+        let request = json!({"version":1,"command_only":true,"handoff_sha256":DIGEST,"approval_generation":self.approval,
             "floor_bytes":1,"budget_bytes":budget,"roots":[root("project",&self.project),
                 root("registry",&self.registry),root("scratch_parent",&self.scratch)]});
-        let mut child = command
+        command
             .arg("writer")
             .arg(&self.project)
             .arg(lock)
@@ -59,12 +62,61 @@ impl Fixture {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?;
+            .spawn()
+    }
+
+    fn open(&self, budget: usize, interrupt_write: bool) -> io::Result<(Child, BufReader<ChildStdout>, Value)> {
+        let mut child = self.spawn(budget, interrupt_write)?;
         let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
         let locked = reply(&mut reader)?;
         assert_eq!(field(&locked, "state"), "locked");
         Ok((child, reader, locked))
     }
+}
+
+#[test]
+fn revoked_broker_approval_cannot_publish_after_rollback() -> io::Result<()> {
+    let mut fixture = Fixture::new()?;
+    let old = fixture.approval.clone();
+    let (mut admitted, _replies, locked) = fixture.open(LIMIT, false)?;
+    let charge = fixture.registry.join(".writer-storage-v1").join(turn(&locked));
+    let original = fs::read(&charge)?;
+    let busy = rollout(&fixture.registry, "revoke-handoff")?;
+    assert!(!busy.status.success());
+    assert!(String::from_utf8_lossy(&busy.stderr).contains("writer storage custody remains open"));
+    assert_eq!(fs::read(&charge)?, original);
+
+    fixture.project = fixture.project.with_file_name("second-project");
+    fs::create_dir(&fixture.project)?;
+    let stale = |f: &Fixture| -> io::Result<()> {
+        let mut child = f.spawn(LIMIT, false)?;
+        let _control = child.stdin.take().expect("keep admission open");
+        let output = child.wait_with_output()?;
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("approval is absent or stale"),
+            "{output:?}"
+        );
+        Ok(())
+    };
+    stale(&fixture)?;
+    send(&mut admitted, &json!({"action":"close"}))?;
+    assert!(admitted.wait()?.success());
+    assert!(rollout(&fixture.registry, "revoke-handoff")?.status.success());
+    // The broker still holds the original approval after the successful empty check.
+    stale(&fixture)?;
+    assert!(!charge.parent().expect("charges").exists());
+    assert_eq!(fs::read_dir(&fixture.scratch)?.count(), 0);
+
+    let fresh = approve(&fixture.registry)?;
+    assert_ne!(fresh, old);
+    stale(&fixture)?;
+    fixture.approval = fresh;
+    let (mut current, _replies, _) = fixture.open(LIMIT, false)?;
+    send(&mut current, &json!({"action":"close"}))?;
+    assert!(current.wait()?.success());
+    Ok(())
 }
 
 fn turn(locked: &Value) -> &str {

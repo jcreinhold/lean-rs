@@ -93,7 +93,11 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
         descriptor.insert("handoff_max_bytes".to_owned(), json!(storage::MAX_HANDOFF_BYTES));
         descriptor.insert(
             "capabilities".to_owned(),
-            json!(["command_only_storage_v1", "command_only_handoff_v1"]),
+            json!([
+                "command_only_storage_v1",
+                "command_only_handoff_v1",
+                "command_only_handoff_approval_v1"
+            ]),
         );
     }
     let mut bytes = serde_json::to_vec(&descriptor).map_err(io::Error::other)?;

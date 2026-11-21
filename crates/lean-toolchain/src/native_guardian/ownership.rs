@@ -1052,6 +1052,10 @@ pub fn collect_closed_owner_records(root: &Path, timeout: Duration) -> io::Resul
     let until = deadline(timeout)?;
     validate_registry(root)?;
     let _mutex = lock_admission(root, until, false)?;
+    check_drained_locked(root, until)
+}
+
+pub(super) fn check_drained_locked(root: &Path, until: std::time::Instant) -> io::Result<()> {
     let occupied = collect_records_locked(root, until)?;
     File::open(root)?.sync_all()?;
     if !occupied.is_empty() {

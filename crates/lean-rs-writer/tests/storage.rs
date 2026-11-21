@@ -20,6 +20,29 @@ fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
     value.get(name).unwrap_or(&Value::Null)
 }
 
+fn rollout(registry: &Path, action: &str) -> io::Result<std::process::Output> {
+    let meta = registry.metadata()?;
+    Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"))
+        .args(["writer-storage", action, "--registry"])
+        .arg(registry)
+        .arg("--registry-device")
+        .arg(meta.dev().to_string())
+        .arg("--registry-inode")
+        .arg(meta.ino().to_string())
+        .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", registry)
+        .output()
+}
+
+fn approve(registry: &Path) -> io::Result<String> {
+    let output = rollout(registry, "approve-handoff")?;
+    assert!(output.status.success(), "{output:?}");
+    let reply: Value = serde_json::from_slice(&output.stdout)?;
+    Ok(field(&reply, "approval_generation")
+        .as_str()
+        .expect("issued generation")
+        .to_owned())
+}
+
 fn start(project: &Path, registry: &Path, scratch: &Path, budget: u64) -> io::Result<Child> {
     start_storage(project, registry, scratch, budget, false)
 }
@@ -291,7 +314,11 @@ fn command_only_capability_is_explicit_and_default_descriptor_is_unchanged() -> 
         if advertise {
             assert_eq!(
                 field(&descriptor, "capabilities"),
-                &json!(["command_only_storage_v1", "command_only_handoff_v1"])
+                &json!([
+                    "command_only_storage_v1",
+                    "command_only_handoff_v1",
+                    "command_only_handoff_approval_v1"
+                ])
             );
             assert_eq!(field(&descriptor, "handoff_max_bytes"), 262_144);
         } else {
