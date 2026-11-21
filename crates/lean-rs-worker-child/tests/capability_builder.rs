@@ -1382,7 +1382,7 @@ mod qualified_pool {
     #[test]
     fn portable_guardian_entry() {
         if std::env::var_os("LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD").is_some() {
-            lean_toolchain::native_guardian::run_guardian_cli().unwrap();
+            lean_toolchain::native_guardian::run_guardian_cli().expect("run portable fixture guardian");
         }
     }
 
@@ -1437,7 +1437,7 @@ mod qualified_pool {
                         .native_guardian(guardian)
                         .lifetime_directory(&owners),
                 )
-                .require_host_runtime(Default::default())
+                .require_host_runtime(LeanWorkerHostRuntimeExpectation::default())
             } else {
                 base
             }

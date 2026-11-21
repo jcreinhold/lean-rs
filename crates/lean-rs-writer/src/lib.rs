@@ -84,9 +84,13 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
         return Err(invalid("existing project directory required"));
     }
     let lock_path = lean_toolchain::shared_writer::project_lock_path(&root)?;
-    let mut descriptor = json!({"protocol":PROTOCOL,"project_root":root,"lock_path":lock_path});
+    let mut descriptor = serde_json::Map::from_iter([
+        ("protocol".to_owned(), json!(PROTOCOL)),
+        ("project_root".to_owned(), json!(root)),
+        ("lock_path".to_owned(), json!(lock_path)),
+    ]);
     if args.capabilities {
-        descriptor["capabilities"] = json!(["command_only_storage_v1"]);
+        descriptor.insert("capabilities".to_owned(), json!(["command_only_storage_v1"]));
     }
     let mut bytes = serde_json::to_vec(&descriptor).map_err(io::Error::other)?;
     bytes.push(b'\n');

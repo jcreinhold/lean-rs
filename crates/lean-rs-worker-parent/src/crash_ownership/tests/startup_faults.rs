@@ -385,20 +385,26 @@ fn publication_failure(running: bool) {
 #[test]
 fn startup_snapshot_rejects_private_recovery_format() {
     let identity = LeanWorkerOwnedProcess::capture(std::process::id()).unwrap().unwrap();
-    let mut snapshot = serde_json::json!({
-        "version": 2,
-        "scope": "inherited-process-group-v2",
-        "generation_id": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef",
-        "parent": identity,
-        "process": identity,
-        "guardian": identity,
-    });
-    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot.clone()).is_ok());
-    snapshot["version"] = serde_json::json!(1);
-    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot.clone()).is_ok());
-    snapshot["version"] = serde_json::json!(3);
-    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot.clone()).is_err());
-    snapshot["version"] = serde_json::json!(2);
-    snapshot["unknown_authority"] = serde_json::json!(true);
-    assert!(serde_json::from_value::<LeanWorkerOwnedGeneration>(snapshot).is_err());
+    use serde_json::{Map, Value, json};
+
+    let mut snapshot = Map::from_iter([
+        ("version".to_owned(), json!(2)),
+        ("scope".to_owned(), json!("inherited-process-group-v2")),
+        (
+            "generation_id".to_owned(),
+            json!("abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"),
+        ),
+        ("parent".to_owned(), json!(identity)),
+        ("process".to_owned(), json!(identity)),
+        ("guardian".to_owned(), json!(identity)),
+    ]);
+    let decode = |snapshot| serde_json::from_value::<LeanWorkerOwnedGeneration>(Value::Object(snapshot));
+    assert!(decode(snapshot.clone()).is_ok());
+    snapshot.insert("version".to_owned(), json!(1));
+    assert!(decode(snapshot.clone()).is_ok());
+    snapshot.insert("version".to_owned(), json!(3));
+    assert!(decode(snapshot.clone()).is_err());
+    snapshot.insert("version".to_owned(), json!(2));
+    snapshot.insert("unknown_authority".to_owned(), json!(true));
+    assert!(decode(snapshot).is_err());
 }
