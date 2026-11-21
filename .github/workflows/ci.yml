@@ -1,46 +1,46 @@
 name: CI
 
-# Per-push CI: a single ubuntu cell pinned to the head of the supported
-# Lean window (mirror of the last entry in `lean_rs_sys::SUPPORTED_TOOLCHAINS`).
-#
-# The full {10 Lean toolchains} × {ubuntu, macos} compatibility matrix runs
-# in `release.yml`'s `verify` job on tag push, and on demand via this
-# workflow's `workflow_dispatch` matrix input. Per-push burn is kept low
-# by design.
-#
-# Doc-only commits skip CI via the `paths-ignore` filter — none of the
-# Rust gates can break when only Markdown / api-review baselines change.
+# Pushes and pull requests check the head Lean release on Ubuntu. Dispatch
+# full_matrix to test every supported version on both operating systems.
+# The API baselines under docs/ are verification inputs even on a docs-only PR.
 
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "prompts/**"
-      - "CHANGELOG.md"
-      - "CLAUDE.md"
-      - ".gitignore"
-      - "LICENSE-*"
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "docs/api-review/*-public.txt"
+      - "!prompts/**"
+      - "!.gitignore"
+      - "!LICENSE-*"
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "prompts/**"
-      - "CHANGELOG.md"
-      - "CLAUDE.md"
-      - ".gitignore"
-      - "LICENSE-*"
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "docs/api-review/*-public.txt"
+      - "!prompts/**"
+      - "!.gitignore"
+      - "!LICENSE-*"
   workflow_dispatch:
     inputs:
       full_matrix:
-        description: "Run the full {10 Lean toolchains} × {ubuntu, macos} matrix instead of the single head cell."
+        description: "Check every supported Lean release on Ubuntu and macOS."
         type: boolean
         default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 env:
   CARGO_TERM_COLOR: always
@@ -71,18 +71,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Default per-push: a single ubuntu cell on head Lean. The full
-        # matrix only runs when `workflow_dispatch` is triggered with
-        # `full_matrix: true`. Bumping the supported window:
-        #
-        #   1. Update `crates/lean-rs-abi/src/supported.rs`.
-        #   2. Update the `lean_version` default below to the new head.
-        #   3. Update the `include`/`full_matrix` lists below.
-        #
-        # See `docs/bump-toolchain.md`.
-        os: [ubuntu-latest]
-        lean_version: ["4.36.0"]
-        include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.full_matrix) && '[{"os":"ubuntu-latest","lean_version":"4.30.0"},{"os":"ubuntu-latest","lean_version":"4.31.0-rc1"},{"os":"ubuntu-latest","lean_version":"4.31.0-rc2"},{"os":"ubuntu-latest","lean_version":"4.31.0"},{"os":"ubuntu-latest","lean_version":"4.32.0-rc1"},{"os":"ubuntu-latest","lean_version":"4.32.0"},{"os":"ubuntu-latest","lean_version":"4.32.2"},{"os":"ubuntu-latest","lean_version":"4.33.0-rc1"},{"os":"ubuntu-latest","lean_version":"4.33.0-rc2"},{"os":"macos-latest","lean_version":"4.30.0"},{"os":"macos-latest","lean_version":"4.31.0-rc1"},{"os":"macos-latest","lean_version":"4.31.0-rc2"},{"os":"macos-latest","lean_version":"4.31.0"},{"os":"macos-latest","lean_version":"4.32.0-rc1"},{"os":"macos-latest","lean_version":"4.32.0"},{"os":"macos-latest","lean_version":"4.32.2"},{"os":"macos-latest","lean_version":"4.33.0-rc1"},{"os":"macos-latest","lean_version":"4.33.0-rc2"},{"os":"ubuntu-latest","lean_version":"4.33.0"},{"os":"macos-latest","lean_version":"4.33.0"},{"os":"ubuntu-latest","lean_version":"4.33.1"},{"os":"macos-latest","lean_version":"4.33.1"},{"os":"ubuntu-latest","lean_version":"4.34.0-rc1"},{"os":"macos-latest","lean_version":"4.34.0-rc1"},{"os":"ubuntu-latest","lean_version":"4.34.0-rc2"},{"os":"macos-latest","lean_version":"4.34.0-rc2"},{"os":"ubuntu-latest","lean_version":"4.34.0"},{"os":"macos-latest","lean_version":"4.34.0"},{"os":"ubuntu-latest","lean_version":"4.34.1"},{"os":"macos-latest","lean_version":"4.34.1"},{"os":"ubuntu-latest","lean_version":"4.35.0-rc1"},{"os":"macos-latest","lean_version":"4.35.0-rc1"},{"os":"ubuntu-latest","lean_version":"4.35.0-rc2"},{"os":"macos-latest","lean_version":"4.35.0-rc2"},{"os":"ubuntu-latest","lean_version":"4.35.0-rc3"},{"os":"macos-latest","lean_version":"4.35.0-rc3"},{"os":"ubuntu-latest","lean_version":"4.35.0-rc4"},{"os":"macos-latest","lean_version":"4.35.0-rc4"},{"os":"ubuntu-latest","lean_version":"4.35.0"},{"os":"macos-latest","lean_version":"4.35.0"},{"os":"ubuntu-latest","lean_version":"4.36.0"},{"os":"macos-latest","lean_version":"4.36.0"}]' || '[]') }}
+        # Each listed version runs on both platforms in the manual sweep.
+        os: ${{ fromJSON(inputs.full_matrix && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        lean_version: >-
+          ${{ fromJSON(inputs.full_matrix &&
+            '["4.30.0", "4.31.0-rc1", "4.31.0-rc2", "4.31.0", "4.32.0-rc1", "4.32.0", "4.32.2",
+              "4.33.0-rc1", "4.33.0-rc2", "4.33.0", "4.33.1", "4.34.0-rc1", "4.34.0-rc2", "4.34.0", "4.34.1",
+              "4.35.0-rc1", "4.35.0-rc2", "4.35.0-rc3", "4.35.0-rc4", "4.35.0", "4.36.0"]' || '["4.36.0"]') }}
     steps:
       - uses: actions/checkout@v6
 
@@ -106,10 +101,14 @@ jobs:
           # same commit (see docs/api-review.md).
           tool: cargo-nextest,cargo-public-api@0.52.0
 
-      - name: Install actionlint
+      - name: Set up workflow linters
         if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.36.0'
         run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          if ! command -v shellcheck >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install elan + Lean ${{ matrix.lean_version }}
@@ -164,7 +163,6 @@ jobs:
 
       - name: Select job-owned scalar and callback fixtures
         if: matrix.lean_version == '4.36.0'
-        shell: bash
         run: |
           python3 scripts/select_test_fixtures.py >> "$GITHUB_ENV"
 
@@ -174,13 +172,14 @@ jobs:
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: actionlint workflows
+      - name: Lint workflows and their shell scripts
         if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.36.0'
-        run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
+        run: |
+          actionlint
+          shellcheck scripts/lean-release-prefix.sh scripts/publish-workspace.sh scripts/trybuild-linked-fixture-rustc.sh
 
       - name: Required SDK worker tests
         if: matrix.lean_version == '4.36.0'
-        shell: bash
         run: |
           set -euo pipefail
           if [ "$RUNNER_OS" = "macOS" ] && ! command -v gtimeout >/dev/null; then

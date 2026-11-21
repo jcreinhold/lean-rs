@@ -110,6 +110,11 @@ the full verification gates; use it only for contents
 already verified for that release. Recovery defaults to `dry_run: true`, which builds the tarballs without uploading. Set it to `false` only when
 you intend to resume the upload.
 
+For example, `gh workflow run release-recover.yml --ref vX.Y.Z -f version=X.Y.Z -f dry_run=true` checks all ten
+packages at the original tag. The publish script checks that every publishable crate has the workspace version
+and uses the committed lockfile for crates.io. If Cargo times out waiting for the index after an upload, check the
+registry for that version before resuming. An indexing timeout can follow a successful upload.
+
 Keep published crate versions and their release tags fixed. If any workspace crate reached crates.io, resume the
 partial upload from the original commit, or use a new version for changed contents. Publish from a clean commit.
 

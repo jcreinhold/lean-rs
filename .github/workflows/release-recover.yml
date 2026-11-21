@@ -27,7 +27,7 @@ on:
         type: string
         required: true
       dry_run:
-        description: "Verify-build the missing crates with --dry-run; do not upload or touch the release."
+        description: "Verify all release packages without uploading or changing the GitHub Release."
         type: boolean
         default: true
 

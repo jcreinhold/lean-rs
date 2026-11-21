@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import shutil
@@ -99,7 +100,7 @@ def check_docs_rs_metadata() -> str:
     return version
 
 
-def package_contents(version: str) -> None:
+def package_contents(version: str, package_dir: pathlib.Path) -> None:
     required = {
         "lean-rs-abi": [
             "Cargo.toml",
@@ -198,7 +199,7 @@ def package_contents(version: str) -> None:
     }
 
     for crate in CRATES:
-        package = ROOT / "target" / "package" / f"{crate}-{version}.crate"
+        package = package_dir / f"{crate}-{version}.crate"
         if not package.is_file():
             fail(f"missing packaged tarball {package}")
         with tarfile.open(package) as tar:
@@ -251,13 +252,13 @@ def release_docs_exist() -> None:
             fail(f"release documentation is missing {rel}")
 
 
-def docs_rs_tarball_simulation(version: str) -> None:
+def docs_rs_tarball_simulation(version: str, package_dir: pathlib.Path) -> None:
     with tempfile.TemporaryDirectory(prefix="lean-rs-package-docsrs-") as tmp:
         workspace = pathlib.Path(tmp) / "workspace"
         workspace.mkdir()
 
         for crate in CRATES:
-            package = ROOT / "target" / "package" / f"{crate}-{version}.crate"
+            package = package_dir / f"{crate}-{version}.crate"
             with tarfile.open(package) as tar:
                 tar.extractall(workspace)
 
@@ -346,10 +347,12 @@ def main() -> None:
     package_log = package_workspace(args.allow_dirty)
     if "warning:" in package_log:
         fail("cargo package emitted an unexpected warning")
-    package_contents(version)
+    metadata = run(["cargo", "metadata", "--no-deps", "--format-version", "1"], capture=True)
+    package_dir = pathlib.Path(json.loads(metadata.stdout)["target_directory"]) / "package"
+    package_contents(version, package_dir)
     template_package_contents()
     release_docs_exist()
-    docs_rs_tarball_simulation(version)
+    docs_rs_tarball_simulation(version, package_dir)
     print("package check: docs.rs tarball simulation passed")
 
 

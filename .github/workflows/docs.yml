@@ -11,10 +11,6 @@ on:
       - "docs/**"
       - ".github/workflows/docs.yml"
 
-env:
-  CARGO_TERM_COLOR: always
-  MDBOOK_VERSION: "0.5.3"
-
 permissions:
   contents: read
 
@@ -23,8 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
           tool: mdbook@0.5.3

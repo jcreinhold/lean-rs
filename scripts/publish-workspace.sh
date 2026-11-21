@@ -20,7 +20,7 @@
 # recovery is required.
 #
 # Usage: scripts/publish-workspace.sh [--dry-run]
-#   The version is the workspace version (read from `cargo metadata`). crates.io
+#   Run from the workspace root. Every publishable crate must have the workspace version. crates.io
 #   versions are immutable, so this only ever fills gaps, never overwrites.
 # Cargo verifies all publishable tarballs together in a temporary registry.
 # Unpublished workspace dependencies resolve there. --dry-run stops after
@@ -28,9 +28,9 @@
 set -euo pipefail
 
 dry_run=false
-case "${1:-}" in
-  --dry-run) dry_run=true ;;
-  "") ;;
+case "$#:${1:-}" in
+  1:--dry-run) dry_run=true ;;
+  0:) ;;
   *)
     echo "usage: $0 [--dry-run]" >&2
     exit 2
@@ -57,13 +57,18 @@ order=(
 # but missing here would silently never publish — which is how
 # lean-rs-interop-shims slipped through the 0.2.1 release. Compare the SET of
 # names (order is asserted by the topological list, not by this check).
-publishable=$(cargo metadata --no-deps --format-version 1 \
+version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+publishable=$(cargo metadata --locked --no-deps --format-version 1 \
   | python3 -c 'import json,sys
 m = json.load(sys.stdin)
 # publish == [] means publish = false (workspace-internal); anything else
 # (null = default, or an explicit registry list) is publishable.
-names = [p["name"] for p in m["packages"] if p.get("publish") != []]
-print(" ".join(sorted(names)))')
+packages = [p for p in m["packages"] if p.get("publish") != []]
+mismatches = [p for p in packages if p["version"] != sys.argv[1]]
+if mismatches:
+    sys.exit("Expected workspace version " + sys.argv[1] + ", found " + ", ".join(
+        p["name"] + "@" + p["version"] for p in mismatches))
+print(" ".join(sorted(p["name"] for p in packages)))' "$version")
 expected=$(printf '%s\n' "${order[@]}" | sort | tr '\n' ' ' | sed 's/ $//')
 if [ "$publishable" != "$expected" ]; then
   echo "::error::publish order list is stale. Publishable members: [$publishable]; scripts/publish-workspace.sh lists: [$expected]. Reconcile the two." >&2
@@ -75,13 +80,10 @@ packages=()
 for c in "${order[@]}"; do
   packages+=(-p "$c")
 done
-cargo package --locked "${packages[@]}"
+cargo package --registry crates-io --locked "${packages[@]}"
 if "$dry_run"; then
   exit 0
 fi
-
-version=$(cargo metadata --no-deps --format-version 1 \
-  | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
 
 echo "Publishing workspace at version $version"
 published=0
@@ -103,7 +105,7 @@ for c in "${order[@]}"; do
       echo "Unexpected crates.io response HTTP $status for $c@$version; no upload attempted for that crate." >&2
       exit 1 ;;
   esac
-  cargo publish -p "$c"
+  cargo publish --registry crates-io --locked -p "$c"
   published=$((published + 1))
 done
 echo "Publish summary: published=$published skipped=$skipped"

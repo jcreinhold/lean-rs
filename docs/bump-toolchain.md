@@ -32,7 +32,7 @@ together.
    after verifying a new digest. Record the reason for any ABI-relevant header change beside the entry.
 2. Mirror the version and digest in
    [`crates/lean-rs-sys/digests/manifest.json`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/digests/manifest.json).
-3. Add both platform cells to the `full_matrix` include list in [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). If the window or
+3. Add the version once to the `full_matrix` Lean version list in [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). If the window or
    policy changed, update [version-matrix.md](version-matrix.md) and the affected support claims in crate READMEs and
    architecture docs.
 

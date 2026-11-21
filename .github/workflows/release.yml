@@ -1,8 +1,8 @@
 name: Release
 
 # Tag-triggered release. Pushing a `v<semver>` tag (e.g. `v0.1.1`, `v0.1.1-rc.1`)
-# runs the full compatibility matrix (`verify` job), then the per-crate live
-# publish in dependency order (`publish` job, depends on `verify`), then creates
+# verifies head Lean on Ubuntu and macOS (`verify` job), publishes crates
+# in dependency order (`publish` job, depends on `verify`), then creates
 # a GitHub Release whose body is the matching `## [<version>]` section of
 # `CHANGELOG.md`.
 #
@@ -11,8 +11,7 @@ name: Release
 #
 # `CARGO_REGISTRY_TOKEN` must be set in the repository secrets before the first
 # tag push (see `docs/release.md`). The token is a scoped publish token from
-# <https://crates.io/settings/tokens>. The publish step fails with a clear
-# "no token configured" message if the secret is absent.
+# <https://crates.io/settings/tokens>.
 
 on:
   push:
@@ -32,13 +31,13 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write # softprops/action-gh-release needs this for the release.
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   # Head of the supported Lean window. The publish job runs once
-  # against this version (the matrix in `verify` covers the rest).
+  # against this version. CI dispatch owns the full compatibility sweep.
   # Bumping the window: update this AND the matrix in `verify` AND
   # `crates/lean-rs-abi/src/supported.rs`. See `docs/bump-toolchain.md`.
   LEAN_VERSION_HEAD: "4.36.0"
@@ -71,18 +70,19 @@ jobs:
         with:
           key: release-verify-${{ matrix.lean_version }}-${{ matrix.os }}
 
-      - name: Install cargo-nextest + cargo-public-api
+      - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
-          # Pinned for a reproducible API gate; newer releases render generic
-          # `StructuralPartialEq` impls differently from the committed
-          # docs/api-review baselines. See ci.yml / docs/api-review.md.
-          tool: cargo-nextest,cargo-public-api@0.52.0
+          tool: cargo-nextest
 
-      - name: Install actionlint
+      - name: Set up workflow linters
         if: matrix.os == 'ubuntu-latest'
         run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          if ! command -v shellcheck >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install elan + Lean ${{ matrix.lean_version }}
@@ -167,9 +167,11 @@ jobs:
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: actionlint workflows
+      - name: Lint workflows and their shell scripts
         if: matrix.os == 'ubuntu-latest'
-        run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml .github/workflows/compile-fail.yml
+        run: |
+          actionlint
+          shellcheck scripts/lean-release-prefix.sh scripts/publish-workspace.sh scripts/trybuild-linked-fixture-rustc.sh
 
       - name: Required SDK worker tests
         if: matrix.lean_version == '4.36.0'
@@ -224,6 +226,8 @@ jobs:
   publish:
     name: Publish ${{ github.ref_name }}
     needs: verify
+    permissions:
+      contents: write # Create the GitHub Release after the uploads.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -286,7 +290,7 @@ jobs:
       - name: Install cargo-public-api
         uses: taiki-e/install-action@v2
         with:
-          # Pinned: see the verify job's install step and docs/api-review.md.
+          # Pinned with the rustdoc nightly that generated docs/api-review/.
           tool: cargo-public-api@0.52.0
 
       - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}

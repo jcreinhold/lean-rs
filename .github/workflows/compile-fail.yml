@@ -1,7 +1,7 @@
 name: Compile-fail
 
 # Runs the trybuild `.stderr` snapshot suites on a single OS + the repo's
-# pinned stable toolchain (`rust-toolchain.toml`). These snapshots capture
+# stable channel (`rust-toolchain.toml`). These snapshots capture
 # `rustc` diagnostics whose wording/whitespace drifts across platforms and
 # toolchain versions, so they are gated behind `RUN_TRYBUILD=1` and run only
 # here—the per-PR `ci.yml` matrix does not. A stable-toolchain bump that
@@ -20,20 +20,26 @@ concurrency:
   group: compile-fail-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   LEAN_VERSION_HEAD: "4.36.0"
 
 jobs:
   compile-fail:
-    name: Compile-fail snapshots (pinned stable)
+    name: Compile-fail snapshots (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      # rust-toolchain.toml pins `channel = "stable"`; cargo resolves it for
-      # every command, so the snapshots match local regeneration on the same
-      # pinned stable. `rust-src` is required: some `.stderr` snapshots quote
+      # Use the same stable rustc version locally when regenerating snapshots.
+      # `rust-src` is required: some `.stderr` snapshots quote
       # the standard-library source (e.g. `PhantomData` in `core/src/marker.rs`)
       # in "required because it appears within the type" notes, and rustc only
       # renders that snippet when the std source is on disk. Regenerate
@@ -55,20 +61,11 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Export LEAN_SYSROOT
-        # `lean-rs-sys/build.rs` reads `lean.h` from the sysroot to compute the
-        # header digest. The negative cases fail to compile before any link
-        # step, so no `libleanshared` runtime is needed.
+        # The sys build reads lean.h. The compile-pass consumer links the
+        # installed shared runtime using the wrapper's rpath.
         run: |
           prefix=$(scripts/lean-release-prefix.sh "${{ env.LEAN_VERSION_HEAD }}")
           printf 'LEAN_SYSROOT=%s\n' "$prefix" >> "$GITHUB_ENV"
-
-      - name: Build Lean fixture
-        # The `lean-rs` / `lean-rs-host` snapshot suites pull in
-        # `lean-toolchain`, whose build script digests the workspace Lake
-        # fixture and aborts when its compiled artifacts are absent. The
-        # trybuild snapshots never run Lean, but the host crates must still
-        # build, so the fixture olean + dylib have to exist.
-        run: (cd fixtures/lean && lake build)
 
       - name: Run compile-fail snapshot suites
         env:

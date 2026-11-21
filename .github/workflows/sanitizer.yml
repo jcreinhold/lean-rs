@@ -12,6 +12,13 @@ concurrency:
   group: sanitizer-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   LEAN_VERSION_HEAD: "4.36.0"
