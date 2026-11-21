@@ -42,6 +42,55 @@ impl ScratchParent {
             dir,
         })
     }
+    pub(super) fn pin_recovery(
+        &self,
+        expected: &lean_toolchain::native_guardian::writer_storage::StorageRoot,
+        cleanup_started: bool,
+    ) -> io::Result<(PathBuf, Option<Scratch<'_>>)> {
+        if expected.path.parent() != Some(self.path.as_path()) {
+            return Err(invalid("writer recovery scratch parent differs"));
+        }
+        let name = expected
+            .path
+            .file_name()
+            .ok_or_else(|| invalid("writer recovery scratch name missing"))?;
+        match openat(&self.dir, name, DIRECTORY, Mode::empty()) {
+            Ok(dir) => {
+                let dir = File::from(dir);
+                let meta = dir.metadata()?;
+                if (meta.dev(), meta.ino()) != (expected.device, expected.inode) {
+                    return Err(invalid("writer recovery scratch inode changed"));
+                }
+                let scratch = Scratch {
+                    parent: self,
+                    name: name
+                        .to_str()
+                        .ok_or_else(|| invalid("writer recovery scratch name is invalid"))?
+                        .into(),
+                    dir,
+                };
+                scratch.verified_path()?;
+                Ok((PathBuf::from(name), Some(scratch)))
+            }
+            Err(rustix::io::Errno::NOENT) if cleanup_started => {
+                match statat(&self.dir, name, AtFlags::SYMLINK_NOFOLLOW) {
+                    Err(rustix::io::Errno::NOENT) => Ok((PathBuf::from(name), None)),
+                    _ => Err(invalid("writer recovery scratch absence is ambiguous")),
+                }
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(super) fn finish_recovery(&self, (name, scratch): (PathBuf, Option<Scratch<'_>>)) -> io::Result<()> {
+        match scratch {
+            Some(scratch) => scratch.remove(),
+            None => match statat(&self.dir, &name, AtFlags::SYMLINK_NOFOLLOW) {
+                Err(rustix::io::Errno::NOENT) => self.dir.sync_all(),
+                _ => Err(invalid("writer recovery scratch absence changed")),
+            },
+        }
+    }
 }
 
 pub(super) struct Scratch<'a> {

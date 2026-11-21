@@ -279,11 +279,14 @@ The managed writer records one turn ID on the full project-lock union and binds 
 and inode in the existing charge before exposing scratch or accepting work. The project locks precede the registry
 admission lock. A retained charge fences overlapping locks even for an unbudgeted invocation of the current writer.
 Deploy this only with cooperating writers using the same registry. A torn binding or interrupted close retains the
-fence. A restarted writer still needs proof that caller-owned writes ended and the exact scratch was durably removed
-before it can reclaim the charge.
+fence. Existing caller-owned turns still lack restart settlement.
 
 A standalone helper can advertise `command_only_storage_v1` in the `capabilities` array returned by
 `writer-lock-path ROOT --capabilities`. The original descriptor is unchanged without the flag. Only callers that
 keep protected writes inside writer commands may opt in with `"command_only": true` in the storage request.
 The matching lock records publish Starting before spawn, Running with the exact process before GO, and Idle after
-group and descriptor closure. Partial transitions remain fenced. Command-only records supply no restart settlement.
+group and descriptor closure. Partial transitions remain fenced. On an opt-in restart, the same ordered EX union
+and agreeing Idle records allow the writer to pin the original scratch and durably mark cleanup in that charge.
+It removes scratch through the approved parent descriptor and settles only after syncing removal. On retry, an
+absent scratch entry is accepted only after the cleanup mark exists, with the original parent and full idle union
+revalidated. Cooperating callers must never rename or recreate a turn's scratch directory.

@@ -138,7 +138,7 @@ pub struct ReadProxyArgs {
     fifo: PathBuf,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Owner {
     version: u32,
@@ -147,7 +147,7 @@ struct Owner {
     session: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ProcessIdentity {
     pid: u32,
@@ -157,7 +157,7 @@ struct ProcessIdentity {
     start_new_session: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
     version: u32,
@@ -1292,7 +1292,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         Value::Null
     };
     let admission = duration(args.admission)?;
-    let mut managed = args
+    let managed = args
         .storage_request
         .as_ref()
         .map(|r| r.reserve(&args.root, &locks, admission))
@@ -1319,13 +1319,17 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     };
     persist_all(&mut file, &loans, &record)?;
     // No path or GO is exposed until the exact managed scratch is durable.
-    let scratch = match &mut managed {
-        Some((parent, charge)) => {
+    let (scratch_parent, mut charge) = match managed {
+        Some((parent, charge)) => (Some(parent), Some(charge)),
+        None => (None, None),
+    };
+    let scratch = match (&scratch_parent, &mut charge) {
+        (Some(parent), Some(charge)) => {
             let scratch = parent.create(charge.turn())?;
             charge.bind_scratch_for_turn(scratch.binding()?, command_only, admission)?;
             Some(scratch)
         }
-        None => None,
+        _ => None,
     };
     let asset_dir = match &scratch {
         Some(scratch) => scratch.verified_path()?,
@@ -1389,18 +1393,18 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     // execute retains custody after every launch until actual group closure.
     // Idle or pre-GO failures have no command that could still need these inputs.
     if let Some(scratch) = scratch {
-        let certainty = result
-            .and_then(|()| {
-                if confirmed_close {
-                    Ok(())
-                } else {
-                    Err(invalid("turn closure unconfirmed"))
-                }
-            })
-            .and_then(|()| scratch.remove());
+        let certainty = result.and_then(|()| {
+            if confirmed_close {
+                Ok(())
+            } else {
+                Err(invalid("turn closure unconfirmed"))
+            }
+        });
         // Preserve the first error; dropping the charge retains the reservation.
         certainty.map_err(|error| io::Error::new(error.kind(), format!("writer storage charge retained: {error}")))?;
-        let (_, charge) = managed.ok_or_else(|| invalid("missing writer storage admission"))?;
+        let mut charge = charge.ok_or_else(|| invalid("missing writer storage admission"))?;
+        charge.begin_command_only_scratch_cleanup(admission)?;
+        scratch.remove()?;
         charge.settle_after_cleanup(&file, Ok(()), admission)
     } else {
         let cleanup = fs::remove_dir_all(&asset_dir);

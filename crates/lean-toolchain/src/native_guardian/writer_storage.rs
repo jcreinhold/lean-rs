@@ -107,9 +107,30 @@ struct Charge {
     scratch: Option<StorageRoot>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     command_only: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    scratch_cleanup_started: bool,
 }
 
 impl Charge {
+    fn rewrite(&self, directory: &File, turn: &str) -> io::Result<()> {
+        let bytes = serde_json::to_vec(self).map_err(io::Error::other)?;
+        if bytes.len() > MAX_OWNER_BYTES {
+            return Err(invalid("writer storage charge too large"));
+        }
+        let flags = OFlags::WRONLY | OFlags::TRUNC | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut record = File::from(openat(directory, turn, flags, Mode::empty())?);
+        record.write_all(&bytes)?;
+        record.sync_all()
+    }
+
+    fn begin_scratch_cleanup(&mut self, directory: &File, turn: &str) -> io::Result<()> {
+        if !self.scratch_cleanup_started {
+            self.scratch_cleanup_started = true;
+            self.rewrite(directory, turn)?;
+        }
+        Ok(())
+    }
+
     fn covers_lock(&self, path: &Path, dev: u64, ino: u64) -> bool {
         path == self.primary
             || (dev, ino) == (self.device, self.inode)
@@ -147,6 +168,7 @@ impl Charge {
             || !entry.primary.is_absolute()
             || entry.secondary_locks.len() >= crate::shared_writer::MAX_WRITER_LOCK_LOANS
             || entry.secondary_locks.iter().any(|(path, _, _)| !path.is_absolute())
+            || (entry.scratch_cleanup_started && (!entry.command_only || entry.scratch.is_none()))
         {
             return Err(invalid("invalid writer storage charge"));
         }
@@ -215,14 +237,34 @@ impl WriterStorageCharge {
         }
         self.charge.scratch = Some(scratch);
         self.charge.command_only = command_only;
-        let bytes = serde_json::to_vec(&self.charge).map_err(io::Error::other)?;
-        if bytes.len() > MAX_OWNER_BYTES {
-            return Err(invalid("writer storage charge too large"));
+        self.charge.rewrite(&dir, &self.turn)
+    }
+
+    /// Mark cleanup of the bound scratch before the original writer removes it.
+    ///
+    /// # Errors
+    /// Returns binding or durable publication errors without permitting cleanup.
+    #[doc(hidden)]
+    pub fn begin_command_only_scratch_cleanup(&mut self, timeout: Duration) -> io::Result<()> {
+        if !self.charge.command_only {
+            return Ok(());
         }
-        let flags = OFlags::WRONLY | OFlags::TRUNC | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let mut record = File::from(openat(&dir, self.turn.as_str(), flags, Mode::empty())?);
-        record.write_all(&bytes)?;
-        record.sync_all()
+        if self.writer != std::process::id() {
+            return Err(invalid("writer storage cleanup belongs to another turn"));
+        }
+        let scratch = self
+            .charge
+            .scratch
+            .as_ref()
+            .ok_or_else(|| invalid("writer cleanup scratch was never bound"))?;
+        let _scratch = scratch.open()?;
+        let root = self.registry.open()?;
+        let _lock = ownership::lock_admission_at(&root, deadline(timeout)?, false)?;
+        let dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory missing"))?;
+        if Charge::read(&dir, &self.turn)? != self.charge {
+            return Err(invalid("writer storage charge changed before cleanup"));
+        }
+        self.charge.begin_scratch_cleanup(&dir, &self.turn)
     }
 
     /// Settle while the same writer still holds EX on the primary loan. Supply
@@ -246,14 +288,90 @@ impl WriterStorageCharge {
         {
             return Err(invalid("writer storage settlement identity changed"));
         }
-        unlinkat(&dir, self.turn.as_str(), AtFlags::empty())?;
-        dir.sync_all()?;
-        match unlinkat(&root, CHARGES, AtFlags::REMOVEDIR) {
-            Ok(()) => root.sync_all(),
-            Err(rustix::io::Errno::NOTEMPTY | rustix::io::Errno::EXIST) => Ok(()),
-            Err(error) => Err(error.into()),
+        settle(&root, &dir, &self.turn)
+    }
+}
+
+fn settle(root: &File, dir: &File, turn: &str) -> io::Result<()> {
+    unlinkat(dir, turn, AtFlags::empty())?;
+    dir.sync_all()?;
+    match unlinkat(root, CHARGES, AtFlags::REMOVEDIR) {
+        Ok(()) => root.sync_all(),
+        Err(rustix::io::Errno::NOTEMPTY | rustix::io::Errno::EXIST) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Reclaim one matching idle command-only charge with the original EX loan union.
+/// The writer checks complete private lock records before passing the turn.
+/// The callbacks first pin exact scratch, then remove it after cleanup intent
+/// is durable. Both run while the caller retains all project locks.
+///
+/// # Errors
+/// Refuses a changed lock, charge, or scratch binding and propagates cleanup
+/// failures. No known charge is removed on an incomplete proof.
+#[doc(hidden)]
+pub fn reclaim_idle_writer_storage<T>(
+    registry: &StorageRoot,
+    locks: &[(PathBuf, File)],
+    turn: &str,
+    timeout: Duration,
+    pin_scratch: impl FnOnce(&StorageRoot, bool) -> io::Result<T>,
+    cleanup: impl FnOnce(T) -> io::Result<()>,
+) -> io::Result<()> {
+    if registry_directory()? != registry.path {
+        return Err(invalid("writer recovery registry differs from the selected registry"));
+    }
+    let root = registry.open()?;
+    let until = deadline(timeout)?;
+    let Some(_) = charge_directory(&root, false)? else {
+        return Ok(());
+    };
+    let mutex = ownership::lock_admission_at(&root, until, false)?;
+    let Some(dir) = charge_directory(&root, false)? else {
+        return Ok(());
+    };
+    let mut charge = match Charge::read(&dir, turn) {
+        Ok(charge) => charge,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !charge.command_only || locks.len().checked_sub(1) != Some(charge.secondary_locks.len()) {
+        return Err(invalid("writer recovery lacks the original command-only lock union"));
+    }
+    let original = std::iter::once((&charge.primary, charge.device, charge.inode))
+        .chain(charge.secondary_locks.iter().map(|(path, dev, ino)| (path, *dev, *ino)));
+    for ((path, file), (expected, dev, ino)) in locks.iter().zip(original) {
+        crate::writer_lock::validate_artifact_lock(file, path, None)?;
+        let held = file.metadata()?;
+        if path != expected || (held.dev(), held.ino()) != (dev, ino) {
+            return Err(invalid("writer recovery lock union changed"));
         }
     }
+    let scratch = charge
+        .scratch
+        .as_ref()
+        .ok_or_else(|| invalid("writer recovery scratch was never bound"))?;
+    let name = format!("lean-writer-assets-{turn}");
+    if scratch.path.file_name().and_then(|part| part.to_str()) != Some(&name) {
+        return Err(invalid("writer recovery scratch does not match its turn"));
+    }
+    let parent = charge
+        .roots
+        .iter()
+        .find(|root| Some(root.path.as_path()) == scratch.path.parent())
+        .ok_or_else(|| invalid("writer recovery scratch parent was not charged"))?;
+    let _parent = parent.open()?;
+    let pinned = pin_scratch(scratch, charge.scratch_cleanup_started)?;
+    charge.begin_scratch_cleanup(&dir, turn)?;
+    drop(mutex);
+    cleanup(pinned)?;
+
+    let _lock = ownership::lock_admission_at(&root, until, false)?;
+    if Charge::read(&dir, turn)? != charge {
+        return Err(invalid("writer recovery charge changed before settlement"));
+    }
+    settle(&root, &dir, turn)
 }
 
 /// Refuse to overwrite a project-lock record while its storage charge remains.
@@ -395,6 +513,7 @@ fn reserve(
         roots: roots.iter().cloned().collect(),
         scratch: None,
         command_only: false,
+        scratch_cleanup_started: false,
         secondary_locks: custody
             .iter()
             .skip(1)

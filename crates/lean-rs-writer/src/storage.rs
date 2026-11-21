@@ -1,7 +1,9 @@
 //! Explicit storage selection for participating full writer turns.
 use super::scratch::ScratchParent;
 use super::{Duration, File, MetadataExt, Path, PathBuf, invalid, io};
-use lean_toolchain::native_guardian::writer_storage::{StorageRoot, WriterStorageCharge, reserve_writer_storage};
+use lean_toolchain::native_guardian::writer_storage::{
+    StorageRoot, WriterStorageCharge, reclaim_idle_writer_storage, reserve_writer_storage,
+};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -98,6 +100,9 @@ impl Request {
         self.verify()?;
         let s = self.entry("scratch_parent")?;
         let parent = ScratchParent::open(&s.path, (s.device, s.inode))?;
+        if self.command_only {
+            self.reclaim(&parent, locks, timeout)?;
+        }
         let roots = self.roots.iter().map(Entry::root).collect::<Vec<_>>();
         let charge = reserve_writer_storage(
             &self.entry("registry")?.root(),
@@ -108,5 +113,35 @@ impl Request {
             timeout,
         )?;
         Ok((parent, charge))
+    }
+    fn reclaim(&self, parent: &ScratchParent, locks: &[(PathBuf, File)], timeout: Duration) -> io::Result<()> {
+        let Some((_, first)) = locks.first() else {
+            return Err(invalid("writer recovery primary lock is missing"));
+        };
+        let Some(record) = super::owner(&mut first.try_clone()?)? else {
+            return Ok(());
+        };
+        if record.command_phase != Some(super::CommandPhase::Idle) || record.process.is_some() {
+            return Ok(());
+        }
+        let turn = record
+            .storage_turn
+            .as_deref()
+            .ok_or_else(|| invalid("writer recovery turn is missing"))?;
+        reclaim_idle_writer_storage(
+            &self.entry("registry")?.root(),
+            locks,
+            turn,
+            timeout,
+            |scratch, cleanup_started| {
+                for (_, file) in locks.iter().skip(1) {
+                    if super::owner(&mut file.try_clone()?)?.as_ref() != Some(&record) {
+                        return Err(invalid("writer recovery lock records do not agree on an idle turn"));
+                    }
+                }
+                parent.pin_recovery(scratch, cleanup_started)
+            },
+            |scratch| parent.finish_recovery(scratch),
+        )
     }
 }

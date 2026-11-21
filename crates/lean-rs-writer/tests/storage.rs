@@ -284,3 +284,100 @@ fn command_only_capability_is_explicit_and_default_descriptor_is_unchanged() -> 
     }
     Ok(())
 }
+
+#[test]
+fn command_only_idle_recovery_keeps_substitutions_and_retries_cleanup() -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temp = tempfile::tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))?;
+    let base = temp.path().canonicalize()?;
+    let (project, registry, scratch) = (base.join("project"), base.join("owners"), base.join("scratch"));
+    for path in [&project, &registry, &scratch] {
+        fs::create_dir(path)?;
+    }
+    fs::set_permissions(&registry, fs::Permissions::from_mode(0o700))?;
+    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
+    let start = || start_storage(&project, &registry, &scratch, 1, true);
+    let abandon_idle = || -> io::Result<_> {
+        let mut child = start()?;
+        let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+        let locked = reply(&mut reader)?;
+        assert_eq!(locked["state"], "locked");
+        let assets = Path::new(locked["asset_dir"].as_str().expect("scratch path")).to_path_buf();
+        send(
+            &mut child,
+            &json!({"action":"run","command":["/usr/bin/true"],"timeout":3}),
+        )?;
+        assert_eq!(reply(&mut reader)?["state"], "started");
+        assert_eq!(reply(&mut reader)?["owned_work_stopped"], true);
+        let owner: Value = serde_json::from_slice(&fs::read(&lock)?)?;
+        assert_eq!(owner["command_phase"], "idle");
+        let charge = registry
+            .join(".writer-storage-v1")
+            .join(owner["storage_turn"].as_str().expect("idle turn"));
+        drop(child.stdin.take());
+        assert!(!child.wait()?.success());
+        Ok((assets, charge))
+    };
+    let refuse = |message: &str| -> io::Result<()> {
+        let mut child = start()?;
+        let _control = child.stdin.take().expect("writer control");
+        let result = child.wait_with_output()?;
+        assert!(!result.status.success());
+        assert!(result.stdout.is_empty(), "refused writer advertised admission");
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains(message), "{error}");
+        Ok(())
+    };
+
+    let (old_scratch, old_charge) = abandon_idle()?;
+    let old_bytes = fs::read(&old_charge)?;
+    let idle_owner = fs::read(&lock)?;
+    let mut legacy: Value = serde_json::from_slice(&idle_owner)?;
+    legacy
+        .as_object_mut()
+        .expect("writer owner object")
+        .remove("command_phase");
+    let mut legacy_bytes = serde_json::to_vec(&legacy)?;
+    legacy_bytes.push(b'\n');
+    fs::write(&lock, legacy_bytes)?;
+    refuse("prior writer storage custody remains open")?;
+    assert!(old_scratch.is_dir());
+    assert_eq!(fs::read(&old_charge)?, old_bytes);
+    fs::write(&lock, idle_owner)?;
+
+    fs::write(old_scratch.join("old-scratch"), b"owned")?;
+    let moved = scratch.join("displaced");
+    fs::rename(&old_scratch, &moved)?;
+    refuse("No such file")?;
+    assert_eq!(fs::read(&old_charge)?, old_bytes);
+    fs::create_dir(&old_scratch)?;
+    fs::write(old_scratch.join("substitute"), b"not owned")?;
+    refuse("scratch inode changed")?;
+    assert_eq!(fs::read(old_scratch.join("substitute"))?, b"not owned");
+    assert_eq!(fs::read(&old_charge)?, old_bytes);
+    fs::remove_file(old_scratch.join("substitute"))?;
+    fs::remove_dir(&old_scratch)?;
+    fs::rename(moved, &old_scratch)?;
+
+    // A new standalone helper must reclaim the old idle charge and its scratch.
+    let (next_scratch, next_charge) = abandon_idle()?;
+    assert!(!old_scratch.exists());
+    assert!(!old_charge.exists());
+    assert_ne!(next_scratch, old_scratch);
+
+    // Model the cut after a durable cleanup intent and unlink, before settlement.
+    let mut cut: Value = serde_json::from_slice(&fs::read(&next_charge)?)?;
+    cut["scratch_cleanup_started"] = json!(true);
+    fs::write(&next_charge, serde_json::to_vec(&cut)?)?;
+    fs::remove_dir(&next_scratch)?;
+    let mut child = start()?;
+    let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+    assert_eq!(reply(&mut reader)?["state"], "locked");
+    assert!(!next_charge.exists());
+    send(&mut child, &json!({"action":"close"}))?;
+    assert!(child.wait()?.success());
+    assert!(fs::read_dir(&scratch)?.next().is_none());
+    assert!(!registry.join(".writer-storage-v1").exists());
+    Ok(())
+}
