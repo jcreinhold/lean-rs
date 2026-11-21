@@ -3590,6 +3590,29 @@ fn cached_module_headers_match_cold_queries_after_edits() {
 }
 
 #[test]
+fn compact_setup_verification_preserves_verdicts_under_output_pressure() {
+    let sysroot = Path::new(lean_toolchain::LEAN_HEADER_PATH)
+        .ancestors()
+        .nth(3)
+        .expect("selected Lean release prefix");
+    let paths = std::env::join_paths(fixture::native_shim_search_paths()).expect("shim import paths");
+    let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lean/compact_verification.lean");
+    let output = Command::new(sysroot.join("bin/lean"))
+        .args(["-j1", "--run"])
+        .arg(probe)
+        .env("LEAN_SYSROOT", sysroot)
+        .env("LEAN_PATH", paths)
+        .output()
+        .expect("run compact setup verification fixture");
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn session_import_observes_lean_root_order_before_reusing_a_profile() {
     let project = TempLakeProject::new("import-root-order");
     let dependency = project.path().join("dependency");

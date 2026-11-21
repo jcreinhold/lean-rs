@@ -22,6 +22,10 @@ Batch selectors additionally support proof states inside declarations, declarati
 and declaration outlines. Selector ids associate each result with its request. Proof attempts and explicit verification
 reuse the same module-processing infrastructure.
 
+Setup-aware declaration verification offers a compact batch entry point. It checks errors across the message log
+before projecting display evidence into the row budget. Oversized diagnostics can be skipped so a later diagnostic
+can still fit. Axiom coverage is complete only when `axiomsAvailable` is true and `axiomsTruncated` is false.
+
 ## Outcome Shape
 
 `ModuleQueryOutcome` distinguishes transport capability from module-header state:

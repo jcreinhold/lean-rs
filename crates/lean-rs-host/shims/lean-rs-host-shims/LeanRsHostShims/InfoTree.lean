@@ -399,8 +399,8 @@ structure DeclarationVerificationFacts where
   candidates : Array DeclarationTargetInfo
   /-- `false` when the axiom dependency set could not be computed (the target
       did not resolve, or `collectAxioms` was not run): an empty `axioms` then
-      means "not computed", not "no axioms". `true` with empty `axioms` means a
-      genuine no-nontrivial-axioms result. -/
+      means "not computed". An empty list is complete only when `axiomsAvailable`
+      is true and `axiomsTruncated` is false. -/
   axiomsAvailable : Bool
   deriving Inhabited
 
@@ -1499,14 +1499,16 @@ private def selectorId : ModuleQuerySelector → String
 private def renderedBytes (info : RenderedInfo) : Nat :=
   info.value.utf8ByteSize
 
+private def diagnosticBytes (diagnostic : LeanRsFixture.Elaboration.Diagnostic) : Nat :=
+  let severityBytes :=
+    match diagnostic.severity with
+    | .info => 4
+    | .warning => 7
+    | .error => 5
+  diagnostic.message.utf8ByteSize + diagnostic.fileLabel.utf8ByteSize + severityBytes
+
 private def failureBytes (failure : LeanRsFixture.Elaboration.ElabFailure) : Nat :=
-  failure.diagnostics.foldl (init := 0) fun bytes diagnostic =>
-    let severityBytes :=
-      match diagnostic.severity with
-      | .info => 4
-      | .warning => 7
-      | .error => 5
-    bytes + diagnostic.message.utf8ByteSize + diagnostic.fileLabel.utf8ByteSize + severityBytes
+  failure.diagnostics.foldl (init := 0) fun bytes diagnostic => bytes + diagnosticBytes diagnostic
 
 private def localInfoBytes (info : LocalInfo) : Nat :=
   info.name.utf8ByteSize + info.binderInfo.utf8ByteSize + renderedBytes info.typeStr +
@@ -2642,9 +2644,39 @@ private def verificationFacts
       | LeanRsFixture.Elaboration.Truncation.complete => false
   }, degraded)
 
-private def verificationStatus (policy : Nat) (degraded : Bool) (facts : DeclarationVerificationFacts) :
-    DeclarationVerificationStatus :=
-  if diagnosticMentionsHeartbeat facts.diagnostics then
+private structure VerificationDiagnosticFlags where
+  heartbeat : Bool := false
+  error : Bool := false
+  resource : Bool := false
+
+private def verificationDiagnosticFlags (failure : LeanRsFixture.Elaboration.ElabFailure) :
+    VerificationDiagnosticFlags :=
+  ⟨diagnosticMentionsHeartbeat failure, diagnosticHasError failure, diagnosticIndicatesResourceLimit failure⟩
+
+/-- Check every error for verdict evidence and keep only diagnostics that fit.
+    An oversized informational message must not hide the error that follows it. -/
+private def compactVerificationDiagnostics (messages : MessageLog) (fileLabel : String) (limit : Nat) :
+    IO (VerificationDiagnosticFlags × LeanRsFixture.Elaboration.ElabFailure) := do
+  let mut flags : VerificationDiagnosticFlags := {}
+  let mut failure := emptyFailure
+  let mut remaining := limit
+  for msg in messages.toArray do
+    let one ← failureFromMessages (MessageLog.empty.add msg) 1 fileLabel
+    if let some diagnostic := one.diagnostics[0]? then
+      if diagnostic.severity matches .error then
+        let evidence := verificationDiagnosticFlags one
+        flags := ⟨flags.heartbeat || evidence.heartbeat, true, flags.resource || evidence.resource⟩
+      let bytes := diagnosticBytes diagnostic
+      if bytes ≤ remaining then
+        failure := { failure with diagnostics := failure.diagnostics.push diagnostic }
+        remaining := remaining - bytes
+      else
+        failure := { failure with truncated := .truncated }
+  return (flags, failure)
+
+private def verificationStatus (policy : Nat) (degraded : Bool) (facts : DeclarationVerificationFacts)
+    (flags : Option VerificationDiagnosticFlags := none) : DeclarationVerificationStatus :=
+  if (flags.map (·.heartbeat)).getD (diagnosticMentionsHeartbeat facts.diagnostics) then
     .timeout
   -- An interrupted elaboration left dangling metavariables: the worker could
   -- not complete the check, so it reports `budgetExceeded` rather than vouching
@@ -2652,7 +2684,7 @@ private def verificationStatus (policy : Nat) (degraded : Bool) (facts : Declara
   -- this never downgrades an honest `accepted`.
   else if degraded then
     .budgetExceeded
-  else if diagnosticHasError facts.diagnostics then
+  else if (flags.map (·.error)).getD (diagnosticHasError facts.diagnostics) then
     .rejected
   else if !facts.unresolvedGoals.isEmpty then
     .rejected
@@ -2695,7 +2727,8 @@ private def verificationBatchRowBytes (row : DeclarationVerificationBatchRow) : 
 
 private def verifyDeclarationRow
     (request : DeclarationVerificationBatchRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
-    (heartbeats : UInt64) (item : DeclarationVerificationBatchItem) :
+    (heartbeats : UInt64) (item : DeclarationVerificationBatchItem)
+    (targetResult : DeclarationTargetResult) (compactFlags : Option VerificationDiagnosticFlags) :
     IO DeclarationVerificationBatchRow := do
   let singleRequest : DeclarationVerificationRequest :=
     {
@@ -2705,21 +2738,20 @@ private def verifyDeclarationRow
       reportAxioms := request.reportAxioms,
       budgets := request.budgets
     }
-  let targetResult := resolveVerificationTarget snapshot item.target
   let (status, facts) ←
     match targetResult with
     | .target info => do
       let candidate? ← findTacticCandidate snapshot.document snapshot.trees
         info.bodySpan.startLine info.bodySpan.startColumn
       let (facts, degraded) ← verificationFacts singleRequest snapshot fileLabel (some info) candidate? #[] heartbeats
-      pure (verificationStatus request.sorryPolicy degraded facts, facts)
+      pure (verificationStatus request.sorryPolicy degraded facts compactFlags, facts)
     | .notFound => do
       let similar := similarDeclarations snapshot.candidates item.target
       let (facts, _) ← verificationFacts singleRequest snapshot fileLabel none none similar heartbeats
       let status :=
         if !snapshot.missing.isEmpty then .needsBuild
-        else if diagnosticMentionsHeartbeat facts.diagnostics then .timeout
-        else if diagnosticIndicatesResourceLimit facts.diagnostics then .budgetExceeded
+        else if (compactFlags.map (·.heartbeat)).getD (diagnosticMentionsHeartbeat facts.diagnostics) then .timeout
+        else if (compactFlags.map (·.resource)).getD (diagnosticIndicatesResourceLimit facts.diagnostics) then .budgetExceeded
         else .notFound
       pure (status, facts)
     | .ambiguous candidates => do
@@ -2736,16 +2768,80 @@ private def verificationBudgetExceededRow (item : DeclarationVerificationBatchIt
     facts := { unavailableVerificationFacts with outputTruncated := true }
   }
 
+private def compactVerificationRow (row : DeclarationVerificationBatchRow)
+    (diagnostics : LeanRsFixture.Elaboration.ElabFailure) (limit : Nat) :
+    DeclarationVerificationBatchRow := Id.run do
+  let mut facts := { row.facts with
+    diagnostics := emptyFailure, unresolvedGoals := #[], candidates := #[], axioms := #[] }
+  let base := { row with facts }
+  let mut remaining := limit - verificationBatchRowBytes base
+  for goal in row.facts.unresolvedGoals do
+    let bounded := renderStringBoundedWith remaining goal.value
+    let rendered := { bounded with truncated := goal.truncated || bounded.truncated }
+    facts := { facts with unresolvedGoals := facts.unresolvedGoals.push rendered }
+    remaining := remaining - renderedBytes bounded
+    if bounded.truncated then
+      facts := { facts with outputTruncated := true }
+      break
+  for name in row.facts.axioms do
+    if name.utf8ByteSize > remaining then
+      facts := { facts with axiomsTruncated := true }
+      break
+    facts := { facts with axioms := facts.axioms.push name }
+    remaining := remaining - name.utf8ByteSize
+  for candidate in row.facts.candidates do
+    let bytes := declarationTargetInfoBytes candidate
+    if bytes > remaining then
+      facts := { facts with outputTruncated := true }
+      break
+    facts := { facts with candidates := facts.candidates.push candidate }
+    remaining := remaining - bytes
+  let mut failure := { diagnostics with diagnostics := #[] }
+  for diagnostic in diagnostics.diagnostics do
+    let bytes := diagnosticBytes diagnostic
+    if bytes ≤ remaining then
+      failure := { failure with diagnostics := failure.diagnostics.push diagnostic }
+      remaining := remaining - bytes
+    else
+      failure := { failure with truncated := .truncated }
+  let diagnosticsTruncated := failure.truncated matches .truncated
+  let outputTruncated := facts.outputTruncated || facts.axiomsTruncated || diagnosticsTruncated
+  facts := { facts with diagnostics := failure, outputTruncated }
+  return { row with facts }
+
 private def verifyDeclarationRows
     (request : DeclarationVerificationBatchRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
-    (heartbeats : UInt64) : IO (Array DeclarationVerificationBatchRow) := do
+    (heartbeats : UInt64) (compact : Bool) : IO (Array DeclarationVerificationBatchRow) := do
+  let (flags, diagnostics) ← if compact then
+    let (flags, diagnostics) ← compactVerificationDiagnostics snapshot.messages fileLabel request.budgets.perFieldBytes
+    pure (some flags, diagnostics)
+  else pure (none, emptyFailure)
+  let snapshot := if compact then { snapshot with messages := {} } else snapshot
+  let planned := if compact then request.targets.map fun item =>
+    let target := resolveVerificationTarget snapshot item.target
+    let detailBytes := match target with
+      | .target info => declarationTargetInfoBytes info
+      | _ => 0
+    let bytes := item.id.utf8ByteSize + verificationTargetBytes item.target + detailBytes
+    (target, if bytes ≤ request.budgets.perFieldBytes then bytes else 0)
+  else #[]
+  -- Optional evidence for this row can use budget left after later verdicts' identities.
+  let mut reserved := planned.foldl (fun sum entry => sum + entry.2) 0
   let mut rows : Array DeclarationVerificationBatchRow := #[]
   let mut spent : Nat := 0
-  for item in request.targets do
+  for (item, index) in request.targets.zipIdx do
+    let plannedRow := planned[index]?
+    reserved := reserved - (plannedRow.map (·.2)).getD 0
     if spent ≥ request.budgets.totalBytes then
       rows := rows.push (verificationBudgetExceededRow item)
     else
-      let row ← verifyDeclarationRow request snapshot fileLabel heartbeats item
+      let row ← match plannedRow with
+        | some (target, bytes) => do
+          let row ← verifyDeclarationRow request snapshot fileLabel heartbeats item target flags
+          let displayLimit := min request.budgets.perFieldBytes (request.budgets.totalBytes - spent - reserved)
+          pure (compactVerificationRow row diagnostics (max bytes displayLimit))
+        | none =>
+          verifyDeclarationRow request snapshot fileLabel heartbeats item (resolveVerificationTarget snapshot item.target) none
       let bytes := verificationBatchRowBytes row
       if bytes > request.budgets.perFieldBytes || spent + bytes > request.budgets.totalBytes then
         rows := rows.push (verificationBudgetExceededRow item)
@@ -3030,13 +3126,13 @@ private def verifyBatchCore
     (env : Environment) (request : DeclarationVerificationBatchRequest)
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
-    (old? : Option ModuleSnapshot) (setup? : Option ModuleSetup)
+    (old? : Option ModuleSnapshot) (setup? : Option ModuleSetup) (compact : Bool := false)
     : IO DeclarationVerificationBatchOutcome := do
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? setup? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
-    let rows ← verifyDeclarationRows request snapshot fileLabel heartbeats
+    let rows ← verifyDeclarationRows request snapshot fileLabel heartbeats compact
     if snapshot.missing.isEmpty then
       pure <| .ok rows snapshot.imports
     else
@@ -3059,6 +3155,14 @@ def verifyDeclarationBatchWithSetup (setup : ModuleSetup) (request : Declaration
     (namespaceContext fileLabel : String) (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO DeclarationVerificationBatchOutcome := do
   verifyBatchCore (← mkEmptyEnvironment) request namespaceContext fileLabel heartbeats diagBytes optionsJson none (some setup)
+
+/-- Supervised setup-aware verification with verdicts independent of display evidence clipping.
+    Has the same initializer and custody requirements as `verifyDeclarationBatchWithSetup`. -/
+def verifyDeclarationBatchCompactWithSetup (setup : ModuleSetup) (request : DeclarationVerificationBatchRequest)
+    (namespaceContext fileLabel : String) (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
+    : IO DeclarationVerificationBatchOutcome := do
+  verifyBatchCore (← mkEmptyEnvironment) request namespaceContext fileLabel heartbeats diagBytes optionsJson none
+    (some setup) true
 
 @[export lean_rs_host_clear_module_snapshot_cache]
 def clearModuleSnapshotCache (_unit : Unit) : IO ModuleSnapshotCacheClearResult := do
