@@ -260,3 +260,120 @@ pub(super) fn assert_service_loss(freeze: Freeze) {
     assert_eq!(observed.payload_bytes_after_marker, 0, "{observed:?}");
     assert!(!crate::process_group::group_present(guardian.process_group).unwrap());
 }
+
+#[test]
+fn fixture_deadline_server() {
+    let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let mut generation = Generation::start(&root);
+    write_json(&root, "deadline-ready", &generation.worker.id());
+    wait_until(|| root.join("arm-deadline").exists());
+    let expires_ns = u64::try_from(
+        deadlines::boot_ticks()
+            .unwrap()
+            .saturating_add(Duration::from_millis(750))
+            .as_nanos(),
+    )
+    .unwrap();
+    let parent = generation.parent.as_mut().unwrap();
+    let attempt = [7_u8; 16];
+    // Split the actual wire message across reads.
+    write_bytes(parent, b"{", deadline(Duration::from_secs(1)).unwrap()).unwrap();
+    thread::sleep(POLL.saturating_mul(3));
+    let arm = frame(&json!({
+        "op":"arm_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+        "attempt":attempt,"stage":1,"expires_ns":expires_ns
+    }))
+    .unwrap();
+    write_bytes(parent, arm.get(1..).unwrap(), deadline(Duration::from_secs(1)).unwrap()).unwrap();
+    let ack = read_frame(parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
+    assert_eq!(
+        ack,
+        json!({
+            "state":"hard_deadline_armed","protocol":PROTOCOL,"nonce":NONCE,
+            "attempt":attempt,"stage":1,"expires_ns":expires_ns
+        })
+    );
+    write_json(&root, "deadline-armed", &expires_ns);
+    assert_eq!(generation.reap().signal(), Some(libc::SIGKILL));
+    wait_until(|| root.join("deadline-test-finished").exists());
+}
+
+#[test]
+fn production_guardian_drains_at_deadline_with_requester_stopped() {
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("service-loss-watchdog"), b"test-only rescue").unwrap();
+    let server = TestChild(
+        fixture_command(
+            &fixture.root,
+            "native_guardian::tests::service_loss_regressions::fixture_deadline_server",
+        )
+        .spawn()
+        .unwrap(),
+    );
+    wait_until(|| fixture.root.join("deadline-ready").exists());
+    let worker: u32 = serde_json::from_slice(&fs::read(fixture.root.join("deadline-ready")).unwrap()).unwrap();
+    let payload = NativeProcessIdentity::capture(worker).unwrap().unwrap();
+    let contender = Contender::start(&fixture, worker);
+    fs::write(fixture.root.join("arm-deadline"), b"arm").unwrap();
+    wait_until(|| fixture.root.join("deadline-armed").exists());
+    let expires: u64 = serde_json::from_slice(&fs::read(fixture.root.join("deadline-armed")).unwrap()).unwrap();
+    let requester = NativeProcessIdentity::capture(server.0.id()).unwrap().unwrap();
+    let requester_pid = rustix::process::Pid::from_raw(i32::try_from(requester.pid).unwrap()).unwrap();
+    rustix::process::kill_process(requester_pid, rustix::process::Signal::STOP).unwrap();
+    wait_until(|| stopped(&requester));
+    assert!(deadlines::boot_ticks().unwrap() < Duration::from_nanos(expires));
+    assert!(crate::process_group::group_present(worker).unwrap());
+    assert!(!fixture.root.join("contender-acquired.json").exists());
+    wait_until_within(Duration::from_secs(2), || !payload.is_live().unwrap());
+    assert!(deadlines::boot_ticks().unwrap() >= Duration::from_nanos(expires));
+    assert!(stopped(&requester), "requester must still hold the open lifeline");
+    // The stopped parent cannot reap its exited worker. Custody must
+    // remain closed to competing writers until the census clears.
+    assert!(!fixture.root.join("contender-acquired.json").exists());
+    rustix::process::kill_process(requester_pid, rustix::process::Signal::CONT).unwrap();
+    let acquired = contender.acquired();
+    assert!(!acquired.group_present && !acquired.worker_live, "{acquired:?}");
+    assert!(acquired.managed_writer_ready, "{acquired:?}");
+    assert_eq!(contender.finish().payload_bytes_after_marker, 0);
+    wait_until(|| fixture.root.join("guardian-returned").exists());
+    assert!(!fixture.root.join("test-rescue-used").exists());
+    assert!(!fixture.root.join("guardian-error").exists());
+    fs::write(fixture.root.join("deadline-test-finished"), b"done").unwrap();
+    let mut server = server;
+    assert!(server.wait().success());
+}
+
+#[test]
+fn guardian_deadline_rejects_malformed_and_duplicate_arm() {
+    let (mut parent, mut guardian) = UnixStream::pair().unwrap();
+    guardian.set_nonblocking(true).unwrap();
+    let mut state = deadlines::OwnerDeadline::default();
+    parent.write_all(b"{\"op\":\"arm_hard_deadline\"}\n").unwrap();
+    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert!(!state.armed(), "malformed request cannot authorize GO");
+
+    let mut state = deadlines::OwnerDeadline::default();
+    let expires = deadlines::boot_ticks()
+        .unwrap()
+        .saturating_add(Duration::from_millis(100));
+    let request = |expires: Duration| {
+        json!({
+            "op": "arm_hard_deadline", "protocol": PROTOCOL, "nonce": NONCE,
+            "attempt": ([7_u8; 16]), "stage": 1,
+            "expires_ns": u64::try_from(expires.as_nanos()).unwrap(),
+        })
+    };
+    parent.write_all(&frame(&request(expires)).unwrap()).unwrap();
+    assert!(!state.poll_parent(&mut guardian, NONCE).unwrap());
+    parent.set_nonblocking(true).unwrap();
+    let ack = read_frame(&mut parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
+    assert_eq!(field(&ack, "state"), "hard_deadline_armed");
+
+    let extension = expires.saturating_add(Duration::from_secs(60));
+    parent.write_all(&frame(&request(extension)).unwrap()).unwrap();
+    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    wait_until_within(Duration::from_secs(1), || state.expired().unwrap());
+}

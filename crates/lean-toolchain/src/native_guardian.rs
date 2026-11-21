@@ -49,6 +49,7 @@ pub const MAX_OWNER_BYTES: usize = 256 * 1024;
 const MAX_FRAME: usize = 16 * 1024;
 const POLL: Duration = Duration::from_millis(5);
 
+mod deadlines;
 mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};
@@ -637,36 +638,38 @@ impl Guardian {
             "nonce":self.nonce,"guardian_pid":std::process::id()}),
             until,
         )?;
+        let mut hard_deadline = deadlines::OwnerDeadline::default();
         loop {
+            if hard_deadline.expired()? {
+                return Ok(());
+            }
             // The server endpoint exists only in the server, never in payloads.
             // getppid also detects root death when fork-only children retained
             // copies of the worker-control endpoint despite CLOEXEC.
             if native::parent_pid() != self.worker
-                || self.parent_closed()?
                 || !self
                     .parent_identity
                     .as_ref()
                     .ok_or_else(|| invalid("native server identity missing"))?
                     .is_live()?
+                || hard_deadline.poll_parent(
+                    self.parent
+                        .as_mut()
+                        .ok_or_else(|| invalid("native guardian parent missing"))?,
+                    &self.nonce,
+                )?
             {
                 return Ok(());
             }
             if let Some((request, descriptors)) = self.incoming.poll(&self.control)? {
+                // Retain publishes files synchronously. No active stage may
+                // enter that path or wait for loan ACK backpressure.
+                if hard_deadline.armed() {
+                    return Err(invalid("read loan after native deadline arm"));
+                }
                 self.retain(&request, descriptors)?;
             }
             thread::sleep(POLL);
-        }
-    }
-    fn parent_closed(&mut self) -> io::Result<bool> {
-        let Some(parent) = &mut self.parent else {
-            return Ok(true);
-        };
-        let mut byte = [0_u8; 1];
-        match parent.read(&mut byte) {
-            Ok(0) => Ok(true),
-            Ok(_) => Err(invalid("unexpected parent guardian control")),
-            Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => Ok(false),
-            Err(error) => Err(error),
         }
     }
     fn retain(&mut self, request: &Value, mut descriptors: Vec<OwnedFd>) -> io::Result<()> {
