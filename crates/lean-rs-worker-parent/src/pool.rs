@@ -501,6 +501,7 @@ impl LeanWorkerPool {
             key,
             builder,
             capability,
+            pending_reopen: None,
             base_request_timeout,
             last_rss_kib: None,
             rss_samples_unavailable: 0,
@@ -783,7 +784,11 @@ impl LeanWorkerPool {
             }
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(_exit) => {
-                entry.capability = entry.builder.clone().open()?;
+                entry.capability = reopen_entry(
+                    &entry.builder,
+                    &mut entry.pending_reopen,
+                    LeanWorkerCapabilityBuilder::open,
+                )?;
                 entry.last_activity = Instant::now();
                 Ok(())
             }
@@ -969,6 +974,7 @@ struct PoolEntry {
     key: LeanWorkerSessionKey,
     builder: LeanWorkerCapabilityBuilder,
     capability: LeanWorkerCapability,
+    pending_reopen: Option<crate::process::LeanWorkerProcessAttempt>,
     base_request_timeout: Duration,
     last_rss_kib: Option<u64>,
     rss_samples_unavailable: u64,
@@ -977,6 +983,25 @@ struct PoolEntry {
     policy_restarts: u64,
     active_leases: u64,
     commands_since_open: u64,
+}
+
+fn reopen_entry(
+    builder: &LeanWorkerCapabilityBuilder,
+    pending: &mut Option<crate::process::LeanWorkerProcessAttempt>,
+    open: impl FnOnce(LeanWorkerCapabilityBuilder) -> Result<LeanWorkerCapability, LeanWorkerError>,
+) -> Result<LeanWorkerCapability, LeanWorkerError> {
+    if pending.as_ref().is_some_and(|attempt| !attempt.closed()) {
+        return Err(LeanWorkerError::ShutdownInProgress {
+            operation: "pool_acquire_lease",
+        });
+    }
+    let (builder, attempt) = builder.clone().observe_process_attempt();
+    // An exited entry already occupies its slot. Fence attempts to reuse that
+    // entry until the replacement either succeeds or its entire scope closes.
+    *pending = Some(attempt);
+    let capability = open(builder)?;
+    *pending = None;
+    Ok(capability)
 }
 
 impl PoolEntry {
@@ -1445,6 +1470,74 @@ mod tests {
             "unrelated caller-tracker work must not occupy this pool's failed-open slot"
         );
         stop(&mut unrelated);
+    }
+
+    #[test]
+    fn failed_reopen_fences_only_its_entry_until_retirement() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let builder = LeanWorkerCapabilityBuilder::new(".", "entry", "entry", std::iter::empty::<String>())
+            .process_tracker(tracker.clone());
+        let mut pending = None;
+        let mut child = None;
+        let original_error = |observed: LeanWorkerCapabilityBuilder| {
+            let mut command = std::process::Command::new("/bin/sleep");
+            command.arg("30");
+            child = Some(
+                observed
+                    .test_process_tracker()
+                    .expect("reopen has a process tracker")
+                    .spawn(&mut command)
+                    .expect("spawn failed replacement child"),
+            );
+            Err(LeanWorkerError::Protocol {
+                message: "original reopen failure".to_owned(),
+            })
+        };
+        assert!(matches!(
+            reopen_entry(&builder, &mut pending, original_error),
+            Err(LeanWorkerError::Protocol { message }) if message == "original reopen failure"
+        ));
+
+        assert!(matches!(
+            reopen_entry(&builder, &mut pending, |_| panic!("failed replacement is still owned")),
+            Err(LeanWorkerError::ShutdownInProgress {
+                operation: "pool_acquire_lease"
+            })
+        ));
+        let mut unrelated = None;
+        let mut unrelated_child = None;
+        assert!(matches!(
+            reopen_entry(&builder, &mut unrelated, |observed| {
+                let mut command = std::process::Command::new("/bin/sleep");
+                command.arg("30");
+                unrelated_child = Some(
+                    observed
+                        .test_process_tracker()
+                        .expect("unrelated reopen has a process tracker")
+                        .spawn(&mut command)
+                        .expect("spawn unrelated child"),
+                );
+                Err(LeanWorkerError::Protocol { message: "unrelated opener ran".to_owned() })
+            }),
+            Err(LeanWorkerError::Protocol { message }) if message == "unrelated opener ran"
+        ));
+
+        drop(child.take().expect("first child was spawned"));
+        let started = Instant::now();
+        while tracker.active_processes() != 1 {
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "failed replacement did not retire"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(matches!(
+            reopen_entry(&builder, &mut pending, |_| {
+                Err(LeanWorkerError::Protocol { message: "entry can reopen".to_owned() })
+            }),
+            Err(LeanWorkerError::Protocol { message }) if message == "entry can reopen"
+        ));
+        stop(&mut unrelated_child.expect("unrelated child was spawned"));
     }
 
     #[test]
