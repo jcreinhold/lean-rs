@@ -110,8 +110,13 @@ the full verification gates; use it only for contents
 already verified for that release. Recovery defaults to `dry_run: true`, which builds the tarballs without uploading. Set it to `false` only when
 you intend to resume the upload.
 
-Published crate versions are immutable. If crate contents need a fix, prepare and verify a patch release. Do not move an
-existing release tag or use `--allow-dirty` to publish changed contents under it.
+Keep published crate versions and their release tags fixed. If any workspace crate reached crates.io, resume the
+partial upload from the original commit, or use a new version for changed contents. Publish from a clean commit.
+
+If a tagged build failed before publication, check every workspace crate at that version on crates.io and check
+GitHub for a Release under the tag. When all are absent, correct the same version and dispatch the Release workflow
+with `dry_run: true` on the exact corrected commit. After both hosted platforms and the package check pass, replace
+the failed tag with a signed tag on that commit. Record the old and new commit IDs and the passing run in the release notes.
 
 If CI is unavailable after the same release checks have passed locally, the local upload command is
 `scripts/publish-workspace.sh`; it uses the same order and resume behavior. Record the verification and upload results

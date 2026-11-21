@@ -9,7 +9,7 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
-## [0.10.4]
+## [0.10.2]
 
 - `LeanWorkerChild::application_launch_input` sends an application-defined UTF-8 value of up to 4096 bytes to the
   selected child and its replacements. Omitting it clears any inherited value. The application validates the contents.
@@ -17,17 +17,6 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - Lean callers can use `verifyDeclarationBatchWithSetup` in a fresh, supervised process to verify current file
   contents with Lake's selected `ModuleSetup`. The caller enables initializer execution before importing and retains
   the trusted setup and matching native artifacts through verification.
-
-## [0.10.3]
-
-The tagged candidate stopped before publication. Its header-reuse test depended on compiled shim imports left in the
-checkout. Version 0.10.4 uses the selected qualification fixture and builds the imports in a disposable project for
-standalone runs.
-
-## [0.10.2]
-
-The tagged candidate was not published. The launch-input test inherited a CI loader override. Version 0.10.3 clears
-the test runner's loader variables before starting its fake parent.
 
 ## [0.10.1]
 
