@@ -290,3 +290,11 @@ and agreeing Idle records allow the writer to pin the original scratch and durab
 It removes scratch through the approved parent descriptor and settles only after syncing removal. On retry, an
 absent scratch entry is accepted only after the cleanup mark exists, with the original parent and full idle union
 revalidated. Cooperating callers must never rename or recreate a turn's scratch directory.
+
+Before a standalone budgeted writer takes any destination project locks, it makes a bounded pass over existing
+command-only charges. It snapshots candidates under the registry admission lock, then releases that lock before
+trying each exact original EX union. Both the project-lock and registry-lock attempts are nonblocking. A busy or
+unverifiable candidate stays charged. Each candidate's descriptors close before the next union or ordinary writer
+admission. The opportunistic pass uses at most 250 ms of checked software time, with a bounded scratch walk.
+Filesystem calls can exceed that budget. Borrowed-lock writers skip this pass because their caller already holds
+a project lock union.

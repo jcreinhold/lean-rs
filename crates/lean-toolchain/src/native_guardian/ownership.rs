@@ -775,6 +775,19 @@ fn lock_admission(root: &Path, until: std::time::Instant, create: bool) -> io::R
     lock_admission_at(&File::open(root)?, until, create)
 }
 pub(super) fn lock_admission_at(root: &File, until: std::time::Instant, create: bool) -> io::Result<File> {
+    let mutex = open_admission_at(root, create)?;
+    loop {
+        if std::time::Instant::now() >= until {
+            return Err(expired());
+        }
+        match mutex.try_lock() {
+            Ok(()) => return Ok(mutex),
+            Err(std::fs::TryLockError::WouldBlock) => thread::sleep(POLL),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+    }
+}
+fn open_admission_at(root: &File, create: bool) -> io::Result<File> {
     use rustix::fs::{Mode, OFlags, openat};
     let flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let existing = || openat(root, ".admission.lock", flags, Mode::empty());
@@ -798,15 +811,15 @@ pub(super) fn lock_admission_at(root: &File, until: std::time::Instant, create: 
     if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != rustix::process::getuid().as_raw() {
         return Err(invalid("native admission lock must be an owned regular file"));
     }
-    loop {
-        if std::time::Instant::now() >= until {
-            return Err(expired());
-        }
-        match mutex.try_lock() {
-            Ok(()) => return Ok(mutex),
-            Err(std::fs::TryLockError::WouldBlock) => thread::sleep(POLL),
-            Err(std::fs::TryLockError::Error(error)) => return Err(error),
-        }
+    Ok(mutex)
+}
+
+pub(super) fn try_lock_admission_at(root: &File) -> io::Result<File> {
+    let mutex = open_admission_at(root, false)?;
+    match mutex.try_lock() {
+        Ok(()) => Ok(mutex),
+        Err(std::fs::TryLockError::WouldBlock) => Err(busy("native admission lock is busy")),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
     }
 }
 /// Collect only owner records whose existing custody predicate proves closure.

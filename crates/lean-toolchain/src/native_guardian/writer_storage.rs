@@ -131,6 +131,11 @@ impl Charge {
         Ok(())
     }
 
+    fn lock_union(&self) -> impl Iterator<Item = (&PathBuf, u64, u64)> {
+        std::iter::once((&self.primary, self.device, self.inode))
+            .chain(self.secondary_locks.iter().map(|(path, dev, ino)| (path, *dev, *ino)))
+    }
+
     fn covers_lock(&self, path: &Path, dev: u64, ino: u64) -> bool {
         path == self.primary
             || (dev, ino) == (self.device, self.inode)
@@ -302,6 +307,111 @@ fn settle(root: &File, dir: &File, turn: &str) -> io::Result<()> {
     }
 }
 
+/// Best-effort recovery of charged turns before taking the next project's EX union.
+///
+/// Briefly snapshots the existing registry, then releases its admission lock
+/// before trying original project locks. The callback revalidates the charge
+/// under that exact EX union. It must retain the charge on an incomplete proof.
+///
+/// # Errors
+/// Returns registry identity and bounded enumeration failures. An individual
+/// ineligible or busy candidate remains charged and does not delay admission.
+#[doc(hidden)]
+pub fn recover_disjoint_writer_storage(
+    registry: &StorageRoot,
+    next_primary: &Path,
+    timeout: Duration,
+    mut recover: impl FnMut(&str, &StorageRoot, &[(PathBuf, File)], Instant) -> io::Result<()>,
+) -> io::Result<()> {
+    if registry_directory()? != registry.path {
+        return Err(invalid("writer recovery registry differs from the selected registry"));
+    }
+    let root = registry.open()?;
+    let until = deadline(timeout)?;
+    let Some(_) = charge_directory(&root, false)? else {
+        return Ok(());
+    };
+    let mutex = match ownership::try_lock_admission_at(&root) {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let Some(dir) = charge_directory(&root, false)? else {
+        return Ok(());
+    };
+    let mut candidates = Vec::new();
+    let mut seen = 0_usize;
+    for entry in Dir::read_from(&dir)? {
+        if Instant::now() >= until {
+            break;
+        }
+        let entry = entry?;
+        let turn = entry.file_name().to_str().map_err(io::Error::other)?;
+        if matches!(turn, "." | "..") {
+            continue;
+        }
+        seen = seen.saturating_add(1);
+        if seen >= MAX_OWNER_RECORDS {
+            break;
+        }
+        // Ordinary budget admission still rejects malformed charges. This
+        // opportunistic read grants no permission to ignore or remove them.
+        let Ok(charge) = Charge::read(&dir, turn) else {
+            continue;
+        };
+        if charge.command_only && charge.primary != next_primary && charge.scratch.is_some() {
+            candidates.push((turn.to_owned(), charge));
+        }
+    }
+    drop(mutex);
+    for (turn, charge) in candidates {
+        if Instant::now() >= until {
+            break;
+        }
+        let Some(parent) = charge.roots.iter().find(|root| {
+            charge.scratch.as_ref().and_then(|scratch| scratch.path.parent()) == Some(root.path.as_path())
+        }) else {
+            continue;
+        };
+        let Ok(locks) = try_recovery_union(&charge, until) else {
+            continue;
+        };
+        // A failed candidate remains charged. The acquired descriptors close
+        // before attempting any other union or ordinary writer admission.
+        let _candidate = recover(&turn, parent, &locks, until);
+    }
+    Ok(())
+}
+
+fn try_recovery_union(charge: &Charge, until: Instant) -> io::Result<Vec<(PathBuf, File)>> {
+    let mut locks = Vec::new();
+    for (path, device, inode) in charge.lock_union() {
+        if Instant::now() >= until {
+            return Err(expired());
+        }
+        let flags = OFlags::RDWR | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let file = File::from(open(path, flags, Mode::empty())?);
+        crate::writer_lock::validate_artifact_lock(&file, path, None)?;
+        let held = file.metadata()?;
+        if (held.dev(), held.ino()) != (device, inode) {
+            return Err(invalid("writer recovery lock inode changed"));
+        }
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "writer recovery lock is busy",
+                ));
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+
+        locks.push((path.clone(), file));
+    }
+    Ok(locks)
+}
+
 /// Reclaim one matching idle command-only charge with the original EX loan union.
 /// The writer checks complete private lock records before passing the turn.
 /// The callbacks first pin exact scratch, then remove it after cleanup intent
@@ -319,15 +429,50 @@ pub fn reclaim_idle_writer_storage<T>(
     pin_scratch: impl FnOnce(&StorageRoot, bool) -> io::Result<T>,
     cleanup: impl FnOnce(T) -> io::Result<()>,
 ) -> io::Result<()> {
+    let until = deadline(timeout)?;
+    reclaim_idle_with(registry, locks, turn, pin_scratch, cleanup, |root| {
+        ownership::lock_admission_at(root, until, false)
+    })
+}
+
+/// Apply the same exact recovery proof without waiting for registry admission.
+///
+/// # Errors
+/// Returns busy or an incomplete recovery proof without settling the charge.
+#[doc(hidden)]
+pub fn try_reclaim_idle_writer_storage<T>(
+    registry: &StorageRoot,
+    locks: &[(PathBuf, File)],
+    turn: &str,
+    pin_scratch: impl FnOnce(&StorageRoot, bool) -> io::Result<T>,
+    cleanup: impl FnOnce(T) -> io::Result<()>,
+) -> io::Result<()> {
+    reclaim_idle_with(
+        registry,
+        locks,
+        turn,
+        pin_scratch,
+        cleanup,
+        ownership::try_lock_admission_at,
+    )
+}
+
+fn reclaim_idle_with<T>(
+    registry: &StorageRoot,
+    locks: &[(PathBuf, File)],
+    turn: &str,
+    pin_scratch: impl FnOnce(&StorageRoot, bool) -> io::Result<T>,
+    cleanup: impl FnOnce(T) -> io::Result<()>,
+    acquire_admission: impl Fn(&File) -> io::Result<File>,
+) -> io::Result<()> {
     if registry_directory()? != registry.path {
         return Err(invalid("writer recovery registry differs from the selected registry"));
     }
     let root = registry.open()?;
-    let until = deadline(timeout)?;
     let Some(_) = charge_directory(&root, false)? else {
         return Ok(());
     };
-    let mutex = ownership::lock_admission_at(&root, until, false)?;
+    let mutex = acquire_admission(&root)?;
     let Some(dir) = charge_directory(&root, false)? else {
         return Ok(());
     };
@@ -339,9 +484,7 @@ pub fn reclaim_idle_writer_storage<T>(
     if !charge.command_only || locks.len().checked_sub(1) != Some(charge.secondary_locks.len()) {
         return Err(invalid("writer recovery lacks the original command-only lock union"));
     }
-    let original = std::iter::once((&charge.primary, charge.device, charge.inode))
-        .chain(charge.secondary_locks.iter().map(|(path, dev, ino)| (path, *dev, *ino)));
-    for ((path, file), (expected, dev, ino)) in locks.iter().zip(original) {
+    for ((path, file), (expected, dev, ino)) in locks.iter().zip(charge.lock_union()) {
         crate::writer_lock::validate_artifact_lock(file, path, None)?;
         let held = file.metadata()?;
         if path != expected || (held.dev(), held.ino()) != (dev, ino) {
@@ -367,7 +510,7 @@ pub fn reclaim_idle_writer_storage<T>(
     drop(mutex);
     cleanup(pinned)?;
 
-    let _lock = ownership::lock_admission_at(&root, until, false)?;
+    let _lock = acquire_admission(&root)?;
     if Charge::read(&dir, turn)? != charge {
         return Err(invalid("writer recovery charge changed before settlement"));
     }

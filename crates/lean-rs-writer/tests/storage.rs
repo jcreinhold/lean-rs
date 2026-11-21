@@ -110,20 +110,20 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
         assert!(child.wait()?.success());
         assert!(!assets.exists());
     }
-    let mut abandoned = start_storage(&a, &registry, &scratch, budget, true)?;
+    let mut abandoned = start(&a, &registry, &scratch, budget)?;
     let mut reader = BufReader::new(abandoned.stdout.take().expect("managed replies"));
     let locked = reply(&mut reader)?;
     let assets = Path::new(locked["asset_dir"].as_str().expect("abandoned scratch"));
     let lock = lean_toolchain::shared_writer::project_lock_path(&a)?;
     let locked_owner: Value = serde_json::from_slice(&fs::read(&lock)?)?;
     let turn = locked_owner["storage_turn"].as_str().expect("managed lock turn");
-    assert_eq!(locked_owner["command_phase"], "idle");
+    assert!(locked_owner.get("command_phase").is_none());
     assert_eq!(
         assets.file_name().and_then(|name| name.to_str()),
         Some(format!("lean-writer-assets-{turn}").as_str())
     );
     let charge: Value = serde_json::from_slice(&fs::read(registry.join(".writer-storage-v1").join(turn))?)?;
-    assert_eq!(charge["command_only"], true);
+    assert!(charge.get("command_only").is_none());
     let scratch_identity = assets.metadata()?;
     assert_eq!(
         charge["scratch"],
@@ -379,5 +379,70 @@ fn command_only_idle_recovery_keeps_substitutions_and_retries_cleanup() -> io::R
     assert!(child.wait()?.success());
     assert!(fs::read_dir(&scratch)?.next().is_none());
     assert!(!registry.join(".writer-storage-v1").exists());
+    Ok(())
+}
+
+#[test]
+fn disjoint_admission_reclaims_only_the_dead_idle_holder() -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temp = tempfile::tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))?;
+    let base = temp.path().canonicalize()?;
+    let (a, b, registry, scratch) = (
+        base.join("a"),
+        base.join("b"),
+        base.join("owners"),
+        base.join("scratch"),
+    );
+    for path in [&a, &b, &registry, &scratch] {
+        fs::create_dir(path)?;
+    }
+    fs::set_permissions(&registry, fs::Permissions::from_mode(0o700))?;
+    let stat = rustix::fs::statvfs(&base)?;
+    let free = stat.f_bavail.checked_mul(stat.f_frsize).expect("fixture pool capacity");
+    let budget = free - free / 4;
+    let mut first = start_storage(&a, &registry, &scratch, budget, true)?;
+    let mut reader = BufReader::new(first.stdout.take().expect("first writer replies"));
+    let locked = reply(&mut reader)?;
+    assert_eq!(locked["state"], "locked");
+    let assets = Path::new(locked["asset_dir"].as_str().expect("first scratch path"));
+    send(
+        &mut first,
+        &json!({"action":"run","command":["/usr/bin/true"],"timeout":3}),
+    )?;
+    assert_eq!(reply(&mut reader)?["state"], "started");
+    assert_eq!(reply(&mut reader)?["owned_work_stopped"], true);
+    let lock = lean_toolchain::shared_writer::project_lock_path(&a)?;
+    let original = fs::read(&lock)?;
+    let owner: Value = serde_json::from_slice(&original)?;
+    assert_eq!(owner["command_phase"], "idle");
+    let charge = registry
+        .join(".writer-storage-v1")
+        .join(owner["storage_turn"].as_str().expect("idle turn"));
+    let charged = fs::read(&charge)?;
+
+    let mut contender = start(&b, &registry, &scratch, budget)?;
+    let _control = contender.stdin.take().expect("live contender control");
+    let refused = contender.wait_with_output()?;
+    assert!(!refused.status.success());
+    assert!(refused.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr)
+            .contains("insufficient space for outstanding full-turn writer budgets")
+    );
+    assert_eq!(fs::read(&charge)?, charged);
+    assert!(assets.is_dir());
+
+    drop(first.stdin.take());
+    assert!(!first.wait()?.success());
+    let mut second = start(&b, &registry, &scratch, budget)?;
+    let mut reader = BufReader::new(second.stdout.take().expect("disjoint writer replies"));
+    assert_eq!(reply(&mut reader)?["state"], "locked");
+    assert!(!assets.exists());
+    assert!(!charge.exists());
+    assert_eq!(fs::read(&lock)?, original, "the first project was not reopened");
+    send(&mut second, &json!({"action":"close"}))?;
+    assert!(second.wait()?.success());
+    assert!(fs::read_dir(&scratch)?.next().is_none());
     Ok(())
 }

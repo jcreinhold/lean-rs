@@ -3,6 +3,7 @@
 use super::{File, MetadataExt, Path, PathBuf, invalid, io};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, mkdirat, open, openat, statat, unlinkat};
 use std::ffi::CStr;
+use std::time::Instant;
 
 const DIRECTORY: OFlags = OFlags::RDONLY
     .union(OFlags::DIRECTORY)
@@ -91,6 +92,19 @@ impl ScratchParent {
             },
         }
     }
+    pub(super) fn finish_bounded_recovery(
+        &self,
+        pinned: (PathBuf, Option<Scratch<'_>>),
+        until: Instant,
+    ) -> io::Result<()> {
+        let (name, scratch) = pinned;
+        let budget = RecoveryBudget { until, remaining: 4096 };
+        budget.check()?;
+        match scratch {
+            Some(scratch) => scratch.remove_inner(Some(budget)),
+            None => self.finish_recovery((name, None)),
+        }
+    }
 }
 
 pub(super) struct Scratch<'a> {
@@ -123,6 +137,10 @@ impl Scratch<'_> {
     }
 
     pub(super) fn remove(self) -> io::Result<()> {
+        self.remove_inner(None)
+    }
+
+    fn remove_inner(self, mut budget: Option<RecoveryBudget>) -> io::Result<()> {
         let held = rustix::fs::fstat(&self.dir)?;
         let check = || -> io::Result<()> {
             let st = statat(&self.parent.dir, self.name.as_str(), AtFlags::SYMLINK_NOFOLLOW)?;
@@ -132,19 +150,51 @@ impl Scratch<'_> {
             Ok(())
         };
         check()?;
-        remove_contents(&self.dir, self.dir.metadata()?.dev())?;
+        remove_contents(&self.dir, self.dir.metadata()?.dev(), budget.as_mut(), 0)?;
+        if let Some(budget) = &budget {
+            budget.check()?;
+        }
         check()?;
         unlinkat(&self.parent.dir, self.name.as_str(), AtFlags::REMOVEDIR)?;
         self.parent.dir.sync_all()
     }
 }
 
-fn remove_contents(dir: &File, device: u64) -> io::Result<()> {
+struct RecoveryBudget {
+    until: Instant,
+    remaining: usize,
+}
+
+impl RecoveryBudget {
+    fn check(&self) -> io::Result<()> {
+        if Instant::now() >= self.until {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "writer recovery cleanup budget exhausted",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn remove_contents(dir: &File, device: u64, mut budget: Option<&mut RecoveryBudget>, depth: usize) -> io::Result<()> {
     for entry in Dir::read_from(dir)? {
         let entry = entry?;
         let name: &CStr = entry.file_name();
         if matches!(name.to_bytes(), b"." | b"..") {
             continue;
+        }
+        if let Some(budget) = budget.as_deref_mut() {
+            budget.check()?;
+            if depth >= 32 {
+                return Err(invalid("writer recovery scratch depth exceeds limit"));
+            }
+            budget.remaining = budget.remaining.checked_sub(1).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "writer recovery cleanup entry budget exhausted",
+                )
+            })?;
         }
         let st = statat(dir, name, AtFlags::SYMLINK_NOFOLLOW)?;
         if FileType::from_raw_mode(st.st_mode) == FileType::Directory {
@@ -152,7 +202,7 @@ fn remove_contents(dir: &File, device: u64) -> io::Result<()> {
             if child.metadata()?.dev() != device {
                 return Err(invalid("scratch crosses a filesystem"));
             }
-            remove_contents(&child, device)?;
+            remove_contents(&child, device, budget.as_deref_mut(), depth.saturating_add(1))?;
             unlinkat(dir, name, AtFlags::REMOVEDIR)?;
         } else {
             unlinkat(dir, name, AtFlags::empty())?;

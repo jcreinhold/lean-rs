@@ -1255,6 +1255,11 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         setsid()?;
     }
     let workspaces = lean_toolchain::shared_writer::inherited_writer_workspaces(&args.root)?;
+    if inherited.is_none()
+        && let Some(request) = &args.storage_request
+    {
+        request.recover_before_admission(&args.root, &args.lock, duration(args.admission)?)?;
+    }
     let input = control();
     let admission_closed = Cell::new(false);
     let cancelled = || {

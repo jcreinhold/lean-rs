@@ -2,7 +2,8 @@
 use super::scratch::ScratchParent;
 use super::{Duration, File, MetadataExt, Path, PathBuf, invalid, io};
 use lean_toolchain::native_guardian::writer_storage::{
-    StorageRoot, WriterStorageCharge, reclaim_idle_writer_storage, reserve_writer_storage,
+    StorageRoot, WriterStorageCharge, reclaim_idle_writer_storage, recover_disjoint_writer_storage,
+    reserve_writer_storage, try_reclaim_idle_writer_storage,
 };
 use serde::Deserialize;
 
@@ -88,6 +89,53 @@ impl Request {
         Ok(())
     }
 
+    pub(super) fn recover_before_admission(
+        &self,
+        project: &Path,
+        next_primary: &Path,
+        timeout: Duration,
+    ) -> io::Result<()> {
+        if self.entry("project")?.path.as_os_str() != project.as_os_str() {
+            return Err(invalid("storage project differs from writer project"));
+        }
+        self.verify()?;
+        let registry = self.entry("registry")?.root();
+        recover_disjoint_writer_storage(
+            &registry,
+            next_primary,
+            timeout.min(Duration::from_millis(250)),
+            |turn, root, locks, until| {
+                let (_, first) = locks.first().ok_or_else(|| invalid("writer recovery lock missing"))?;
+                let record = super::owner(&mut first.try_clone()?)?
+                    .ok_or_else(|| invalid("writer recovery owner is incomplete"))?;
+                if record.command_phase != Some(super::CommandPhase::Idle)
+                    || record.process.is_some()
+                    || record.storage_turn.as_deref() != Some(turn)
+                {
+                    return Err(invalid("writer recovery owner is not the selected idle turn"));
+                }
+                Self::check_secondary_records(locks, &record)?;
+                let parent = ScratchParent::open(&root.path, (root.device, root.inode))?;
+                try_reclaim_idle_writer_storage(
+                    &registry,
+                    locks,
+                    turn,
+                    |scratch, started| parent.pin_recovery(scratch, started),
+                    |scratch| parent.finish_bounded_recovery(scratch, until),
+                )
+            },
+        )
+    }
+
+    fn check_secondary_records(locks: &[(PathBuf, File)], record: &super::Record) -> io::Result<()> {
+        for (_, file) in locks.iter().skip(1) {
+            if super::owner(&mut file.try_clone()?)?.as_ref() != Some(record) {
+                return Err(invalid("writer recovery lock records do not agree on an idle turn"));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn reserve(
         &self,
         project: &Path,
@@ -134,11 +182,7 @@ impl Request {
             turn,
             timeout,
             |scratch, cleanup_started| {
-                for (_, file) in locks.iter().skip(1) {
-                    if super::owner(&mut file.try_clone()?)?.as_ref() != Some(&record) {
-                        return Err(invalid("writer recovery lock records do not agree on an idle turn"));
-                    }
-                }
+                Self::check_secondary_records(locks, &record)?;
                 parent.pin_recovery(scratch, cleanup_started)
             },
             |scratch| parent.finish_recovery(scratch),
