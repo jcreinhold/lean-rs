@@ -387,7 +387,11 @@ fn fixture_server() {
     let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
         return;
     };
-    let generation = Generation::start(&root);
+    let slot = root
+        .join("recovery-slot")
+        .exists()
+        .then(service_loss_regressions::recovery_slot);
+    let generation = Generation::start_with_slot(&root, slot.as_ref());
     fs::write(
         root.join("server-ready"),
         serde_json::to_vec(&json!({"worker":generation.worker.id(),

@@ -12,6 +12,7 @@ pub(super) struct Observation {
     pub(super) worker_live: bool,
     pub(super) managed_writer_ready: bool,
     pub(super) payload_bytes_after_marker: usize,
+    lock_identity: (u64, u64),
 }
 
 fn write_json(root: &Path, name: &str, value: &impl Serialize) {
@@ -82,17 +83,45 @@ fn fixture_contender() {
     let process: NativeProcessIdentity =
         serde_json::from_slice(&fs::read(root.join("contender-worker.json")).unwrap()).unwrap();
     let lock_path = crate::shared_writer::project_lock_path(&root.join("project")).unwrap();
-    let file = OpenOptions::new().read(true).write(true).open(&lock_path).unwrap();
+    let open = || OpenOptions::new().read(true).write(true).open(&lock_path).unwrap();
+    let first = open();
+    let initial = first.metadata().unwrap();
+    let identity = (initial.dev(), initial.ino());
     assert!(
-        matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+        matches!(first.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
         "first real attempt must block before fault"
     );
+    drop(first);
     fs::write(root.join("contender-blocked"), b"actual EX attempt blocked").unwrap();
-    wait_until_within(Duration::from_secs(2), || match file.try_lock() {
-        Ok(()) => true,
-        Err(std::fs::TryLockError::WouldBlock) => false,
-        Err(error) => panic!("contender lock failed: {error}"),
+    let managed = root.join("managed-contender").exists();
+    let mut acquired = None;
+    let mut reported_refusal = false;
+    let budget = if managed {
+        Duration::from_secs(8)
+    } else {
+        Duration::from_secs(2)
+    };
+    wait_until_within(budget, || {
+        let candidate = open();
+        let meta = candidate.metadata().unwrap();
+        assert_eq!((meta.dev(), meta.ino()), identity, "writer lock inode changed");
+        match candidate.try_lock() {
+            Ok(()) => {
+                if managed && !protected_native_reads_stopped(&root.join("owners"), &lock_path, identity).unwrap() {
+                    if !reported_refusal {
+                        fs::write(root.join("managed-contender-refused"), b"registry refused real EX").unwrap();
+                        reported_refusal = true;
+                    }
+                    return false;
+                }
+                acquired = Some(candidate);
+                true
+            }
+            Err(std::fs::TryLockError::WouldBlock) => false,
+            Err(error) => panic!("contender lock failed: {error}"),
+        }
     });
+    let file = acquired.unwrap();
     // These observations FOLLOW the lock call; the later marker/log cannot
     // establish the exact acquisition instant or every scheduling interleaving.
     let mut observation = Observation {
@@ -100,6 +129,7 @@ fn fixture_contender() {
         worker_live: process.is_live().unwrap(),
         managed_writer_ready: false,
         payload_bytes_after_marker: 0,
+        lock_identity: identity,
     };
     let metadata = file.metadata().unwrap();
     observation.managed_writer_ready =
@@ -184,6 +214,114 @@ fn stopped(process: &NativeProcessIdentity) -> bool {
     // SAFETY: successful exact-sized proc_pidinfo initialized the whole structure.
     let info = unsafe { info.assume_init() };
     info.pbi_status == libc::SSTOP && NativeProcessIdentity::capture(process.pid).unwrap().as_ref() == Some(process)
+}
+
+pub(super) fn recovery_slot() -> NativeCapacitySlot {
+    NativeCapacitySlot {
+        key: "frozen-recoverer".to_owned(),
+        scope: "main".to_owned(),
+        limit: 1,
+    }
+}
+
+#[test]
+fn fixture_recovery_claimant() {
+    let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let record = root.join("owners").join(format!("worker-{NONCE}")).join("owner.json");
+    let owner = read_owner(&record).unwrap();
+    let worker: NativeProcessIdentity = serde_json::from_value(field(&owner, "process").clone()).unwrap();
+    claim_native_recovery(&record, &worker, Duration::from_secs(1)).unwrap();
+    fs::write(
+        root.join("claimant-published"),
+        b"claim committed after releasing admission lock",
+    )
+    .unwrap();
+    // The controller owns this actual Child and reaps it on every exit.
+    wait_until_within(Duration::from_secs(10), || root.join("claimant-finish").exists());
+}
+
+#[test]
+fn frozen_claimant_cannot_release_live_scope_and_passive_closure_still_retires_it() {
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("recovery-slot"), b"one actor slot").unwrap();
+    fs::write(fixture.root.join("managed-contender"), b"managed writer gate").unwrap();
+    let mut server = TestChild(
+        fixture_command(&fixture.root, "native_guardian::tests::fixture_server")
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    wait_until(|| fixture.root.join("server-ready").exists());
+    let ready: Value = serde_json::from_slice(&fs::read(fixture.root.join("server-ready")).unwrap()).unwrap();
+    let worker = pid(field(&ready, "worker")).unwrap();
+    let process = NativeProcessIdentity::capture(worker).unwrap().unwrap();
+    let guardian: NativeProcessIdentity = serde_json::from_value(field(&ready, "guardian").clone()).unwrap();
+    let record = fixture.registry.join(format!("worker-{NONCE}")).join("owner.json");
+    let lock = fs::metadata(fixture.lock()).unwrap();
+    let writer = Contender::start(&fixture, worker);
+
+    // The worker itself kills and reaps its actual guardian child. The
+    // controller only signals its own actual service and claimant children.
+    fs::write(fixture.root.join("kill-guardian"), b"request to actual Child owner").unwrap();
+    wait_until(|| fixture.root.join("guardian-reaped").exists());
+    assert!(!guardian.is_live().unwrap());
+    server.0.kill().unwrap();
+    assert_eq!(server.wait().signal(), Some(libc::SIGKILL));
+    let mut claimant = TestChild(
+        fixture_command(
+            &fixture.root,
+            "native_guardian::tests::service_loss_regressions::fixture_recovery_claimant",
+        )
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap(),
+    );
+    wait_until(|| fixture.root.join("claimant-published").exists());
+    let exact = NativeProcessIdentity::capture(claimant.0.id()).unwrap().unwrap();
+    assert!(claimant.0.try_wait().unwrap().is_none());
+    let target = rustix::process::Pid::from_raw(i32::try_from(claimant.0.id()).unwrap()).unwrap();
+    rustix::process::kill_process(target, rustix::process::Signal::STOP).unwrap();
+    wait_until(|| stopped(&exact));
+
+    wait_until(|| fixture.root.join("managed-contender-refused").exists());
+    let published = read_owner(&record).unwrap();
+    assert_eq!(published["recovery_claim"]["claimant"], json!(exact));
+    let before = fixture.heartbeat();
+    wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
+    assert_eq!(
+        claim_native_recovery(&record, &process, Duration::from_secs(1))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock,
+    );
+    let next_nonce = format!("{:048x}", 700);
+    let reserve = || {
+        reserve_owner_record_with_slot(
+            &fixture.registry,
+            &next_nonce,
+            Duration::from_secs(1),
+            Some(&recovery_slot()),
+        )
+    };
+    assert_eq!(reserve().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(read_owner(&record).unwrap(), published);
+    assert!(!fixture.root.join("contender-acquired.json").exists());
+
+    // The unowned worker and leaf expire on their own fixture deadlines.
+    // A claim provides no means to stop that inherited group.
+    let acquired = writer.acquired();
+    assert!(stopped(&exact), "claimant must still be frozen at passive closure");
+    assert!(!acquired.group_present && !acquired.worker_live);
+    assert!(acquired.managed_writer_ready);
+    assert_eq!(acquired.lock_identity, (lock.dev(), lock.ino()));
+    let replacement = reserve().unwrap();
+    assert!(!record.exists());
+    assert!(replacement.exists());
+    assert_eq!(writer.finish().payload_bytes_after_marker, 0);
+    claimant.0.kill().unwrap();
+    assert_eq!(claimant.wait().signal(), Some(libc::SIGKILL));
 }
 
 #[derive(Clone, Copy)]
