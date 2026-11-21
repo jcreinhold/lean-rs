@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.5]
+
+- Opt-in source-bound writer handoffs require a current registry approval generation. Operators can issue it with
+  `writer-storage approve-handoff` and disable new source-bound admissions with `writer-storage revoke-handoff`.
+  Revocation disables admission before checking for a drain. Drain launchers that can use older source-bound helpers
+  before issuing the first approval, then use matching launchers and helpers.
+- Source-bound recovery checks the exact scratch parent and turn directory against the identity recorded on
+  every original project lock. Older source-bound turns without that evidence stay charged. The interrupted
+  command's result remains unknown.
+
 ## [0.10.4]
 
 - `LeanWorkerNativeScope::prepare_with_socket_directory` lets callers place a guarded scope's Unix socket in an
