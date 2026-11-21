@@ -3156,6 +3156,23 @@ def verifyDeclarationBatchWithSetup (setup : ModuleSetup) (request : Declaration
     : IO DeclarationVerificationBatchOutcome := do
   verifyBatchCore (← mkEmptyEnvironment) request namespaceContext fileLabel heartbeats diagBytes optionsJson none (some setup)
 
+/-- Outline the current file using the same trusted setup and initializer custody as
+    `verifyDeclarationBatchWithSetup`. Body errors add a bounded diagnostics item before
+    the declarations item so callers can distinguish a partial outline. -/
+def declarationOutlineWithSetup (setup : ModuleSetup) (source : String) (budgets : ModuleQueryOutputBudgets)
+    (namespaceContext fileLabel : String) (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
+    : IO ModuleQueryBatchOutcome := do
+  match ← buildModuleSnapshot (← mkEmptyEnvironment) source namespaceContext fileLabel heartbeats diagBytes
+      optionsJson (oneShotPolicy source fileLabel) none (some setup) with
+  | .error (failure, _) => return .headerParseFailed failure
+  | .ok (snapshot, _) =>
+    let outline := ModuleQuerySelector.declarationOutline "declarations"
+    let selectors := if snapshot.messages.hasErrors then #[.diagnostics "diagnostics", outline] else #[outline]
+    let limits := { budgets with perFieldBytes := min budgets.perFieldBytes diagBytes.toNat }
+    let result ← runBatchSelectorsWithCandidates selectors snapshot.document snapshot.messages snapshot.trees
+      snapshot.candidates limits fileLabel snapshot.missing
+    return .ok result snapshot.imports
+
 /-- Supervised setup-aware verification with verdicts independent of display evidence clipping.
     Has the same initializer and custody requirements as `verifyDeclarationBatchWithSetup`. -/
 def verifyDeclarationBatchCompactWithSetup (setup : ModuleSetup) (request : DeclarationVerificationBatchRequest)

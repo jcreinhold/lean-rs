@@ -66,9 +66,40 @@ private unsafe def checkSharedBudget : IO Unit := do
       first.id == "first" && second.id == "second" && first.facts.outputTruncated do
     throw (IO.userError "display evidence exhausted the shared verdict budget")
 
+private unsafe def checkProjectOutline : IO Unit := do
+  let dependency := `LeanRsHostShims.Interop
+  let olean ← findOLean dependency
+  let setupFor (path : System.FilePath) : ModuleSetup := {
+    name := `OutlineFile
+    importArts := ({} : NameMap ImportArtifacts).insert dependency (.ofArrays #[#[path]]) }
+  let source := "import LeanRsHostShims.Interop\nprivate def hiddenCallback := LeanRsFixture.Interop.callbackLoop\n"
+  let run := fun setup text (bytes : Nat) => do
+    Lean.enableInitializersExecution
+    declarationOutlineWithSetup setup text ⟨65536, bytes⟩ "Example" "OutlineFile.lean" 200000 65536 "{}"
+  let .ok result imports ← run (setupFor olean) source 65536 | throw (IO.userError "project outline failed")
+  let #[.ok "declarations" (.declarationOutline outline)] := result.items | throw (IO.userError "expected outline")
+  let #[row] := outline.declarations | throw (IO.userError "expected exactly the file's private declaration")
+  unless imports == #[dependency.toString] && row.shortName == "hiddenCallback" &&
+      isPrivateName row.declarationName.toName && privateToUserName row.declarationName.toName == `Example.hiddenCallback &&
+      row.namespaceName == "Example" && row.declarationSpan.startLine == 2 &&
+      !outline.truncated && !result.totalTruncated do throw (IO.userError s!"wrong project outline: {row.declarationName}")
+  let .ok clipped _ ← run (setupFor olean) source 1 | throw (IO.userError "small-budget outline failed")
+  unless clipped.items matches #[.ok "declarations" (.declarationOutline { declarations := #[], truncated := true })] do
+    throw (IO.userError "outline truncation was lost")
+  let .headerParseFailed failure ← run (setupFor (olean.addExtension "absent")) source 65536
+    | throw (IO.userError "ignored the missing setup-selected artifact")
+  unless failure.diagnostics.any (·.severity matches .error) do throw (IO.userError "missing import diagnostic")
+  let .ok broken _ ← run (setupFor olean) (source ++ "#check NoSuchFixtureName\n") 65536
+    | throw (IO.userError "body error misclassified as a header failure")
+  let #[.ok "diagnostics" (.diagnostics errors), .ok "declarations" (.declarationOutline _)] := broken.items
+    | throw (IO.userError "body error lost from partial outline")
+  unless errors.diagnostics.any (fun d => d.fileLabel == "OutlineFile.lean" && (d.severity matches .error)) do
+    throw (IO.userError "missing labeled body diagnostic")
+
 unsafe def main : IO Unit := do
   checkVerdict "fixtureAxiom" true
   checkVerdict "False.intro" false
   checkVerdict "by sorry" false
   checkVerdict "by skip" false
   checkSharedBudget
+  checkProjectOutline
