@@ -180,7 +180,7 @@ struct RecoveryClaim {
     claimant: NativeProcessIdentity,
 }
 
-fn validate_boot_uuid(boot: &str) -> io::Result<()> {
+pub(super) fn validate_boot_uuid(boot: &str) -> io::Result<()> {
     if boot.len() == 36
         && boot.bytes().enumerate().all(|(index, byte)| {
             if matches!(index, 8 | 13 | 18 | 23) {
@@ -194,6 +194,27 @@ fn validate_boot_uuid(boot: &str) -> io::Result<()> {
     } else {
         Err(invalid("invalid native boot session UUID"))
     }
+}
+
+/// Capture the local installation and kernel boot directly at admission. These
+/// identify the observing host; neither one describes where delegated work ran.
+pub(super) fn writer_origin() -> io::Result<(String, String)> {
+    use sha2::{Digest as _, Sha256};
+    let boot = native::boot_session()?;
+    validate_boot_uuid(&boot)?;
+    let machine = native::machine_identity()?;
+    if machine.iter().all(|byte| *byte == 0) {
+        return Err(invalid("local machine identity unavailable"));
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"lean-rs-writer-origin-v1\0");
+    hash.update(machine);
+    use std::fmt::Write as _;
+    let mut host = String::with_capacity(64);
+    for byte in hash.finalize() {
+        write!(host, "{byte:02x}").map_err(io::Error::other)?;
+    }
+    Ok((host, boot.to_ascii_lowercase()))
 }
 
 fn recovery_claim(value: &Value) -> io::Result<RecoveryClaim> {
@@ -1123,6 +1144,41 @@ mod native {
     #[cfg(not(target_os = "linux"))]
     use super::invalid;
     use super::io;
+    #[cfg(target_os = "macos")]
+    pub(super) fn machine_identity() -> io::Result<Vec<u8>> {
+        let mut uuid = [0; 16];
+        let timeout = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 100_000_000,
+        };
+        // SAFETY: gethostuuid writes one 16-byte UUID into valid local storage
+        // and reads the initialized timeout only during this synchronous call.
+        if unsafe { libc::gethostuuid(uuid.as_mut_ptr(), &raw const timeout) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(uuid.to_vec())
+    }
+    #[cfg(target_os = "linux")]
+    pub(super) fn machine_identity() -> io::Result<Vec<u8>> {
+        use std::io::Read as _;
+        use std::os::unix::fs::MetadataExt as _;
+        let file = std::fs::File::open("/etc/machine-id")?;
+        let meta = file.metadata()?;
+        if !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+            return Err(super::invalid("untrusted local machine identity"));
+        }
+        let mut value = String::new();
+        file.take(34).read_to_string(&mut value)?;
+        let id = value.strip_suffix('\n').unwrap_or(&value);
+        if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) || id.bytes().all(|b| b == b'0') {
+            return Err(super::invalid("invalid local machine identity"));
+        }
+        Ok(id.to_ascii_lowercase().into_bytes())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub(super) fn machine_identity() -> io::Result<Vec<u8>> {
+        Err(invalid("local machine identity unavailable"))
+    }
     #[cfg(target_os = "linux")]
     use super::{PathBuf, read_process};
     #[cfg(target_os = "macos")]

@@ -298,3 +298,55 @@ unverifiable candidate stays charged. Each candidate's descriptors close before 
 admission. The opportunistic pass uses at most 250 ms of checked software time, with a bounded scratch walk.
 Filesystem calls can exceed that budget. Borrowed-lock writers skip this pass because their caller already holds
 a project lock union.
+
+Callers with an immutable source handoff must first find `command_only_handoff_v1` in the standalone helper's
+capabilities. Pass its lowercase SHA-256 as `handoff_sha256` with `command_only: true`. The original charge binds
+the digest to its generated turn and ordered lock paths, devices and inodes before the writer can send Ready.
+The `locked` reply adds `handoff` with `version: 1`, `turn`, `handoff_sha256` and `locks` in primary-first order.
+Compare the receipt to the intended digest and every expected lock before sending a command. The supervised
+consumer must verify the handoff bytes and their meaning before using them. The writer never reconstructs a
+source manifest or attests a database result.
+
+The digest identifies bytes. Cleanup covers only the turn's bound scratch directory. If the caller stages a
+payload elsewhere before admission, the caller retains custody of that file after a lost close. A settled
+writer report supplies no authority to remove that separate file.
+
+This opt-in also records a local installation fingerprint and the kernel boot ID. Failure to obtain them
+refuses the extended reservation. The ordinary v1 request and reply retain their existing shape. Helpers
+that predate this capability reject the extended request and cannot read an outstanding extended charge.
+Use matching helpers across the participating registry when enabling the capability.
+
+### Inspecting and settling an interrupted turn
+
+From the configured writer environment, use the registry path, device and inode from the launcher's binding and
+the turn ID from the admission record. Both commands print one JSON report. An eligible preview or a confirmed
+settlement exits zero. A refusal or unconfirmed settlement exits nonzero. The acknowledgement is required on the
+second command and supplies no closure evidence.
+
+```sh
+lean-rs-writer writer-storage inspect --registry "$registry" --registry-device "$device" \
+  --registry-inode "$inode" --turn "$turn"
+lean-rs-writer writer-storage recover --registry "$registry" --registry-device "$device" \
+  --registry-inode "$inode" --turn "$turn" --acknowledge-unknown-result
+```
+
+Use `lean_rs_writer::inspect_writer_storage_turn` with the recorded turn ID and the launcher's original
+registry path, device and inode. The report shows the readable reservation, including its charged bytes,
+primary and secondary locks, approved roots, original scratch and recorded cleanup intent. The command phase
+can be observed only after acquiring every original project lock exclusively. A refusal identifies the
+missing observation. A preview expires as soon as the locks are released.
+
+`lean_rs_writer::recover_idle_writer_storage_turn` repeats the inspection. A successful settlement requires
+matching Idle records for that turn on every original inode, an explicit empty process disposition, and the
+original command-only scope. It reopens every charged directory, checks the selected charge file, and uses the
+same descriptor-relative scratch cleanup as ordinary recovery. Cleanup intent is synced before removal. A retry
+can finish after removal if the intent was durable and the original scratch parent still matches. The report
+keeps the interrupted job's result unknown. A second call finds no remaining turn to settle. If cleanup finished
+but final registry publication could not be confirmed, the report says `settlement_unconfirmed`. Inspect the
+same turn again before making another admission decision.
+
+Caller-owned writes require closure evidence from their original custodian. A live lock, incomplete or inconsistent
+records, an unbound scratch directory, or a changed inode leaves the charge in place. Missing PIDs, elapsed time,
+free locks and operator acknowledgment cannot supply a missing closure transition. Host and boot observations
+identify where the reservation was made. Even a verified later boot on that host cannot establish that remote,
+delegated or unmanaged writes stopped. This recovery entry accepts durable Idle evidence only.

@@ -70,7 +70,7 @@ fn request(root: &Path, locks: &[(PathBuf, File)]) -> io::Result<WriterStorageCh
         &registry,
         locks,
         &[expected(root.to_owned())],
-        (FLOOR, BUDGET),
+        (FLOOR, BUDGET, None),
         deadline(TIMEOUT)?,
         |_| Ok(CAPACITY),
     )
@@ -186,7 +186,7 @@ fn restart_retains_pre_go_and_post_payload_charges_and_fences_secondary_replacem
             &registry,
             &locks,
             &[expected(f.0.clone())],
-            (0, 1),
+            (0, 1, None),
             deadline(TIMEOUT).unwrap(),
             |_| Ok(CAPACITY),
         )
@@ -211,7 +211,7 @@ fn registry_binding_and_lowest_outstanding_root_are_checked() {
             &registry,
             &first,
             std::slice::from_ref(&old_root),
-            (FLOOR, 1),
+            (FLOOR, 1, None),
             deadline(TIMEOUT).unwrap(),
             |_| Ok(CAPACITY)
         )
@@ -223,7 +223,7 @@ fn registry_binding_and_lowest_outstanding_root_are_checked() {
         &registry,
         &first,
         std::slice::from_ref(&old_root),
-        (FLOOR, 1),
+        (FLOOR, 1, None),
         deadline(TIMEOUT).unwrap(),
         |_| Ok(CAPACITY),
     )
@@ -233,7 +233,7 @@ fn registry_binding_and_lowest_outstanding_root_are_checked() {
         &registry,
         &second,
         &[expected(f.0.clone())],
-        (FLOOR, 1),
+        (FLOOR, 1, None),
         deadline(TIMEOUT).unwrap(),
         |dir| {
             Ok(if dir.metadata()?.ino() == old_root.inode {
@@ -309,7 +309,7 @@ fn scratch_binding_rejects_wrong_inode_and_fences_all_turn_locks() {
         &registry,
         &locks[1..],
         &[expected(fixture.0.clone())],
-        (0, 1),
+        (0, 1, None),
         deadline(TIMEOUT).unwrap(),
         |_| Ok(CAPACITY),
     )

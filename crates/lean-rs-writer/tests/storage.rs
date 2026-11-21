@@ -289,7 +289,10 @@ fn command_only_capability_is_explicit_and_default_descriptor_is_unchanged() -> 
         assert_eq!(field(&descriptor, "project_root"), &json!(root));
         assert_eq!(field(&descriptor, "protocol"), 1);
         if advertise {
-            assert_eq!(field(&descriptor, "capabilities"), &json!(["command_only_storage_v1"]));
+            assert_eq!(
+                field(&descriptor, "capabilities"),
+                &json!(["command_only_storage_v1", "command_only_handoff_v1"])
+            );
         } else {
             assert!(descriptor.get("capabilities").is_none());
         }
@@ -460,3 +463,6 @@ fn disjoint_admission_reclaims_only_the_dead_idle_holder() -> io::Result<()> {
     assert!(fs::read_dir(&scratch)?.next().is_none());
     Ok(())
 }
+
+#[path = "storage/exact_turn.rs"]
+mod exact_turn;

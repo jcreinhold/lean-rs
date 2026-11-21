@@ -90,7 +90,10 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
         ("lock_path".to_owned(), json!(lock_path)),
     ]);
     if args.capabilities {
-        descriptor.insert("capabilities".to_owned(), json!(["command_only_storage_v1"]));
+        descriptor.insert(
+            "capabilities".to_owned(),
+            json!(["command_only_storage_v1", "command_only_handoff_v1"]),
+        );
     }
     let mut bytes = serde_json::to_vec(&descriptor).map_err(io::Error::other)?;
     bytes.push(b'\n');
@@ -166,6 +169,9 @@ struct ProcessIdentity {
 struct Record {
     version: u32,
     owner: Owner,
+    // The writer always publishes a disposition, including explicit null
+    // for Idle. A missing field cannot certify command closure.
+    #[serde(deserialize_with = "Option::deserialize")]
     process: Option<ProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     storage_turn: Option<String>,
@@ -1350,7 +1356,16 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     };
     let mut confirmed_close = false;
     let result = (|| -> io::Result<()> {
-        send(&json!({"state":"locked","owner":record.owner,"lock_loans":receipt,"asset_dir":asset_dir}))?;
+        let mut ready = serde_json::Map::from_iter([
+            ("state".to_owned(), json!("locked")),
+            ("owner".to_owned(), json!(record.owner)),
+            ("lock_loans".to_owned(), receipt),
+            ("asset_dir".to_owned(), json!(asset_dir)),
+        ]);
+        if let Some(handoff) = charge.as_ref().and_then(|c| c.handoff_receipt()) {
+            ready.insert("handoff".to_owned(), handoff);
+        }
+        send(&Value::Object(ready))?;
         while let Ok(message) = input.recv() {
             let message = message?;
             match field(&message, "action").as_str() {
@@ -1496,3 +1511,28 @@ mod sdk_contract_tests;
 
 mod scratch;
 mod storage;
+
+/// Inspect one existing storage turn in the independently selected registry.
+///
+/// The JSON report contains the reservation when readable and either the
+/// current eligibility or the reason closure cannot be established. A
+/// preview never marks cleanup and never authorizes a subsequent settlement.
+#[must_use]
+pub fn inspect_writer_storage_turn(
+    registry: &lean_toolchain::native_guardian::writer_storage::StorageRoot,
+    turn: &str,
+) -> Value {
+    storage::exact_turn(registry, turn, false).0
+}
+
+/// Recheck and settle one exact Idle command-only turn.
+///
+/// The old work result remains unknown. Returns the same JSON report as inspection with a success
+/// flag indicating that this call actually completed settlement.
+#[must_use]
+pub fn recover_idle_writer_storage_turn(
+    registry: &lean_toolchain::native_guardian::writer_storage::StorageRoot,
+    turn: &str,
+) -> (Value, bool) {
+    storage::exact_turn(registry, turn, true)
+}

@@ -96,6 +96,10 @@ pub(super) fn charges_remain(registry: &Path) -> io::Result<bool> {
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Charge {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin: Option<WriterOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    handoff_sha256: Option<String>,
     primary: PathBuf,
     device: u64,
     inode: u64,
@@ -109,6 +113,17 @@ struct Charge {
     command_only: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     scratch_cleanup_started: bool,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WriterOrigin {
+    host: String,
+    boot: String,
+}
+
+fn valid_digest(digest: &str) -> bool {
+    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 impl Charge {
@@ -143,6 +158,10 @@ impl Charge {
     }
 
     fn read(directory: &File, turn: &str) -> io::Result<Self> {
+        Self::read_bound(directory, turn).map(|(charge, _)| charge)
+    }
+
+    fn read_bound(directory: &File, turn: &str) -> io::Result<(Self, File)> {
         if turn.len() != 32 || !turn.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid("invalid writer storage turn"));
         }
@@ -158,12 +177,24 @@ impl Charge {
             return Err(invalid("invalid writer storage charge file"));
         }
         let mut bytes = Vec::new();
-        file.take((MAX_OWNER_BYTES as u64).saturating_add(1))
+        (&file)
+            .take((MAX_OWNER_BYTES as u64).saturating_add(1))
             .read_to_end(&mut bytes)?;
         if bytes.len() > MAX_OWNER_BYTES {
             return Err(invalid("writer storage charge too large"));
         }
         let entry: Self = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+        if entry.handoff_sha256.is_some() != entry.origin.is_some()
+            || entry
+                .handoff_sha256
+                .as_deref()
+                .is_some_and(|digest| !valid_digest(digest))
+            || entry.origin.as_ref().is_some_and(|origin| {
+                !valid_digest(&origin.host) || ownership::validate_boot_uuid(&origin.boot).is_err()
+            })
+        {
+            return Err(invalid("invalid writer handoff or local origin evidence"));
+        }
         if entry.budget == 0
             || entry.roots.is_empty()
             || entry.roots.len() > MAX_ROOTS
@@ -174,7 +205,7 @@ impl Charge {
         {
             return Err(invalid("invalid writer storage charge"));
         }
-        Ok(entry)
+        Ok((entry, file))
     }
 }
 
@@ -193,6 +224,26 @@ impl WriterStorageCharge {
     /// Unique component used by the writer for this turn's scratch directory.
     pub fn turn(&self) -> &str {
         &self.turn
+    }
+
+    /// The digest and ordered EX identities from this reservation, for its
+    /// negotiated command-only admission reply. No receipt precedes scratch binding.
+    #[doc(hidden)]
+    pub fn handoff_receipt(&self) -> Option<serde_json::Value> {
+        let digest = self.charge.handoff_sha256.as_ref()?;
+        if !self.charge.command_only || self.charge.scratch.is_none() {
+            return None;
+        }
+        let locks: Vec<_> = self
+            .charge
+            .lock_union()
+            .map(|(path, device, inode)| {
+                serde_json::json!({
+                    "path":path, "device":device, "inode":inode
+                })
+            })
+            .collect();
+        Some(serde_json::json!({"version":1,"turn":self.turn,"handoff_sha256":digest,"locks":locks}))
     }
 
     /// Persist the exact scratch directory before the writer exposes it.
@@ -214,6 +265,9 @@ impl WriterStorageCharge {
         command_only: bool,
         timeout: Duration,
     ) -> io::Result<()> {
+        if self.charge.handoff_sha256.is_some() && !command_only {
+            return Err(invalid("a bound handoff requires a command-only turn"));
+        }
         if self.writer != std::process::id() || self.charge.scratch.is_some() {
             return Err(invalid(
                 "writer storage scratch already bound or belongs to another writer",
@@ -409,6 +463,135 @@ fn try_recovery_union(charge: &Charge, until: Instant) -> io::Result<Vec<(PathBu
     Ok(locks)
 }
 
+/// A private-registry observation of one existing reservation. Pins its charge
+/// inode through the subsequent EX acquisition. Observing it grants no custody.
+#[doc(hidden)]
+#[derive(Debug, Serialize)]
+pub struct WriterStorageTurn {
+    turn: String,
+    registry: StorageRoot,
+    #[serde(flatten)]
+    charge: Charge,
+    #[serde(skip)]
+    entry: File,
+}
+
+impl WriterStorageTurn {
+    /// Read one exact turn without creating registry state.
+    /// # Errors
+    /// Refuses missing turns, busy admission, malformed records or a changed registry.
+    pub fn inspect(registry: &StorageRoot, turn: &str) -> io::Result<Self> {
+        if registry_directory()? != registry.path {
+            return Err(invalid("writer inspection registry differs from the selected registry"));
+        }
+        ownership::validate_registry(&registry.path)?;
+        let root = registry.open()?;
+        let _mutex = ownership::try_lock_admission_at(&root)?;
+        let dir = charge_directory(&root, false)?.ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        let (charge, entry) = Charge::read_bound(&dir, turn)?;
+        if !charge.roots.contains(registry) {
+            return Err(invalid("reservation does not bind the selected registry"));
+        }
+        Ok(Self {
+            turn: turn.to_owned(),
+            registry: registry.clone(),
+            charge,
+            entry,
+        })
+    }
+
+    /// Acquire the full EX union without waiting, then recheck the snapshot.
+    /// # Errors
+    /// Returns contention or a changed binding before any cleanup.
+    pub fn try_locks(&self, until: Instant) -> io::Result<Vec<(PathBuf, File)>> {
+        let locks = try_recovery_union(&self.charge, until)?;
+        let root = self.registry.open()?;
+        let _mutex = ownership::try_lock_admission_at(&root)?;
+        let dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory disappeared"))?;
+        let (current, entry) = Charge::read_bound(&dir, &self.turn)?;
+        if current != self.charge || !same_inode(&entry, &self.entry)? {
+            return Err(invalid("writer storage reservation changed since inspection"));
+        }
+        current.check_bindings(&locks)?;
+        Ok(locks)
+    }
+
+    /// The original bound scratch and whether cleanup intent is durable.
+    pub fn scratch(&self) -> io::Result<(&StorageRoot, &StorageRoot, bool)> {
+        if !self.charge.command_only {
+            return Err(invalid(
+                "caller-owned or unbound turn: missing durable command-only closure evidence",
+            ));
+        }
+        let (parent, scratch) = self.charge.scratch_binding(&self.turn)?;
+        Ok((parent, scratch, self.charge.scratch_cleanup_started))
+    }
+
+    /// Settle the inspected inode after the writer checks agreeing idle
+    /// records under its retained EX union and removes the bound scratch.
+    /// # Errors
+    /// Refuses a changed snapshot or incomplete cleanup, including a prior settlement.
+    pub fn reclaim<T>(
+        &self,
+        locks: &[(PathBuf, File)],
+        pin: impl FnOnce(&StorageRoot, bool) -> io::Result<T>,
+        cleanup: impl FnOnce(T) -> io::Result<()>,
+    ) -> io::Result<()> {
+        reclaim_idle_with(
+            &self.registry,
+            locks,
+            &self.turn,
+            Some(self),
+            pin,
+            cleanup,
+            ownership::try_lock_admission_at,
+        )
+    }
+}
+
+fn same_inode(first: &File, second: &File) -> io::Result<bool> {
+    let a = first.metadata()?;
+    let b = second.metadata()?;
+    Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
+}
+
+impl Charge {
+    fn check_bindings(&self, locks: &[(PathBuf, File)]) -> io::Result<()> {
+        if locks.len().checked_sub(1) != Some(self.secondary_locks.len()) {
+            return Err(invalid("writer recovery lacks the original lock union"));
+        }
+        for root in &self.roots {
+            root.open()?;
+        }
+        for ((path, file), (expected, dev, ino)) in locks.iter().zip(self.lock_union()) {
+            check_path(path)?;
+            crate::writer_lock::validate_artifact_lock(file, path, None)?;
+            let held = file.metadata()?;
+            if path != expected || (held.dev(), held.ino()) != (dev, ino) {
+                return Err(invalid("writer recovery lock union changed"));
+            }
+        }
+        Ok(())
+    }
+
+    fn scratch_binding(&self, turn: &str) -> io::Result<(&StorageRoot, &StorageRoot)> {
+        let scratch = self
+            .scratch
+            .as_ref()
+            .ok_or_else(|| invalid("writer recovery scratch was never bound"))?;
+        let name = format!("lean-writer-assets-{turn}");
+        if scratch.path.file_name().and_then(|part| part.to_str()) != Some(&name) {
+            return Err(invalid("writer recovery scratch does not match its turn"));
+        }
+        let parent = self
+            .roots
+            .iter()
+            .find(|root| Some(root.path.as_path()) == scratch.path.parent())
+            .ok_or_else(|| invalid("writer recovery scratch parent was not charged"))?;
+        Ok((parent, scratch))
+    }
+}
+
 /// Reclaim one matching idle command-only charge with the original EX loan union.
 /// The writer checks complete private lock records before passing the turn.
 /// The callbacks first pin exact scratch, then remove it after cleanup intent
@@ -427,7 +610,7 @@ pub fn reclaim_idle_writer_storage<T>(
     cleanup: impl FnOnce(T) -> io::Result<()>,
 ) -> io::Result<()> {
     let until = deadline(timeout)?;
-    reclaim_idle_with(registry, locks, turn, pin_scratch, cleanup, |root| {
+    reclaim_idle_with(registry, locks, turn, None, pin_scratch, cleanup, |root| {
         ownership::lock_admission_at(root, until, false)
     })
 }
@@ -448,6 +631,7 @@ pub fn try_reclaim_idle_writer_storage<T>(
         registry,
         locks,
         turn,
+        None,
         pin_scratch,
         cleanup,
         ownership::try_lock_admission_at,
@@ -458,6 +642,7 @@ fn reclaim_idle_with<T>(
     registry: &StorageRoot,
     locks: &[(PathBuf, File)],
     turn: &str,
+    expected: Option<&WriterStorageTurn>,
     pin_scratch: impl FnOnce(&StorageRoot, bool) -> io::Result<T>,
     cleanup: impl FnOnce(T) -> io::Result<()>,
     acquire_admission: impl Fn(&File) -> io::Result<File>,
@@ -466,50 +651,56 @@ fn reclaim_idle_with<T>(
         return Err(invalid("writer recovery registry differs from the selected registry"));
     }
     let root = registry.open()?;
+    let absent = || {
+        if expected.is_some() {
+            Err(invalid("inspected reservation is no longer present"))
+        } else {
+            Ok(())
+        }
+    };
     let Some(_) = charge_directory(&root, false)? else {
-        return Ok(());
+        return absent();
     };
     let mutex = acquire_admission(&root)?;
     let Some(dir) = charge_directory(&root, false)? else {
-        return Ok(());
+        return absent();
     };
-    let mut charge = match Charge::read(&dir, turn) {
+    let (mut charge, entry) = match Charge::read_bound(&dir, turn) {
         Ok(charge) => charge,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return absent(),
         Err(error) => return Err(error),
     };
-    if !charge.command_only || locks.len().checked_sub(1) != Some(charge.secondary_locks.len()) {
+    if let Some(expected) = expected
+        && (charge != expected.charge || !same_inode(&entry, &expected.entry)?)
+    {
+        return Err(invalid("writer storage reservation changed before cleanup"));
+    }
+    if !charge.roots.contains(registry) {
+        return Err(invalid("reservation does not bind the selected registry"));
+    }
+    if !charge.command_only {
         return Err(invalid("writer recovery lacks the original command-only lock union"));
     }
-    for ((path, file), (expected, dev, ino)) in locks.iter().zip(charge.lock_union()) {
-        crate::writer_lock::validate_artifact_lock(file, path, None)?;
-        let held = file.metadata()?;
-        if path != expected || (held.dev(), held.ino()) != (dev, ino) {
-            return Err(invalid("writer recovery lock union changed"));
-        }
-    }
-    let scratch = charge
-        .scratch
-        .as_ref()
-        .ok_or_else(|| invalid("writer recovery scratch was never bound"))?;
-    let name = format!("lean-writer-assets-{turn}");
-    if scratch.path.file_name().and_then(|part| part.to_str()) != Some(&name) {
-        return Err(invalid("writer recovery scratch does not match its turn"));
-    }
-    let parent = charge
-        .roots
-        .iter()
-        .find(|root| Some(root.path.as_path()) == scratch.path.parent())
-        .ok_or_else(|| invalid("writer recovery scratch parent was not charged"))?;
-    let _parent = parent.open()?;
+    charge.check_bindings(locks)?;
+    let (_, scratch) = charge.scratch_binding(turn)?;
     let pinned = pin_scratch(scratch, charge.scratch_cleanup_started)?;
     charge.begin_scratch_cleanup(&dir, turn)?;
     drop(mutex);
     cleanup(pinned)?;
 
     let _lock = acquire_admission(&root)?;
-    if Charge::read(&dir, turn)? != charge {
+    registry.open()?;
+    let named_dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory disappeared"))?;
+    let (named_charge, named_entry) = Charge::read_bound(&named_dir, turn)?;
+    charge.check_bindings(locks)?;
+    if !same_inode(&dir, &named_dir)? || !same_inode(&entry, &named_entry)? || named_charge != charge {
         return Err(invalid("writer recovery charge changed before settlement"));
+    }
+    let (_, scratch) = charge.scratch_binding(turn)?;
+    match fs::symlink_metadata(&scratch.path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+        Ok(_) => return Err(invalid("writer recovery scratch still exists before settlement")),
     }
     settle(&root, &dir, turn)
 }
@@ -579,12 +770,29 @@ pub fn reserve_writer_storage(
     budget: u64,
     timeout: Duration,
 ) -> io::Result<WriterStorageCharge> {
+    reserve_writer_storage_with_handoff(registry, locks, roots, floor, budget, timeout, None)
+}
+
+/// Bind an optional caller-checked immutable handoff digest in the original
+/// reservation, under the full ordered EX union, before any work is admitted.
+/// # Errors
+/// Refuses malformed digests and all admission failures of `reserve_writer_storage`.
+#[doc(hidden)]
+pub fn reserve_writer_storage_with_handoff(
+    registry: &StorageRoot,
+    locks: &[(PathBuf, File)],
+    roots: &[StorageRoot],
+    floor: u64,
+    budget: u64,
+    timeout: Duration,
+    handoff: Option<&str>,
+) -> io::Result<WriterStorageCharge> {
     reserve(
         &registry_directory()?,
         registry,
         locks,
         roots,
-        (floor, budget),
+        (floor, budget, handoff),
         deadline(timeout)?,
         |file| {
             let stat = fstatvfs(file)?;
@@ -600,10 +808,13 @@ fn reserve(
     registry: &StorageRoot,
     locks: &[(PathBuf, File)],
     approved: &[StorageRoot],
-    (floor, budget): (u64, u64),
+    (floor, budget, handoff): (u64, u64, Option<&str>),
     until: Instant,
     available: impl Fn(&File) -> io::Result<u64>,
 ) -> io::Result<WriterStorageCharge> {
+    if handoff.is_some_and(|s| !valid_digest(s)) {
+        return Err(invalid("expected a lowercase SHA-256 handoff digest"));
+    }
     if selected.as_os_str() != registry.path.as_os_str()
         || budget == 0
         || approved.is_empty()
@@ -646,6 +857,11 @@ fn reserve(
         return Err(invalid("writer storage root count exceeds limit"));
     }
     let charge = Charge {
+        // An enrolled turn must not silently omit its admission witness.
+        origin: handoff
+            .map(|_| ownership::writer_origin().map(|(host, boot)| WriterOrigin { host, boot }))
+            .transpose()?,
+        handoff_sha256: handoff.map(str::to_owned),
         primary: path.clone(),
         device,
         inode,

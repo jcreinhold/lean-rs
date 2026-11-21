@@ -1,0 +1,230 @@
+//! Exercise the operator decision with real registry charges and both EX locks.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "the fixture asserts exact JSON fields and owns two lock descriptors"
+)]
+use super::*;
+use lean_toolchain::native_guardian::writer_storage::StorageRoot;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::PathBuf;
+use std::process::Command;
+
+fn root(path: &Path) -> io::Result<StorageRoot> {
+    let stat = path.metadata()?;
+    Ok(StorageRoot {
+        path: path.to_owned(),
+        device: stat.dev(),
+        inode: stat.ino(),
+    })
+}
+
+#[test]
+fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
+    const CHILD: &str = "LEAN_RS_TEST_EXACT_TURN_DIRECTORY";
+    let Some(fixture) = std::env::var_os(CHILD) else {
+        let temp = tempfile::tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))?;
+        let fixture = temp.path().canonicalize()?;
+        let registry = fixture.join("registry");
+        fs::create_dir(&registry)?;
+        fs::set_permissions(&registry, fs::Permissions::from_mode(0o700))?;
+        let status = Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "exact_turn::exact_turn_checks_each_binding_and_settles_once",
+                "--nocapture",
+            ])
+            .env(CHILD, &fixture)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", registry)
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let fixture = PathBuf::from(fixture);
+    let registry = root(&fixture.join("registry"))?;
+    let project = fixture.join("project");
+    let dependency = fixture.join("dependency");
+    let sibling = fixture.join("other-root");
+    let scratch_parent = fixture.join("scratch");
+    for p in [&project, &dependency, &sibling, &scratch_parent] {
+        fs::create_dir(p)?;
+    }
+    let primary = lean_toolchain::shared_writer::project_lock_path(&project)?;
+    let secondary = lean_toolchain::shared_writer::project_lock_path(&dependency)?;
+    let digest = "a".repeat(64);
+    let request = json!({"version":1,"command_only":true,"handoff_sha256":digest,"floor_bytes":1,"budget_bytes":1,
+        "roots":[super::root("project",&project),super::root("registry",&registry.path),
+            super::root("scratch_parent",&scratch_parent),super::root("outputs",&sibling)]});
+    for (marker, command_only) in [(Value::Null, true), (json!("bad digest"), true), (json!(digest), false)] {
+        let mut bad = request.clone();
+        bad["handoff_sha256"] = marker;
+        bad["command_only"] = json!(command_only);
+        let out = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"))
+            .arg("writer")
+            .arg(&project)
+            .arg(&primary)
+            .args(["3", "--storage-request"])
+            .arg(bad.to_string())
+            .output()?;
+        assert!(!out.status.success());
+        assert!(out.stdout.is_empty());
+        assert!(!registry.path.join(".writer-storage-v1").exists());
+    }
+    let mut writer = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"))
+        .arg("writer")
+        .arg(&project)
+        .arg(&primary)
+        .args(["3", "--storage-request"])
+        .arg(request.to_string())
+        .env(
+            "LEAN_HOST_MCP_WRITER_WORKSPACES",
+            json!([project, dependency]).to_string(),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let mut reader = BufReader::new(writer.stdout.take().expect("writer replies"));
+    let ready = reply(&mut reader)?;
+    let receipt = &ready["handoff"];
+    let turn = receipt["turn"].as_str().expect("turn").to_owned();
+    let scratch = PathBuf::from(ready["asset_dir"].as_str().expect("bound scratch"));
+    assert_eq!(receipt["handoff_sha256"], digest);
+    let identities = [&primary, &secondary]
+        .into_iter()
+        .map(|path| {
+            let m = path.metadata()?;
+            Ok(json!({"path":path,"device":m.dev(),"inode":m.ino()}))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    assert_eq!(receipt["locks"], json!(identities));
+    let operator = |action: &str| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+        command
+            .args(["writer-storage", action, "--registry"])
+            .arg(&registry.path)
+            .arg("--registry-device")
+            .arg(registry.device.to_string())
+            .arg("--registry-inode")
+            .arg(registry.inode.to_string())
+            .arg("--turn")
+            .arg(&turn);
+        command
+    };
+    let inspect = |recover| {
+        let mut command = operator(if recover { "recover" } else { "inspect" });
+        if recover {
+            command.arg("--acknowledge-unknown-result");
+        }
+        let output = command.output().expect("operator command");
+        let report: Value = serde_json::from_slice(&output.stdout).expect("operator JSON report");
+        assert_eq!(report["old_result"], "unknown");
+        assert_eq!(
+            output.status.success(),
+            matches!(report["state"].as_str(), Some("eligible" | "settled"))
+        );
+        report
+    };
+    assert_eq!(inspect(true)["state"], "refused");
+    send(
+        &mut writer,
+        &json!({"action":"run","command":["/usr/bin/true"],"timeout":3}),
+    )?;
+    assert_eq!(reply(&mut reader)?["state"], "started");
+    assert_eq!(reply(&mut reader)?["owned_work_stopped"], true);
+    drop(writer.stdin.take());
+    assert!(!writer.wait()?.success());
+    let preview = inspect(false);
+    assert_eq!(preview["state"], "eligible", "{preview}");
+    assert_eq!(preview["old_result"], "unknown");
+    let entry = registry.path.join(".writer-storage-v1").join(&turn);
+    let saved_charge = fs::read(&entry)?;
+    let unacknowledged = operator("recover").output()?;
+    assert_eq!(unacknowledged.status.code(), Some(2));
+    assert!(unacknowledged.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&unacknowledged.stderr).contains("--acknowledge-unknown-result"));
+    assert_eq!(fs::read(&entry)?, saved_charge);
+    assert!(scratch.is_dir());
+    let observed = lean_toolchain::native_guardian::writer_storage::WriterStorageTurn::inspect(&registry, &turn)?;
+    let original_entry = fixture.join("original-charge");
+    fs::rename(&entry, &original_entry)?;
+    fs::write(&entry, &saved_charge)?;
+    fs::set_permissions(&entry, fs::Permissions::from_mode(0o600))?;
+    let refusal = observed.try_locks(
+        std::time::Instant::now()
+            .checked_add(std::time::Duration::from_secs(1))
+            .expect("deadline"),
+    );
+    assert!(refusal.is_err_and(|e| e.to_string().contains("changed since inspection")));
+    fs::rename(original_entry, &entry)?;
+    let admitted: Value = serde_json::from_slice(&saved_charge)?;
+    assert_eq!(admitted["handoff_sha256"], receipt["handoff_sha256"]);
+    assert_eq!(admitted["primary"], receipt["locks"][0]["path"]);
+    assert_eq!(admitted["device"], receipt["locks"][0]["device"]);
+    assert_eq!(admitted["inode"], receipt["locks"][0]["inode"]);
+    let secondary_id = &receipt["locks"][1];
+    assert_eq!(
+        admitted["secondary_locks"],
+        json!([[secondary_id["path"], secondary_id["device"], secondary_id["inode"]]])
+    );
+    assert!(admitted["origin"]["host"].as_str().is_some_and(|id| id.len() == 64));
+    assert!(admitted["origin"]["boot"].as_str().is_some_and(|id| id.len() == 36));
+    assert!(scratch.is_dir());
+    let original = fs::read(&secondary)?;
+    let mut starting: Value = serde_json::from_slice(&original)?;
+    starting["command_phase"] = json!("starting");
+    let starting = format!("{starting}\n");
+    fs::write(&secondary, &starting)?;
+    assert_eq!(inspect(true)["state"], "refused");
+    fs::write(&primary, &starting)?;
+    let refused = inspect(true);
+    assert_eq!(refused["command_phase"], "starting");
+    assert_eq!(refused["state"], "refused");
+    fs::write(&primary, &original)?;
+    fs::write(&secondary, &original)?;
+    fs::rename(&sibling, fixture.join("original-root"))?;
+    fs::create_dir(&sibling)?;
+    assert_eq!(inspect(true)["state"], "refused");
+    fs::remove_dir(&sibling)?;
+    fs::rename(fixture.join("original-root"), &sibling)?;
+    fs::rename(&secondary, fixture.join("original-lock"))?;
+    fs::write(&secondary, &original)?;
+    assert_eq!(inspect(true)["state"], "refused");
+    fs::remove_file(&secondary)?;
+    fs::rename(fixture.join("original-lock"), &secondary)?;
+    let mut legacy: Value = serde_json::from_slice(&saved_charge)?;
+    legacy
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("fixture charge"))?
+        .remove("command_only");
+    fs::write(&entry, serde_json::to_vec(&legacy)?)?;
+    assert!(
+        inspect(true)["reason"]
+            .as_str()
+            .is_some_and(|s| s.contains("caller-owned"))
+    );
+    fs::write(&entry, &saved_charge)?;
+    // Cut after removal: absent scratch alone proves nothing.
+    let displaced = fixture.join("original-scratch");
+    fs::rename(&scratch, &displaced)?;
+    assert_eq!(inspect(true)["state"], "refused");
+    assert_eq!(fs::read(&entry)?, saved_charge);
+    fs::rename(displaced, &scratch)?;
+    // The bounded production walker commits intent before reaching its depth limit.
+    let deep = (0..35).fold(scratch.clone(), |p, _| p.join("child"));
+    fs::create_dir_all(&deep)?;
+    assert!(
+        inspect(true)["reason"]
+            .as_str()
+            .is_some_and(|why| why.contains("depth exceeds"))
+    );
+    let marked: Value = serde_json::from_slice(&fs::read(&entry)?)?;
+    assert_eq!(marked["scratch_cleanup_started"], true);
+    // Model the separate cut after removing the exact directory and before
+    // settling. Recovery has to sync the parent before it can settle.
+    fs::remove_dir_all(&scratch)?;
+    let recovered = inspect(true);
+    assert_eq!(recovered["state"], "settled", "{recovered}");
+    assert_eq!(recovered["old_result"], "unknown");
+    assert!(!entry.exists());
+    assert_eq!(inspect(true)["state"], "refused");
+    Ok(())
+}

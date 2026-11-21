@@ -2,8 +2,8 @@
 use super::scratch::ScratchParent;
 use super::{Duration, File, MetadataExt, Path, PathBuf, invalid, io};
 use lean_toolchain::native_guardian::writer_storage::{
-    StorageRoot, WriterStorageCharge, reclaim_idle_writer_storage, recover_disjoint_writer_storage,
-    reserve_writer_storage, try_reclaim_idle_writer_storage,
+    StorageRoot, WriterStorageCharge, WriterStorageTurn, reclaim_idle_writer_storage, recover_disjoint_writer_storage,
+    reserve_writer_storage_with_handoff, try_reclaim_idle_writer_storage,
 };
 use serde::Deserialize;
 
@@ -15,6 +15,8 @@ pub(super) struct Request {
     budget_bytes: u64,
     #[serde(default)]
     command_only: bool,
+    #[serde(default, deserialize_with = "present_digest")]
+    handoff_sha256: Option<String>,
     roots: Vec<Entry>,
 }
 
@@ -25,6 +27,15 @@ struct Entry {
     path: PathBuf,
     device: u64,
     inode: u64,
+}
+
+// An explicitly supplied null must not downgrade a handoff request.
+fn present_digest<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
+    let digest = String::deserialize(input)?;
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+        return Err(serde::de::Error::custom("expected a lowercase SHA-256 handoff digest"));
+    }
+    Ok(Some(digest))
 }
 
 impl Entry {
@@ -49,6 +60,9 @@ impl Request {
         let request: Self = serde_json::from_str(input)?;
         if request.version != 1 || request.budget_bytes == 0 || request.roots.len() > 48 {
             return Err(invalid("invalid writer storage request"));
+        }
+        if request.handoff_sha256.is_some() && !request.command_only {
+            return Err(invalid("immutable handoff requires command-only storage"));
         }
         let mut roles = std::collections::BTreeSet::new();
         for entry in &request.roots {
@@ -152,13 +166,14 @@ impl Request {
             self.reclaim(&parent, locks, timeout)?;
         }
         let roots = self.roots.iter().map(Entry::root).collect::<Vec<_>>();
-        let charge = reserve_writer_storage(
+        let charge = reserve_writer_storage_with_handoff(
             &self.entry("registry")?.root(),
             locks,
             &roots,
             self.floor_bytes,
             self.budget_bytes,
             timeout,
+            self.handoff_sha256.as_deref(),
         )?;
         Ok((parent, charge))
     }
@@ -188,4 +203,60 @@ impl Request {
             |scratch| parent.finish_recovery(scratch),
         )
     }
+}
+
+/// Both operations take an instantaneous EX snapshot. Inspection never marks
+/// cleanup, and recovery obtains its own observation instead of consuming a preview.
+pub(super) fn exact_turn(registry: &StorageRoot, turn: &str, recover: bool) -> (serde_json::Value, bool) {
+    use serde_json::json;
+    let mut reservation = serde_json::Value::Null;
+    let mut phase = None;
+    let mut cleanup_finished = false;
+    let result = (|| -> io::Result<()> {
+        let snapshot = WriterStorageTurn::inspect(registry, turn)?;
+        reservation = serde_json::to_value(&snapshot)?;
+        let until = std::time::Instant::now()
+            .checked_add(Duration::from_secs(5))
+            .ok_or_else(|| invalid("invalid recovery deadline"))?;
+        let locks = snapshot.try_locks(until)?;
+        let (_, primary) = locks.first().ok_or_else(|| invalid("primary lock is missing"))?;
+        let record = super::owner(&mut primary.try_clone()?)?
+            .ok_or_else(|| invalid("missing complete original owner record"))?;
+        phase = record.command_phase;
+        if record.storage_turn.as_deref() != Some(turn) {
+            return Err(invalid("owner does not identify the selected turn"));
+        }
+        Request::check_secondary_records(&locks, &record)?;
+        let (parent, scratch, started) = snapshot.scratch()?;
+        if record.command_phase != Some(super::CommandPhase::Idle) || record.process.is_some() {
+            return Err(invalid(
+                "missing durable Idle transition confirming command and delegated write closure",
+            ));
+        }
+        let parent = ScratchParent::open(&parent.path, (parent.device, parent.inode))?;
+        if recover {
+            snapshot.reclaim(
+                &locks,
+                |binding, marked| parent.pin_recovery(binding, marked),
+                |pinned| {
+                    parent.finish_bounded_recovery(pinned, until)?;
+                    cleanup_finished = true;
+                    Ok(())
+                },
+            )?;
+        } else {
+            parent.pin_recovery(scratch, started)?;
+        }
+        Ok(())
+    })();
+    let state = match (&result, recover) {
+        (Err(_), true) if cleanup_finished => "settlement_unconfirmed",
+        (Err(_), _) => "refused",
+        (Ok(()), true) => "settled",
+        (Ok(()), false) => "eligible",
+    };
+    let ok = result.is_ok();
+    let report = json!({"version":1,"turn":turn,"registry":registry,"reservation":reservation,
+        "command_phase":phase,"old_result":"unknown","state":state,"reason":result.err().map(|e|e.to_string())});
+    (report, ok)
 }
