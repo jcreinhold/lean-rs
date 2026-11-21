@@ -730,17 +730,7 @@ fn seal_shims_only(
             .mode(0o600)
             .open(lock)?;
     }
-    // The initial broken-import case prepares the deployment for this run.
-    // A cold checkout can lack even the lock files needed for the read-only probe.
-    let shim = if case.is_some() {
-        selected_host_artifacts()?
-    } else {
-        match lean_rs_host::host::ready_host_artifacts_locally() {
-            Ok(Some(snapshot)) => snapshot,
-            probe => lean_rs_host::host::prepare_host_artifacts_without_lock_wait()
-                .map_err(|error| format!("initial shim preparation failed: {error} (readiness: {probe:?})"))?,
-        }
-    };
+    let shim = selected_host_artifacts()?;
     scopes.extend_from_slice(shim.artifact_roots());
     scopes.sort();
     let record = serde_json::json!({

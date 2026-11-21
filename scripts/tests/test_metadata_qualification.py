@@ -451,7 +451,21 @@ class MetadataQualificationTest(unittest.TestCase):
         state_lock.assert_not_called()
         self.launch.assert_not_called()
 
+    def mock_private_package(self):
+        root = qualification.stream_package_root()
+        manifest = root / "crates/lean-rs-host/shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lean-rs-build-cache/host.json"
+
+        def prepare(_release):
+            root.mkdir(mode=0o700)
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("{}")
+            return root.stat(), manifest, []
+
+        self.enterContext(patch.object(qualification, "prepare_stream_package", side_effect=prepare))
+        return manifest
+
     def test_broken_import_runs_exact_case_with_no_helper_then_cleans(self):
+        manifest = self.mock_private_package()
         state = self.state.with_name("broken-import")
         self.worker.chmod(0o500)
         seen = []
@@ -471,7 +485,9 @@ class MetadataQualificationTest(unittest.TestCase):
                 self.target, qualification.DARWIN_ARM64_PINS
             )
 
-        self.assertEqual(len(seen), 4)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(json.loads(seen[0][2]["LEAN_RS_PREPARED_HOST_ARTIFACTS"])["shim_manifest_path"], str(manifest))
+        self.assertFalse(qualification.stream_package_root().exists())
         for command, _, env, check in seen:
             self.assertEqual(
                 command[:4],
@@ -497,6 +513,7 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertFalse(state.exists())
 
     def test_broken_import_failure_retains_owned_state_and_refuses_replay(self):
+        self.mock_private_package()
         state = self.state.with_name("broken-import")
         with (
             patch.object(
@@ -522,13 +539,14 @@ class MetadataQualificationTest(unittest.TestCase):
     def run_typed_selection(
         self, *, live_pid=False, extra_json_worker=False, direct_tests=()
     ):
+        manifest = self.mock_private_package()
         broken = self.state.with_name("broken-import")
         typed = self.state.with_name("typed-session")
         self.worker.chmod(0o500)
         seen = []
         host, interop = (str(self.sdk / image) for image in ("host", "interop"))
         record = {
-            "shim_manifest": str(self.sdk / "manifest"),
+            "shim_manifest": str(manifest),
             "shim_json": "{}",
             "shim_roots": [str(self.sdk)],
             "shim_paths": [str(self.sdk)],
@@ -697,18 +715,18 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertFalse(broken.exists())
         self.assertEqual(
             len(seen),
-            7
+            6
             if live_pid
-            else 8
+            else 7
             if extra_json_worker
-            else 7 + len(qualification.ORDINARY_AUDITED_TESTS),
+            else 6 + len(qualification.ORDINARY_AUDITED_TESTS),
         )
         return seen, output.getvalue()
 
     def test_typed_group_reuses_prepared_shims_and_excludes_only_completed_tests(self):
         seen, output = self.run_typed_selection()
-        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[4:7]
-        audited_cases = seen[7:]
+        (prepare, prepare_env), (build, build_env), (nextest, run_env) = seen[3:6]
+        audited_cases = seen[6:]
         assignments = dict(line.split("=", 1) for line in output.splitlines())
         descriptor = assignments["LEAN_RS_PREPARED_HOST_ARTIFACTS"]
         self.assertEqual(prepare[-1], "--typed-session")
@@ -1184,7 +1202,7 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             selection = qualification.qualify_stream(
                 self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"],
-                retain_for_workspace=True,
+                prepared_package=(owner, manifest, pins), retain_for_workspace=True,
             )
         self.assertTrue(root.is_dir())
         env = {"LEAN_RS_TEST_ORDINARY_HOST_SHIMS": selection}
@@ -1211,6 +1229,40 @@ class MetadataQualificationTest(unittest.TestCase):
                 ["cargo", "nextest", "run", "--workspace", "--profile", "ci", "-E", "all()"], cwd=self.sdk
             )
         self.assertFalse(root.exists())
+
+    def test_focused_stream_consumes_the_verified_handoff_only_once(self):
+        root = qualification.stream_package_root()
+        root.mkdir(mode=0o700)
+        owner = root.stat()
+        manifest = root / "host.json"
+        manifest.write_text("{}")
+        pins = []
+        for name in ("host", "interop"):
+            image = root / name
+            image.write_text(name)
+            info = image.stat()
+            pins.append([str(image), info.st_dev, info.st_ino, qualification.digest(image)])
+        receipt = {"package_identity": [owner.st_dev, owner.st_ino], "manifest": str(manifest),
+                   "manifest_sha256": qualification.digest(manifest), "images": pins}
+        note = root / "stream-ready.json"
+        note.write_text(json.dumps(receipt))
+        with patch.object(qualification, "prepare_stream_package") as build, patch.object(
+            qualification, "run_stream_group", side_effect=ValueError("worker closure unknown")
+        ) as run:
+            manifest.write_text("changed")
+            with self.assertRaisesRegex(ValueError, "manifest changed"):
+                qualification.qualify_stream(self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"])
+            run.assert_not_called()
+            self.assertTrue(note.exists())
+            manifest.write_text("{}")
+            with self.assertRaisesRegex(ValueError, "closure unknown"):
+                qualification.qualify_stream(self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"])
+            self.assertFalse(note.exists())
+            with self.assertRaises(FileNotFoundError):
+                qualification.qualify_stream(self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"])
+            run.assert_called_once()
+            build.assert_not_called()
+        self.assertTrue(root.is_dir())
 
     def test_missing_doctor_exports_audit_requires_admission_without_a_grant(self):
         case = qualification.NO_EXPORTS_CASE

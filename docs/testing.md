@@ -140,12 +140,14 @@ python3 scripts/qualify_metadata.py broken-import --emit-host-selection
 
 For stream or metadata changes, test the affected cases and one control. Set `SHIM_MANIFEST` to the
 absolute path of the prepared `*.lean-rs-capability.json` file reported in the shim descriptor above.
-The qualifier builds the stream worker against a disposable copy of the host package and its checked-in Lake sources under
-`target/metadata-qualification/stream-package`. It verifies the isolated manifest against the selected SDK manifest.
-The stream and legacy workers use this package’s own lock files and the installed Lean toolchain.
-For the full 4.36 release checks, `--workspace-shims` keeps this same package for the direct-host tests.
-`workspace-tests` checks its identity, runs the workspace filter, and removes the package after Nextest succeeds.
-An interrupted or failed workspace run retains the package for inspection.
+The qualifier builds one SDK shim generation under `target/metadata-qualification/stream-package` using the
+installed Elan toolchain. It copies the tracked Lake inputs, links the Rust sources, and uses the normal Cargo
+target. The broken-import, typed and stream workers use this package's manifest and lock files.
+A successful `--emit-host-selection` hands the generation to the next stream command, which checks the package
+identity, manifest and images and removes it after all selected workers close. An explicit checkout manifest can
+also serve as the comparison input to a standalone stream check.
+For the full 4.36 release checks, `--workspace-shims` hands the same generation to `workspace-tests`.
+That command removes it after Nextest succeeds. A failed run retains its state until closure can be established.
 
 ```sh
 python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \

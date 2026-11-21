@@ -3619,8 +3619,7 @@ fn session_import_observes_lean_root_order_before_reusing_a_profile() {
         );
     }
 
-    let shims = lean_rs_host::host::prepare_host_artifacts().expect("prepare bundled shims");
-    let shim_paths = shims.shim_search_paths();
+    let shim_paths = fixture::native_shim_search_paths();
     let inherited_path =
         std::env::join_paths(std::iter::once(inherited.as_path()).chain(shim_paths.iter().map(PathBuf::as_path)))
             .expect("encode inherited path");
@@ -3688,8 +3687,7 @@ fn session_import_runs_the_selected_plugin_with_its_compiled_module() {
         .args(["-DLEAN_EXPORTING", "-shared", "-o"])
         .arg(&image)
         .arg("QualifiedPlugin.c"));
-    let shims = lean_rs_host::host::prepare_host_artifacts().expect("prepare bundled shims");
-    let paths = std::env::join_paths(shims.shim_search_paths()).expect("shim import paths");
+    let paths = std::env::join_paths(fixture::native_shim_search_paths()).expect("shim import paths");
     let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lean/session_import_plugin.lean");
     let marker = root.join("initialized");
     run(tool("lean")

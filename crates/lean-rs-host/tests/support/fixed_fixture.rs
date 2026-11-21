@@ -263,6 +263,19 @@ pub(super) fn native_fixture_root() -> PathBuf {
     fixture_root()
 }
 
+#[allow(dead_code, reason = "used by the Lean import probes")]
+pub(super) fn native_shim_search_paths() -> Vec<PathBuf> {
+    #[cfg(all(test, unix))]
+    if let Some(fixture) = ordinary_fixture() {
+        let (shims, _) = fixture.shims.as_ref().expect("selected host shims");
+        return shims.search_paths.clone();
+    }
+    lean_rs_host::host::prepare_host_artifacts()
+        .expect("prepare bundled shims")
+        .shim_search_paths()
+        .to_vec()
+}
+
 #[allow(dead_code, reason = "shared with separate strict test binaries")]
 pub(super) fn native_project_library() -> lean_rs::module::LeanLibrary<'static> {
     #[cfg(all(test, unix))]

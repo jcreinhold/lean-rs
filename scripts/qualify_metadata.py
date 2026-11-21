@@ -1500,7 +1500,7 @@ def stream_cargo_patch():
     return f'patch.{json.dumps((SDK / host).as_uri())}.lean-rs-host.path={json.dumps(str(stream_package_root() / host))}'
 
 
-def prepare_stream_package(release, reference):
+def prepare_stream_package(release, reference=None):
     root = stream_package_root()
     require(not os.path.lexists(root.parent / "interop-stream"), "previous stream cohort has not closed")
     require(root.parent.resolve(strict=True) == root.parent, "aliased stream package parent")
@@ -1522,7 +1522,11 @@ def prepare_stream_package(release, reference):
         src, dst = SDK / rel, root / rel
         require(src.resolve(strict=True) == src and src.is_file(), f"invalid stream package input: {src}")
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
+        if rel.is_relative_to(host) and rel != host / "Cargo.toml" and not rel.is_relative_to(host / "shims"):
+            # Cargo needs the same Rust sources with a fixture-owned CARGO_MANIFEST_DIR.
+            dst.symlink_to(src)
+        else:
+            shutil.copyfile(src, dst)
     (root / "fixtures/interop-worker").chmod(0o700)
     scratch = root / "tmp"
     scratch.mkdir(mode=0o700)
@@ -1540,25 +1544,25 @@ def prepare_stream_package(release, reference):
                    cwd=APP, env=env, check=True, stdout=sys.stderr)
     manifest = Path(subprocess.check_output([TARGET / "debug/prepare", root, "--stream-shims"],
                                             cwd=APP, env=env, text=True).strip())
-    # Only the package root changes. Compare the full SDK manifest, including signatures and toolchain.
     directory = host / "shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lean-rs-build-cache"
-    require(reference.parent == SDK / directory and reference.resolve(strict=True) == reference,
-            "select the canonical SDK host manifest")
     require(manifest.parent == root / directory and manifest.resolve(strict=True) == manifest,
             "stream worker prepared a different host package")
-    expected = json.loads(reference.read_bytes())
     actual = json.loads(manifest.read_bytes())
-    # Rebase only path fields owned by the two bundled Lake packages.
-    def original(path):
-        return str(SDK / Path(path).relative_to(root))
-    contract = {**actual, "primary_dylib": original(actual["primary_dylib"]),
-                "search_dirs": [original(d) for d in actual["search_dirs"]],
-                "dependencies": [{**d, "dylib_path": original(d["dylib_path"])} for d in actual["dependencies"]]}
-    require(contract == expected, "isolated host manifest differs from the selected SDK contract")
+    if reference is not None:
+        require(reference.parent == SDK / directory and reference.resolve(strict=True) == reference,
+                "select the canonical SDK host manifest")
+        # Standalone comparison against an explicitly selected SDK manifest.
+        def original(path):
+            return str(SDK / Path(path).relative_to(root))
+        contract = {**actual, "primary_dylib": original(actual["primary_dylib"]),
+                    "search_dirs": [original(d) for d in actual["search_dirs"]],
+                    "dependencies": [{**d, "dylib_path": original(d["dylib_path"])} for d in actual["dependencies"]]}
+        require(contract == json.loads(reference.read_bytes()), "isolated host manifest differs from the selected SDK contract")
     pins = []
     for path in (actual["primary_dylib"], *(d["dylib_path"] for d in actual["dependencies"])):
         image = Path(path)
-        require(image.resolve(strict=True) == image, "aliased isolated shim image")
+        require(image.is_relative_to(root / host / "shims") and image.resolve(strict=True) == image,
+                "isolated shim image outside the private package")
         identity = image.stat()
         pins.append((path, identity.st_dev, identity.st_ino, digest(image)))
     return owner, manifest, pins
@@ -1570,6 +1574,7 @@ def qualify_stream(
     shim_manifest,
     cases,
     *,
+    prepared_package=None,
     pinned_selection=None,
     bookended_release=False,
     retain_for_workspace=False,
@@ -1578,7 +1583,17 @@ def qualify_stream(
         require(pinned_selection[0]["shim_manifest_path"] == str(shim_manifest)
                 and pinned_selection[0]["shim_manifest_json"] == shim_manifest.read_text(),
                 "prepared host manifest changed before stream qualification")
-    owner, manifest, isolated_pins = prepare_stream_package(release, shim_manifest)
+    if prepared_package is None and shim_manifest.is_relative_to(stream_package_root()):
+        # A separate successful broken-import command handed this generation to us.
+        root = stream_package_root()
+        require(not os.path.lexists(root / "workspace-running"), "workspace closure is unknown")
+        note = root / "stream-ready.json"
+        receipt = json.loads(note.read_bytes())
+        owner = checked_package_owner(root, receipt)
+        require(Path(receipt["manifest"]) == shim_manifest, "stream handoff changed")
+        prepared_package = owner, shim_manifest, receipt["images"]
+        note.unlink()  # A failed cohort must not be resumed.
+    owner, manifest, isolated_pins = prepared_package or prepare_stream_package(release, shim_manifest)
     image_pins = isolated_pins
     if pinned_selection is not None:
         image_pins = [*pinned_selection[1], *isolated_pins]
@@ -1625,23 +1640,28 @@ def verify_provider(image_pins):
         )
 
 
+def checked_package_owner(root, selection):
+    require(root.resolve(strict=True) == root, "aliased workspace shim package")
+    owner = root.stat()
+    require(owner.st_uid == os.geteuid() and stat.S_IMODE(owner.st_mode) == 0o700
+            and [owner.st_dev, owner.st_ino] == selection["package_identity"],
+            "workspace shim package ownership changed")
+    require(not os.path.lexists(root.parent / "interop-stream"), "stream cohort has not closed")
+    manifest = Path(selection["manifest"])
+    require(manifest.is_relative_to(root) and manifest.resolve(strict=True) == manifest
+            and digest(manifest) == selection["manifest_sha256"], "workspace shim manifest changed")
+    require(len(selection["images"]) == 2 and all(Path(pin[0]).is_relative_to(root) for pin in selection["images"]),
+            "workspace shim images must belong to the retained package")
+    verify_provider(selection["images"])
+    return owner
+
+
 def workspace_tests(expression):
     # The named qualifier published this selection only after its workers closed.
     root = stream_package_root()
     selection = json.loads(os.environ["LEAN_RS_TEST_ORDINARY_HOST_SHIMS"])
     with ordinary_state_lock():
-        require(root.resolve(strict=True) == root, "aliased workspace shim package")
-        owner = root.stat()
-        require(owner.st_uid == os.geteuid() and stat.S_IMODE(owner.st_mode) == 0o700
-                and [owner.st_dev, owner.st_ino] == selection["package_identity"],
-                "workspace shim package ownership changed")
-        require(not os.path.lexists(root.parent / "interop-stream"), "stream cohort has not closed")
-        manifest = Path(selection["manifest"])
-        require(manifest.is_relative_to(root) and manifest.resolve(strict=True) == manifest
-                and digest(manifest) == selection["manifest_sha256"], "workspace shim manifest changed")
-        require(len(selection["images"]) == 2 and all(Path(pin[0]).is_relative_to(root) for pin in selection["images"]),
-                "workspace shim images must belong to the retained package")
-        verify_provider(selection["images"])
+        owner = checked_package_owner(root, selection)
         # A later invocation must not retry or remove a package left by an interrupted workspace run.
         (root / "workspace-running").mkdir(mode=0o700)
         result = subprocess.run(
@@ -1714,6 +1734,30 @@ lean_lib «LeanRsInteropConsumer» where
     require_no_legacy_provider_shadow(provider)
 
 
+def stream_descriptor(shim_manifest):
+    bundle = stream_package_root() / "crates/lean-rs-host/shims"
+    host, interop = bundle / "lean-rs-host-shims", bundle / "lean-rs-interop-shims"
+    output = Path(".lake/lean-rs-generated/lean-4.36.0")
+    manifest = shim_manifest.resolve(strict=True)
+    require(
+        manifest == shim_manifest
+        and manifest.parent == host / output / "lean-rs-build-cache",
+        "select the canonical prepared host manifest",
+    )
+    with manifest.open("rb") as stream:
+        raw = stream.read(64 * 1024 + 1)
+    require(len(raw) <= 64 * 1024, "shim manifest exceeds wire bound")
+    return {
+        "protocol": 2,
+        "shim_manifest_path": str(manifest),
+        "shim_manifest_json": raw.decode(),
+        "artifact_roots": list(map(str, sorted((host, interop)))),
+        "shim_search_paths": [
+            str(root / output / "lib/lean") for root in (interop, host)
+        ],
+    }
+
+
 def run_stream_group(
     release,
     profile,
@@ -1746,25 +1790,7 @@ def run_stream_group(
     )
     if legacy:
         require_no_legacy_provider_shadow(interop)
-    output = Path(".lake/lean-rs-generated/lean-4.36.0")
-    manifest = shim_manifest.resolve(strict=True)
-    require(
-        manifest == shim_manifest
-        and manifest.parent == host / output / "lean-rs-build-cache",
-        "select the canonical prepared host manifest",
-    )
-    with manifest.open("rb") as stream:
-        raw = stream.read(64 * 1024 + 1)
-    require(len(raw) <= 64 * 1024, "shim manifest exceeds wire bound")
-    descriptor = {
-        "protocol": 2,
-        "shim_manifest_path": str(manifest),
-        "shim_manifest_json": raw.decode(),
-        "artifact_roots": list(map(str, sorted((host, interop)))),
-        "shim_search_paths": [
-            str(root / output / "lib/lean") for root in (interop, host)
-        ],
-    }
+    descriptor = stream_descriptor(shim_manifest)
     parent = TARGET / "metadata-qualification"
     require(parent == parent.resolve(strict=True), "aliased fixture directory")
     state = parent / "interop-stream"
@@ -1936,8 +1962,12 @@ def ordinary_host_shim_selection(release, selected):
         image = selected[name]
         require(Path(image).is_relative_to(SDK), f"invalid {name} selection")
         image_pins.append([image, *selected["files"][image]])
+    package = stream_package_root()
+    require(Path(selected["shim_manifest"]).is_relative_to(package), "expected fixture-owned host manifest")
+    owner = package.stat()
     return json.dumps(
         {
+            "package_identity": [owner.st_dev, owner.st_ino],
             "prefix": str(release),
             "manifest": selected["shim_manifest"],
             "manifest_sha256": hashlib.sha256(
@@ -2425,6 +2455,8 @@ def qualify_broken_import(
     check_tracked_fixture_sources()
     space(TARGET)
     state = parent / "broken-import"
+    if os.path.lexists(stream_package_root()):
+        raise FileExistsError(f"previous qualification still owns {stream_package_root()}")
     state.mkdir(mode=0o700)  # Refuse a previous or uncertain invocation.
     owner = state.stat()
     scratch = state / "tmp"
@@ -2441,8 +2473,11 @@ def qualify_broken_import(
             **({"stdout": sys.stderr} if emit_host_selection else {}),
         )
 
-    cargo = ["cargo", "build", "--locked", "--offline", "-j1"]
-    run([*cargo, "--bin", "prepare"], APP)
+    package = prepare_stream_package(release)
+    package_owner, manifest, pins = package
+    verify_provider(pins)
+    env["LEAN_RS_PREPARED_HOST_ARTIFACTS"] = json.dumps(stream_descriptor(manifest))
+    cargo = ["cargo", "build", "--locked", "--offline", "-j1", "--config", stream_cargo_patch()]
     record = launch_host_builder(
         BROKEN_IMPORT_TEST,
         "--broken-import",
@@ -2467,7 +2502,7 @@ def qualify_broken_import(
             "broken-import selection changed after verification",
         )
         selected = json.loads(data)
-        manifest = Path(selected["shim_manifest"])
+        require(Path(selected["shim_manifest"]) == manifest, "broken-import opened a different shim generation")
         host_selection, image_pins = ordinary_host_shim_selection(release, selected)
         typed_descriptor = json.dumps(
             {
@@ -2493,17 +2528,22 @@ def qualify_broken_import(
         qualify_scalar_entry(release, profile, run, env, cargo, typed_descriptor)
         direct_tests += qualify_optional_whnf(release, profile, run, env)
     if run_stream:
-        isolated_selection = qualify_stream(
+        host_selection = qualify_stream(
             release,
             profile,
             manifest,
             None,
+            prepared_package=package,
             pinned_selection=(json.loads(typed_descriptor), image_pins),
             bookended_release=bookended_release,
-            retain_for_workspace=retain_for_workspace,
+            retain_for_workspace=True,
         )
-        if retain_for_workspace:
-            host_selection = isolated_selection
+    if emit_host_selection and not retain_for_workspace:
+        note = stream_package_root() / "stream-ready.json"
+        with note.open("x") as stream:
+            stream.write(host_selection)
+    elif not emit_host_selection:
+        remove_owned_state(stream_package_root(), package_owner)
     if emit_host_selection:
         print("LEAN_RS_TEST_ORDINARY_HOST_SHIMS=" + host_selection)
         print("LEAN_RS_PREPARED_HOST_ARTIFACTS=" + typed_descriptor)

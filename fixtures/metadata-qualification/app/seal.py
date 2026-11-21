@@ -212,7 +212,8 @@ def main():
         )
     )
     builder = builder_profiles.get(host_builder_case)
-    assets = sdk / "target/metadata-qualification/stream-package" if stream else sdk
+    private_package = sdk / "target/metadata-qualification/stream-package"
+    assets = private_package if stream else sdk
     project = (
         state
         / (
@@ -250,7 +251,8 @@ def main():
         owner = foreign.stat()
         assert owner.st_uid == os.geteuid() and owner.st_mode & 0o7777 == 0o700
     release = Path(rec["sysroot"])
-    bundle = state / "shims" if optional_whnf else assets / "crates/lean-rs-host/shims"
+    shim_package = private_package if broken or typed or scalar else sdk
+    bundle = state / "shims" if optional_whnf else shim_package / "crates/lean-rs-host/shims"
     dep = bundle / "lean-rs-interop-shims"
     host = bundle / "lean-rs-host-shims"
     if legacy:
