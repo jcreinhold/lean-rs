@@ -68,7 +68,8 @@ pub mod writer_storage;
 pub use ownership::{
     NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, claim_native_recovery,
     collect_closed_owner_records, dispatch_owner_record, publish_startup_owner, registry_directory,
-    reserve_owner_record, reserve_owner_record_with_slot, retire_preparing_owner_record, retire_unspawned_owner_record,
+    request_original_guardian_drain, reserve_owner_record, reserve_owner_record_with_slot,
+    retire_preparing_owner_record, retire_unspawned_owner_record,
 };
 
 /// One actual shared lock and epoch protected by a native generation.
@@ -638,8 +639,14 @@ impl Guardian {
         {
             return Err(invalid("durable native guardian record differs"));
         }
+        let (worker, guardian) = self
+            .bootstrap_identity
+            .as_ref()
+            .ok_or_else(|| invalid("guardian bootstrap identity missing"))?;
+        let drain_guardian =
+            ownership::publish_guardian_drain_support(&record, worker, guardian)?.then(|| guardian.clone());
         self.parent_identity = Some(serde_json::from_value(field(&value, "parent").clone()).map_err(io::Error::other)?);
-        self.record = Some(record);
+        self.record = Some(record.clone());
         self.parent = Some(parent);
         write_frame(
             &mut self.control,
@@ -648,6 +655,7 @@ impl Guardian {
             until,
         )?;
         let mut hard_deadline = deadlines::OwnerDeadline::default();
+        let mut last_recovery_poll = Instant::now();
         loop {
             if hard_deadline.expired()? {
                 return Ok(());
@@ -669,6 +677,19 @@ impl Guardian {
                 )?
             {
                 return Ok(());
+            }
+            // An armed stage must not enter a synchronous registry read.
+            // Its original deadline and lifeline remain the stop authority.
+            if !hard_deadline.armed()
+                && let Some(guardian) = &drain_guardian
+                && last_recovery_poll.elapsed() >= Duration::from_millis(50)
+            {
+                last_recovery_poll = Instant::now();
+                // An unavailable registry never supplies a request. The
+                // independently owned deadline and lifeline remain active.
+                if ownership::original_guardian_drain_requested(&record, guardian).is_ok_and(|requested| requested) {
+                    return Ok(());
+                }
             }
             if let Some((request, descriptors)) = self.incoming.poll(&self.control)? {
                 // Retain publishes files synchronously. No active stage may
@@ -716,6 +737,7 @@ impl Guardian {
                 .record
                 .as_ref()
                 .ok_or_else(|| invalid("native owner record missing"))?;
+            let _lock = ownership::lock_publication(record, Duration::from_secs(2))?;
             let mut value = read_owner(record)?;
             let domains: Vec<_> = self.loans.iter().map(|(domain, _)| domain).collect();
             value

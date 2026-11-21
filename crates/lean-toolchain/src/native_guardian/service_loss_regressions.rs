@@ -216,6 +216,76 @@ fn stopped(process: &NativeProcessIdentity) -> bool {
     info.pbi_status == libc::SSTOP && NativeProcessIdentity::capture(process.pid).unwrap().as_ref() == Some(process)
 }
 
+#[test]
+fn replacement_requests_drain_from_original_guardian_without_taking_custody() {
+    let fixture = Fixture::new();
+    for marker in [
+        "reap-after-recovery-request",
+        "managed-contender",
+        "service-loss-watchdog",
+    ] {
+        fs::write(fixture.root.join(marker), b"test-owned recovery request").unwrap();
+    }
+    let mut server = TestChild(
+        fixture_command(&fixture.root, "native_guardian::tests::fixture_server")
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    wait_until(|| fixture.root.join("server-ready").exists());
+    let ready: Value = serde_json::from_slice(&fs::read(fixture.root.join("server-ready")).unwrap()).unwrap();
+    let worker = pid(field(&ready, "worker")).unwrap();
+    let process = NativeProcessIdentity::capture(worker).unwrap().unwrap();
+    let guardian: NativeProcessIdentity = serde_json::from_value(field(&ready, "guardian").clone()).unwrap();
+    let requester = NativeProcessIdentity::capture(server.0.id()).unwrap().unwrap();
+    let record = fixture.registry.join(format!("worker-{NONCE}")).join("owner.json");
+    let original = read_owner(&record).unwrap();
+    assert_eq!(original["guardian_drain"], "available");
+    assert_eq!(
+        request_original_guardian_drain(&record, &process, Duration::from_secs(1))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock,
+    );
+    let lock = fs::metadata(fixture.lock()).unwrap();
+    let writer = Contender::start(&fixture, worker);
+
+    // Only the harness’s own unreaped service Child receives fixture signals.
+    assert!(server.0.try_wait().unwrap().is_none());
+    let target = rustix::process::Pid::from_raw(i32::try_from(server.0.id()).unwrap()).unwrap();
+    rustix::process::kill_process(target, rustix::process::Signal::STOP).unwrap();
+    wait_until(|| stopped(&requester));
+    let mut stale = process.clone();
+    stale.start = "wrong-recovery-birth".to_owned();
+    assert!(request_original_guardian_drain(&record, &stale, Duration::from_secs(1)).is_err());
+    let before = fixture.heartbeat();
+    wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
+    assert!(guardian.is_live().unwrap());
+    assert!(!fixture.root.join("contender-acquired.json").exists());
+
+    request_original_guardian_drain(&record, &process, Duration::from_secs(1)).unwrap();
+    assert_eq!(read_owner(&record).unwrap()["guardian_drain"], "requested");
+    wait_until_within(Duration::from_secs(1), || !process.is_live().unwrap());
+    // The original service still holds its open lifeline but cannot reap
+    // the dead worker. The guardian and writer gate preserve custody here.
+    assert!(stopped(&requester));
+    assert!(guardian.is_live().unwrap());
+    assert!(!fixture.root.join("contender-acquired.json").exists());
+    assert!(!fixture.root.join("test-rescue-used").exists());
+
+    rustix::process::kill_process(target, rustix::process::Signal::CONT).unwrap();
+    let acquired = writer.acquired();
+    assert!(!acquired.group_present && !acquired.worker_live);
+    assert!(acquired.managed_writer_ready);
+    assert_eq!(acquired.lock_identity, (lock.dev(), lock.ino()));
+    assert_eq!(writer.finish().payload_bytes_after_marker, 0);
+    wait_until(|| fixture.root.join("guardian-returned").exists());
+    assert!(!guardian.is_live().unwrap());
+    assert!(!fixture.root.join("test-rescue-used").exists());
+    fs::write(fixture.root.join("recovery-request-test-finished"), b"closed").unwrap();
+    assert!(server.wait().success());
+}
+
 pub(super) fn recovery_slot() -> NativeCapacitySlot {
     NativeCapacitySlot {
         key: "frozen-recoverer".to_owned(),

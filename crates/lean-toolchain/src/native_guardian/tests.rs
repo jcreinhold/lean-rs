@@ -391,7 +391,7 @@ fn fixture_server() {
         .join("recovery-slot")
         .exists()
         .then(service_loss_regressions::recovery_slot);
-    let generation = Generation::start_with_slot(&root, slot.as_ref());
+    let mut generation = Generation::start_with_slot(&root, slot.as_ref());
     fs::write(
         root.join("server-ready"),
         serde_json::to_vec(&json!({"worker":generation.worker.id(),
@@ -399,6 +399,11 @@ fn fixture_server() {
         .unwrap(),
     )
     .unwrap();
+    if root.join("reap-after-recovery-request").exists() {
+        assert_eq!(generation.reap().signal(), Some(libc::SIGKILL));
+        wait_until(|| root.join("recovery-request-test-finished").exists());
+        return;
+    }
     let until = Instant::now() + Duration::from_secs(6);
     while Instant::now() < until {
         thread::sleep(POLL);

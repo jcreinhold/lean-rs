@@ -81,6 +81,18 @@ impl NativeProcessIdentity {
         }
         Ok(native::snapshot(self.pid)?.is_some_and(|(start, live)| start == self.start && live))
     }
+    fn is_stopped(&self) -> io::Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            Ok(native::bsd_info(self.pid)?
+                .is_some_and(|info| native::bsd_start(&info) == self.start && info.pbi_status == libc::SSTOP))
+        }
+        #[cfg(not(target_os = "macos"))]
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "exact stopped state unavailable",
+        ))
+    }
 }
 /// The one default native namespace shared by all cooperating managed writers.
 /// # Errors
@@ -210,6 +222,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
                     | "capacity_slot"
                     | "recovery_claim"
                     | "original_worker_boot"
+                    | "guardian_drain"
             )
         })
     }) {
@@ -227,6 +240,14 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     let phase = field(value, "phase");
     let original_boot = value.get("original_worker_boot");
     let claim = value.get("recovery_claim");
+    if let Some(drain) = value.get("guardian_drain")
+        && (version != 3
+            || phase != "running"
+            || original_boot.is_none()
+            || !matches!(drain.as_str(), Some("available" | "requested")))
+    {
+        return Err(invalid("invalid original guardian drain state"));
+    }
     if version == 3 {
         if phase != "running" || (original_boot.is_none() && claim.is_none()) {
             return Err(invalid(
@@ -438,6 +459,106 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
     lock_admission(root, deadline(timeout)?, false)
 }
 
+/// Ask the original live guardian to drain a scope whose service is stopped.
+///
+/// This is a request to the existing custodian. Success confirms only durable
+/// delivery to the registry. An armed stage relies on its existing guardian
+/// deadline or lifeline. The reader/writer gate still observes closure.
+/// The supplied record and worker must come from a trusted managed scope.
+///
+/// # Errors
+/// Refuses unavailable or changed authority, including responsive services and
+/// guardians that did not advertise this path during startup.
+#[doc(hidden)]
+pub fn request_original_guardian_drain(
+    record: &Path,
+    worker: &NativeProcessIdentity,
+    timeout: Duration,
+) -> io::Result<()> {
+    let _lock = lock_publication(record, timeout)?;
+    validate_registry(
+        record
+            .parent()
+            .ok_or_else(|| invalid("native owner directory missing"))?,
+    )?;
+    let mut value = read_owner(record)?;
+    verify_original_worker_boot(&value)?;
+    if checked_identity(field(&value, "process"))? != *worker
+        || NativeProcessIdentity::capture(worker.pid)?.as_ref() != Some(worker)
+        || !matches!(
+            field(&value, "guardian_drain").as_str(),
+            Some("available" | "requested")
+        )
+    {
+        return Err(invalid("original guardian drain binding changed or unavailable"));
+    }
+    check_guardian_drain_eligibility(&value)?;
+    if field(&value, "guardian_drain") == "requested" {
+        return Ok(());
+    }
+    value
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?
+        .insert("guardian_drain".to_owned(), json!("requested"));
+    persist_recovery_owner(record, &value)
+}
+
+fn check_guardian_drain_eligibility(value: &Value) -> io::Result<()> {
+    let parent = checked_identity(field(value, "parent"))?;
+    let guardian = checked_identity(field(value, "guardian"))?;
+    if !parent.is_stopped()? || !guardian.is_live()? || guardian.is_stopped()? {
+        return Err(busy("original service is not stopped or guardian is unavailable"));
+    }
+    Ok(())
+}
+
+pub(super) fn publish_guardian_drain_support(
+    record: &Path,
+    worker: &NativeProcessIdentity,
+    guardian: &NativeProcessIdentity,
+) -> io::Result<bool> {
+    if !cfg!(target_os = "macos") {
+        return Ok(false);
+    }
+    let _lock = lock_publication(record, Duration::from_secs(2))?;
+    let mut value = read_owner(record)?;
+    validate_owner_header(&value)?;
+    if value.get("original_worker_boot").is_none() {
+        return Ok(false);
+    }
+    verify_original_worker_boot(&value)?;
+    if checked_identity(field(&value, "process"))? != *worker
+        || checked_identity(field(&value, "guardian"))? != *guardian
+        || guardian.pid != std::process::id()
+        || field(&value, "phase") != "running"
+        || value.get("guardian_drain").is_some()
+    {
+        return Err(invalid("original guardian drain advertisement differs"));
+    }
+    value
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?
+        .insert("guardian_drain".to_owned(), json!("available"));
+    persist_owner(record, &value)?;
+    Ok(true)
+}
+
+pub(super) fn original_guardian_drain_requested(record: &Path, guardian: &NativeProcessIdentity) -> io::Result<bool> {
+    let value = read_owner(record)?;
+    validate_owner_header(&value)?;
+    if checked_identity(field(&value, "guardian"))? != *guardian || guardian.pid != std::process::id() {
+        return Err(invalid("original guardian drain owner differs"));
+    }
+    if field(&value, "guardian_drain") != "requested" {
+        return Ok(false);
+    }
+    verify_original_worker_boot(&value)?;
+    // Admission checked the stopped service under the publication lock.
+    // Like an explicit stop, the committed request remains in effect if
+    // that service later resumes. The guardian alone drains its own scope.
+    Ok(true)
+}
+
 /// Publish the first recovery intent for an exact running worker after loss
 /// of the original service and its guardian. This arbitrates intent only.
 /// It conveys no authority to signal, take custody or reuse the worker slot.
@@ -498,6 +619,10 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     owner.insert("version".to_owned(), json!(3));
     owner.insert("scope".to_owned(), json!("inherited-process-group-v3"));
     owner.insert("recovery_claim".to_owned(), json!(RecoveryClaim { boot, claimant }));
+    persist_recovery_owner(record, &value)
+}
+
+fn persist_recovery_owner(record: &Path, value: &Value) -> io::Result<()> {
     // An eligible retry has the sole publication lock. Only owner.json is
     // committed evidence. A prior staging file cannot grant claim authority.
     let staged = record.with_extension("recovery-write");
@@ -514,7 +639,7 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    super::persist_owner_at(record, &value, "recovery-write")
+    super::persist_owner_at(record, value, "recovery-write")
 }
 
 /// Mark possible dispatch durably before invoking the spawn syscall.
@@ -963,7 +1088,7 @@ mod native {
         Err(invalid("native boot session identity unavailable"))
     }
     #[cfg(target_os = "macos")]
-    pub(super) fn snapshot(pid: u32) -> io::Result<Option<(String, bool)>> {
+    pub(super) fn bsd_info(pid: u32) -> io::Result<Option<libc::proc_bsdinfo>> {
         let native = i32::try_from(pid).map_err(io::Error::other)?;
         if native <= 0 {
             return Err(invalid("invalid process identity PID"));
@@ -1001,10 +1126,15 @@ mod native {
         if usize::try_from(got).ok() != Some(size) || info.pbi_pid != pid {
             return Err(invalid("incomplete process identity observation"));
         }
-        Ok(Some((
-            format!("macos:{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
-            info.pbi_status != libc::SZOMB,
-        )))
+        Ok(Some(info))
+    }
+    #[cfg(target_os = "macos")]
+    pub(super) fn bsd_start(info: &libc::proc_bsdinfo) -> String {
+        format!("macos:{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec)
+    }
+    #[cfg(target_os = "macos")]
+    pub(super) fn snapshot(pid: u32) -> io::Result<Option<(String, bool)>> {
+        Ok(bsd_info(pid)?.map(|info| (bsd_start(&info), info.pbi_status != libc::SZOMB)))
     }
     #[cfg(target_os = "linux")]
     pub(super) fn snapshot(pid: u32) -> io::Result<Option<(String, bool)>> {
