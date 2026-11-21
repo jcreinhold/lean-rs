@@ -47,7 +47,7 @@ RUN_PUBLIC_API=1
 USE_DOCKER=0
 DOCKER_PLATFORM=""
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 DOCKERFILE="$REPO_ROOT/scripts/Dockerfile.prerelease"
 DOCKER_IMAGE_TAG="lean-rs-prerelease"
 
@@ -391,10 +391,14 @@ check_head_consistency() {
 
 	# Committed lean-toolchain pins (sanitizer.yml/compile-fail.yml have
 	# no repin step; they build against these).
-	local f
+	local f tracked_pins
+	if ! tracked_pins=$(git -C "$REPO_ROOT" ls-files -- 'lean-toolchain' ':(glob)**/lean-toolchain') || [[ -z "$tracked_pins" ]]; then
+		log_err "could not enumerate tracked Lean pins in $REPO_ROOT"
+		return 1
+	fi
 	while IFS= read -r f; do
-		grep -qx "leanprover/lean4:v$head" "$f" || problems+=("$f does not pin v$head")
-	done < <(find "$REPO_ROOT" -name lean-toolchain -type f -not -path '*/.git/*' -not -path '*/target/*')
+		grep -Fqx "leanprover/lean4:v$head" "$REPO_ROOT/$f" || problems+=("$f does not pin v$head")
+	done <<< "$tracked_pins"
 
 	# Workflow heads.
 	local wf
@@ -403,11 +407,13 @@ check_head_consistency() {
 			problems+=(".github/workflows/$wf LEAN_VERSION_HEAD != $head")
 	done
 
-	# Default matrices (release.yml's verify + ci.yml's two-cell matrix).
+	# Check the release matrix and the CI matrix's fallback expression.
 	grep -q "lean_version: \[\"$head\"\]" "$REPO_ROOT/.github/workflows/release.yml" ||
 		problems+=("release.yml verify matrix != $head")
-	grep -q "lean_version: \[\"$head\"\]" "$REPO_ROOT/.github/workflows/ci.yml" ||
-		problems+=("ci.yml default matrix != $head")
+	python3 -B "$REPO_ROOT/scripts/check_ci_default_lean.py" "$REPO_ROOT/.github/workflows/ci.yml" "$head" ||
+		problems+=("ci.yml default matrix check failed")
+	(cd "$REPO_ROOT" && python3 -B -m unittest scripts.tests.test_ci_default_lean) ||
+		problems+=("CI default matrix check fixtures failed")
 
 	# Head-gated steps in ci.yml (actionlint, package/docs.rs simulation,
 	# nightly install, public-API diff) must key on the head.
@@ -534,7 +540,7 @@ fi
 # instead so the script also works on aarch64 hosts.
 #
 # Keep Docker runs serial to stay within their VM memory limit.
-run_nextest() {
+run_nextest() (
 	if [[ "$LEAN_VERSION" == "4.36.0" && -z "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then
 		log_err "Worker test setup failed; workspace tests did not start"
 		return 1
@@ -542,6 +548,27 @@ run_nextest() {
 	local env_args=(env RUST_BACKTRACE=0)
 	if [[ "$OS_KIND" == "Linux" ]]; then
 		env_args+=("LD_PRELOAD=libgcc_s.so.1")
+	elif [[ -z "${LEAN_RS_TEST_IPC_BASE:-}" ]]; then
+		# Reuse the outer target for an export directly below it. The shared
+		# reader and recovery fixtures both add their own socket name suffixes.
+		local ipc_parent ipc_base
+		ipc_parent=$(dirname "$REPO_ROOT")
+		if [[ "$(basename "$ipc_parent")" != target ]]; then
+			ipc_parent="$REPO_ROOT/target"
+		fi
+		mkdir -p "$ipc_parent" || return
+		ipc_parent=$(cd "$ipc_parent" && pwd -P) || return
+		ipc_base=$(mktemp -d "$ipc_parent/i.XXXXXX") || return
+		trap '
+			status=$?
+			if ! rmdir "$ipc_base"; then
+				log_err "could not remove private Nextest IPC base: $ipc_base"
+				status=1
+			fi
+			exit "$status"
+		' EXIT
+		env_args+=("LEAN_RS_TEST_IPC_BASE=$ipc_base")
+		log_step "Using private Nextest IPC base $ipc_base"
 	fi
 	if [[ -f /.dockerenv ]]; then
 		env_args+=("NEXTEST_TEST_THREADS=1")
@@ -558,7 +585,7 @@ run_nextest() {
 	else
 		"${env_args[@]}" cargo nextest run --workspace --profile ci -j1
 	fi
-}
+)
 
 run_gate "cargo nextest run --workspace --profile ci" \
 	run_nextest

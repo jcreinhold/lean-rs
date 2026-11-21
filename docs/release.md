@@ -41,6 +41,10 @@ Keep this checkout and its installed toolchain unchanged until the script finish
 build or clean. This is trusted job ownership, not protection against arbitrary same-user writes.
 The opt-in covers only ordinary scalar/callback tests; shared-reader and custody tests keep their real guards.
 
+On macOS the prerelease script gives workspace Nextest a short, private socket directory under `target` and removes
+it when the tests exit. An export directly below `target` uses that outer directory to keep Unix socket paths short.
+For a longer checkout path, set `LEAN_RS_TEST_IPC_BASE` to a short, canonical directory you own with mode `0700`.
+
 ## Interop checks
 
 For changes to callback, progress, or worker streaming contracts, run these targeted checks in addition to the workspace

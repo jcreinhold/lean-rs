@@ -38,7 +38,8 @@ together.
 
 When the candidate becomes the head, update these together:
 
-- The default `lean_version` and head-gated steps in `ci.yml`.
+- The fallback JSON list in `jobs.check.strategy.matrix.lean_version` and the head-gated steps in `ci.yml`.
+  `scripts/check_ci_default_lean.py` checks the fallback against the supported window head.
 - `LEAN_VERSION_HEAD` in `release.yml`, `release-recover.yml`, `sanitizer.yml`, and `compile-fail.yml`; the release
   verification matrix; and `DEFAULT_LEAN_VERSION` in [`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh).
 - Every tracked `lean-toolchain` file. Find the pins with `git ls-files '*lean-toolchain'`; this includes bundled shims,
