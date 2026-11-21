@@ -373,6 +373,12 @@ missing observation. A preview expires as soon as the locks are released.
 `lean_rs_writer::recover_idle_writer_storage_turn` repeats the inspection. A successful settlement requires
 matching Idle records for that turn on every original inode, an explicit empty process disposition, and the
 original command-only scope. It reopens every charged directory and checks the selected charge file.
+For a source-bound turn the writer records `scratch_identity: [device, inode]` from the directory it
+created on every original project lock before publishing the scratch binding in the charge. Inspection
+and recovery require that pair to agree with the charge, even after cleanup intent when the name is
+absent. Earlier source-bound records without the pair stay charged. Turns without a source handoff keep
+their existing record format and recovery rules. This check assumes private records and cooperating
+writers. An actor able to rewrite both the lock records and the charge can substitute both identities.
 Opportunistic disjoint admission limits cleanup to 32 levels and 4096 entries. Explicit recovery walks the
 selected tree through held directory descriptors while retaining its original exclusive locks. A filesystem
 boundary, an I/O error or a process descriptor limit can interrupt cleanup and leave the turn charged.

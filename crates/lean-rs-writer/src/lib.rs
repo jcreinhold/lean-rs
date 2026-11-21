@@ -182,6 +182,8 @@ struct Record {
     storage_turn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     command_phase: Option<CommandPhase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scratch_identity: Option<[u64; 2]>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1325,7 +1327,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     let mut file = files.next().ok_or_else(|| invalid("writer primary loan missing"))?;
     let loans: Vec<_> = files.collect();
     let current = std::process::id();
-    let record = Record {
+    let mut record = Record {
         version: PROTOCOL,
         owner: Owner {
             version: PROTOCOL,
@@ -1336,17 +1338,22 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         process: None,
         storage_turn: managed.as_ref().map(|(_, charge)| charge.turn().to_owned()),
         command_phase: command_only.then_some(CommandPhase::Idle),
+        scratch_identity: None,
     };
     persist_all(&mut file, &loans, &record)?;
-    // No path or GO is exposed until the exact managed scratch is durable.
-    let (scratch_parent, mut charge) = match managed {
-        Some((parent, charge)) => (Some(parent), Some(charge)),
-        None => (None, None),
-    };
+    let mut pending_handoff = args.storage_request.as_ref().filter(|r| r.requires_handoff());
+    let (scratch_parent, mut charge) = managed.unzip();
     let scratch = match (&scratch_parent, &mut charge) {
         (Some(parent), Some(charge)) => {
             let scratch = parent.create(charge.turn())?;
-            charge.bind_scratch_for_turn(scratch.binding()?, command_only, admission)?;
+            let binding = scratch.binding()?;
+            if pending_handoff.is_some() {
+                // Publish the writer-created identity on every original lock
+                // before this charge becomes recoverable or scratch is exposed.
+                record.scratch_identity = Some([binding.device, binding.inode]);
+                persist_all(&mut file, &loans, &record)?;
+            }
+            charge.bind_scratch_for_turn(binding, command_only, admission)?;
             Some(scratch)
         }
         _ => None,
@@ -1360,7 +1367,6 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
             .canonicalize()?,
     };
     let mut confirmed_close = false;
-    let mut pending_handoff = args.storage_request.as_ref().filter(|r| r.requires_handoff());
     let result = (|| -> io::Result<()> {
         let mut ready = serde_json::Map::from_iter([
             ("state".to_owned(), json!("locked")),

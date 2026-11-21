@@ -221,6 +221,27 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     assert!(scratch.is_dir());
     let original = fs::read(&secondary)?;
     let mut starting: Value = serde_json::from_slice(&original)?;
+    let created = scratch.metadata()?;
+    assert_eq!(starting["scratch_identity"], json!([created.dev(), created.ino()]));
+    assert_eq!(fs::read(&primary)?, original);
+    // Earlier source-bound turns lack the independent identity on their locks.
+    let mut earlier = starting.clone();
+    earlier.as_object_mut().expect("owner").remove("scratch_identity");
+    for lock in [&primary, &secondary] {
+        fs::write(lock, format!("{earlier}\n"))?;
+    }
+    for recover in [false, true] {
+        let report = inspect(recover);
+        assert_eq!(report["state"], "refused", "{report}");
+        assert!(
+            report["reason"]
+                .as_str()
+                .is_some_and(|s| s.contains("scratch identity"))
+        );
+        assert_eq!(fs::read(&entry)?, saved_charge);
+    }
+    fs::write(&primary, &original)?;
+    fs::write(&secondary, &original)?;
     starting["command_phase"] = json!("starting");
     let starting = format!("{starting}\n");
     fs::write(&secondary, &starting)?;
@@ -258,7 +279,35 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     fs::rename(&scratch, &displaced)?;
     assert_eq!(inspect(true)["state"], "refused");
     assert_eq!(fs::read(&entry)?, saved_charge);
-    fs::rename(displaced, &scratch)?;
+    // A fresh inspection sees a valid charge naming the replacement inode.
+    // Only the independent record on the original EX union can disprove it.
+    fs::create_dir(&scratch)?;
+    let replacement = root(&scratch)?;
+    let check_rewritten_charge = || -> io::Result<()> {
+        let original = fs::read(&entry)?;
+        let mut changed: Value = serde_json::from_slice(&original)?;
+        changed["scratch"] = serde_json::to_value(&replacement)?;
+        let rewritten = serde_json::to_vec(&changed)?;
+        fs::write(&entry, &rewritten)?;
+        for recover in [false, true] {
+            let report = inspect(recover);
+            assert_eq!(report["reservation"]["scratch"], changed["scratch"]);
+            assert_eq!(report["state"], "refused", "{report}");
+            assert!(
+                report["reason"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("scratch identity")),
+                "{report}"
+            );
+            assert_eq!(fs::read(&entry)?, rewritten);
+        }
+        fs::write(&entry, original)
+    };
+    fs::write(scratch.join("sentinel"), b"keep")?;
+    check_rewritten_charge()?;
+    assert_eq!(fs::read(scratch.join("sentinel"))?, b"keep");
+    fs::rename(&scratch, fixture.join("replacement"))?;
+    fs::rename(&displaced, &scratch)?;
     // A disjoint admission attempts cleanup but leaves the deep turn charged.
     let other = fixture.join("disjoint-project");
     fs::create_dir(&other)?;
@@ -270,6 +319,12 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     assert_eq!(marked["scratch_cleanup_started"], true);
     send(&mut disjoint, &json!({"action":"close"}))?;
     assert!(disjoint.wait()?.success());
+
+    // With the name absent, the cleanup mark cannot authenticate an edited charge.
+    fs::rename(&scratch, &displaced)?;
+    check_rewritten_charge()?;
+    assert_eq!(inspect(false)["state"], "eligible");
+    fs::rename(&displaced, &scratch)?;
 
     // Interrupt the actual operator walk with a kernel descriptor limit.
     // The normal retry resumes using the original directory and custody.

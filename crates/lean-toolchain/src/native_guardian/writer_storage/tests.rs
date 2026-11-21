@@ -64,15 +64,18 @@ fn lock(project: &Path) -> (PathBuf, File) {
     (path, file)
 }
 
-fn publish_idle_records(locks: &[(PathBuf, File)], turn: &str) -> io::Result<()> {
+fn publish_idle_records(locks: &[(PathBuf, File)], turn: &str, scratch: Option<&StorageRoot>) -> io::Result<()> {
     let pid = std::process::id();
-    let record = serde_json::json!({
+    let mut record = serde_json::json!({
         "version": 1,
         "owner": {"version": 1, "pid": pid, "start": "fixture", "session": pid},
         "process": null,
         "storage_turn": turn,
         "command_phase": "idle"
     });
+    if let Some(scratch) = scratch {
+        record["scratch_identity"] = serde_json::json!([scratch.device, scratch.inode]);
+    }
     for (_, file) in locks {
         let mut file = file.try_clone()?;
         file.set_len(0)?;
@@ -399,7 +402,7 @@ fn interrupted_publication_preserves_the_exact_charge() -> io::Result<()> {
     charge.bind_scratch_for_turn(binding.clone(), true, TIMEOUT)?;
 
     let bound = fs::read(&entry)?;
-    publish_idle_records(&first, &turn)?;
+    publish_idle_records(&first, &turn, None)?;
     CHARGE_WRITE_CUT.set(Some(ChargeWriteCut::DuringWrite));
     assert!(charge.begin_command_only_scratch_cleanup(TIMEOUT).is_err());
     assert!(staged.try_exists()?);
@@ -490,8 +493,9 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
         let turn = charge.turn().to_owned();
         let scratch = root.join(format!("lean-writer-assets-{turn}"));
         fs::create_dir(&scratch)?;
-        charge.bind_scratch_for_turn(expected(scratch.clone()), true, TIMEOUT)?;
-        publish_idle_records(&locks, &turn)?;
+        let binding = expected(scratch.clone());
+        publish_idle_records(&locks, &turn, Some(&binding))?;
+        charge.bind_scratch_for_turn(binding, true, TIMEOUT)?;
         (turn, scratch)
     };
 
@@ -559,6 +563,13 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
         let secondary = &locks.last().unwrap().0;
         let idle = fs::read(secondary)?;
         let record: serde_json::Value = serde_json::from_slice(&idle)?;
+        let mut changed = record.clone();
+        let different = expected(root.clone());
+        changed["scratch_identity"] = serde_json::json!([different.device, different.inode]);
+        fs::write(secondary, format!("{changed}\n"))?;
+        let refusal = snapshot.reclaim(&locks, no_pin, |()| Ok(())).unwrap_err();
+        assert!(refusal.to_string().contains("scratch identity"));
+        assert_eq!(fs::read(&entry)?, original);
         let mut no_disposition = record.clone();
         no_disposition.as_object_mut().unwrap().remove("process");
         let mut running = record.clone();

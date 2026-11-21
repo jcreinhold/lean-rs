@@ -646,9 +646,14 @@ struct IdleLockRecord {
     process: (),
     storage_turn: String,
     command_phase: IdlePhase,
+    scratch_identity: Option<[u64; 2]>,
 }
 
-fn require_idle_lock_owner(locks: &[(PathBuf, File)], turn: &str) -> io::Result<WriterLockOwner> {
+fn require_idle_lock_owner(
+    locks: &[(PathBuf, File)],
+    turn: &str,
+    expected_scratch: Option<[u64; 2]>,
+) -> io::Result<WriterLockOwner> {
     let mut prior = None;
     for (_, file) in locks {
         // Use the supplied open description so a correct loan keeps holding
@@ -663,7 +668,13 @@ fn require_idle_lock_owner(locks: &[(PathBuf, File)], turn: &str) -> io::Result<
             process: (),
             storage_turn,
             command_phase: IdlePhase::Idle,
+            scratch_identity,
         } = serde_json::from_slice(&bytes).map_err(|error| invalid(format!("missing durable Idle record: {error}")))?;
+        if scratch_identity != expected_scratch {
+            return Err(invalid(
+                "writer lock scratch identity missing or differs from the charge",
+            ));
+        }
         if version != WRITER_OWNER_PROTOCOL
             || owner.version != WRITER_OWNER_PROTOCOL
             || owner.pid == 0
@@ -786,6 +797,16 @@ impl WriterStorageTurn {
         Ok((parent, scratch, self.charge.scratch_cleanup_started))
     }
 
+    /// Check the original Idle lock records before reporting an eligible preview.
+    /// # Errors
+    /// Refuses a changed lock union, missing owner evidence or a different scratch identity.
+    pub fn check_idle_owner(&self, locks: &[(PathBuf, File)]) -> io::Result<()> {
+        let (_, scratch, _) = self.scratch()?;
+        self.charge.check_bindings(locks)?;
+        require_idle_lock_owner(locks, &self.turn, self.charge.owner_scratch_identity(scratch))?;
+        Ok(())
+    }
+
     /// Settle the inspected turn using the independently acquired EX
     /// descriptions from `Self::try_locks` and its matching Idle records.
     /// The callbacks pin and remove the bound scratch.
@@ -817,6 +838,10 @@ fn same_inode(first: &File, second: &File) -> io::Result<bool> {
 }
 
 impl Charge {
+    fn owner_scratch_identity(&self, scratch: &StorageRoot) -> Option<[u64; 2]> {
+        self.handoff_sha256.as_ref().map(|_| [scratch.device, scratch.inode])
+    }
+
     fn check_bindings(&self, locks: &[(PathBuf, File)]) -> io::Result<()> {
         if locks.len().checked_sub(1) != Some(self.secondary_locks.len()) {
             return Err(invalid("writer recovery lacks the original lock union"));
@@ -955,7 +980,8 @@ fn reclaim_idle_with<T>(
     }
     charge.check_bindings(locks)?;
     let (_, scratch) = charge.scratch_binding(turn)?;
-    let idle_owner = require_idle_lock_owner(locks, turn)?;
+    let expected_scratch = charge.owner_scratch_identity(scratch);
+    let idle_owner = require_idle_lock_owner(locks, turn, expected_scratch)?;
     let pinned = pin_scratch(scratch, charge.scratch_cleanup_started)?;
     let entry = charge.begin_scratch_cleanup(&dir, turn, entry)?;
     drop(mutex);
@@ -966,7 +992,7 @@ fn reclaim_idle_with<T>(
     let named_dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory disappeared"))?;
     let (named_charge, named_entry) = Charge::read_bound(&named_dir, turn)?;
     charge.check_bindings(locks)?;
-    if require_idle_lock_owner(locks, turn)? != idle_owner {
+    if require_idle_lock_owner(locks, turn, expected_scratch)? != idle_owner {
         return Err(invalid("writer recovery lock owner changed before settlement"));
     }
     if !same_inode(&dir, &named_dir)? || !same_inode(&entry, &named_entry)? || named_charge != charge {

@@ -97,6 +97,7 @@ impl Fixture {
             process: None,
             storage_turn: None,
             command_phase: None,
+            scratch_identity: None,
         };
         persist(&mut file, &record).unwrap();
         persist(&mut loan, &record).unwrap();

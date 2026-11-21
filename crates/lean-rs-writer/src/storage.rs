@@ -329,6 +329,7 @@ pub(super) fn exact_turn(registry: &StorageRoot, turn: &str, recover: bool) -> (
                 },
             )?;
         } else {
+            snapshot.check_idle_owner(&locks)?;
             parent.pin_recovery(scratch, started)?;
         }
         Ok(())

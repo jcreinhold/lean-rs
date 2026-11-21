@@ -150,6 +150,7 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
         .as_str()
         .expect("managed lock turn");
     assert!(locked_owner.get("command_phase").is_none());
+    assert!(locked_owner.get("scratch_identity").is_none());
     assert_eq!(
         assets.file_name().and_then(|name| name.to_str()),
         Some(format!("lean-writer-assets-{turn}").as_str())
@@ -356,6 +357,7 @@ fn command_only_idle_recovery_keeps_substitutions_and_retries_cleanup() -> io::R
         assert_eq!(field(&reply(&mut reader)?, "owned_work_stopped"), true);
         let owner: Value = serde_json::from_slice(&fs::read(&lock)?)?;
         assert_eq!(field(&owner, "command_phase"), "idle");
+        assert!(owner.get("scratch_identity").is_none());
         let charge = registry
             .join(".writer-storage-v1")
             .join(field(&owner, "storage_turn").as_str().expect("idle turn"));
