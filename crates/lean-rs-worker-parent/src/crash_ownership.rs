@@ -223,6 +223,21 @@ impl LeanWorkerNativeScope {
         ParentLifetime::prepare_guarded_with_slot(registry, timeout, slot).map(Self)
     }
 
+    /// Reserve the same guarded scope with its temporary socket under an explicit private directory.
+    /// The durable generation record and optional capacity slot remain in `registry`.
+    ///
+    /// # Errors
+    /// Returns an error before admission if the socket root is noncanonical, is not owned
+    /// by the caller with mode 0700, or cannot fit the platform's Unix socket path limit.
+    pub fn prepare_with_socket_directory(
+        registry: &Path,
+        timeout: Duration,
+        slot: Option<&native_guardian::NativeCapacitySlot>,
+        socket_directory: &Path,
+    ) -> io::Result<Self> {
+        ParentLifetime::prepare_with_socket_directory(registry, Some(socket_directory), true, timeout, slot).map(Self)
+    }
+
     /// Create the private input directory owned by this preparing generation.
     /// # Errors
     /// Refuses aliased or invalid owned directories.

@@ -384,12 +384,11 @@ mod startup_traces;
 #[test]
 fn explicit_relative_socket_root_fails_before_owner_creation() {
     let owners = Path::new("unused-relative-owner-root");
-    let error = ParentLifetime::prepare_with_socket_directory(
+    let error = LeanWorkerNativeScope::prepare_with_socket_directory(
         owners,
-        Some(Path::new("relative")),
-        true,
         Duration::from_secs(1),
         None,
+        Path::new("relative"),
     )
     .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
@@ -419,14 +418,14 @@ fn explicit_socket_root_validation_and_cleanup() {
     for guarded in [false, true] {
         let owner_root = root.join(format!("owners-{}-{guarded}", std::process::id()));
         let owned = TestDirectory::create(owner_root.clone());
-        let lifetime = ParentLifetime::prepare_with_socket_directory(
-            &owner_root,
-            Some(&root),
-            guarded,
-            Duration::from_secs(1),
-            None,
-        )
-        .unwrap();
+        let lifetime = if guarded {
+            LeanWorkerNativeScope::prepare_with_socket_directory(&owner_root, Duration::from_secs(1), None, &root)
+                .unwrap()
+                .0
+        } else {
+            ParentLifetime::prepare_with_socket_directory(&owner_root, Some(&root), false, Duration::from_secs(1), None)
+                .unwrap()
+        };
         let directory = lifetime.socket_directory.clone();
         assert_eq!(directory.parent(), Some(root.as_path()));
         assert!(directory.join("parent.sock").exists());
