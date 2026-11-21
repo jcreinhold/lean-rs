@@ -1683,8 +1683,11 @@ def prepare_workspace_template(root):
     config = template / ".cargo/config.toml"
     config.parent.mkdir()
     config.write_text(stream_cargo_patch() + "\n")
+    # The workspace runner builds this template for its native target. Resolving
+    # other targets here would require their crates even in an offline native run.
+    host = subprocess.check_output(["rustc", "--print", "host-tuple"], cwd=template, text=True).strip()
     graph = json.loads(subprocess.check_output(
-        ["cargo", "metadata", "--offline", "--format-version", "1"], cwd=template))
+        ["cargo", "metadata", "--offline", "--format-version", "1", "--filter-platform", host], cwd=template))
     hosts = [Path(p["manifest_path"]) for p in graph["packages"] if p["name"] == "lean-rs-host"]
     require(hosts == [root / "crates/lean-rs-host/Cargo.toml"], "shipped template selected another host package")
 
