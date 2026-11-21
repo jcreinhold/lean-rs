@@ -71,11 +71,23 @@ mod tests {
 
     #[test]
     fn bundled_shim_manifest_contains_generated_signatures() {
-        let selection = crate::host::lake::ShimOutputSelection::resolve(None)
-            .expect("supported exact Lean sysroot selects shim outputs");
-        let built = crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures(), &selection)
-            .expect("bundled shim capability builds");
-        let manifest = CapabilityManifest::read(built.manifest_path()).expect("manifest parses");
+        let path = if let Some(selection) = option_env!("LEAN_RS_TEST_ORDINARY_HOST_SHIMS") {
+            #[derive(serde::Deserialize)]
+            struct Selection {
+                manifest: PathBuf,
+            }
+            serde_json::from_str::<Selection>(selection)
+                .expect("fixture shim selection")
+                .manifest
+        } else {
+            let selection = crate::host::lake::ShimOutputSelection::resolve(None)
+                .expect("supported exact Lean sysroot selects shim outputs");
+            crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures(), &selection)
+                .expect("bundled shim capability builds")
+                .manifest_path()
+                .to_owned()
+        };
+        let manifest = CapabilityManifest::read(&path).expect("manifest parses");
         let generated = signatures_by_symbol(host_shim_export_signatures());
         let manifest_exports = signatures_by_symbol(manifest.exports);
 

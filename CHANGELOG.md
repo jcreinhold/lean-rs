@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.2]
+
+- `LeanWorkerChild::application_launch_input` sends an application-defined UTF-8 value of up to 4096 bytes to the
+  selected child and its replacements. Omitting it clears any inherited value. The application validates the contents.
+  Worker protocol 13 is unchanged.
+- Lean callers can use `verifyDeclarationBatchWithSetup` in a fresh, supervised process to verify current file
+  contents with Lake's selected `ModuleSetup`. The caller enables initializer execution before importing and retains
+  the trusted setup and matching native artifacts through verification.
+
 ## [0.10.1]
 
 - Ordinary application-owned workers can open explicitly prepared host shims using

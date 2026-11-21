@@ -143,8 +143,10 @@ jobs:
       - name: Build Lake packages
         run: |
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
-          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
-          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake -R -KleanRsGeneratedShims=true build)
+          if [ "${{ matrix.lean_version }}" != "4.36.0" ]; then
+            (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
+            (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake -R -KleanRsGeneratedShims=true build)
+          fi
           # This fresh CI checkout belongs to this job until its tests exit.
           chmod 700 fixtures/lean fixtures/interop-shims crates/lean-rs/shims/lean-rs-interop-shims
           (cd fixtures/lean && lake build)

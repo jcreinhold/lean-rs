@@ -3619,8 +3619,7 @@ fn session_import_observes_lean_root_order_before_reusing_a_profile() {
         );
     }
 
-    let shims = lean_rs_host::host::prepare_host_artifacts().expect("prepare bundled shims");
-    let shim_paths = shims.shim_search_paths();
+    let shim_paths = fixture::native_shim_search_paths();
     let inherited_path =
         std::env::join_paths(std::iter::once(inherited.as_path()).chain(shim_paths.iter().map(PathBuf::as_path)))
             .expect("encode inherited path");
@@ -3688,8 +3687,7 @@ fn session_import_runs_the_selected_plugin_with_its_compiled_module() {
         .args(["-DLEAN_EXPORTING", "-shared", "-o"])
         .arg(&image)
         .arg("QualifiedPlugin.c"));
-    let shims = lean_rs_host::host::prepare_host_artifacts().expect("prepare bundled shims");
-    let paths = std::env::join_paths(shims.shim_search_paths()).expect("shim import paths");
+    let paths = std::env::join_paths(fixture::native_shim_search_paths()).expect("shim import paths");
     let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lean/session_import_plugin.lean");
     let marker = root.join("initialized");
     run(tool("lean")
@@ -3706,30 +3704,46 @@ fn session_import_runs_the_selected_plugin_with_its_compiled_module() {
 /// with the shim source so no test-only symbol enters the shipped library.
 #[test]
 fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
-    let package = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shims/lean-rs-host-shims");
-    let build = Command::new("lake")
-        .args(["build", "LeanRsHostShims.Elaboration"])
-        .current_dir(&package)
-        .output()
-        .expect("build probe imports");
-    assert!(
-        build.status.success(),
-        "probe imports: {}",
-        String::from_utf8_lossy(&build.stderr)
-    );
     let project = TempLakeProject::new("header-reuse-private-probe");
-    let source = fs::read_to_string(package.join("LeanRsHostShims/InfoTree.lean")).expect("read shim source");
+    let shim_paths = if fixture::native_fixture_selected() {
+        fixture::native_shim_search_paths()
+    } else {
+        // Standalone runs build just the probe's imports in its disposable project.
+        let shims = Path::new(env!("CARGO_MANIFEST_DIR")).join("shims");
+        let src_dir = |package: &str| serde_json::to_string(&shims.join(package)).expect("shim source directory");
+        project.write(
+            "lakefile.toml",
+            &format!(
+                "name = \"header_probe\"\n[[lean_lib]]\nname = \"LeanRsInterop\"\nsrcDir = {}\n\
+                 [[lean_lib]]\nname = \"LeanRsHostShims\"\nsrcDir = {}\n",
+                src_dir("lean-rs-interop-shims"),
+                src_dir("lean-rs-host-shims")
+            ),
+        );
+        let build = Command::new("lake")
+            .args(["build", "LeanRsHostShims.Elaboration", "LeanRsHostShims.Environment"])
+            .current_dir(project.path())
+            .output()
+            .expect("build probe imports");
+        assert!(
+            build.status.success(),
+            "probe imports: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        vec![project.path().join(".lake/build/lib/lean")]
+    };
+    let lean_path =
+        std::env::join_paths(std::iter::once(project.path()).chain(shim_paths.iter().map(PathBuf::as_path)))
+            .expect("probe import path");
+    let source = include_str!("../shims/lean-rs-host-shims/LeanRsHostShims/InfoTree.lean");
     project.write(
         "HeaderReuseProbe.lean",
         &format!("{source}\n{}", include_str!("lean/header_reuse_probe.lean")),
     );
-    let compile = Command::new("lake")
-        .args(["env", "lean", "-R"])
-        .arg(project.path())
-        .arg("-o")
-        .arg(project.path().join("HeaderReuseProbe.olean"))
-        .arg(project.path().join("HeaderReuseProbe.lean"))
-        .current_dir(&package)
+    let compile = Command::new("lean")
+        .args(["-o", "HeaderReuseProbe.olean", "HeaderReuseProbe.lean"])
+        .env("LEAN_PATH", &lean_path)
+        .current_dir(project.path())
         .output()
         .expect("compile header probe module");
     assert!(
@@ -3742,11 +3756,10 @@ fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
         "Run.lean",
         "import HeaderReuseProbe\n#eval LeanRsFixture.InfoTree.runHeaderReuseProbe\n",
     );
-    let result = Command::new("lake")
-        .args(["env", "lean"])
-        .env("LEAN_PATH", project.path())
-        .arg(project.path().join("Run.lean"))
-        .current_dir(package)
+    let result = Command::new("lean")
+        .arg("Run.lean")
+        .env("LEAN_PATH", &lean_path)
+        .current_dir(project.path())
         .output()
         .expect("run header reuse probe");
     assert!(

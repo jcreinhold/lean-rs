@@ -446,6 +446,10 @@ for dir in \
 	"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims" \
 	"$REPO_ROOT/fixtures/lean" \
 	"$REPO_ROOT/fixtures/interop-shims"; do
+	if [[ "$LEAN_VERSION" == "4.36.0" && "$dir" == "$REPO_ROOT/crates/lean-rs-host/shims/"* ]]; then
+		# The required worker gate builds these two packages in its private root.
+		continue
+	fi
 	log_step "lake build ($(basename "$dir"))"
 	if [[ "$dir" == "$REPO_ROOT/crates/lean-rs-host/shims/"* ]]; then
 		(cd "$dir" && lake -R -KleanRsGeneratedShims=true build)

@@ -1998,10 +1998,13 @@ private def resolveModuleHeader (env : Environment) (header : Lean.Elab.HeaderSy
 
 private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String) (policy : ModuleQueryCachePolicy)
-    (old? : Option ModuleSnapshot := none) :
+    (old? : Option ModuleSnapshot := none) (setup? : Option ModuleSetup := none) :
     IO (Except (LeanRsFixture.Elaboration.ElabFailure × Nat) (ModuleSnapshot × ModuleQueryTimings)) := do
   let headerStart ← IO.monoMsNow
   let opts ← LeanRsFixture.Elaboration.buildOptions heartbeats optionsJson
+  let opts := match setup? with
+    | none => opts
+    | some setup => maxHeartbeats.set (opts.mergeBy (fun _ _ v => v) setup.options.toOptions) heartbeats.toNat
   let inputCtx := Parser.mkInputContext source fileLabel
   let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
@@ -2010,10 +2013,16 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
 
   let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
   let loadedModules := env.header.moduleNames.map (·.toString)
-  let missing := userImports.filter (fun nm => ! loadedModules.contains nm)
+  let missing := if setup?.isSome then #[] else userImports.filter (fun nm => ! loadedModules.contains nm)
   let headerSource := String.Pos.Raw.extract source 0 parserState.pos
   let (commandEnv, initialMessages) ←
-    if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
+    if let some setup := setup? then
+      setup.dynlibs.forM Lean.loadDynlib
+      Lean.Elab.processHeaderCore (HeaderSyntax.startPos header) (setup.imports?.getD (HeaderSyntax.imports header))
+        (setup.isModule || HeaderSyntax.isModule header) opts headerMessages inputCtx
+        (plugins := setup.plugins) (mainModule := setup.name) (package? := setup.package?)
+        (arts := setup.importArts) (headerStx? := some header)
+    else if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
         resolveModuleHeader env header opts headerMessages inputCtx
           headerSource fileLabel heartbeats optionsJson
@@ -3017,15 +3026,14 @@ def verifyDeclaration
     else
       pure <| .missingImports status facts snapshot.imports snapshot.missing
 
-@[export lean_rs_host_verify_declaration_batch]
-def verifyDeclarationBatch
+private def verifyBatchCore
     (env : Environment) (request : DeclarationVerificationBatchRequest)
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
+    (old? : Option ModuleSnapshot) (setup? : Option ModuleSetup)
     : IO DeclarationVerificationBatchOutcome := do
-  let old? ← cachedSameFileSnapshot? env fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
-      (oneShotPolicy request.source fileLabel) old? with
+      (oneShotPolicy request.source fileLabel) old? setup? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
     let rows ← verifyDeclarationRows request snapshot fileLabel heartbeats
@@ -3033,6 +3041,24 @@ def verifyDeclarationBatch
       pure <| .ok rows snapshot.imports
     else
       pure <| .missingImports rows snapshot.imports snapshot.missing
+
+@[export lean_rs_host_verify_declaration_batch]
+def verifyDeclarationBatch
+    (env : Environment) (request : DeclarationVerificationBatchRequest)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
+    : IO DeclarationVerificationBatchOutcome := do
+  verifyBatchCore env request namespaceContext fileLabel heartbeats diagBytes optionsJson
+    (← cachedSameFileSnapshot? env fileLabel) none
+
+/-- Verify a current file in a fresh, supervised Lean process with its Lake-selected
+    setup. Its single-threaded frontend must enable initializer execution before importing,
+    use matching native images, and retain the trusted setup and artifacts through use.
+    This Lean-only path never consults the in-process snapshot or header cache. -/
+def verifyDeclarationBatchWithSetup (setup : ModuleSetup) (request : DeclarationVerificationBatchRequest)
+    (namespaceContext fileLabel : String) (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
+    : IO DeclarationVerificationBatchOutcome := do
+  verifyBatchCore (← mkEmptyEnvironment) request namespaceContext fileLabel heartbeats diagBytes optionsJson none (some setup)
 
 @[export lean_rs_host_clear_module_snapshot_cache]
 def clearModuleSnapshotCache (_unit : Unit) : IO ModuleSnapshotCacheClearResult := do

@@ -112,8 +112,10 @@ jobs:
         run: |
           chmod 700 fixtures/lean fixtures/interop-shims crates/lean-rs/shims/lean-rs-interop-shims
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
-          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
-          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake -R -KleanRsGeneratedShims=true build)
+          if [ "${{ matrix.lean_version }}" != "4.36.0" ]; then
+            (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake -R -KleanRsGeneratedShims=true build)
+            (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake -R -KleanRsGeneratedShims=true build)
+          fi
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
           if [ "$RUNNER_OS" = "Linux" ]; then

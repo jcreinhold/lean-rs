@@ -1,5 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+#[path = "support/shipped_template.rs"]
+mod shipped_template;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,14 +48,6 @@ fn interop_root() -> PathBuf {
     workspace_root().join("fixtures").join("interop-shims")
 }
 
-fn shipped_template_root() -> PathBuf {
-    workspace_root().join("templates").join("shipped-lean-crate")
-}
-
-fn shipped_template_manifest() -> PathBuf {
-    shipped_template_root().join("Cargo.toml")
-}
-
 fn shipped_template_target_dir() -> PathBuf {
     // Cargo serializes builds in this package-owned target across nextest processes.
     // Each process still asks Cargo to validate the selected sources and outputs.
@@ -75,7 +70,8 @@ fn build_shipped_template() -> &'static ShippedBuild {
     ONCE.get_or_init(|| {
         let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
             .args(["build", "--jobs", "1", "--manifest-path"])
-            .arg(shipped_template_manifest())
+            .arg("Cargo.toml")
+            .current_dir(shipped_template::root())
             .args(["--bins", "--examples", "--message-format=json"])
             .env("CARGO_TARGET_DIR", shipped_template_target_dir())
             .output()

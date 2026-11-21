@@ -1,5 +1,8 @@
 #![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
+#[path = "support/shipped_template.rs"]
+mod shipped_template;
+
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -22,13 +25,6 @@ fn workspace_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("crates/<name> lives two directories below the workspace root")
         .to_path_buf()
-}
-
-fn template_manifest() -> PathBuf {
-    workspace_root()
-        .join("templates")
-        .join("shipped-lean-crate")
-        .join("Cargo.toml")
 }
 
 fn template_target_debug() -> PathBuf {
@@ -61,7 +57,8 @@ fn build_template() {
     let debug = template_target_debug();
     let output = Command::new(cargo())
         .args(["build", "--jobs", "1", "--manifest-path"])
-        .arg(template_manifest())
+        .arg("Cargo.toml")
+        .current_dir(shipped_template::root())
         .args(["--bins", "--examples", "--target-dir"])
         .arg(debug.parent().expect("debug output has a target directory"))
         .output()
