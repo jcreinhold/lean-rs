@@ -317,8 +317,14 @@ fn prepare_typed_session(
         state.join("legacy")
     } else if stream {
         sdk.join("target/metadata-qualification/stream-package/fixtures/interop-worker")
-    } else {
+    } else if optional_whnf {
         sdk.join("fixtures/lean")
+    } else {
+        let selected = PathBuf::from(env::var_os("LEAN_RS_TEST_TYPED_PROJECT").ok_or("missing typed fixture project")?);
+        if selected != sdk.join("fixtures/lean") && selected != state.join("lean") {
+            return Err("typed fixture project is outside the approved job roots".into());
+        }
+        selected
     };
     let project = expected_project.canonicalize()?;
     // The trusted job already built this exact checkout fixture once and keeps

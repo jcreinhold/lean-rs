@@ -2024,13 +2024,12 @@ def ordinary_host_shim_selection(release, selected):
     ), image_pins
 
 
-def adapter_host_inputs(release, record, pinned_digest):
+def adapter_host_inputs(release, record, pinned_digest, fixture):
     with record.open("rb") as stream:
         data = stream.read(16 * 1024**2 + 1)
     require(len(data) <= 16 * 1024**2, "typed record exceeds fixture bound")
     require(hashlib.sha256(data).hexdigest() == pinned_digest, "typed record changed")
     selected = json.loads(data)
-    fixture = SDK / "fixtures/lean"
     require(Path(selected["project"]) == fixture, "adapter selects a different project")
     native = "dylib" if platform.system() == "Darwin" else "so"
     image = fixture / ".lake/build/lib" / f"liblean__rs__fixture_LeanRsFixture.{native}"
@@ -2048,15 +2047,27 @@ def adapter_host_inputs(release, record, pinned_digest):
     }
 
 
-def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
-    state = parent / "typed-session"
-    state.mkdir(mode=0o700)
-    owner = state.stat()
+def prepare_typed_worker(state, fixture, release, run, env, cargo, descriptor):
+    require(
+        fixture in (SDK / "fixtures/lean", state / "lean"),
+        "unapproved typed fixture root",
+    )
+    require(
+        fixture == fixture.resolve(strict=True) and fixture.is_dir(),
+        "aliased typed fixture root",
+    )
+    owner = fixture.stat()
+    require(
+        owner.st_uid == os.geteuid() and stat.S_IMODE(owner.st_mode) == 0o700,
+        "typed fixture root is not private and job-owned",
+    )
     scratch = state / "tmp"
     scratch.mkdir(mode=0o700)
     env.clear()
     env.update(
-        build_environment(release, scratch), LEAN_RS_PREPARED_HOST_ARTIFACTS=descriptor
+        build_environment(release, scratch),
+        LEAN_RS_PREPARED_HOST_ARTIFACTS=descriptor,
+        LEAN_RS_TEST_TYPED_PROJECT=str(fixture),
     )
     run([TARGET / "debug/prepare", state, "--typed-session"], APP)
     record = state / "deployment.json"
@@ -2084,7 +2095,7 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
         {
             "worker": str(worker),
             "worker_sha256": fixture_worker_digest(worker),
-            "fixture": str(SDK / "fixtures/lean"),
+            "fixture": str(fixture),
             "json_manifest": str(manifest),
             "sysroot": str(release),
             "prepared": json.loads(descriptor),
@@ -2095,9 +2106,22 @@ def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
         len(selection.encode()) <= 64 * 1024, "typed selection exceeds launch limit"
     )
     env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"] = selection
+    return record, events
+
+
+def qualify_typed_group(parent, release, profile, run, env, cargo, descriptor):
+    state = parent / "typed-session"
+    state.mkdir(mode=0o700)
+    owner = state.stat()
+    fixture = SDK / "fixtures/lean"
+    record, events = prepare_typed_worker(
+        state, fixture, release, run, env, cargo, descriptor
+    )
     # These direct-host pins are compiled into the parity test and checked at runtime.
     env.update(
-        adapter_host_inputs(release, record, env["LEAN_RS_METADATA_DEPLOYMENT_SHA256"])
+        adapter_host_inputs(
+            release, record, env["LEAN_RS_METADATA_DEPLOYMENT_SHA256"], fixture
+        )
     )
     select_nextest_runner(env, profile)
 

@@ -542,6 +542,8 @@ class MetadataQualificationTest(unittest.TestCase):
         manifest = self.mock_private_package()
         broken = self.state.with_name("broken-import")
         typed = self.state.with_name("typed-session")
+        fixture = self.sdk / "fixtures/lean"
+        fixture.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.worker.chmod(0o500)
         seen = []
         host, interop = (str(self.sdk / image) for image in ("host", "interop"))
@@ -560,7 +562,7 @@ class MetadataQualificationTest(unittest.TestCase):
             if command[-1] == "--broken-import":
                 (broken / "deployment.json").write_text(json.dumps(record))
             elif command[-1] == "--typed-session":
-                fixture = self.sdk / "fixtures/lean"
+                self.assertEqual(env["LEAN_RS_TEST_TYPED_PROJECT"], str(fixture))
                 native = (
                     "dylib" if qualification.platform.system() == "Darwin" else "so"
                 )
@@ -722,6 +724,26 @@ class MetadataQualificationTest(unittest.TestCase):
             else 6 + len(qualification.ORDINARY_AUDITED_TESTS),
         )
         return seen, output.getvalue()
+
+    def test_typed_worker_rejects_shared_or_unselected_project_before_preparation(self):
+        state = self.state.with_name("typed-session")
+        state.mkdir(mode=0o700)
+        shared = self.sdk / "fixtures/lean"
+        shared.mkdir(mode=0o755, parents=True)
+        wrong = state / "other"
+        wrong.mkdir(mode=0o700)
+        for fixture, error in (
+            (shared, "typed fixture root is not private and job-owned"),
+            (wrong, "unapproved typed fixture root"),
+        ):
+            with (
+                self.subTest(fixture=fixture),
+                self.assertRaisesRegex(ValueError, error),
+            ):
+                qualification.prepare_typed_worker(
+                    state, fixture, self.target, None, {}, [], "{}"
+                )
+            self.assertFalse((state / "tmp").exists())
 
     def test_typed_group_reuses_prepared_shims_and_excludes_only_completed_tests(self):
         seen, output = self.run_typed_selection()

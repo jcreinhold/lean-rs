@@ -69,6 +69,9 @@ impl LeanWorker {
             )?;
             self.request_started = Some(now);
             self.record_request(false);
+            #[cfg(all(test, target_os = "macos"))]
+            tests::after_real_dispatch(self, arm);
+
             let response = self.read_response_with_progress(OPERATION, None, Some(&token))?;
             if let Response::DeclarationInspection { result } = response {
                 Ok(result)

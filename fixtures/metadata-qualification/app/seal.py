@@ -241,6 +241,12 @@ def main():
         project = state / "legacy"
     elif scalar:
         project = state / "lean"
+    elif typed and not stream and not optional_whnf:
+        project = Path(os.environ["LEAN_RS_TEST_TYPED_PROJECT"])
+        assert project in (sdk / "fixtures/lean", state / "lean"), project
+        assert project == project.resolve(strict=True) and project.is_dir(), project
+        owner = project.stat()
+        assert owner.st_uid == os.geteuid() and owner.st_mode & 0o7777 == 0o700, project
     assert Path(rec["project"]) == project
     foreign = Path(rec["foreign_workspace"]) if rec.get("foreign_workspace") else None
     if foreign:
