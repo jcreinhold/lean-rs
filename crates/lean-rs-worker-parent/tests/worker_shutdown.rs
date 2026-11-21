@@ -56,7 +56,14 @@ const FAKE_IMPORT_RESIDUE_BYTES: u64 = 1_000;
 //
 //   cargo nextest run -p lean-rs-worker-parent --profile ci
 //
+const LAUNCH_INPUT_CASE: &str = "worker_application_launch_input";
+const INPUT_ENV: &str = "LEAN_RS_WORKER_APPLICATION_INPUT";
+
 fn main() {
+    if env::args().nth(1).as_deref() == Some("--test-launch-input-parent") {
+        check_application_launch_input();
+        return;
+    }
     if let Ok(mode) = env::var(FAKE_CHILD_ENV) {
         run_fake_child(&mode);
         return;
@@ -73,18 +80,37 @@ fn main() {
             "--ignored" => ignored = true,
             "--format" if args.next() == Some("terse") => {}
             "--format=terse" | "--exact" | "--nocapture" | "--quiet" => {}
-            CASE if selected.is_none() => selected = Some(arg),
+            CASE | LAUNCH_INPUT_CASE if selected.is_none() => selected = Some(arg),
             _ => panic!("unsupported worker shutdown test argument: {arg}"),
         }
     }
     if listing {
         if !ignored {
             println!("{CASE}: test");
+            println!("{LAUNCH_INPUT_CASE}: test");
         }
         return;
     }
     if ignored {
         return;
+    }
+
+    if selected != Some(CASE) {
+        // Use a fresh parent environment without mutating the test process.
+        let status = std::process::Command::new(env::current_exe().expect("test executable"))
+            .arg("--test-launch-input-parent")
+            // Cargo/Nextest inject these library search paths for test executables.
+            // This self-contained fake child needs neither.
+            .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
+            .env_remove("LD_LIBRARY_PATH")
+            .env(INPUT_ENV, "ambient")
+            .env(FAKE_CHILD_ENV, "launch_input")
+            .status()
+            .expect("isolated application input test parent");
+        assert!(status.success());
+        if selected == Some(LAUNCH_INPUT_CASE) {
+            return;
+        }
     }
 
     public_worker_handles_keep_unwind_safety();
@@ -276,6 +302,50 @@ fn main() {
     }
 }
 
+fn check_application_launch_input() {
+    use lean_rs_worker_parent::LeanWorkerHostHandleBuilder;
+
+    assert_eq!(env::var(INPUT_ENV).as_deref(), Ok("ambient"));
+    let executable = env::current_exe().expect("fixture executable");
+    let root = env::current_dir().expect("fixture root");
+    let locator = LeanWorkerChild::for_toolchain(executable, &root);
+    assert!(locator.clone().application_launch_input(&"é".repeat(2048)).is_ok());
+    for invalid in ["", "embedded\0byte", &"é".repeat(2049)] {
+        assert!(matches!(
+            locator.clone().application_launch_input(invalid),
+            Err(LeanWorkerError::Setup { .. })
+        ));
+    }
+
+    const DATA: &str = "deployment Δ\nKEY=value";
+    for (child, expected) in [
+        (locator.clone(), None),
+        (locator.clone().checked_native_loader_environment(), None),
+        (
+            locator
+                .application_launch_input(DATA)
+                .expect("valid input")
+                .checked_native_loader_environment(),
+            Some(DATA),
+        ),
+    ] {
+        let mut handle = LeanWorkerHostHandleBuilder::shims_only(&root, std::iter::empty::<&str>())
+            .worker_child(child)
+            .open()
+            .expect("framed worker started");
+        let observe = |metadata: lean_rs_worker_parent::LeanWorkerRuntimeMetadata| -> (u32, Option<String>) {
+            serde_json::from_str(&metadata.worker_version).expect("child reported pid and launch value")
+        };
+        let first = observe(handle.runtime_metadata());
+        assert_eq!(first.1.as_deref(), expected);
+        handle.restart().expect("worker replaced");
+        let replacement = observe(handle.runtime_metadata());
+        assert_ne!(first.0, replacement.0);
+        assert_eq!(replacement.1.as_deref(), expected);
+        handle.try_shutdown().expect("replacement shut down");
+    }
+}
+
 fn run_fake_child(mode: &str) {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -283,7 +353,11 @@ fn run_fake_child(mode: &str) {
     write_frame(
         &mut stdout,
         Message::Handshake {
-            worker_version: "fake-worker-shutdown-test".to_owned(),
+            worker_version: if mode == "launch_input" {
+                serde_json::to_string(&(std::process::id(), env::var(INPUT_ENV).ok())).expect("child observation")
+            } else {
+                "fake-worker-shutdown-test".to_owned()
+            },
             protocol_version: PROTOCOL_VERSION,
         },
         MAX_FRAME_BYTES,

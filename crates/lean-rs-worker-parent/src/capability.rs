@@ -495,6 +495,11 @@ impl LeanWorkerCapabilityBuilder {
         .with_import_profile(self.import_profile)
         .with_import_workspace_root(self.effective_import_workspace_root())
         .restart_policy_class(restart_policy_class);
+        key.launch_input_child = self
+            .worker_child
+            .as_ref()
+            .filter(|child| child.application_launch_input.is_some())
+            .map(|child| Box::new(child.clone()));
         if let Some(manifest_path) = &self.built_manifest_path {
             key = key.with_built_manifest_path(manifest_path.clone());
         }
@@ -1909,6 +1914,7 @@ fn spawn_checked_worker(
     let mut config = LeanWorkerConfig::new(worker_executable)
         .env("LEAN_SYSROOT", lean_sysroot.as_os_str())
         .shared_artifact_reads(worker_child.shared_artifact_reads);
+    config.application_launch_input = worker_child.application_launch_input;
     if worker_child.check_loader_environment {
         config = config.checked_native_loader_environment();
     }
@@ -2070,6 +2076,7 @@ pub struct LeanWorkerChild {
     env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
     shared_writer_executable: Option<PathBuf>,
+    application_launch_input: Option<String>,
     prepared_host_artifacts: Option<lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts>,
     check_loader_environment: bool,
     shared_artifact_reads: bool,
@@ -2101,6 +2108,7 @@ impl LeanWorkerChild {
             env_var: None,
             lean_sysroot: None,
             shared_writer_executable: None,
+            application_launch_input: None,
             prepared_host_artifacts: None,
             check_loader_environment: false,
             shared_artifact_reads: false,
@@ -2124,6 +2132,7 @@ impl LeanWorkerChild {
             env_var: None,
             lean_sysroot: None,
             shared_writer_executable: None,
+            application_launch_input: None,
             prepared_host_artifacts: None,
             check_loader_environment: false,
             shared_artifact_reads: false,
@@ -2153,6 +2162,7 @@ impl LeanWorkerChild {
             env_var: None,
             lean_sysroot: Some(sysroot.into()),
             shared_writer_executable: None,
+            application_launch_input: None,
             prepared_host_artifacts: None,
             check_loader_environment: false,
             shared_artifact_reads: false,
@@ -2184,6 +2194,25 @@ impl LeanWorkerChild {
     pub fn shared_writer_executable(mut self, executable: impl Into<PathBuf>) -> Self {
         self.shared_writer_executable = Some(executable.into());
         self
+    }
+
+    /// Set an immutable application-defined UTF-8 value for this child and its replacements.
+    ///
+    /// The child reads `LEAN_RS_WORKER_APPLICATION_INPUT`. The supervisor removes any
+    /// ambient value when the input is omitted. The application defines and validates
+    /// its contents. For an external file, the application can carry its locator and
+    /// expected digest here and retain custody itself.
+    ///
+    /// # Errors
+    /// Returns a setup error for an empty value, a NUL byte, or more than 4096 UTF-8 bytes.
+    pub fn application_launch_input(mut self, value: &str) -> Result<Self, LeanWorkerError> {
+        if value.is_empty() || value.len() > 4096 || value.as_bytes().contains(&0) {
+            return Err(LeanWorkerError::Setup {
+                message: "application launch input requires 1 to 4096 UTF-8 bytes without NUL".to_owned(),
+            });
+        }
+        self.application_launch_input = Some(value.to_owned());
+        Ok(self)
     }
 
     /// Select the exact prepared host shims for this worker generation.
@@ -2763,6 +2792,22 @@ mod tests {
         assert_eq!(key_a, key_a_dot);
         assert_ne!(key_a, key_b);
         drop(std::fs::remove_dir_all(manifest_dir));
+    }
+
+    #[test]
+    fn application_launch_input_partitions_capability_pool_reuse() {
+        let key = |path, input| {
+            let mut child = LeanWorkerChild::path(path);
+            if let Some(value) = input {
+                child = child.application_launch_input(value).expect("valid launch input");
+            }
+            capability_builder().worker_child(child).session_key()
+        };
+        let selected = key("worker", Some("first"));
+        assert_eq!(selected, key("worker", Some("first")));
+        assert_ne!(selected, key("worker", Some("second")));
+        assert_ne!(selected, key("worker", None));
+        assert_ne!(selected, key("other-worker", Some("first")));
     }
 
     #[test]

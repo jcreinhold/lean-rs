@@ -19,6 +19,12 @@ The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile 
 build. Applications ship an app-owned child binary. `LeanWorker` remains available for custom supervision, diagnostics,
 and focused lifecycle tests. `LeanWorkerCapabilityBuilder::check()` reports bootstrap readiness before body commands.
 
+An application can set one UTF-8 value of up to 4096 bytes with `LeanWorkerChild::application_launch_input`.
+The supervisor supplies those same bytes in `LEAN_RS_WORKER_APPLICATION_INPUT` on every launch and removes the
+variable when omitted. The child interprets and validates the data. If the value identifies an external file, the
+application verifies its contents and maintains custody. A capability pool keeps different launch selections separate
+when application input is present.
+
 ## Import workspace
 
 The capability project owns its dylib and manifest. The import workspace root separately determines Lean's search path:

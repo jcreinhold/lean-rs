@@ -278,6 +278,7 @@ pub const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(
 /// demangled backtrace on the child's stderr.
 #[derive(Clone, Debug)]
 pub struct LeanWorkerConfig {
+    pub(crate) application_launch_input: Option<String>,
     executable: PathBuf,
     process_tracker: LeanWorkerProcessTracker,
     current_dir: Option<PathBuf>,
@@ -307,6 +308,7 @@ impl LeanWorkerConfig {
     pub fn new(executable: impl Into<PathBuf>) -> Self {
         Self {
             executable: executable.into(),
+            application_launch_input: None,
             process_tracker: LeanWorkerProcessTracker::new(),
             current_dir: None,
             check_loader_environment: false,
@@ -2063,6 +2065,13 @@ impl LeanWorker {
                     message: error.to_string(),
                 })
             })?;
+        }
+        // Install this reserved value after inherited and explicit generic environment
+        // choices, on the common path for both initial and replacement generations.
+        if let Some(input) = &config.application_launch_input {
+            command.env("LEAN_RS_WORKER_APPLICATION_INPUT", input);
+        } else {
+            command.env_remove("LEAN_RS_WORKER_APPLICATION_INPUT");
         }
         if config.shared_artifact_reads {
             command.env("LEAN_RS_WORKER_SHARED_ARTIFACT_READS", "1");

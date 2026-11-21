@@ -47,6 +47,8 @@ pub enum LeanWorkerRestartPolicyClass {
 /// provenance.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerSessionKey {
+    // Preserve the exact launch selection when the child carries application data.
+    pub(crate) launch_input_child: Option<Box<crate::LeanWorkerChild>>,
     project_root: PathBuf,
     import_workspace_root: PathBuf,
     built_manifest_path: Option<PathBuf>,
@@ -78,6 +80,7 @@ impl LeanWorkerSessionKey {
             import_workspace_root: normalize_import_workspace_root(project_root.clone()),
             project_root,
             built_manifest_path: None,
+            launch_input_child: None,
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
