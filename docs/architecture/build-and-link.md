@@ -266,3 +266,11 @@ advanced same-process callback recipe is [`docs/recipes/downstream-interop.md`](
 The helper builds Lake `lean_lib` shared facets for the host platform. It does not cross-compile, build executables, or
 publish Lake packages. The generic and host shim sources are bundled with their owning Rust crates; this helper is the
 path those crates and downstream examples use to materialize the dylibs.
+
+A cooperating SDK caller can opt into the standalone writer's v1 storage admission with
+`SharedWriter::open_with_storage_request`. Supply the same bounded JSON request as
+`lean-rs-writer writer --storage-request`, with the launcher's registry, project, selected scratch parent and
+all other approved storage roots. Include the known Lake artifact cache even for a no-build/no-cache command.
+Retain the writer through caller-owned writes. Keep each command's result and separately check the consuming
+`SharedWriter::close` result, which waits for the helper to exit successfully. Dropping the control channel or
+losing the close result does not confirm settlement or authorize replay.

@@ -573,6 +573,7 @@ fn send_until(
 struct Helper {
     input: Option<ChildStdin>,
     id: u32,
+    exit: mpsc::Receiver<std::process::ExitStatus>,
 }
 
 #[cfg(unix)]
@@ -585,6 +586,7 @@ impl Helper {
     fn spawn(command: Command, fds: &[BorrowedFd<'_>]) -> io::Result<(Self, mpsc::Receiver<io::Result<Value>>)> {
         let (children, incoming) = mpsc::sync_channel::<Child>(1);
         let (sender, receiver) = mpsc::sync_channel(4);
+        let (exited, exit) = mpsc::sync_channel(1);
         // Establish reaping ownership before a helper can exist. Failure to create
         // this thread therefore cannot abandon a process or dispatch a command.
         thread::Builder::new()
@@ -618,7 +620,11 @@ impl Helper {
                 }));
                 // A lost reply seals the caller, but H remains the cleanup owner.
                 // Only this thread owns its Child; EOF is not an exit observation.
-                while child.wait().is_err() {
+                loop {
+                    if let Ok(status) = child.wait() {
+                        let _ = exited.send(status);
+                        break;
+                    }
                     thread::sleep(Duration::from_millis(20));
                 }
             })?;
@@ -630,7 +636,14 @@ impl Helper {
         // disconnects. Thus this first send cannot lose its receiver.
         children.send(child).expect("writer reaper exists before helper launch");
         let input = input.ok_or_else(|| invalid("writer stdin missing"))?;
-        Ok((Self { input: Some(input), id }, receiver))
+        Ok((
+            Self {
+                input: Some(input),
+                id,
+                exit,
+            },
+            receiver,
+        ))
     }
 }
 
@@ -699,7 +712,38 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
-        Self::open_with_admission_timeout(executable, root, prepared_roots, timeout, timeout, cancelled)
+        Self::open_with_admission_timeout(executable, root, prepared_roots, timeout, timeout, None, cancelled)
+    }
+
+    /// Open a writer with the standalone helper's v1 managed storage request.
+    /// Pass the complete reviewed JSON, including cache roots even for no-build commands.
+    /// Keep the returned writer through all caller writes, then call [`Self::close`].
+    ///
+    /// # Errors
+    /// Returns request-size, lock, admission, launch or handshake errors before dispatch.
+    pub fn open_with_storage_request(
+        executable: &Path,
+        root: &Path,
+        prepared_roots: &[PathBuf],
+        storage_request: &str,
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+    ) -> io::Result<Self> {
+        if storage_request.len() > 16 * 1024 {
+            return Err(failure(
+                WriterDisposition::NotStarted,
+                invalid("oversized writer storage request"),
+            ));
+        }
+        Self::open_with_admission_timeout(
+            executable,
+            root,
+            prepared_roots,
+            timeout,
+            timeout,
+            Some(storage_request),
+            cancelled,
+        )
     }
 
     pub(crate) fn open_immediately(
@@ -708,7 +752,7 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
-        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, cancelled)
+        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, None, cancelled)
     }
 
     fn open_with_admission_timeout(
@@ -717,6 +761,7 @@ impl SharedWriter {
         prepared_roots: &[PathBuf],
         timeout: Duration,
         lock_timeout: Duration,
+        storage_request: Option<&str>,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
         (|| {
@@ -741,6 +786,7 @@ impl SharedWriter {
                 &workspaces,
                 &roots,
                 timeout.saturating_sub(started.elapsed()),
+                storage_request,
                 cancelled,
             )
         })()
@@ -756,7 +802,7 @@ impl SharedWriter {
     ) -> io::Result<Self> {
         let workspaces = vec![root.to_path_buf()];
         let roots = crate::write_domains::workspace_union(root, &workspaces)?;
-        Self::open_with_locks_and_workspaces(executable, root, locks, &workspaces, &roots, timeout, cancelled)
+        Self::open_with_locks_and_workspaces(executable, root, locks, &workspaces, &roots, timeout, None, cancelled)
     }
 
     #[allow(
@@ -770,6 +816,7 @@ impl SharedWriter {
         workspaces: &[PathBuf],
         roots: &[PathBuf],
         timeout: Duration,
+        storage_request: Option<&str>,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
         (|| {
@@ -831,6 +878,9 @@ impl SharedWriter {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
+            if let Some(request) = storage_request {
+                command.arg("--storage-request").arg(request);
+            }
             let fds: Vec<_> = duplicates.iter().map(AsFd::as_fd).collect();
             let (helper, receiver) = Helper::spawn(command, &fds)?;
             let mut client = Self {
@@ -1135,6 +1185,39 @@ impl SharedWriter {
                     ));
                 }
             }
+        }
+    }
+
+    /// Finish caller writes and confirm settlement by observing the exact helper exit.
+    /// The command result remains independently available to the caller. Dropping
+    /// a managed writer without an explicit close leaves settlement unconfirmed.
+    ///
+    /// # Errors
+    /// A sealed writer, failed close delivery, timeout or unsuccessful exit leaves
+    /// cleanup unconfirmed. Do not replay a command on this basis.
+    pub fn close(mut self, timeout: Duration) -> io::Result<()> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or_else(|| invalid("writer close deadline overflow"))?;
+        if self.active {
+            return Err(invalid("sealed writer cannot confirm cleanup"));
+        }
+        let input = self
+            .helper
+            .input
+            .as_mut()
+            .ok_or_else(|| invalid("writer control closed"))?;
+        send_until(input, &json!({"action":"close"}), deadline, &|| false)?;
+        drop(self.helper.input.take());
+        let status = self
+            .helper
+            .exit
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|error| invalid(format!("writer close unconfirmed: {error}")))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(invalid(format!("writer cleanup failed: {status}")))
         }
     }
 

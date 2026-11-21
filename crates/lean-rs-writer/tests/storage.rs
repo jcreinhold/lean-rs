@@ -116,3 +116,69 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
     assert_eq!(fs::read_dir(&scratch)?.count(), 1);
     Ok(())
 }
+
+#[test]
+fn sdk_writer_shares_the_standalone_reserve() -> io::Result<()> {
+    use lean_toolchain::shared_writer::SharedWriter;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::time::Duration;
+
+    const FIXTURE: &str = "LEAN_RS_TEST_SDK_STORAGE_FIXTURE";
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let temp = tempfile::tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))?;
+        let base = temp.path().canonicalize()?;
+        for name in ["a", "b", "owners", "scratch"] {
+            fs::create_dir(base.join(name))?;
+        }
+        fs::set_permissions(base.join("owners"), fs::Permissions::from_mode(0o700))?;
+        // Bind the launcher's trusted registry without changing this test process's environment.
+        let status = Command::new(std::env::current_exe()?)
+            .args(["--exact", "sdk_writer_shares_the_standalone_reserve", "--nocapture"])
+            .env(FIXTURE, &base)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", base.join("owners"))
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let base = Path::new(&base);
+    let a = base.join("a");
+    let b = base.join("b");
+    let registry = base.join("owners");
+    let scratch = base.join("scratch");
+    let stat = rustix::fs::statvfs(base)?;
+    let free = stat.f_bavail.checked_mul(stat.f_frsize).expect("fixture pool capacity");
+    let budget = free - free / 4;
+    let request = json!({"version":1,"floor_bytes":1,"budget_bytes":budget,
+        "roots":[root("project",&a), root("registry",&registry), root("scratch_parent",&scratch)]});
+    let timeout = Duration::from_secs(3);
+    let mut writer = SharedWriter::open_with_storage_request(
+        Path::new(env!("CARGO_BIN_EXE_lean-rs-writer")),
+        &a,
+        &[],
+        &request.to_string(),
+        timeout,
+        &|| false,
+    )?;
+    let output = writer.run(&Command::new("/usr/bin/false"), timeout)?;
+    let assets = writer.asset_dir().to_owned();
+    assert_eq!(assets.parent(), Some(scratch.as_path()));
+    let mut contender = start(&b, &registry, &scratch, budget)?;
+    let _control = contender.stdin.take().expect("keep admission live");
+    let refused = contender.wait_with_output()?;
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr)
+            .contains("insufficient space for outstanding full-turn writer budgets")
+    );
+    writer.close(timeout)?;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!assets.exists());
+
+    let mut successor = start(&b, &registry, &scratch, budget)?;
+    let mut reader = BufReader::new(successor.stdout.take().expect("writer replies"));
+    assert_eq!(reply(&mut reader)?["state"], "locked");
+    send(&mut successor, &json!({"action":"close"}))?;
+    assert!(successor.wait()?.success());
+    assert_eq!(fs::read_dir(&scratch)?.count(), 0);
+    Ok(())
+}
