@@ -351,6 +351,15 @@ fn fixture_recovery_claimant() {
     let record = root.join("owners").join(format!("worker-{NONCE}")).join("owner.json");
     let owner = read_owner(&record).unwrap();
     let worker: NativeProcessIdentity = serde_json::from_value(field(&owner, "process").clone()).unwrap();
+    if root.join("require-live-guardian-refusal").exists() {
+        assert_eq!(
+            claim_native_recovery(&record, &worker, Duration::from_secs(1))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::WouldBlock,
+        );
+        return;
+    }
     if root.join("claim-race").exists() {
         let id = std::process::id();
         let identity = NativeProcessIdentity::capture(id).unwrap().unwrap();
@@ -602,6 +611,79 @@ pub(super) fn assert_service_loss(freeze: Freeze) {
     assert!(acquired.managed_writer_ready, "{acquired:?}");
     assert_eq!(observed.payload_bytes_after_marker, 0, "{observed:?}");
     assert!(!crate::process_group::group_present(guardian.process_group).unwrap());
+}
+
+#[test]
+#[ignore = "requires a short private checkout-local fixture root"]
+fn dead_service_leaves_only_original_guardian_in_charge_of_live_scope() {
+    assert!(
+        std::env::var_os("LEAN_RS_GUARDIAN_TEST_ROOT").is_some(),
+        "supply an owned test root"
+    );
+    let fixture = Fixture::new();
+    for marker in [
+        "service-loss-watchdog",
+        "hold-service-loss-signal",
+        "managed-contender",
+        "recovery-slot",
+        "require-live-guardian-refusal",
+    ] {
+        fs::write(fixture.root.join(marker), b"test-owned service loss").unwrap();
+    }
+    let mut server = TestChild(
+        fixture_command(&fixture.root, "native_guardian::tests::fixture_server")
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    wait_until(|| fixture.root.join("server-ready").exists());
+    let ready: Value = serde_json::from_slice(&fs::read(fixture.root.join("server-ready")).unwrap()).unwrap();
+    let worker = pid(field(&ready, "worker")).unwrap();
+    let guardian: NativeProcessIdentity = serde_json::from_value(field(&ready, "guardian").clone()).unwrap();
+    let record = fixture.registry.join(format!("worker-{NONCE}")).join("owner.json");
+    let original = read_owner(&record).unwrap();
+    let parent: NativeProcessIdentity = serde_json::from_value(field(&original, "parent").clone()).unwrap();
+    let metadata = fs::metadata(fixture.lock()).unwrap();
+    let writer = Contender::start(&fixture, worker);
+    server.0.kill().unwrap();
+    assert_eq!(server.wait().signal(), Some(libc::SIGKILL));
+    wait_until(|| fixture.root.join("service-loss-signal-held").exists());
+    assert!(!parent.is_live().unwrap());
+    assert!(guardian.is_live().unwrap());
+    assert!(crate::process_group::group_present(worker).unwrap());
+    let before = fixture.heartbeat();
+    wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
+
+    let mut rival = TestChild(
+        fixture_command(
+            &fixture.root,
+            "native_guardian::tests::service_loss_regressions::fixture_recovery_claimant",
+        )
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap(),
+    );
+    assert!(rival.wait().success());
+    let reserve = |nonce| {
+        reserve_owner_record_with_slot(&fixture.registry, nonce, Duration::from_secs(1), Some(&recovery_slot()))
+    };
+    let next = format!("{:048x}", 704);
+    let another = format!("{:048x}", 705);
+    assert_eq!(reserve(&next).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(read_owner(&record).unwrap(), original);
+    assert!(guardian.is_live().unwrap());
+    assert!(!fixture.root.join("contender-acquired.json").exists());
+    fs::remove_file(fixture.root.join("hold-service-loss-signal")).unwrap();
+
+    let acquired = writer.acquired();
+    assert!(!acquired.group_present && !acquired.worker_live && acquired.managed_writer_ready);
+    assert_eq!(acquired.lock_identity, (metadata.dev(), metadata.ino()));
+    wait_until(|| !guardian.is_live().unwrap());
+    assert!(fixture.root.join("guardian-returned").exists());
+    assert!(!fixture.root.join("test-rescue-used").exists());
+    assert!(reserve(&next).unwrap().exists());
+    assert_eq!(reserve(&another).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(writer.finish().payload_bytes_after_marker, 0);
 }
 
 #[test]

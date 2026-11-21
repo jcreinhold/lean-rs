@@ -61,7 +61,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let root = Path::new("/tmp").join(format!(
+        let parent =
+            std::env::var_os("LEAN_RS_GUARDIAN_TEST_ROOT").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+        let root = parent.join(format!(
             "native-guard-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
@@ -259,6 +261,16 @@ pub(super) fn hold_requested_group_signal(guardian: &Guardian) -> bool {
                 .as_ref()
                 .and_then(|record| read_owner(record).ok())
                 .is_some_and(|owner| field(&owner, "guardian_drain") == "requested")
+    })
+}
+
+pub(super) fn hold_service_loss_group_signal() -> bool {
+    std::env::var_os(ROOT_ENV).map(PathBuf::from).is_some_and(|root| {
+        if !root.join("hold-service-loss-signal").exists() {
+            return false;
+        }
+        fs::write(root.join("service-loss-signal-held"), b"guardian entered drain").unwrap();
+        true
     })
 }
 

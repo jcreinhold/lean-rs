@@ -798,7 +798,7 @@ impl Guardian {
                         return;
                     }
                     #[cfg(all(test, target_os = "macos"))]
-                    if tests::hold_requested_group_signal(self) {
+                    if tests::hold_requested_group_signal(self) || tests::hold_service_loss_group_signal() {
                         thread::sleep(POLL);
                         continue;
                     }
