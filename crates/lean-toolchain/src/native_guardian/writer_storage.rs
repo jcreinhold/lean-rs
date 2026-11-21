@@ -5,7 +5,7 @@
 //! A free-space observation is advisory. It cannot constrain unrelated writes.
 
 use super::{MAX_OWNER_BYTES, MAX_OWNER_RECORDS, deadline, expired, invalid, ownership, registry_directory};
-use rustix::fs::{AtFlags, Dir, Mode, OFlags, fstatvfs, mkdirat, open, openat, unlinkat};
+use rustix::fs::{AtFlags, Dir, DirEntry, Mode, OFlags, fstatvfs, mkdirat, open, openat, renameat, statat, unlinkat};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const CHARGES: &str = ".writer-storage-v1";
+const STAGED_CHARGE: &str = ".charge-write";
 const MAX_ROOTS: usize = 96;
 const DIRECTORY: OFlags = OFlags::RDONLY
     .union(OFlags::DIRECTORY)
@@ -85,15 +86,83 @@ pub(super) fn charges_remain(registry: &Path) -> io::Result<bool> {
     let Some(dir) = charge_directory(&File::open(registry)?, false)? else {
         return Ok(false);
     };
-    for entry in Dir::read_from(dir)? {
-        if !matches!(entry?.file_name().to_bytes(), b"." | b"..") {
+    for entry in Dir::read_from(&dir)? {
+        if charge_name(&dir, &entry?)?.is_some() {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+// Under admission, a reserved staging name can only be from an interrupted
+// publication. Its bytes never constitute a reservation or cleanup evidence.
+fn open_staged_charge(directory: &File) -> io::Result<Option<File>> {
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let file = match openat(directory, STAGED_CHARGE, flags, Mode::empty()) {
+        Ok(file) => File::from(file),
+        Err(rustix::io::Errno::NOENT) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != rustix::process::getuid().as_raw()
+        || metadata.mode() & 0o077 != 0
+        || metadata.len() > MAX_OWNER_BYTES as u64
+    {
+        return Err(invalid("invalid writer storage staging file"));
+    }
+    Ok(Some(file))
+}
+
+fn discard_staged_charge(directory: &File) -> io::Result<()> {
+    if open_staged_charge(directory)?.is_some() {
+        unlinkat(directory, STAGED_CHARGE, AtFlags::empty())?;
+    }
+    Ok(())
+}
+
+fn charge_name<'entry>(directory: &File, entry: &'entry DirEntry) -> io::Result<Option<&'entry str>> {
+    let name = entry.file_name().to_str().map_err(io::Error::other)?;
+    match name {
+        "." | ".." => Ok(None),
+        STAGED_CHARGE => {
+            open_staged_charge(directory)?;
+            Ok(None)
+        }
+        name => Ok(Some(name)),
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChargeWriteCut {
+    DuringWrite,
+    BeforeRename,
+    AfterRename,
+    DirectorySync,
+}
+
+#[cfg(test)]
+thread_local! {
+    static CHARGE_WRITE_CUT: std::cell::Cell<Option<ChargeWriteCut>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn interrupt_charge_write(cut: ChargeWriteCut) -> io::Result<()> {
+    if CHARGE_WRITE_CUT.with(|armed| armed.get() == Some(cut) && armed.take().is_some()) {
+        return Err(io::Error::other("injected writer storage publication interruption"));
+    }
+    Ok(())
+}
+
+fn sync_charge_directory(directory: &File) -> io::Result<()> {
+    #[cfg(test)]
+    interrupt_charge_write(ChargeWriteCut::DirectorySync)?;
+    directory.sync_all()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Charge {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -115,7 +184,7 @@ struct Charge {
     scratch_cleanup_started: bool,
 }
 
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WriterOrigin {
     host: String,
@@ -127,23 +196,47 @@ fn valid_digest(digest: &str) -> bool {
 }
 
 impl Charge {
-    fn rewrite(&self, directory: &File, turn: &str) -> io::Result<()> {
+    // The caller serializes publication and has checked the current entry
+    // under admission. Keep the file descriptor of the published inode.
+    fn publish(&self, directory: &File, turn: &str) -> io::Result<File> {
         let bytes = serde_json::to_vec(self).map_err(io::Error::other)?;
         if bytes.len() > MAX_OWNER_BYTES {
             return Err(invalid("writer storage charge too large"));
         }
-        let flags = OFlags::WRONLY | OFlags::TRUNC | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let mut record = File::from(openat(directory, turn, flags, Mode::empty())?);
+        discard_staged_charge(directory)?;
+        let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut record = File::from(openat(directory, STAGED_CHARGE, flags, Mode::RUSR | Mode::WUSR)?);
+        #[cfg(test)]
+        if let Err(error) = interrupt_charge_write(ChargeWriteCut::DuringWrite) {
+            let partial = bytes
+                .get(..bytes.len() / 2)
+                .ok_or_else(|| invalid("writer storage staging cut exceeds record"))?;
+            record.write_all(partial)?;
+            return Err(error);
+        }
         record.write_all(&bytes)?;
-        record.sync_all()
+        record.sync_all()?;
+        #[cfg(test)]
+        interrupt_charge_write(ChargeWriteCut::BeforeRename)?;
+        renameat(directory, STAGED_CHARGE, directory, turn)?;
+        #[cfg(test)]
+        interrupt_charge_write(ChargeWriteCut::AfterRename)?;
+        sync_charge_directory(directory)?;
+        Ok(record)
     }
 
-    fn begin_scratch_cleanup(&mut self, directory: &File, turn: &str) -> io::Result<()> {
-        if !self.scratch_cleanup_started {
-            self.scratch_cleanup_started = true;
-            self.rewrite(directory, turn)?;
+    fn begin_scratch_cleanup(&mut self, directory: &File, turn: &str, entry: File) -> io::Result<File> {
+        if self.scratch_cleanup_started {
+            // A prior process might have renamed the mark and stopped before
+            // syncing the directory. No removal may precede that sync.
+            sync_charge_directory(directory)?;
+            return Ok(entry);
         }
-        Ok(())
+        let mut marked = self.clone();
+        marked.scratch_cleanup_started = true;
+        let entry = marked.publish(directory, turn)?;
+        *self = marked;
+        Ok(entry)
     }
 
     fn lock_union(&self) -> impl Iterator<Item = (&PathBuf, u64, u64)> {
@@ -291,9 +384,12 @@ impl WriterStorageCharge {
         if Charge::read(&dir, &self.turn)? != self.charge {
             return Err(invalid("writer storage charge changed before scratch binding"));
         }
-        self.charge.scratch = Some(scratch);
-        self.charge.command_only = command_only;
-        self.charge.rewrite(&dir, &self.turn)
+        let mut bound = self.charge.clone();
+        bound.scratch = Some(scratch);
+        bound.command_only = command_only;
+        bound.publish(&dir, &self.turn)?;
+        self.charge = bound;
+        Ok(())
     }
 
     /// Mark cleanup of the bound scratch before the original writer removes it.
@@ -317,10 +413,12 @@ impl WriterStorageCharge {
         let root = self.registry.open()?;
         let _lock = ownership::lock_admission_at(&root, deadline(timeout)?, false)?;
         let dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory missing"))?;
-        if Charge::read(&dir, &self.turn)? != self.charge {
+        let (current, entry) = Charge::read_bound(&dir, &self.turn)?;
+        if current != self.charge {
             return Err(invalid("writer storage charge changed before cleanup"));
         }
-        self.charge.begin_scratch_cleanup(&dir, &self.turn)
+        self.charge.begin_scratch_cleanup(&dir, &self.turn, entry)?;
+        Ok(())
     }
 
     /// Settle while the same writer still holds EX on the primary loan. Supply
@@ -349,6 +447,7 @@ impl WriterStorageCharge {
 }
 
 fn settle(root: &File, dir: &File, turn: &str) -> io::Result<()> {
+    discard_staged_charge(dir)?;
     unlinkat(dir, turn, AtFlags::empty())?;
     dir.sync_all()?;
     match unlinkat(root, CHARGES, AtFlags::REMOVEDIR) {
@@ -397,10 +496,9 @@ pub fn recover_disjoint_writer_storage(
             break;
         }
         let entry = entry?;
-        let turn = entry.file_name().to_str().map_err(io::Error::other)?;
-        if matches!(turn, "." | "..") {
+        let Some(turn) = charge_name(&dir, &entry)? else {
             continue;
-        }
+        };
         seen = seen.saturating_add(1);
         if seen >= MAX_OWNER_RECORDS {
             break;
@@ -684,7 +782,7 @@ fn reclaim_idle_with<T>(
     charge.check_bindings(locks)?;
     let (_, scratch) = charge.scratch_binding(turn)?;
     let pinned = pin_scratch(scratch, charge.scratch_cleanup_started)?;
-    charge.begin_scratch_cleanup(&dir, turn)?;
+    let entry = charge.begin_scratch_cleanup(&dir, turn, entry)?;
     drop(mutex);
     cleanup(pinned)?;
 
@@ -732,10 +830,9 @@ pub fn ensure_no_writer_storage_charge(locks: &[(PathBuf, File)], timeout: Durat
             return Err(expired());
         }
         let entry = entry?;
-        let turn = entry.file_name().to_str().map_err(io::Error::other)?;
-        if matches!(turn, "." | "..") {
+        let Some(turn) = charge_name(&dir, &entry)? else {
             continue;
-        }
+        };
         seen = seen.saturating_add(1);
         if seen >= MAX_OWNER_RECORDS {
             return Err(invalid("writer storage turn limit reached"));
@@ -887,10 +984,9 @@ fn reserve(
                 return Err(expired());
             }
             let entry = item?;
-            let name = entry.file_name().to_str().map_err(io::Error::other)?;
-            if matches!(name, "." | "..") {
+            let Some(name) = charge_name(&dir, &entry)? else {
                 continue;
-            }
+            };
             seen = seen.saturating_add(1);
             if seen >= MAX_OWNER_RECORDS {
                 return Err(io::Error::other("writer storage turn limit reached"));
@@ -929,21 +1025,16 @@ fn reserve(
     let mut random = [0; 16];
     File::open("/dev/urandom")?.read_exact(&mut random)?;
     let turn = format!("{:032x}", u128::from_ne_bytes(random));
-    let bytes = serde_json::to_vec(&charge).map_err(io::Error::other)?;
-    if bytes.len() > MAX_OWNER_BYTES {
-        return Err(invalid("writer storage charge too large"));
-    }
     if Instant::now() >= until {
         return Err(expired());
     }
     let dir = charge_directory(&root, true)?.ok_or_else(|| invalid("writer storage directory missing"))?;
-    let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW;
-    let mut record = File::from(openat(&dir, turn.as_str(), flags, Mode::RUSR | Mode::WUSR)?);
-    // A torn file blocks subsequent admissions. No command may start until
-    // the record, its directory and the registry entry are all durable.
-    record.write_all(&bytes)?;
-    record.sync_all()?;
-    dir.sync_all()?;
+    match statat(&dir, turn.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
+        Err(rustix::io::Errno::NOENT) => {}
+        Err(error) => return Err(error.into()),
+        Ok(_) => return Err(io::Error::from(io::ErrorKind::AlreadyExists)),
+    }
+    charge.publish(&dir, &turn)?;
     root.sync_all()?;
     Ok(WriterStorageCharge {
         registry: registry.clone(),

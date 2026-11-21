@@ -316,3 +316,216 @@ fn scratch_binding_rejects_wrong_inode_and_fences_all_turn_locks() {
     .unwrap_err();
     assert!(refusal.to_string().contains("prior writer storage custody"));
 }
+
+#[test]
+fn interrupted_publication_preserves_the_exact_charge() -> io::Result<()> {
+    let Some(root) = std::env::var_os(CHILD_ROOT).map(PathBuf::from) else {
+        let fixture = Fixture::new();
+        let module = module_path!().split_once("::").unwrap().1;
+        let status = Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                &format!("{module}::interrupted_publication_preserves_the_exact_charge"),
+            ])
+            .env(CHILD_ROOT, &fixture.0)
+            .env(super::super::OWNERS_DIRECTORY_ENV, fixture.0.join("owners"))
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let registry = expected(root.join("owners"));
+    let directory = registry.path.join(CHARGES);
+    let staged = directory.join(STAGED_CHARGE);
+    let first = [lock(&root.join("first"))];
+    let disjoint = || -> io::Result<()> {
+        let second = lock(&root.join("second"));
+        reserve(
+            &registry.path,
+            &registry,
+            std::slice::from_ref(&second),
+            &[expected(root.clone())],
+            (FLOOR, 1, None),
+            deadline(TIMEOUT)?,
+            |_| Ok(CAPACITY),
+        )?
+        .settle_after_cleanup(&second.1, Ok(()), TIMEOUT)
+    };
+
+    CHARGE_WRITE_CUT.set(Some(ChargeWriteCut::DuringWrite));
+    assert!(request(&root, &first).is_err());
+    let partial = fs::read(&staged)?;
+    assert!(!partial.is_empty() && serde_json::from_slice::<Charge>(&partial).is_err());
+    assert_eq!(fs::read_dir(&directory)?.count(), 1);
+    disjoint()?;
+    assert!(!staged.try_exists()?);
+
+    let mut charge = request(&root, &first)?;
+    let turn = charge.turn().to_owned();
+    let entry = directory.join(&turn);
+    let unbound = fs::read(&entry)?;
+    let scratch = root.join(format!("lean-writer-assets-{turn}"));
+    fs::create_dir(&scratch)?;
+    let binding = expected(scratch.clone());
+    CHARGE_WRITE_CUT.set(Some(ChargeWriteCut::BeforeRename));
+    assert!(charge.bind_scratch_for_turn(binding.clone(), true, TIMEOUT).is_err());
+    assert_eq!(fs::read(&entry)?, unbound);
+    assert_eq!(
+        serde_json::from_slice::<Charge>(&fs::read(&staged)?)?.scratch,
+        Some(binding.clone())
+    );
+    disjoint()?;
+    assert_eq!(fs::read(&entry)?, unbound);
+    charge.bind_scratch_for_turn(binding.clone(), true, TIMEOUT)?;
+
+    let bound = fs::read(&entry)?;
+    CHARGE_WRITE_CUT.set(Some(ChargeWriteCut::DuringWrite));
+    assert!(charge.begin_command_only_scratch_cleanup(TIMEOUT).is_err());
+    assert!(staged.try_exists()?);
+    assert_eq!(fs::read(&entry)?, bound);
+    disjoint()?;
+    assert_eq!(fs::read(&entry)?, bound);
+    assert!(!staged.try_exists()?);
+    drop(charge);
+    drop(first);
+
+    let scratch_removed = std::cell::Cell::new(false);
+    for cut in [ChargeWriteCut::AfterRename, ChargeWriteCut::DirectorySync] {
+        let snapshot = WriterStorageTurn::inspect(&registry, &turn)?;
+        let locks = snapshot.try_locks(deadline(TIMEOUT)?)?;
+        CHARGE_WRITE_CUT.set(Some(cut));
+        let result = snapshot.reclaim(
+            &locks,
+            |found, _| {
+                assert_eq!(found, &binding);
+                Ok(())
+            },
+            |()| {
+                scratch_removed.set(true);
+                Ok(())
+            },
+        );
+        assert!(result.is_err() && CHARGE_WRITE_CUT.take().is_none());
+        assert!(!scratch_removed.get());
+        assert!(scratch.is_dir());
+        assert!(!staged.try_exists()?);
+        let marked = serde_json::from_slice::<Charge>(&fs::read(&entry)?)?;
+        assert!(marked.scratch_cleanup_started);
+        assert_eq!(marked.scratch.as_ref(), Some(&binding));
+    }
+
+    let snapshot = WriterStorageTurn::inspect(&registry, &turn)?;
+    let locks = snapshot.try_locks(deadline(TIMEOUT)?)?;
+    snapshot.reclaim(
+        &locks,
+        |found, marked| {
+            assert_eq!(found, &binding);
+            assert!(marked);
+            Ok(())
+        },
+        |()| {
+            fs::remove_dir(&scratch)?;
+            File::open(&root)?.sync_all()
+        },
+    )?;
+    assert!(!scratch.try_exists()?);
+    assert!(!entry.try_exists()?);
+    assert!(WriterStorageTurn::inspect(&registry, &turn).is_err());
+    Ok(())
+}
+
+#[test]
+fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
+    let Some(root) = std::env::var_os(CHILD_ROOT).map(PathBuf::from) else {
+        let fixture = Fixture::new();
+        let module = module_path!().split_once("::").unwrap().1;
+        let status = Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                &format!("{module}::exact_recoverers_release_partial_locks_and_settle_once"),
+            ])
+            .env(CHILD_ROOT, &fixture.0)
+            .env(super::super::OWNERS_DIRECTORY_ENV, fixture.0.join("owners"))
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let registry = expected(root.join("owners"));
+    let first_project = root.join("first");
+    let second_project = root.join("second");
+    let (turn, scratch) = {
+        let locks = [lock(&first_project), lock(&second_project)];
+        let mut charge = request(&root, &locks)?;
+        let turn = charge.turn().to_owned();
+        let scratch = root.join(format!("lean-writer-assets-{turn}"));
+        fs::create_dir(&scratch)?;
+        charge.bind_scratch_for_turn(expected(scratch.clone()), true, TIMEOUT)?;
+        (turn, scratch)
+    };
+
+    let snapshot = WriterStorageTurn::inspect(&registry, &turn)?;
+    {
+        let second = lock(&second_project);
+        let refusal = snapshot.try_locks(deadline(TIMEOUT)?).unwrap_err();
+        assert_eq!(refusal.kind(), io::ErrorKind::WouldBlock);
+        let _first = lock(&first_project);
+        drop(second);
+    }
+
+    let entry = registry.path.join(CHARGES).join(&turn);
+    let original = fs::read(&entry)?;
+    {
+        let mut reversed = snapshot.try_locks(deadline(TIMEOUT)?)?;
+        assert_eq!(reversed.len(), 2);
+        reversed.reverse();
+        let pin_called = std::cell::Cell::new(false);
+        let refusal = snapshot
+            .reclaim(
+                &reversed,
+                |_, _| {
+                    pin_called.set(true);
+                    Ok(())
+                },
+                |()| Err(io::Error::other("reversed lock evidence reached cleanup")),
+            )
+            .unwrap_err();
+        assert!(refusal.to_string().contains("lock union changed"));
+        assert!(!pin_called.get());
+        assert_eq!(fs::read(&entry)?, original);
+        assert!(scratch.is_dir());
+    }
+
+    let contender = WriterStorageTurn::inspect(&registry, &turn)?;
+    let remove_scratch = || {
+        fs::remove_dir(&scratch)?;
+        File::open(&root)?.sync_all()
+    };
+    let (cleaning, during_cleanup) = std::sync::mpsc::channel();
+    let (checked, during_attempt) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| -> io::Result<()> {
+        let winner = scope.spawn(move || {
+            let locks = snapshot.try_locks(deadline(TIMEOUT)?)?;
+            snapshot.reclaim(
+                &locks,
+                |_, marked| {
+                    assert!(!marked);
+                    Ok(())
+                },
+                |()| {
+                    cleaning.send(()).map_err(io::Error::other)?;
+                    during_attempt.recv_timeout(TIMEOUT).map_err(io::Error::other)?;
+                    remove_scratch()
+                },
+            )
+        });
+        during_cleanup.recv_timeout(TIMEOUT).map_err(io::Error::other)?;
+        let refusal = contender.try_locks(deadline(TIMEOUT)?).unwrap_err();
+        assert_eq!(refusal.kind(), io::ErrorKind::WouldBlock);
+        checked.send(()).map_err(io::Error::other)?;
+        winner.join().unwrap()
+    })?;
+    assert!(!scratch.try_exists()?);
+    assert!(!entry.try_exists()?);
+    assert!(contender.try_locks(deadline(TIMEOUT)?).is_err());
+    assert!(WriterStorageTurn::inspect(&registry, &turn).is_err());
+    Ok(())
+}
