@@ -66,7 +66,7 @@ private unsafe def checkSharedBudget : IO Unit := do
       first.id == "first" && second.id == "second" && first.facts.outputTruncated do
     throw (IO.userError "display evidence exhausted the shared verdict budget")
 
-private unsafe def checkProjectOutline : IO Unit := do
+private unsafe def checkProjectFileQueries : IO Unit := do
   let dependency := `LeanRsHostShims.Interop
   let olean ← findOLean dependency
   let setupFor (path : System.FilePath) : ModuleSetup := {
@@ -96,10 +96,31 @@ private unsafe def checkProjectOutline : IO Unit := do
   unless errors.diagnostics.any (fun d => d.fileLabel == "OutlineFile.lean" && (d.severity matches .error)) do
     throw (IO.userError "missing labeled body diagnostic")
 
+  let messages := source ++ "#check hiddenCallback\nprivate theorem unfinished : True := by sorry\n"
+  let diagnostics := fun setup (bytes : Nat) (diagBytes : USize) => do
+    Lean.enableInitializersExecution
+    fileDiagnosticsWithSetup setup messages ⟨65536, bytes⟩ "Example" "OutlineFile.lean" 200000 diagBytes "{}"
+  let .ok reported imports ← diagnostics (setupFor olean) 65536 65536 | throw (IO.userError "diagnostics failed")
+  let #[.ok "diagnostics" (.diagnostics log)] := reported.items | throw (IO.userError "expected typed diagnostics")
+  unless imports == #[dependency.toString] && !reported.totalTruncated && (log.truncated matches .complete) &&
+      log.diagnostics.any (fun d => (d.severity matches .info) && d.position.any (·.line == 3)) &&
+      log.diagnostics.any (fun d => (d.severity matches .warning) && d.position.any (·.line == 4)) &&
+      log.diagnostics.all (fun d => d.fileLabel == "OutlineFile.lean" && !(d.severity matches .error)) do
+    throw (IO.userError "missing project warning or information at the original source position")
+  let .ok limited _ ← diagnostics (setupFor olean) 65536 1 | throw (IO.userError "limited diagnostics failed")
+  unless limited.items matches #[.ok "diagnostics" (.diagnostics { truncated := .truncated, .. })] do
+    throw (IO.userError "diagnostic truncation was lost")
+  let .ok exhausted _ ← diagnostics (setupFor olean) 1 65536 | throw (IO.userError "limited batch failed")
+  unless exhausted.totalTruncated && (exhausted.items matches #[.budgetExceeded "diagnostics" _]) do
+    throw (IO.userError "diagnostics exceeded the batch budget")
+  let .headerParseFailed failure ← diagnostics (setupFor (olean.addExtension "absent")) 65536 65536
+    | throw (IO.userError "diagnostics ignored the missing setup-selected artifact")
+  unless failure.diagnostics.any (·.severity matches .error) do throw (IO.userError "missing import diagnostic")
+
 unsafe def main : IO Unit := do
   checkVerdict "fixtureAxiom" true
   checkVerdict "False.intro" false
   checkVerdict "by sorry" false
   checkVerdict "by skip" false
   checkSharedBudget
-  checkProjectOutline
+  checkProjectFileQueries
