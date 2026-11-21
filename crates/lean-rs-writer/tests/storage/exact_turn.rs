@@ -50,7 +50,8 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     }
     let primary = lean_toolchain::shared_writer::project_lock_path(&project)?;
     let secondary = lean_toolchain::shared_writer::project_lock_path(&dependency)?;
-    let digest = "a".repeat(64);
+    // SHA-256 of the single byte 'x'.
+    let digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881";
     let request = json!({"version":1,"command_only":true,"handoff_sha256":digest,"floor_bytes":1,"budget_bytes":1,
         "roots":[super::root("project",&project),super::root("registry",&registry.path),
             super::root("scratch_parent",&scratch_parent),super::root("outputs",&sibling)]});
@@ -126,10 +127,22 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     assert_eq!(inspect(true)["state"], "refused");
     send(
         &mut writer,
-        &json!({"action":"run","command":["/usr/bin/true"],"timeout":3}),
+        &json!({"action":"stage_handoff","turn":turn,"data_hex":"78"}),
+    )?;
+    assert_eq!(
+        reply(&mut reader)?,
+        json!({"state":"handoff_staged","turn":turn,
+        "handoff_sha256":digest,"bytes":1,"name":"handoff.json"})
+    );
+    send(
+        &mut writer,
+        &json!({"action":"run","command":["/bin/cat",scratch.join("handoff.json")],"timeout":3}),
     )?;
     assert_eq!(reply(&mut reader)?["state"], "started");
-    assert_eq!(reply(&mut reader)?["owned_work_stopped"], true);
+    let stopped = reply(&mut reader)?;
+    assert_eq!(stopped["owned_work_stopped"], true);
+    assert_eq!(stopped["exit_code"], 0);
+    assert_eq!(stopped["stdout"], "x");
     drop(writer.stdin.take());
     assert!(!writer.wait()?.success());
     let preview = inspect(false);
@@ -137,6 +150,23 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     assert_eq!(preview["old_result"], "unknown");
     let entry = registry.path.join(".writer-storage-v1").join(&turn);
     let saved_charge = fs::read(&entry)?;
+    let mut pre_staging: Value = serde_json::from_slice(&saved_charge)?;
+    pre_staging
+        .as_object_mut()
+        .expect("charge")
+        .remove("helper_stages_handoff");
+    let pre_staging = serde_json::to_vec(&pre_staging)?;
+    fs::write(&entry, &pre_staging)?;
+    let refused = inspect(true);
+    assert_eq!(refused["state"], "refused");
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|s| s.contains("staging") || s.contains("scope"))
+    );
+    assert_eq!(fs::read(&entry)?, pre_staging);
+    assert!(scratch.is_dir());
+    fs::write(&entry, &saved_charge)?;
     let unacknowledged = operator("recover").output()?;
     assert_eq!(unacknowledged.status.code(), Some(2));
     assert!(unacknowledged.stdout.is_empty());

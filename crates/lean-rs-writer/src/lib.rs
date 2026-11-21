@@ -90,6 +90,7 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
         ("lock_path".to_owned(), json!(lock_path)),
     ]);
     if args.capabilities {
+        descriptor.insert("handoff_max_bytes".to_owned(), json!(storage::MAX_HANDOFF_BYTES));
         descriptor.insert(
             "capabilities".to_owned(),
             json!(["command_only_storage_v1", "command_only_handoff_v1"]),
@@ -1355,6 +1356,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
             .canonicalize()?,
     };
     let mut confirmed_close = false;
+    let mut pending_handoff = args.storage_request.as_ref().filter(|r| r.requires_handoff());
     let result = (|| -> io::Result<()> {
         let mut ready = serde_json::Map::from_iter([
             ("state".to_owned(), json!("locked")),
@@ -1369,7 +1371,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         while let Ok(message) = input.recv() {
             let message = message?;
             match field(&message, "action").as_str() {
-                Some("run") => {
+                Some(action @ ("stage_handoff" | "run")) => {
                     // Re-derive the declared graph immediately before this stage.
                     // Unknown or expanded graphs never release a command body.
                     for required in workspace_domains(&workspaces)? {
@@ -1399,6 +1401,21 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                         if let Some(request) = &args.storage_request {
                             request.verify()?;
                         }
+                    }
+                    if action == "stage_handoff" {
+                        let turn = record
+                            .storage_turn
+                            .as_deref()
+                            .ok_or_else(|| invalid("no storage turn"))?;
+                        let request = pending_handoff
+                            .take()
+                            .ok_or_else(|| invalid("unexpected or duplicate stage"))?;
+                        let scratch = scratch.as_ref().ok_or_else(|| invalid("missing handoff scratch"))?;
+                        send(&request.stage_handoff(&message, turn, scratch)?)?;
+                        continue;
+                    }
+                    if pending_handoff.is_some() {
+                        return Err(invalid("command requires a staged handoff"));
                     }
                     if !execute(&message, &args.root, &args.lock, &mut file, &loans, &record, &input)? {
                         break;

@@ -299,22 +299,31 @@ admission. The opportunistic pass uses at most 250 ms of checked software time, 
 Filesystem calls can exceed that budget. Borrowed-lock writers skip this pass because their caller already holds
 a project lock union.
 
-Callers with an immutable source handoff must first find `command_only_handoff_v1` in the standalone helper's
-capabilities. Pass its lowercase SHA-256 as `handoff_sha256` with `command_only: true`. The original charge binds
-the digest to its generated turn and ordered lock paths, devices and inodes before the writer can send Ready.
+Callers with an immutable source handoff must first find `command_only_handoff_v1` and the top-level integer
+`handoff_max_bytes: 262144` in the standalone helper's `writer-lock-path --capabilities` descriptor. A helper
+missing either cannot enroll. Pass the lowercase SHA-256 as `handoff_sha256` with `command_only: true`. The original
+charge binds the digest to its generated turn and ordered lock paths, devices and inodes before the writer can send Ready.
 The `locked` reply adds `handoff` with `version: 1`, `turn`, `handoff_sha256` and `locks` in primary-first order.
-Compare the receipt to the intended digest and every expected lock before sending a command. The supervised
-consumer must verify the handoff bytes and their meaning before using them. The writer never reconstructs a
-source manifest or attests a database result.
+Encode the handoff in memory before admission. Refuse inputs over 262144 bytes or the full-turn storage
+budget. Compare the locked receipt to the intended digest and every expected lock. Send one JSON line
+`{"action":"stage_handoff","turn":"<turn>","data_hex":"<lowercase hex>"}`. The operation accepts at most
+524288 hex digits. The entire control frame, including its newline, retains the 1 MiB limit.
 
-The digest identifies bytes. Cleanup covers only the turn's bound scratch directory. If the caller stages a
-payload elsewhere before admission, the caller retains custody of that file after a lost close. A settled
-writer report supplies no authority to remove that separate file.
+The helper verifies the bytes against the admitted digest, exclusively creates `handoff.json` in its pinned
+scratch, writes and syncs it, and closes its writable descriptor. Wait for
+`{"state":"handoff_staged","turn":"<turn>","handoff_sha256":"<digest>","bytes":N,"name":"handoff.json"}`.
+Check every field before sending the ordinary run frame. The supervised consumer takes
+`locked.asset_dir/handoff.json` as an argument and checks the digest and the meaning of the bytes.
+The controller must never open a writable scratch file or create a spill file. A failed or lost stage
+ends the exchange. Never repeat staging or dispatch work on an unknown outcome. Exact Idle recovery
+can clean partial helper writes after the complete original EX union is available. A handoff charge
+from the earlier experimental helper lacks this staging custody evidence and stays charged.
 
 This opt-in also records a local installation fingerprint and the kernel boot ID. Failure to obtain them
 refuses the extended reservation. The ordinary v1 request and reply retain their existing shape. Helpers
 that predate this capability reject the extended request and cannot read an outstanding extended charge.
-Use matching helpers across the participating registry when enabling the capability.
+The earlier experimental Proofs client rejects the extra field in capability discovery before admission.
+Use matching clients and helpers across the participating registry when enabling the capability.
 
 ### Inspecting and settling an interrupted turn
 

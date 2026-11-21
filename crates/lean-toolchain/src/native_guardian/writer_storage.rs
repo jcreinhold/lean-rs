@@ -174,6 +174,8 @@ struct Charge {
     origin: Option<WriterOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     handoff_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    helper_stages_handoff: bool,
     primary: PathBuf,
     device: u64,
     inode: u64,
@@ -219,6 +221,9 @@ impl Charge {
         .map_err(io::Error::other)?;
         let mut hash = Sha256::new();
         hash.update(b"lean-rs-writer-storage-scope-v1\0");
+        if self.helper_stages_handoff {
+            hash.update(b"helper-stages-handoff\0");
+        }
         hash.update(scope);
         let hash = hash.finalize();
         let (id, _) = hash
@@ -309,7 +314,8 @@ impl Charge {
             return Err(invalid("writer storage charge too large"));
         }
         let entry: Self = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-        if entry.handoff_sha256.is_some() != entry.origin.is_some()
+        if (entry.helper_stages_handoff && entry.handoff_sha256.is_none())
+            || entry.handoff_sha256.is_some() != entry.origin.is_some()
             || entry
                 .handoff_sha256
                 .as_deref()
@@ -832,6 +838,11 @@ impl Charge {
         if self.scope_nonce.is_none() {
             return Err(invalid("writer storage turn lacks an original scope binding"));
         }
+        if self.handoff_sha256.is_some() && !self.helper_stages_handoff {
+            return Err(invalid(
+                "handoff writer custody unknown: original helper did not own staging",
+            ));
+        }
         let scratch = self
             .scratch
             .as_ref()
@@ -1038,6 +1049,8 @@ pub fn reserve_writer_storage(
 
 /// Bind an optional caller-checked immutable handoff digest in the original
 /// reservation, under the full ordered EX union, before any work is admitted.
+/// For a handoff, the helper must exclusively stage the bytes in bound scratch
+/// and close its write descriptor before releasing any command.
 /// # Errors
 /// Refuses malformed digests and all admission failures of `reserve_writer_storage`.
 #[doc(hidden)]
@@ -1126,6 +1139,7 @@ fn reserve(
             .map(|_| ownership::writer_origin().map(|(host, boot)| WriterOrigin { host, boot }))
             .transpose()?,
         handoff_sha256: handoff.map(str::to_owned),
+        helper_stages_handoff: handoff.is_some(),
         primary: path.clone(),
         device,
         inode,

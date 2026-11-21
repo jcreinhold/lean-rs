@@ -21,6 +21,7 @@ lean-toolchain.workspace = true
 rustix = { version = "1", features = ["fs", "net", "pipe", "process"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]

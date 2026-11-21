@@ -1,11 +1,15 @@
 //! Explicit storage selection for participating full writer turns.
-use super::scratch::ScratchParent;
+use super::scratch::{HANDOFF_NAME, Scratch, ScratchParent};
 use super::{Duration, File, MetadataExt, Path, PathBuf, invalid, io};
 use lean_toolchain::native_guardian::writer_storage::{
     StorageRoot, WriterStorageCharge, WriterStorageTurn, reclaim_idle_writer_storage, recover_disjoint_writer_storage,
     reserve_writer_storage_with_handoff, try_reclaim_idle_writer_storage,
 };
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
+
+// Two hex digits per input byte, with room for the envelope in a 1 MiB control frame.
+pub(super) const MAX_HANDOFF_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +53,65 @@ impl Entry {
 }
 
 impl Request {
+    pub(super) fn requires_handoff(&self) -> bool {
+        self.handoff_sha256.is_some()
+    }
+
+    pub(super) fn stage_handoff(
+        &self,
+        message: &serde_json::Value,
+        turn: &str,
+        scratch: &Scratch<'_>,
+    ) -> io::Result<serde_json::Value> {
+        let expected = self
+            .handoff_sha256
+            .as_deref()
+            .ok_or_else(|| invalid("handoff was not admitted"))?;
+        if message.get("turn").and_then(serde_json::Value::as_str) != Some(turn) {
+            return Err(invalid("wrong handoff turn"));
+        }
+        let encoded = message
+            .get("data_hex")
+            .and_then(serde_json::Value::as_str)
+            .filter(|_| message.as_object().is_some_and(|fields| fields.len() == 3))
+            .ok_or_else(|| invalid("invalid handoff stage frame"))?;
+        let len = encoded.len() / 2;
+        if len > MAX_HANDOFF_BYTES || (len as u64) > self.budget_bytes || !encoded.len().is_multiple_of(2) {
+            return Err(invalid("invalid handoff size or writer budget exceeded"));
+        }
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the matched ASCII ranges give values 0 through 15"
+        )]
+        fn digit(byte: u8) -> io::Result<u8> {
+            match byte {
+                b'0'..=b'9' => Ok(byte - b'0'),
+                b'a'..=b'f' => Ok(byte - b'a' + 10),
+                _ => Err(invalid("expected lowercase hex handoff bytes")),
+            }
+        }
+        let bytes = encoded
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[a, b]| Ok(digit(a)? << 4 | digit(b)?))
+            .collect::<io::Result<Vec<_>>>()?;
+        // Compare the bounded received bytes to the original admission. A
+        // stage request supplies neither a path nor its own expected digest.
+        let digest = Sha256::digest(&bytes);
+        for (byte, &[a, b]) in digest.iter().zip(expected.as_bytes().as_chunks::<2>().0) {
+            if *byte != (digit(a)? << 4 | digit(b)?) {
+                return Err(invalid("handoff bytes differ from the admitted digest"));
+            }
+        }
+        scratch.write_handoff(&bytes)?;
+        Ok(
+            serde_json::json!({"state":"handoff_staged","turn":turn,"handoff_sha256":expected,
+            "bytes":len,"name":HANDOFF_NAME}),
+        )
+    }
+
     pub(super) fn command_only(&self) -> bool {
         self.command_only
     }

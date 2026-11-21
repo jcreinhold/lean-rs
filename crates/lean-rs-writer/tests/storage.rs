@@ -293,8 +293,10 @@ fn command_only_capability_is_explicit_and_default_descriptor_is_unchanged() -> 
                 field(&descriptor, "capabilities"),
                 &json!(["command_only_storage_v1", "command_only_handoff_v1"])
             );
+            assert_eq!(field(&descriptor, "handoff_max_bytes"), 262_144);
         } else {
             assert!(descriptor.get("capabilities").is_none());
+            assert!(descriptor.get("handoff_max_bytes").is_none());
         }
     }
     Ok(())
@@ -466,3 +468,6 @@ fn disjoint_admission_reclaims_only_the_dead_idle_holder() -> io::Result<()> {
 
 #[path = "storage/exact_turn.rs"]
 mod exact_turn;
+
+#[path = "storage/handoff.rs"]
+mod handoff;

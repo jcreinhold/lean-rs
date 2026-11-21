@@ -3,6 +3,7 @@
 use super::{File, MetadataExt, Path, PathBuf, invalid, io};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, mkdirat, open, openat, statat, unlinkat};
 use std::ffi::CStr;
+use std::io::Write as _;
 use std::time::Instant;
 
 const DIRECTORY: OFlags = OFlags::RDONLY
@@ -114,6 +115,20 @@ pub(super) struct Scratch<'a> {
 }
 
 impl Scratch<'_> {
+    /// The helper owns the only writable descriptor. A fatal partial write
+    /// leaves the file in this turn's scratch for exact Idle recovery.
+    pub(super) fn write_handoff(&self, contents: &[u8]) -> io::Result<()> {
+        self.verified_path()?;
+        let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+        let mut output = File::from(openat(&self.dir, HANDOFF_NAME, flags, Mode::RUSR)?);
+        output.write_all(contents)?;
+        output.sync_all()?;
+        drop(output);
+        self.dir.sync_all()?;
+        self.verified_path()?;
+        Ok(())
+    }
+
     pub(super) fn verified_path(&self) -> io::Result<PathBuf> {
         let path = self.parent.path.join(&self.name);
         let named = std::fs::symlink_metadata(&path)?;
@@ -159,6 +174,8 @@ impl Scratch<'_> {
         self.parent.dir.sync_all()
     }
 }
+
+pub(super) const HANDOFF_NAME: &str = "handoff.json";
 
 struct RecoveryBudget {
     until: Instant,
