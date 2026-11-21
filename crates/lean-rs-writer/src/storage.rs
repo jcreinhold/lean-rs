@@ -36,10 +36,10 @@ struct Entry {
 }
 
 // An explicitly supplied null must not downgrade a handoff request.
-fn present_digest<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
+pub(super) fn present_digest<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
     let digest = String::deserialize(input)?;
     if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
-        return Err(serde::de::Error::custom("expected a lowercase SHA-256 handoff digest"));
+        return Err(serde::de::Error::custom("expected a lowercase SHA-256 digest"));
     }
     Ok(Some(digest))
 }

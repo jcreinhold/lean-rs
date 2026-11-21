@@ -182,8 +182,12 @@ struct Record {
     storage_turn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     command_phase: Option<CommandPhase>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    scratch_identity: Option<[u64; 2]>,
+    #[serde(
+        default,
+        deserialize_with = "storage::present_digest",
+        skip_serializing_if = "Option::is_none"
+    )]
+    scratch_identity: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1350,7 +1354,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
             if pending_handoff.is_some() {
                 // Publish the writer-created identity on every original lock
                 // before this charge becomes recoverable or scratch is exposed.
-                record.scratch_identity = Some([binding.device, binding.inode]);
+                record.scratch_identity = Some(charge.scratch_identity(&binding)?);
                 persist_all(&mut file, &loans, &record)?;
             }
             charge.bind_scratch_for_turn(binding, command_only, admission)?;

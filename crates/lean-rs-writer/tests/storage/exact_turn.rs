@@ -222,7 +222,11 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     let original = fs::read(&secondary)?;
     let mut starting: Value = serde_json::from_slice(&original)?;
     let created = scratch.metadata()?;
-    assert_eq!(starting["scratch_identity"], json!([created.dev(), created.ino()]));
+    assert!(
+        starting["scratch_identity"]
+            .as_str()
+            .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+    );
     assert_eq!(fs::read(&primary)?, original);
     // Earlier source-bound turns lack the independent identity on their locks.
     let mut earlier = starting.clone();
@@ -238,6 +242,15 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
                 .as_str()
                 .is_some_and(|s| s.contains("scratch identity"))
         );
+        assert_eq!(fs::read(&entry)?, saved_charge);
+    }
+    // The unpublished inode-only pair cannot establish the original parent.
+    earlier["scratch_identity"] = json!([created.dev(), created.ino()]);
+    for lock in [&primary, &secondary] {
+        fs::write(lock, format!("{earlier}\n"))?;
+    }
+    for recover in [false, true] {
+        assert_eq!(inspect(recover)["state"], "refused");
         assert_eq!(fs::read(&entry)?, saved_charge);
     }
     fs::write(&primary, &original)?;
@@ -283,10 +296,10 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     // Only the independent record on the original EX union can disprove it.
     fs::create_dir(&scratch)?;
     let replacement = root(&scratch)?;
-    let check_rewritten_charge = || -> io::Result<()> {
+    let check_rewritten_charge = |substitute: &StorageRoot| -> io::Result<()> {
         let original = fs::read(&entry)?;
         let mut changed: Value = serde_json::from_slice(&original)?;
-        changed["scratch"] = serde_json::to_value(&replacement)?;
+        changed["scratch"] = serde_json::to_value(substitute)?;
         let rewritten = serde_json::to_vec(&changed)?;
         fs::write(&entry, &rewritten)?;
         for recover in [false, true] {
@@ -304,7 +317,7 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
         fs::write(&entry, original)
     };
     fs::write(scratch.join("sentinel"), b"keep")?;
-    check_rewritten_charge()?;
+    check_rewritten_charge(&replacement)?;
     assert_eq!(fs::read(scratch.join("sentinel"))?, b"keep");
     fs::rename(&scratch, fixture.join("replacement"))?;
     fs::rename(&displaced, &scratch)?;
@@ -320,9 +333,18 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     send(&mut disjoint, &json!({"action":"close"}))?;
     assert!(disjoint.wait()?.success());
 
+    // Keep the real scratch and its inode pair. Only redirect its name under
+    // another admitted root, where a marked cleanup would see absence.
+    let mut redirected = root(&scratch)?;
+    redirected.path = sibling.join(scratch.file_name().expect("turn name"));
+    assert!(!redirected.path.try_exists()?);
+    check_rewritten_charge(&redirected)?;
+    assert!(deep.is_dir());
+    assert_eq!(serde_json::from_slice::<Value>(&fs::read(&entry)?)?, marked);
+
     // With the name absent, the cleanup mark cannot authenticate an edited charge.
     fs::rename(&scratch, &displaced)?;
-    check_rewritten_charge()?;
+    check_rewritten_charge(&replacement)?;
     assert_eq!(inspect(false)["state"], "eligible");
     fs::rename(&displaced, &scratch)?;
 
