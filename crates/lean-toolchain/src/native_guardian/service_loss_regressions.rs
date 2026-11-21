@@ -270,7 +270,7 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
     rustix::process::kill_process(target, rustix::process::Signal::STOP).unwrap();
     wait_until(|| stopped(&requester));
     let mut stale = process.clone();
-    stale.start = "wrong-recovery-birth".to_owned();
+    "wrong-recovery-birth".clone_into(&mut stale.start);
     assert!(request_original_guardian_drain(&record, &stale, Duration::from_secs(1)).is_err());
     let before = fixture.heartbeat();
     wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
@@ -629,7 +629,8 @@ fn fixture_deadline_server() {
         "attempt":attempt,"stage":1,"expires_ns":expires_ns
     }))
     .unwrap();
-    write_bytes(parent, arm.get(1..).unwrap(), deadline(Duration::from_secs(1)).unwrap()).unwrap();
+    let (_, arm_tail) = arm.split_first().unwrap();
+    write_bytes(parent, arm_tail, deadline(Duration::from_secs(1)).unwrap()).unwrap();
     let ack = read_frame(parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
     assert_eq!(
         ack,

@@ -833,7 +833,7 @@ mod closure_publication_tests {
         RECOVERY_WRITE_CUT.with(|cut| cut.set(Some(RecoveryWriteCut::AfterRename)));
         assert!(ownership::publish_guardian_drain_request(&record, &mut value).is_err());
         let mut requested = read()?;
-        assert_eq!(requested["guardian_drain"], "requested");
+        assert_eq!(field(&requested, "guardian_drain"), "requested");
         assert!(!record.with_extension("recovery-write").exists());
         RECOVERY_WRITE_CUT.with(|cut| cut.set(Some(RecoveryWriteCut::DirectorySync)));
         assert!(ownership::publish_guardian_drain_request(&record, &mut requested).is_err());
