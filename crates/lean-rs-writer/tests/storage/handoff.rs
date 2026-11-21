@@ -49,9 +49,19 @@ impl Fixture {
             Command::new(bin)
         };
         let lock = lean_toolchain::shared_writer::project_lock_path(&self.project)?;
-        let request = json!({"version":1,"command_only":true,"handoff_sha256":DIGEST,"approval_generation":self.approval,
-            "floor_bytes":1,"budget_bytes":budget,"roots":[root("project",&self.project),
-                root("registry",&self.registry),root("scratch_parent",&self.scratch)]});
+        let request = json!({
+            "version": 1,
+            "command_only": true,
+            "handoff_sha256": DIGEST,
+            "approval_generation": self.approval,
+            "floor_bytes": 1,
+            "budget_bytes": budget,
+            "roots": [
+                root("project", &self.project),
+                root("registry", &self.registry),
+                root("scratch_parent", &self.scratch),
+            ],
+        });
         command
             .arg("writer")
             .arg(&self.project)

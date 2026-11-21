@@ -53,9 +53,20 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     // SHA-256 of the single byte 'x'.
     let digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881";
     let generation = approve(&registry.path)?;
-    let request = json!({"version":1,"command_only":true,"handoff_sha256":digest,"approval_generation":generation,"floor_bytes":1,"budget_bytes":1,
-        "roots":[super::root("project",&project),super::root("registry",&registry.path),
-            super::root("scratch_parent",&scratch_parent),super::root("outputs",&sibling)]});
+    let request = json!({
+        "version": 1,
+        "command_only": true,
+        "handoff_sha256": digest,
+        "approval_generation": generation,
+        "floor_bytes": 1,
+        "budget_bytes": 1,
+        "roots": [
+            super::root("project", &project),
+            super::root("registry", &registry.path),
+            super::root("scratch_parent", &scratch_parent),
+            super::root("outputs", &sibling),
+        ],
+    });
     for (field, replacement) in [
         ("handoff_sha256", Some(Value::Null)),
         ("handoff_sha256", Some(json!("bad digest"))),

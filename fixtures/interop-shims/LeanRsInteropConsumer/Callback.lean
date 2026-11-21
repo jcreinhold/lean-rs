@@ -327,7 +327,7 @@ def workerShapeMathlibScaleTimeoutAfterRow (_requestJson : String) (handle tramp
     #[Stream.row "declarations"
       (mathlibScaleDeclarationPayload "Mathlib.Fixture.Timeout" 0)]
   if status == 0 then
-    IO.sleep 200
+    IO.sleep 5000
     pure 0
   else
     pure status

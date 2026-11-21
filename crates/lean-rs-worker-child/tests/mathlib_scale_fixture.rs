@@ -296,8 +296,10 @@ fn mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly(
     let mut timeout_lease = timeout_pool
         .acquire_lease(planned_builder())
         .expect("planned lease opens");
+    // The request deadline includes dispatch and first-row delivery. The
+    // paired Lean fixture waits longer after emitting its row.
     timeout_lease
-        .set_request_timeout(Duration::from_millis(50))
+        .set_request_timeout(Duration::from_secs(2))
         .expect("request timeout is set");
     let timeout_command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_timeout_after_row",

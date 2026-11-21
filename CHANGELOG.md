@@ -11,6 +11,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [0.10.5]
 
+- Lean callers can get a bounded declaration outline or file diagnostics from the current source using
+  `declarationOutlineWithSetup` and `fileDiagnosticsWithSetup` with Lake's selected `ModuleSetup`.
 - Opt-in source-bound writer handoffs require a current registry approval generation. Operators can issue it with
   `writer-storage approve-handoff` and disable new source-bound admissions with `writer-storage revoke-handoff`.
   Revocation disables admission before checking for a drain. Drain launchers that can use older source-bound helpers
