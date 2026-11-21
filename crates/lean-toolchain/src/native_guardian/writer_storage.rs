@@ -7,9 +7,10 @@
 use super::{MAX_OWNER_BYTES, MAX_OWNER_RECORDS, deadline, expired, invalid, ownership, registry_directory};
 use rustix::fs::{AtFlags, Dir, DirEntry, Mode, OFlags, fstatvfs, mkdirat, open, openat, renameat, statat, unlinkat};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -17,6 +18,8 @@ use std::time::{Duration, Instant};
 const CHARGES: &str = ".writer-storage-v1";
 const STAGED_CHARGE: &str = ".charge-write";
 const MAX_ROOTS: usize = 96;
+const WRITER_OWNER_PROTOCOL: u32 = 1;
+const MAX_WRITER_OWNER_BYTES: u64 = 4096;
 const DIRECTORY: OFlags = OFlags::RDONLY
     .union(OFlags::DIRECTORY)
     .union(OFlags::NOFOLLOW)
@@ -166,6 +169,8 @@ fn sync_charge_directory(directory: &File) -> io::Result<()> {
 #[serde(deny_unknown_fields)]
 struct Charge {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    scope_nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     origin: Option<WriterOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     handoff_sha256: Option<String>,
@@ -196,6 +201,33 @@ fn valid_digest(digest: &str) -> bool {
 }
 
 impl Charge {
+    // Lock owner records already persist the 32-hex turn before any command
+    // may start. Make that independent record commit to the admitted scope,
+    // preserving the existing owner and reply schemas. The nonce keeps turns
+    // distinct even when the same scope is admitted again.
+    fn scoped_turn(&self, directory: &File, nonce: &str) -> io::Result<String> {
+        let registry = File::from(openat(directory, "..", DIRECTORY, Mode::empty())?).metadata()?;
+        let scope = serde_json::to_vec(&(
+            nonce,
+            (registry.dev(), registry.ino()),
+            self.lock_union().collect::<Vec<_>>(),
+            &self.handoff_sha256,
+            &self.origin,
+            &self.roots,
+            self.budget,
+        ))
+        .map_err(io::Error::other)?;
+        let mut hash = Sha256::new();
+        hash.update(b"lean-rs-writer-storage-scope-v1\0");
+        hash.update(scope);
+        let hash = hash.finalize();
+        let (id, _) = hash
+            .split_at_checked(16)
+            .ok_or_else(|| invalid("writer storage scope digest is incomplete"))?;
+        let id = id.try_into().map_err(io::Error::other)?;
+        Ok(format!("{:032x}", u128::from_be_bytes(id)))
+    }
+
     // The caller serializes publication and has checked the current entry
     // under admission. Keep the file descriptor of the published inode.
     fn publish(&self, directory: &File, turn: &str) -> io::Result<File> {
@@ -297,6 +329,13 @@ impl Charge {
             || (entry.scratch_cleanup_started && (!entry.command_only || entry.scratch.is_none()))
         {
             return Err(invalid("invalid writer storage charge"));
+        }
+        if let Some(nonce) = &entry.scope_nonce
+            && (nonce.len() != 32
+                || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || entry.scoped_turn(directory, nonce)? != turn)
+        {
+            return Err(invalid("writer storage charge differs from the original turn scope"));
         }
         Ok((entry, file))
     }
@@ -545,20 +584,133 @@ fn try_recovery_union(charge: &Charge, until: Instant) -> io::Result<Vec<(PathBu
         if (held.dev(), held.ino()) != (device, inode) {
             return Err(invalid("writer recovery lock inode changed"));
         }
-        match file.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "writer recovery lock is busy",
-                ));
-            }
-            Err(std::fs::TryLockError::Error(error)) => return Err(error),
-        }
-
+        try_hold_recovery_lock(&file)?;
         locks.push((path.clone(), file));
     }
     Ok(locks)
+}
+
+fn try_hold_recovery_lock(file: &File) -> io::Result<()> {
+    // macOS and Linux flock operate on the open description. Reassert EX on
+    // a retained loan without releasing it or waiting for a different owner.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let result = rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive).map_err(io::Error::from);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let result = {
+        let _ = file;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "writer recovery requires macOS or Linux flock",
+        ))
+    };
+    match result {
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Err(io::Error::new(error.kind(), "writer recovery lock is busy"))
+        }
+        result => result,
+    }
+}
+
+#[derive(Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct WriterLockOwner {
+    version: u32,
+    pid: u32,
+    start: String,
+    session: u32,
+}
+
+#[derive(Deserialize)]
+enum IdlePhase {
+    #[serde(rename = "idle")]
+    Idle,
+}
+
+/// The recovery subset of lean-rs-writer's private lock record. Required
+/// fields reject incomplete publication. JSON null is the only disposition
+/// allowed here, and the original turn binds the ordered scope independently.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IdleLockRecord {
+    version: u32,
+    owner: WriterLockOwner,
+    process: (),
+    storage_turn: String,
+    command_phase: IdlePhase,
+}
+
+fn require_idle_lock_owner(locks: &[(PathBuf, File)], turn: &str) -> io::Result<WriterLockOwner> {
+    let mut prior = None;
+    for (_, file) in locks {
+        // Use the supplied open description so a correct loan keeps holding
+        // EX. Another live holder on a different description still conflicts.
+        try_hold_recovery_lock(file)?;
+        let Some(bytes) = read_complete_lock_record(file)? else {
+            return Err(invalid("missing complete writer recovery owner record"));
+        };
+        let IdleLockRecord {
+            version,
+            owner,
+            process: (),
+            storage_turn,
+            command_phase: IdlePhase::Idle,
+        } = serde_json::from_slice(&bytes).map_err(|error| invalid(format!("missing durable Idle record: {error}")))?;
+        if version != WRITER_OWNER_PROTOCOL
+            || owner.version != WRITER_OWNER_PROTOCOL
+            || owner.pid == 0
+            || owner.session != owner.pid
+            || owner.start.is_empty()
+            || storage_turn != turn
+            || prior.as_ref().is_some_and(|previous| previous != &owner)
+        {
+            return Err(invalid(
+                "writer recovery lock owner differs from the original Idle turn",
+            ));
+        }
+        prior = Some(owner);
+    }
+    prior.ok_or_else(|| invalid("writer recovery requires its primary Idle lock owner"))
+}
+
+fn read_complete_lock_record(file: &File) -> io::Result<Option<Vec<u8>>> {
+    let mut reader = file.try_clone()?;
+    reader.rewind()?;
+    let mut bytes = Vec::new();
+    reader.take(MAX_WRITER_OWNER_BYTES + 1).read_to_end(&mut bytes)?;
+    Ok((bytes.last() == Some(&b'\n') && bytes.len() as u64 <= MAX_WRITER_OWNER_BYTES).then_some(bytes))
+}
+
+fn prior_custody() -> io::Error {
+    io::Error::new(io::ErrorKind::WouldBlock, "prior writer storage custody remains open")
+}
+
+// Legacy charges lack a scope commitment. A surviving owner record in an
+// admitted lock can still corroborate that this domain belongs to a turn.
+fn check_legacy_lock_records(dir: &File, locks: &[(PathBuf, File)]) -> io::Result<()> {
+    #[derive(Deserialize)]
+    struct TurnPointer {
+        storage_turn: Option<String>,
+    }
+    for (_, file) in locks {
+        let Some(bytes) = read_complete_lock_record(file)? else {
+            continue;
+        };
+        let Ok(TurnPointer {
+            storage_turn: Some(turn),
+        }) = serde_json::from_slice(&bytes)
+        else {
+            continue;
+        };
+        if turn.len() != 32 || !turn.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            continue;
+        }
+        match statat(dir, turn, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(_) => return Err(prior_custody()),
+            Err(rustix::io::Errno::NOENT) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 /// A private-registry observation of one existing reservation. Pins its charge
@@ -625,10 +777,12 @@ impl WriterStorageTurn {
         Ok((parent, scratch, self.charge.scratch_cleanup_started))
     }
 
-    /// Settle the inspected inode after the writer checks agreeing idle
-    /// records under its retained EX union and removes the bound scratch.
+    /// Settle the inspected turn using the independently acquired EX
+    /// descriptions from `Self::try_locks` and its matching Idle records.
+    /// The callbacks pin and remove the bound scratch.
     /// # Errors
-    /// Refuses a changed snapshot or incomplete cleanup, including a prior settlement.
+    /// Refuses contention, incomplete owner evidence, a changed snapshot,
+    /// or incomplete cleanup, including a prior settlement.
     pub fn reclaim<T>(
         &self,
         locks: &[(PathBuf, File)],
@@ -673,6 +827,11 @@ impl Charge {
     }
 
     fn scratch_binding(&self, turn: &str) -> io::Result<(&StorageRoot, &StorageRoot)> {
+        // Old records still count against storage and fence their domains.
+        // They carry no independent scope binding for automatic recovery.
+        if self.scope_nonce.is_none() {
+            return Err(invalid("writer storage turn lacks an original scope binding"));
+        }
         let scratch = self
             .scratch
             .as_ref()
@@ -691,7 +850,8 @@ impl Charge {
 }
 
 /// Reclaim one matching idle command-only charge with the original EX loan union.
-/// The writer checks complete private lock records before passing the turn.
+/// The incoming writer supplies EX descriptions acquired independently of the
+/// interrupted writer. Recovery reasserts EX and checks each private record.
 /// The callbacks first pin exact scratch, then remove it after cleanup intent
 /// is durable. Both run while the caller retains all project locks.
 ///
@@ -781,6 +941,7 @@ fn reclaim_idle_with<T>(
     }
     charge.check_bindings(locks)?;
     let (_, scratch) = charge.scratch_binding(turn)?;
+    let idle_owner = require_idle_lock_owner(locks, turn)?;
     let pinned = pin_scratch(scratch, charge.scratch_cleanup_started)?;
     let entry = charge.begin_scratch_cleanup(&dir, turn, entry)?;
     drop(mutex);
@@ -791,6 +952,9 @@ fn reclaim_idle_with<T>(
     let named_dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory disappeared"))?;
     let (named_charge, named_entry) = Charge::read_bound(&named_dir, turn)?;
     charge.check_bindings(locks)?;
+    if require_idle_lock_owner(locks, turn)? != idle_owner {
+        return Err(invalid("writer recovery lock owner changed before settlement"));
+    }
     if !same_inode(&dir, &named_dir)? || !same_inode(&entry, &named_entry)? || named_charge != charge {
         return Err(invalid("writer recovery charge changed before settlement"));
     }
@@ -825,6 +989,7 @@ pub fn ensure_no_writer_storage_charge(locks: &[(PathBuf, File)], timeout: Durat
         return Ok(());
     };
     let mut seen = 0_usize;
+    let mut has_legacy = false;
     for entry in Dir::read_from(&dir)? {
         if Instant::now() >= until {
             return Err(expired());
@@ -838,15 +1003,16 @@ pub fn ensure_no_writer_storage_charge(locks: &[(PathBuf, File)], timeout: Durat
             return Err(invalid("writer storage turn limit reached"));
         }
         let charge = Charge::read(&dir, turn)?;
+        has_legacy |= charge.scope_nonce.is_none();
         for (path, file) in locks {
             let held = file.metadata()?;
             if charge.covers_lock(path, held.dev(), held.ino()) {
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "prior writer storage custody remains open",
-                ));
+                return Err(prior_custody());
             }
         }
+    }
+    if has_legacy {
+        check_legacy_lock_records(&dir, locks)?;
     }
     Ok(())
 }
@@ -953,7 +1119,8 @@ fn reserve(
     if roots.len() > MAX_ROOTS {
         return Err(invalid("writer storage root count exceeds limit"));
     }
-    let charge = Charge {
+    let mut charge = Charge {
+        scope_nonce: None,
         // An enrolled turn must not silently omit its admission witness.
         origin: handoff
             .map(|_| ownership::writer_origin().map(|(host, boot)| WriterOrigin { host, boot }))
@@ -979,6 +1146,7 @@ fn reserve(
     if let Some(dir) = charge_directory(&root, false)? {
         let entries = Dir::read_from(&dir)?;
         let mut seen = 0_usize;
+        let mut has_legacy = false;
         for item in entries {
             if Instant::now() >= until {
                 return Err(expired());
@@ -993,16 +1161,17 @@ fn reserve(
             }
             let old = Charge::read(&dir, name)
                 .map_err(|e| io::Error::new(e.kind(), format!("reading writer storage charge {name}: {e}")))?;
+            has_legacy |= old.scope_nonce.is_none();
             if custody.iter().any(|&(p, d, i)| old.covers_lock(p, d, i)) {
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "prior writer storage custody remains open",
-                ));
+                return Err(prior_custody());
             }
             required = required
                 .checked_add(old.budget)
                 .ok_or_else(|| invalid("writer storage budget overflow"))?;
             roots.extend(old.roots);
+        }
+        if has_legacy {
+            check_legacy_lock_records(&dir, locks)?;
         }
     }
     for item in roots {
@@ -1024,11 +1193,13 @@ fn reserve(
     }
     let mut random = [0; 16];
     File::open("/dev/urandom")?.read_exact(&mut random)?;
-    let turn = format!("{:032x}", u128::from_ne_bytes(random));
+    let nonce = format!("{:032x}", u128::from_ne_bytes(random));
     if Instant::now() >= until {
         return Err(expired());
     }
     let dir = charge_directory(&root, true)?.ok_or_else(|| invalid("writer storage directory missing"))?;
+    let turn = charge.scoped_turn(&dir, &nonce)?;
+    charge.scope_nonce = Some(nonce);
     match statat(&dir, turn.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
         Err(rustix::io::Errno::NOENT) => {}
         Err(error) => return Err(error.into()),

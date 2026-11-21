@@ -63,6 +63,27 @@ fn lock(project: &Path) -> (PathBuf, File) {
     file.try_lock().unwrap();
     (path, file)
 }
+
+fn publish_idle_records(locks: &[(PathBuf, File)], turn: &str) -> io::Result<()> {
+    let pid = std::process::id();
+    let record = serde_json::json!({
+        "version": 1,
+        "owner": {"version": 1, "pid": pid, "start": "fixture", "session": pid},
+        "process": null,
+        "storage_turn": turn,
+        "command_phase": "idle"
+    });
+    for (_, file) in locks {
+        let mut file = file.try_clone()?;
+        file.set_len(0)?;
+        file.rewind()?;
+        serde_json::to_writer(&mut file, &record)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    Ok(())
+}
+
 fn request(root: &Path, locks: &[(PathBuf, File)]) -> io::Result<WriterStorageCharge> {
     let registry = expected(root.join("owners"));
     reserve(
@@ -378,6 +399,7 @@ fn interrupted_publication_preserves_the_exact_charge() -> io::Result<()> {
     charge.bind_scratch_for_turn(binding.clone(), true, TIMEOUT)?;
 
     let bound = fs::read(&entry)?;
+    publish_idle_records(&first, &turn)?;
     CHARGE_WRITE_CUT.set(Some(ChargeWriteCut::DuringWrite));
     assert!(charge.begin_command_only_scratch_cleanup(TIMEOUT).is_err());
     assert!(staged.try_exists()?);
@@ -454,11 +476,21 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
     let second_project = root.join("second");
     let (turn, scratch) = {
         let locks = [lock(&first_project), lock(&second_project)];
-        let mut charge = request(&root, &locks)?;
+        let digest = "a".repeat(64);
+        let mut charge = reserve(
+            &registry.path,
+            &registry,
+            &locks,
+            &[expected(root.clone())],
+            (FLOOR, BUDGET, Some(&digest)),
+            deadline(TIMEOUT)?,
+            |_| Ok(CAPACITY),
+        )?;
         let turn = charge.turn().to_owned();
         let scratch = root.join(format!("lean-writer-assets-{turn}"));
         fs::create_dir(&scratch)?;
         charge.bind_scratch_for_turn(expected(scratch.clone()), true, TIMEOUT)?;
+        publish_idle_records(&locks, &turn)?;
         (turn, scratch)
     };
 
@@ -473,6 +505,80 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
 
     let entry = registry.path.join(CHARGES).join(&turn);
     let original = fs::read(&entry)?;
+    let no_pin = |_: &StorageRoot, _: bool| Err::<(), _>(io::Error::other("unexpected scratch pin"));
+    let admitted: Charge = serde_json::from_slice(&original)?;
+    let mut shortened = admitted.clone();
+    shortened.secondary_locks.clear();
+    let mut reordered = admitted.clone();
+    let (path, device, inode) = reordered.secondary_locks.first_mut().unwrap();
+    std::mem::swap(path, &mut reordered.primary);
+    std::mem::swap(device, &mut reordered.device);
+    std::mem::swap(inode, &mut reordered.inode);
+    let mut changed_digest = admitted.clone();
+    changed_digest.handoff_sha256 = Some("b".repeat(64));
+    for changed in [shortened, reordered, changed_digest] {
+        fs::write(&entry, serde_json::to_vec(&changed)?)?;
+        let refusal = WriterStorageTurn::inspect(&registry, &turn).unwrap_err();
+        assert!(refusal.to_string().contains("original turn scope"));
+    }
+    let mut without_scope = admitted;
+    without_scope.scope_nonce = None;
+    without_scope.secondary_locks.clear();
+    fs::write(&entry, serde_json::to_vec(&without_scope)?)?;
+    {
+        let legacy = WriterStorageTurn::inspect(&registry, &turn)?;
+        let locks = legacy.try_locks(deadline(TIMEOUT)?)?;
+        let refusal = legacy.reclaim(&locks, no_pin, |()| Ok(())).unwrap_err();
+        assert!(refusal.to_string().contains("lacks an original scope binding"));
+    }
+    {
+        let second = [lock(&second_project)];
+        let refusal = ensure_no_writer_storage_charge(&second, TIMEOUT).unwrap_err();
+        assert_eq!(refusal.kind(), io::ErrorKind::WouldBlock);
+        let refusal = request(&root, &second).unwrap_err();
+        assert!(refusal.to_string().contains("prior writer storage custody"));
+    }
+    fs::write(&entry, &original)?;
+
+    {
+        let retained = lock(&second_project);
+        let read_write = |path: &Path| OpenOptions::new().read(true).write(true).open(path);
+        let first_path = crate::shared_writer::project_lock_path(&first_project)?;
+        let claimed = [
+            (first_path.clone(), read_write(&first_path)?),
+            (retained.0.clone(), read_write(&retained.0)?),
+        ];
+        let refusal = snapshot.reclaim(&claimed, no_pin, |()| Ok(())).unwrap_err();
+        assert_eq!(refusal.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(fs::read(&entry)?, original);
+    }
+
+    {
+        let locks = snapshot.try_locks(deadline(TIMEOUT)?)?;
+        let secondary = &locks.last().unwrap().0;
+        let idle = fs::read(secondary)?;
+        let record: serde_json::Value = serde_json::from_slice(&idle)?;
+        let mut no_disposition = record.clone();
+        no_disposition.as_object_mut().unwrap().remove("process");
+        let mut running = record.clone();
+        running
+            .as_object_mut()
+            .unwrap()
+            .insert("command_phase".to_owned(), serde_json::json!("running"));
+        let mut with_process = record;
+        with_process
+            .as_object_mut()
+            .unwrap()
+            .insert("process".to_owned(), serde_json::json!({}));
+        for incomplete in [no_disposition, running, with_process] {
+            fs::write(secondary, format!("{incomplete}\n"))?;
+            let refusal = snapshot.reclaim(&locks, no_pin, |()| Ok(())).unwrap_err();
+            assert!(refusal.to_string().contains("missing durable Idle record"));
+            assert_eq!(fs::read(&entry)?, original);
+        }
+        fs::write(secondary, idle)?;
+    }
+
     {
         let mut reversed = snapshot.try_locks(deadline(TIMEOUT)?)?;
         assert_eq!(reversed.len(), 2);
