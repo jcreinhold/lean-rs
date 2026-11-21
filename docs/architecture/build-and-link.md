@@ -274,3 +274,10 @@ all other approved storage roots. Include the known Lake artifact cache even for
 Retain the writer through caller-owned writes. Keep each command's result and separately check the consuming
 `SharedWriter::close` result, which waits for the helper to exit successfully. Dropping the control channel or
 losing the close result does not confirm settlement or authorize replay.
+
+The managed writer records one turn ID on the full project-lock union and binds the exact scratch path, device
+and inode in the existing charge before exposing scratch or accepting work. The project locks precede the registry
+admission lock. A retained charge fences overlapping locks even for an unbudgeted invocation of the current writer.
+Deploy this only with cooperating writers using the same registry. A torn binding or interrupted close retains the
+fence. A restarted writer still needs proof that caller-owned writes ended and the exact scratch was durably removed
+before it can reclaim the charge.

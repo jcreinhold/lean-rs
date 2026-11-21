@@ -282,3 +282,37 @@ fn simultaneous_disjoint_requests_cannot_both_spend_the_same_free_bytes() {
     }
     assert_eq!((admitted, refused), (1, 1));
 }
+
+#[test]
+fn scratch_binding_rejects_wrong_inode_and_fences_all_turn_locks() {
+    let fixture = Fixture::new();
+    let locks = [lock(&fixture.0.join("first")), lock(&fixture.0.join("second"))];
+    let mut charge = request(&fixture.0, &locks).unwrap();
+    let scratch = fixture.0.join(format!("lean-writer-assets-{}", charge.turn()));
+    DirBuilder::new().mode(0o700).create(&scratch).unwrap();
+    let original = expected(scratch);
+    let displaced = fixture.0.join("displaced");
+    fs::rename(&original.path, &displaced).unwrap();
+    DirBuilder::new().mode(0o700).create(&original.path).unwrap();
+    assert_ne!(original.inode, expected(original.path.clone()).inode);
+    assert!(charge.bind_scratch(original.clone(), TIMEOUT).is_err());
+    fs::remove_dir(&original.path).unwrap();
+    fs::rename(displaced, &original.path).unwrap();
+    assert!(charge.charge.scratch.is_none());
+    charge.bind_scratch(original.clone(), TIMEOUT).unwrap();
+    let root = charge.registry.open().unwrap();
+    let dir = charge_directory(&root, false).unwrap().unwrap();
+    assert_eq!(Charge::read(&dir, charge.turn()).unwrap().scratch, Some(original));
+    let registry = expected(fixture.0.join("owners"));
+    let refusal = reserve(
+        &registry.path,
+        &registry,
+        &locks[1..],
+        &[expected(fixture.0.clone())],
+        (0, 1),
+        deadline(TIMEOUT).unwrap(),
+        |_| Ok(CAPACITY),
+    )
+    .unwrap_err();
+    assert!(refusal.to_string().contains("prior writer storage custody"));
+}

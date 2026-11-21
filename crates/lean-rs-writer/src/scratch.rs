@@ -61,6 +61,18 @@ impl Scratch<'_> {
         Ok(path)
     }
 
+    pub(super) fn binding(&self) -> io::Result<lean_toolchain::native_guardian::writer_storage::StorageRoot> {
+        let path = self.verified_path()?;
+        let held = self.dir.metadata()?;
+        self.dir.sync_all()?;
+        self.parent.dir.sync_all()?;
+        Ok(lean_toolchain::native_guardian::writer_storage::StorageRoot {
+            path,
+            device: held.dev(),
+            inode: held.ino(),
+        })
+    }
+
     pub(super) fn remove(self) -> io::Result<()> {
         let held = rustix::fs::fstat(&self.dir)?;
         let check = || -> io::Result<()> {
@@ -74,7 +86,7 @@ impl Scratch<'_> {
         remove_contents(&self.dir, self.dir.metadata()?.dev())?;
         check()?;
         unlinkat(&self.parent.dir, self.name.as_str(), AtFlags::REMOVEDIR)?;
-        Ok(())
+        self.parent.dir.sync_all()
     }
 }
 

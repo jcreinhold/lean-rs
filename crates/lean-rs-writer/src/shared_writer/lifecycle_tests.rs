@@ -74,7 +74,7 @@ struct Fixture {
     launcher: PathBuf,
     file: File,
     loans: Vec<File>,
-    record: Owner,
+    record: Record,
 }
 
 impl Fixture {
@@ -85,19 +85,20 @@ impl Fixture {
         let loan_path = root.join("loan.lock");
         let mut file = Self::locked(&lock_path);
         let mut loan = Self::locked(&loan_path);
-        let record = Owner {
+        let owner = Owner {
             version: PROTOCOL,
             pid: std::process::id(),
             start: birth(std::process::id()).unwrap(),
             session: sid(None).unwrap(),
         };
-        let initial = Record {
+        let record = Record {
             version: PROTOCOL,
-            owner: record.clone(),
+            owner,
             process: None,
+            storage_turn: None,
         };
-        persist(&mut file, &initial).unwrap();
-        persist(&mut loan, &initial).unwrap();
+        persist(&mut file, &record).unwrap();
+        persist(&mut loan, &record).unwrap();
         fs::write(root.join("mode"), mode).unwrap();
         let launcher = root.join("launcher");
         fs::write(&launcher, LAUNCHER).unwrap();

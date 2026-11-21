@@ -157,6 +157,8 @@ struct Record {
     version: u32,
     owner: Owner,
     process: Option<ProcessIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    storage_turn: Option<String>,
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -261,6 +263,10 @@ fn owner(file: &mut File) -> io::Result<Option<Record>> {
         || identity.pid == 0
         || identity.session != identity.pid
         || identity.start.is_empty()
+        || record
+            .storage_turn
+            .as_ref()
+            .is_some_and(|turn| turn.len() != 32 || !turn.bytes().all(|byte| byte.is_ascii_hexdigit()))
     {
         return Err(invalid("writer owner has no exact session identity"));
     }
@@ -984,7 +990,7 @@ fn execute(
     lock_path: &Path,
     file: &mut File,
     loans: &[File],
-    record: &Owner,
+    record: &Record,
     input: &Receiver<io::Result<Value>>,
 ) -> io::Result<bool> {
     let launcher = std::env::current_exe()?;
@@ -1001,7 +1007,7 @@ fn execute_with_launcher(
     lock_path: &Path,
     file: &mut File,
     loans: &[File],
-    record: &Owner,
+    record: &Record,
     input: &Receiver<io::Result<Value>>,
     launcher: &Path,
     mut emit: impl FnMut(&Value) -> io::Result<()>,
@@ -1044,7 +1050,7 @@ fn execute_with_launcher(
         process = Some(ProcessIdentity {
             pid: group.id(),
             process_group: group.id(),
-            session: record.session,
+            session: record.owner.session,
             start: birth(group.id())?,
             start_new_session: false,
         });
@@ -1052,9 +1058,8 @@ fn execute_with_launcher(
             file,
             loans,
             &Record {
-                version: PROTOCOL,
-                owner: record.clone(),
                 process: process.clone(),
+                ..record.clone()
             },
         )?;
         let mut launch = message.clone();
@@ -1073,7 +1078,7 @@ fn execute_with_launcher(
             .ok_or_else(|| invalid("writer launch channel missing"))?;
         write_launch(&mut channel, &bytes, input, deadline, &mut cancelled)?;
         drop(channel);
-        emit(&json!({"state":"started","process":process,"owner":record}))
+        emit(&json!({"state":"started","process":process,"owner":record.owner}))
     })();
     let mut reason = setup.err().map(|error| format!("writer launch failed: {error}"));
     let mut notified = false;
@@ -1124,7 +1129,7 @@ fn execute_with_launcher(
                 // This is a failed operation even if subsequent cleanup confirms
                 // root exit zero. It can never authorize another writer stage.
                 let _delivery = emit(&json!({"state":"still_running","result":"no_result",
-                    "reason":why,"process":process,"owner":record}));
+                    "reason":why,"process":process,"owner":record.owner}));
                 notified = true;
             }
             if status.is_none() {
@@ -1146,9 +1151,8 @@ fn execute_with_launcher(
                     file,
                     loans,
                     &Record {
-                        version: PROTOCOL,
-                        owner: record.clone(),
                         process: None,
+                        ..record.clone()
                     },
                 );
                 if let Err(error) = &cleared {
@@ -1173,7 +1177,7 @@ fn execute_with_launcher(
                 // provisional stopping frame or interpret exit zero as success.
                 let result = json!({"state":"stopped","exit_code":code(status),
                     "stdout":captured_stdout,"stderr":captured_stderr,"process":process,
-                    "owner":record,"owned_work_stopped":true,"cancelled":cancelled,
+                    "owner":record.owner,"owned_work_stopped":true,"cancelled":cancelled,
                     "intervened":unavailable,"result":if unavailable {"no_result"} else {"result"},
                     "reason":reason});
                 emit(&result)?;
@@ -1246,37 +1250,40 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         Value::Null
     };
     let admission = duration(args.admission)?;
-    let managed = args
+    let mut managed = args
         .storage_request
         .as_ref()
         .map(|r| r.reserve(&args.root, &locks, admission))
         .transpose()?;
+    if managed.is_none() {
+        lean_toolchain::native_guardian::writer_storage::ensure_no_writer_storage_charge(&locks, admission)?;
+    }
     let paths: Vec<_> = locks.iter().map(|(path, _)| path.clone()).collect();
     let mut files = locks.into_iter().map(|(_, file)| file);
     let mut file = files.next().ok_or_else(|| invalid("writer primary loan missing"))?;
     let loans: Vec<_> = files.collect();
     let current = std::process::id();
-    let record = Owner {
+    let record = Record {
         version: PROTOCOL,
-        pid: current,
-        start: birth(current)?,
-        session: current,
-    };
-    persist_all(
-        &mut file,
-        &loans,
-        &Record {
+        owner: Owner {
             version: PROTOCOL,
-            owner: record.clone(),
-            process: None,
+            pid: current,
+            start: birth(current)?,
+            session: current,
         },
-    )?;
-    // Disarm filesystem deletion before exposing any path. A panic or helper
-    // crash leaves safe orphan inputs instead of removing files beneath work.
-    let scratch = managed
-        .as_ref()
-        .map(|(parent, charge)| parent.create(charge.turn()))
-        .transpose()?;
+        process: None,
+        storage_turn: managed.as_ref().map(|(_, charge)| charge.turn().to_owned()),
+    };
+    persist_all(&mut file, &loans, &record)?;
+    // No path or GO is exposed until the exact managed scratch is durable.
+    let scratch = match &mut managed {
+        Some((parent, charge)) => {
+            let scratch = parent.create(charge.turn())?;
+            charge.bind_scratch(scratch.binding()?, admission)?;
+            Some(scratch)
+        }
+        None => None,
+    };
     let asset_dir = match &scratch {
         Some(scratch) => scratch.verified_path()?,
         None => tempfile::Builder::new()
@@ -1287,7 +1294,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     };
     let mut confirmed_close = false;
     let result = (|| -> io::Result<()> {
-        send(&json!({"state":"locked","owner":record,"lock_loans":receipt,"asset_dir":asset_dir}))?;
+        send(&json!({"state":"locked","owner":record.owner,"lock_loans":receipt,"asset_dir":asset_dir}))?;
         while let Ok(message) = input.recv() {
             let message = message?;
             match field(&message, "action").as_str() {

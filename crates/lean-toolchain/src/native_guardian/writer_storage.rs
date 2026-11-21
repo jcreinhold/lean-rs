@@ -101,9 +101,22 @@ struct Charge {
     inode: u64,
     budget: u64,
     roots: Vec<StorageRoot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    secondary_locks: Vec<(PathBuf, u64, u64)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scratch: Option<StorageRoot>,
 }
 
 impl Charge {
+    fn covers_lock(&self, path: &Path, dev: u64, ino: u64) -> bool {
+        path == self.primary
+            || (dev, ino) == (self.device, self.inode)
+            || self
+                .secondary_locks
+                .iter()
+                .any(|(prior, device, inode)| path == prior || (dev, ino) == (*device, *inode))
+    }
+
     fn read(directory: &File, turn: &str) -> io::Result<Self> {
         if turn.len() != 32 || !turn.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid("invalid writer storage turn"));
@@ -126,7 +139,12 @@ impl Charge {
             return Err(invalid("writer storage charge too large"));
         }
         let entry: Self = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-        if entry.budget == 0 || entry.roots.is_empty() || entry.roots.len() > MAX_ROOTS || !entry.primary.is_absolute()
+        if entry.budget == 0
+            || entry.roots.is_empty()
+            || entry.roots.len() > MAX_ROOTS
+            || !entry.primary.is_absolute()
+            || entry.secondary_locks.len() >= crate::shared_writer::MAX_WRITER_LOCK_LOANS
+            || entry.secondary_locks.iter().any(|(path, _, _)| !path.is_absolute())
         {
             return Err(invalid("invalid writer storage charge"));
         }
@@ -149,6 +167,46 @@ impl WriterStorageCharge {
     /// Unique component used by the writer for this turn's scratch directory.
     pub fn turn(&self) -> &str {
         &self.turn
+    }
+
+    /// Persist the exact scratch directory before the writer exposes it.
+    ///
+    /// # Errors
+    /// Refuses an unapproved, substituted, or already bound scratch directory.
+    /// An incomplete write leaves the charge fenced.
+    pub fn bind_scratch(&mut self, scratch: StorageRoot, timeout: Duration) -> io::Result<()> {
+        if self.writer != std::process::id() || self.charge.scratch.is_some() {
+            return Err(invalid(
+                "writer storage scratch already bound or belongs to another writer",
+            ));
+        }
+        let name = format!("lean-writer-assets-{}", self.turn);
+        if scratch.path.file_name().and_then(|part| part.to_str()) != Some(&name) {
+            return Err(invalid("writer storage scratch does not match its turn"));
+        }
+        let parent = self
+            .charge
+            .roots
+            .iter()
+            .find(|root| Some(root.path.as_path()) == scratch.path.parent())
+            .ok_or_else(|| invalid("writer storage scratch parent was not charged"))?;
+        let _parent = parent.open()?;
+        let _scratch = scratch.open()?;
+        let root = self.registry.open()?;
+        let _lock = ownership::lock_admission_at(&root, deadline(timeout)?, false)?;
+        let dir = charge_directory(&root, false)?.ok_or_else(|| invalid("writer storage directory missing"))?;
+        if Charge::read(&dir, &self.turn)? != self.charge {
+            return Err(invalid("writer storage charge changed before scratch binding"));
+        }
+        self.charge.scratch = Some(scratch);
+        let bytes = serde_json::to_vec(&self.charge).map_err(io::Error::other)?;
+        if bytes.len() > MAX_OWNER_BYTES {
+            return Err(invalid("writer storage charge too large"));
+        }
+        let flags = OFlags::WRONLY | OFlags::TRUNC | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut record = File::from(openat(&dir, self.turn.as_str(), flags, Mode::empty())?);
+        record.write_all(&bytes)?;
+        record.sync_all()
     }
 
     /// Settle while the same writer still holds EX on the primary loan. Supply
@@ -180,6 +238,55 @@ impl WriterStorageCharge {
             Err(error) => Err(error.into()),
         }
     }
+}
+
+/// Refuse to overwrite a project-lock record while its storage charge remains.
+/// The caller must already hold its complete project EX union.
+///
+/// # Errors
+/// Returns unresolved custody, malformed charge, or registry access failure.
+#[doc(hidden)]
+pub fn ensure_no_writer_storage_charge(locks: &[(PathBuf, File)], timeout: Duration) -> io::Result<()> {
+    let root = match File::open(registry_directory()?) {
+        Ok(root) => root,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let Some(_) = charge_directory(&root, false)? else {
+        return Ok(());
+    };
+    let until = deadline(timeout)?;
+    let _lock = ownership::lock_admission_at(&root, until, false)?;
+    // The directory may have been retired while we were waiting for admission.
+    let Some(dir) = charge_directory(&root, false)? else {
+        return Ok(());
+    };
+    let mut seen = 0_usize;
+    for entry in Dir::read_from(&dir)? {
+        if Instant::now() >= until {
+            return Err(expired());
+        }
+        let entry = entry?;
+        let turn = entry.file_name().to_str().map_err(io::Error::other)?;
+        if matches!(turn, "." | "..") {
+            continue;
+        }
+        seen = seen.saturating_add(1);
+        if seen >= MAX_OWNER_RECORDS {
+            return Err(invalid("writer storage turn limit reached"));
+        }
+        let charge = Charge::read(&dir, turn)?;
+        for (path, file) in locks {
+            let held = file.metadata()?;
+            if charge.covers_lock(path, held.dev(), held.ino()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "prior writer storage custody remains open",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Reserve one full-turn charge under the native registry admission lock.
@@ -270,6 +377,12 @@ fn reserve(
         inode,
         budget,
         roots: roots.iter().cloned().collect(),
+        scratch: None,
+        secondary_locks: custody
+            .iter()
+            .skip(1)
+            .map(|&(path, dev, ino)| (path.clone(), dev, ino))
+            .collect(),
     };
     let mut required = floor
         .checked_add(budget)
@@ -292,10 +405,7 @@ fn reserve(
             }
             let old = Charge::read(&dir, name)
                 .map_err(|e| io::Error::new(e.kind(), format!("reading writer storage charge {name}: {e}")))?;
-            if custody
-                .iter()
-                .any(|&(p, d, i)| *p == old.primary || (d, i) == (old.device, old.inode))
-            {
+            if custody.iter().any(|&(p, d, i)| old.covers_lock(p, d, i)) {
                 return Err(io::Error::new(
                     io::ErrorKind::WouldBlock,
                     "prior writer storage custody remains open",

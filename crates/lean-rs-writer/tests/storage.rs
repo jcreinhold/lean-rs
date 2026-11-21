@@ -103,6 +103,20 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
     let mut reader = BufReader::new(abandoned.stdout.take().expect("managed replies"));
     let locked = reply(&mut reader)?;
     let assets = Path::new(locked["asset_dir"].as_str().expect("abandoned scratch"));
+    let lock = lean_toolchain::shared_writer::project_lock_path(&a)?;
+    let locked_owner: Value = serde_json::from_slice(&fs::read(&lock)?)?;
+    let turn = locked_owner["storage_turn"].as_str().expect("managed lock turn");
+    assert_eq!(
+        assets.file_name().and_then(|name| name.to_str()),
+        Some(format!("lean-writer-assets-{turn}").as_str())
+    );
+    let charge: Value = serde_json::from_slice(&fs::read(registry.join(".writer-storage-v1").join(turn))?)?;
+    let scratch_identity = assets.metadata()?;
+    assert_eq!(
+        charge["scratch"],
+        json!({"path":assets,"device":scratch_identity.dev(),"inode":scratch_identity.ino()})
+    );
+
     send(
         &mut abandoned,
         &json!({"action":"run","command":["/usr/bin/true"],"timeout":3}),
@@ -111,6 +125,7 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
     let stopped = reply(&mut reader)?;
     assert_eq!(stopped["state"], "stopped");
     assert_eq!(stopped["owned_work_stopped"], true);
+    assert_eq!(serde_json::from_slice::<Value>(&fs::read(&lock)?)?, locked_owner);
     drop(abandoned.stdin.take());
     assert!(!abandoned.wait()?.success());
     assert!(assets.is_dir());
@@ -138,6 +153,22 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
         String::from_utf8_lossy(&refused.stderr)
     );
     assert_eq!(fs::read_dir(&scratch)?.count(), 0);
+    let mut legacy = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"))
+        .arg("writer")
+        .arg(&a)
+        .arg(&lock)
+        .arg("3")
+        .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &registry)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let _legacy_control = legacy.stdin.take().expect("unbudgeted restart lifeline");
+    let refused = legacy.wait_with_output()?;
+    assert!(!refused.status.success());
+    assert!(refused.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("prior writer storage custody remains open"));
+    assert_eq!(serde_json::from_slice::<Value>(&fs::read(&lock)?)?, locked_owner);
     Ok(())
 }
 
