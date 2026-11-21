@@ -745,6 +745,29 @@ impl ParentLifetime {
         })
     }
 }
+/// One original managed attempt/stage and its immutable same-boot deadline.
+#[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
+pub(crate) struct ManagedRequestDeadline {
+    pub(crate) attempt: [u8; 16],
+    pub(crate) stage: u64,
+    pub(crate) expires_ns: u64,
+}
+
+#[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
+impl ManagedRequestDeadline {
+    pub(crate) fn remaining(&self) -> io::Result<Duration> {
+        let remaining =
+            Duration::from_nanos(self.expires_ns).saturating_sub(native_guardian::guardian_deadline_ticks()?);
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "managed request deadline elapsed",
+            ));
+        }
+        Ok(remaining)
+    }
+}
+
 impl ParentLifetimeLease {
     pub(crate) fn publish_running(&mut self) -> io::Result<()> {
         if Instant::now() >= self.deadline {
@@ -790,6 +813,39 @@ impl ParentLifetimeLease {
             write_before_deadline(&mut self.stream, b"durable-owner-ready\n", self.deadline)
         }
     }
+    #[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
+    pub(crate) fn arm_managed_request(&mut self, arm: &ManagedRequestDeadline) -> io::Result<()> {
+        if !self.guarded || !self.running_published {
+            return Err(io::Error::other(
+                "managed request requires an acknowledged independent guardian",
+            ));
+        }
+        let base = Instant::now();
+        let until = base
+            .checked_add(arm.remaining()?.min(Duration::from_secs(2)))
+            .ok_or_else(|| io::Error::other("invalid managed ACK deadline"))?;
+        let expected = serde_json::json!({
+            "state":"hard_deadline_armed", "protocol":native_guardian::PROTOCOL, "nonce":self.nonce,
+            "attempt":arm.attempt, "stage":arm.stage, "expires_ns":arm.expires_ns
+        });
+        let request = serde_json::json!({
+            "op":"arm_hard_deadline", "protocol":native_guardian::PROTOCOL, "nonce":self.nonce,
+            "attempt":arm.attempt, "stage":arm.stage, "expires_ns":arm.expires_ns
+        });
+        let mut bytes = serde_json::to_vec(&request).map_err(io::Error::other)?;
+        bytes.push(b'\n');
+        write_before_deadline(&mut self.stream, &bytes, until)?;
+        let reply: serde_json::Value =
+            serde_json::from_str(&read_startup_hello(&mut self.stream, until)?).map_err(io::Error::other)?;
+        if reply != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "managed guardian arm ACK differs",
+            ));
+        }
+        arm.remaining().map(|_| ())
+    }
+
     pub(crate) fn request_stop(&self) -> io::Result<()> {
         self.stream.shutdown(std::net::Shutdown::Both)
     }

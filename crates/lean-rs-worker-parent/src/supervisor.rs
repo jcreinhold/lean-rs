@@ -3993,7 +3993,7 @@ impl LeanWorker {
         if self.generation_dispatch.is_some() && !cleanup {
             self.check_request_cancelled(operation, cancellation)?;
         }
-        let result = self.write_request_bounded_inner(request, operation, cancellation, timeout);
+        let result = self.write_request_bounded_inner(request, operation, cancellation, timeout, None);
         self.seal_dispatch_error(result)
     }
 
@@ -4003,6 +4003,7 @@ impl LeanWorker {
         operation: &'static str,
         cancellation: Option<&LeanWorkerCancellationToken>,
         timeout: Duration,
+        managed_expiry_ns: Option<u64>,
     ) -> Result<(), LeanWorkerError> {
         // Keep the authoritative check beside the actual frame write, even if
         // another internal caller later reuses this bounded writer.
@@ -4023,6 +4024,7 @@ impl LeanWorker {
         let timeout = frame_timeout(started, timeout, deadline);
         stdin.get_mut().deadline = started.checked_add(timeout);
         stdin.get_mut().cancellation = cancellation.cloned();
+        stdin.get_mut().managed_expiry_ns = managed_expiry_ns;
         let (result, entered) = if let Some((in_flight, next)) = planned {
             let release = matches!(&request, Request::ReleaseHostRead);
             // Completed frames have flushed the buffer. The pipe checks the
@@ -4048,6 +4050,7 @@ impl LeanWorker {
         };
         stdin.get_mut().deadline = None;
         stdin.get_mut().cancellation = None;
+        stdin.get_mut().managed_expiry_ns = None;
         let cancelled = cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled);
         match result {
             Ok(()) => {
@@ -7627,3 +7630,7 @@ time.sleep(60)";
 #[cfg(all(test, unix))]
 #[path = "supervisor/dispatch_pin_tests.rs"]
 mod dispatch_pin_tests;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "supervisor/managed_once.rs"]
+mod managed_once;

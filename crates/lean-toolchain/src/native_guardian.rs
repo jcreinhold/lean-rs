@@ -50,6 +50,15 @@ const MAX_FRAME: usize = 16 * 1024;
 const POLL: Duration = Duration::from_millis(5);
 
 mod deadlines;
+
+/// Read the same suspend-inclusive boot clock used by the native guardian.
+///
+/// # Errors
+/// Returns an error if the platform clock cannot be read.
+#[doc(hidden)]
+pub fn guardian_deadline_ticks() -> io::Result<Duration> {
+    deadlines::boot_ticks()
+}
 mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};

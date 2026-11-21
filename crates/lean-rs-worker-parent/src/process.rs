@@ -553,6 +553,18 @@ impl OwnedChild {
             .acknowledge()
     }
 
+    #[cfg(unix)]
+    #[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
+    pub(crate) fn arm_managed_request(
+        &mut self,
+        arm: &crate::crash_ownership::ManagedRequestDeadline,
+    ) -> io::Result<()> {
+        self.lifetime
+            .as_mut()
+            .ok_or_else(|| io::Error::other("managed worker lifetime lease missing"))?
+            .arm_managed_request(arm)
+    }
+
     pub(crate) fn kill(&mut self) -> io::Result<()> {
         self.cleanup_requested = true;
         #[cfg(unix)]
