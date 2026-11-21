@@ -351,6 +351,24 @@ fn fixture_recovery_claimant() {
     let record = root.join("owners").join(format!("worker-{NONCE}")).join("owner.json");
     let owner = read_owner(&record).unwrap();
     let worker: NativeProcessIdentity = serde_json::from_value(field(&owner, "process").clone()).unwrap();
+    if root.join("claim-race").exists() {
+        let id = std::process::id();
+        let identity = NativeProcessIdentity::capture(id).unwrap().unwrap();
+        fs::write(root.join(format!("claimant-ready-{id}")), b"actual contender").unwrap();
+        wait_until(|| root.join("claim-race-go").exists());
+        let winner = match claim_native_recovery(&record, &worker, Duration::from_secs(1)) {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => false,
+            Err(error) => panic!("claim race failed: {error}"),
+        };
+        write_json(
+            &root,
+            &format!("claimant-result-{id}.json"),
+            &json!({"winner":winner,"identity":identity}),
+        );
+        wait_until(|| root.join("claimant-finish").exists());
+        return;
+    }
     claim_native_recovery(&record, &worker, Duration::from_secs(1)).unwrap();
     fs::write(
         root.join("claimant-published"),
@@ -359,6 +377,80 @@ fn fixture_recovery_claimant() {
     .unwrap();
     // The controller owns this actual Child and reaps it on every exit.
     wait_until_within(Duration::from_secs(10), || root.join("claimant-finish").exists());
+}
+
+fn lose_original_cleanup_owners(fixture: &Fixture, server: &mut TestChild, guardian: &NativeProcessIdentity) {
+    // The worker kills and reaps its actual guardian child. The controller
+    // holds and signals only its own actual service child.
+    fs::write(fixture.root.join("kill-guardian"), b"request to actual Child owner").unwrap();
+    wait_until(|| fixture.root.join("guardian-reaped").exists());
+    assert!(!guardian.is_live().unwrap());
+    server.0.kill().unwrap();
+    assert_eq!(server.wait().signal(), Some(libc::SIGKILL));
+}
+
+#[test]
+fn distinct_replacement_processes_race_for_one_durable_claim() {
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("claim-race"), b"two actual contenders").unwrap();
+    let mut server = TestChild(
+        fixture_command(&fixture.root, "native_guardian::tests::fixture_server")
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    wait_until(|| fixture.root.join("server-ready").exists());
+    let ready: Value = serde_json::from_slice(&fs::read(fixture.root.join("server-ready")).unwrap()).unwrap();
+    let worker = pid(field(&ready, "worker")).unwrap();
+    let guardian: NativeProcessIdentity = serde_json::from_value(field(&ready, "guardian").clone()).unwrap();
+    let record = fixture.registry.join(format!("worker-{NONCE}")).join("owner.json");
+    lose_original_cleanup_owners(&fixture, &mut server, &guardian);
+    let spawn_contender = || {
+        TestChild(
+            fixture_command(
+                &fixture.root,
+                "native_guardian::tests::service_loss_regressions::fixture_recovery_claimant",
+            )
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+        )
+    };
+    let mut first = spawn_contender();
+    let mut second = spawn_contender();
+    let ids = [first.0.id(), second.0.id()];
+    assert_ne!(ids[0], ids[1]);
+    wait_until(|| {
+        ids.iter()
+            .all(|id| fixture.root.join(format!("claimant-ready-{id}")).exists())
+    });
+    fs::write(fixture.root.join("claim-race-go"), b"race now").unwrap();
+    let result = |id| {
+        let path = fixture.root.join(format!("claimant-result-{id}.json"));
+        wait_until(|| path.exists());
+        let value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let actual = NativeProcessIdentity::capture(id).unwrap().unwrap();
+        assert_eq!(value["identity"], json!(actual));
+        (value["winner"].as_bool().unwrap(), actual)
+    };
+    let (first_won, first_identity) = result(ids[0]);
+    let (second_won, second_identity) = result(ids[1]);
+    assert_ne!(first_won, second_won, "one claimant must be refused");
+    assert!(first.0.try_wait().unwrap().is_none());
+    assert!(second.0.try_wait().unwrap().is_none());
+    let winner = if first_won { first_identity } else { second_identity };
+    let persisted = read_owner(&record).unwrap();
+    assert_eq!(persisted["recovery_claim"]["claimant"], json!(winner));
+    assert!(!record.with_extension("recovery-write").exists());
+
+    fs::write(fixture.root.join("claimant-finish"), b"both contenders observed").unwrap();
+    assert!(first.wait().success());
+    assert!(second.wait().success());
+    // There is still no stop authority after both control owners are lost.
+    // Wait for the disposable worker and leaf's natural exit before collection.
+    wait_until(|| !crate::process_group::group_present(worker).unwrap());
+    collect_closed_owner_records(&fixture.registry, Duration::from_secs(1)).unwrap();
+    assert!(!record.exists());
 }
 
 #[test]
@@ -381,13 +473,7 @@ fn frozen_claimant_cannot_release_live_scope_and_passive_closure_still_retires_i
     let lock = fs::metadata(fixture.lock()).unwrap();
     let writer = Contender::start(&fixture, worker);
 
-    // The worker itself kills and reaps its actual guardian child. The
-    // controller only signals its own actual service and claimant children.
-    fs::write(fixture.root.join("kill-guardian"), b"request to actual Child owner").unwrap();
-    wait_until(|| fixture.root.join("guardian-reaped").exists());
-    assert!(!guardian.is_live().unwrap());
-    server.0.kill().unwrap();
-    assert_eq!(server.wait().signal(), Some(libc::SIGKILL));
+    lose_original_cleanup_owners(&fixture, &mut server, &guardian);
     let mut claimant = TestChild(
         fixture_command(
             &fixture.root,

@@ -126,14 +126,19 @@ so this is not a sandbox against adversarial native code.
 | supervisor loss | guardian parent stream and recorded identity; `native_guardian.rs` | `supervisor_loss_at_generated_startup_prefixes` enumerates seven projected startup cuts, including loss after a positive partial ACK write and real Lean work after full ACK. The startup projection does not cover a host GO or durable request store. |
 | authentic physical closure | `OwnedCommandGroup::try_wait`; `ParentLifetimeLease::retirement_closed` | direct wait and ECHILD/whole-group tests; OS behavior remains assumed |
 | custody-capacity return | `LeanWorkerProcessTracker::release`; `ParentLifetimeLease::retirement_closed`; `BootstrapCustody::closed` | guarded closure requires both group absence and guardian death; the clean retained-`AfterSpawn` test observed tracker 1 before closure and 0 after exact closure, but is not a proof of every wait/ECHILD/drop cut |
+| terminal leader in a pinned group | `publish_guardian_zombie_closure`, `matches_zombie_birth`, `observed_group_singleton` | `TerminalLeaderWithPeer` still permits a payload writer. `CleanupToUnreapedLeader` removes the peers while the original guardian pins the group. `PublishZombieClosure` records the exact unreaped terminal leader and singleton observation. |
+| separate custody and admission gates | `payload_closed`, `record_can_be_removed`, `protected_native_reads_stopped`, `reserve_owner_record_with_slot` | `ZombieAdmissionFenced` checks same-inode writer admission and successor slot reservation only after durable publication, original guardian closure, and release of the kernel lock. The stopped-parent fixture exercises admission and one replacement reservation while the original parent remains stopped. The surviving-leaf fixture checks refusal while a potential writer remains. |
 | shared lock aliases | `shared_reader`, `native_guardian::retain_reads`, child inherited reads | `durable_fd_union_ack_survives_abrupt_root_exit_and_fd_closing_descendant` observes retention after close; `explicit_unlock_releases_alias_lock_but_registry_fences_live_group` observes raw EX and a late write after unlock while the managed reader fence still refuses admission |
 | writer exclusion | `writer_lock` and shared-reader locks | same-inode contention tests; guardian-loss qualification exposed an early-admission trace |
 
-This model returns the process tracker's custody-capacity reservation. Registry
-compute occupancy, which may ignore a guardian-only record after payload closure,
-is a separate policy outside this model. `retirement_closed` is evidence for resource closure, not an exit-status
-receipt. The model likewise keeps physical closure separate from a request's
-semantic outcome.
+The ordinary group-absence path models the process tracker's custody-capacity
+return. The pinned terminal-leader path projects the registry's special
+stopped-parent admission rule. It tracks one retiring generation and a single
+successor reservation, with separate evidence for payload closure, original
+guardian closure, and the same-inode lock. A replacement cannot create the
+terminal-leader witness after both original owners are lost. Passive collection
+can still use authentic group absence. Physical closure and semantic request
+outcome remain separate.
 
 `"worker"` in `aliases` represents all payload-side aliases collectively, not
 one literal root-process descriptor. `GuardianReady` means the helper has sent
@@ -195,6 +200,14 @@ Expected outcomes:
   can lose its installed cleanup authority.
 - `CollectPreparingOnParentDeath.cfg`: `NoEarlyCapacityReturn` fails if parent
   death alone collects a pre-ACK reservation while its group remains.
+- `ZombieReceiptBeforeCustodyClosed.cfg`: `ZombieAdmissionFenced` fails when
+  a successor reserves the slot after publication but before original guardian closure.
+- `ZombieWriterWithoutReceipt.cfg`: `ZombieAdmissionFenced` fails when
+  the writer is admitted for a remaining numeric group without a durable
+  terminal-leader witness.
+
+The pinned terminal-leader model passed `Good.cfg` with 2,193 generated states
+and 701 distinct states. TLC rejected both pinned terminal-leader mutations.
 
 Keep the failing configurations. They are executable statements of distinct trust
 boundaries, not passing qualification cases.
