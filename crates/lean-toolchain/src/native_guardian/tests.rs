@@ -251,6 +251,33 @@ impl Drop for Generation {
     }
 }
 
+pub(super) fn hold_requested_group_signal(guardian: &Guardian) -> bool {
+    std::env::var_os(ROOT_ENV).map(PathBuf::from).is_some_and(|root| {
+        root.join("hold-requested-group-signal").exists()
+            && guardian
+                .record
+                .as_ref()
+                .and_then(|record| read_owner(record).ok())
+                .is_some_and(|owner| field(&owner, "guardian_drain") == "requested")
+    })
+}
+
+pub(super) fn pause_after_zombie_receipt(guardian: &Guardian) {
+    let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    if !root.join("hold-zombie-custody").exists() {
+        return;
+    }
+    assert!(!guardian.loans.is_empty());
+    fs::write(
+        root.join("zombie-custody-held"),
+        b"receipt published, actual SH still held",
+    )
+    .unwrap();
+    wait_until_within(Duration::from_secs(2), || root.join("release-zombie-custody").exists());
+}
+
 #[test]
 fn fixture_guardian() {
     let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
@@ -400,7 +427,12 @@ fn fixture_server() {
     )
     .unwrap();
     if root.join("reap-after-recovery-request").exists() {
-        assert_eq!(generation.reap().signal(), Some(libc::SIGKILL));
+        let exit = generation.reap();
+        if root.join("finish-root").exists() {
+            assert!(exit.success(), "negative control exits the root normally");
+        } else {
+            assert_eq!(exit.signal(), Some(libc::SIGKILL));
+        }
         wait_until(|| root.join("recovery-request-test-finished").exists());
         return;
     }

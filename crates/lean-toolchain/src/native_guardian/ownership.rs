@@ -223,6 +223,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
                     | "recovery_claim"
                     | "original_worker_boot"
                     | "guardian_drain"
+                    | "guardian_zombie_closure"
             )
         })
     }) {
@@ -247,6 +248,11 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             || !matches!(drain.as_str(), Some("available" | "requested")))
     {
         return Err(invalid("invalid original guardian drain state"));
+    }
+    if let Some(closed) = value.get("guardian_zombie_closure")
+        && (closed != true || field(value, "guardian_drain") != "requested")
+    {
+        return Err(invalid("invalid original guardian closure evidence"));
     }
     if version == 3 {
         if phase != "running" || (original_boot.is_none() && claim.is_none()) {
@@ -328,6 +334,14 @@ pub(super) fn payload_closed(value: &Value) -> io::Result<bool> {
         return Ok(false); // Pre-Running custody requires a durable guardian closure receipt.
     }
     let process = checked_identity(field(value, "process"))?;
+    #[cfg(target_os = "macos")]
+    if field(value, "guardian_zombie_closure") == true {
+        // A live original guardian still owns descriptor custody.
+        // The receipt records an irreversible sole-zombie observation, so
+        // closure need not wait for the stopped service to reap that child.
+        verify_original_worker_boot(value)?;
+        return checked_identity(field(value, "guardian"))?.is_live().map(|live| !live);
+    }
     let absent = !crate::process_group::group_present(process.process_group)?;
     Ok(absent)
 }
@@ -493,14 +507,18 @@ pub fn request_original_guardian_drain(
         return Err(invalid("original guardian drain binding changed or unavailable"));
     }
     check_guardian_drain_eligibility(&value)?;
-    if field(&value, "guardian_drain") == "requested" {
-        return Ok(());
+    publish_guardian_drain_request(record, &mut value)
+}
+
+pub(super) fn publish_guardian_drain_request(record: &Path, value: &mut Value) -> io::Result<()> {
+    if field(value, "guardian_drain") == "requested" {
+        return super::sync_owner_directory_for(record, "recovery-write");
     }
     value
         .as_object_mut()
         .ok_or_else(|| invalid("native owner object missing"))?
         .insert("guardian_drain".to_owned(), json!("requested"));
-    persist_recovery_owner(record, &value)
+    persist_recovery_owner(record, value)
 }
 
 fn check_guardian_drain_eligibility(value: &Value) -> io::Result<()> {
@@ -556,6 +574,53 @@ pub(super) fn original_guardian_drain_requested(record: &Path, guardian: &Native
     // Admission checked the stopped service under the publication lock.
     // Like an explicit stop, the committed request remains in effect if
     // that service later resumes. The guardian alone drains its own scope.
+    Ok(true)
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn matches_zombie_birth(worker: &NativeProcessIdentity) -> io::Result<bool> {
+    Ok(native::bsd_info_with_zombies(worker.pid, true)?.is_some_and(|info| {
+        info.pbi_status == libc::SZOMB
+            && info.pbi_pgid == worker.process_group
+            && native::bsd_start(&info) == worker.start
+    }))
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn publish_guardian_zombie_closure(
+    record: &Path,
+    worker: &NativeProcessIdentity,
+    guardian: &NativeProcessIdentity,
+) -> io::Result<bool> {
+    let _lock = lock_publication(record, Duration::from_secs(2))?;
+    let mut value = read_owner(record)?;
+    verify_original_worker_boot(&value)?;
+    if field(&value, "guardian_drain") != "requested"
+        || checked_identity(field(&value, "process"))? != *worker
+        || checked_identity(field(&value, "guardian"))? != *guardian
+        || guardian.pid != std::process::id()
+    {
+        return Err(invalid("original guardian closure scope differs"));
+    }
+    super::native::validate_pin(worker.pid)?;
+    if field(&value, "guardian_zombie_closure") == true {
+        super::sync_owner_directory_for(record, "closure-write")?;
+        return Ok(true);
+    }
+    // The pin excludes numeric group recycling. Matching zombie birth on
+    // both sides of a complete singleton census rules out a surviving leaf
+    // and the original worker cannot run or fork again.
+    if !matches_zombie_birth(worker)?
+        || !crate::process_group::observed_group_singleton(worker.pid)?
+        || !matches_zombie_birth(worker)?
+    {
+        return Ok(false);
+    }
+    value
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?
+        .insert("guardian_zombie_closure".to_owned(), json!(true));
+    super::persist_closure_owner(record, &value)?;
     Ok(true)
 }
 
@@ -1089,6 +1154,11 @@ mod native {
     }
     #[cfg(target_os = "macos")]
     pub(super) fn bsd_info(pid: u32) -> io::Result<Option<libc::proc_bsdinfo>> {
+        bsd_info_with_zombies(pid, false)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn bsd_info_with_zombies(pid: u32, include_zombies: bool) -> io::Result<Option<libc::proc_bsdinfo>> {
         let native = i32::try_from(pid).map_err(io::Error::other)?;
         if native <= 0 {
             return Err(invalid("invalid process identity PID"));
@@ -1106,7 +1176,7 @@ mod native {
             libc::proc_pidinfo(
                 native,
                 libc::PROC_PIDTBSDINFO,
-                0,
+                u64::from(include_zombies),
                 (&raw mut info).cast(),
                 i32::try_from(size).map_err(io::Error::other)?,
             )

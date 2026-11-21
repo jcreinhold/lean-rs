@@ -169,7 +169,10 @@ pub(super) fn guardian_fixture(root: &Path) -> io::Result<()> {
         }
     });
     let result = run_guardian_cli();
-    if crate::process_group::group_present(worker)? {
+    let record = root.join("owners").join(format!("worker-{NONCE}")).join("owner.json");
+    let tested_zombie_closure = root.join("hold-zombie-custody").exists()
+        && read_owner(&record).is_ok_and(|owner| field(&owner, "guardian_zombie_closure") == true);
+    if crate::process_group::group_present(worker)? && !tested_zombie_closure {
         rescue(root, worker);
         return Err(io::Error::other("guardian returned before scope closure"));
     }
@@ -218,11 +221,22 @@ fn stopped(process: &NativeProcessIdentity) -> bool {
 
 #[test]
 fn replacement_requests_drain_from_original_guardian_without_taking_custody() {
+    assert_requested_zombie_closure(false);
+}
+
+#[test]
+fn surviving_leaf_prevents_zombie_closure_until_original_guardian_drains_it() {
+    assert_requested_zombie_closure(true);
+}
+
+fn assert_requested_zombie_closure(hold_leaf: bool) {
     let fixture = Fixture::new();
     for marker in [
         "reap-after-recovery-request",
         "managed-contender",
         "service-loss-watchdog",
+        "hold-zombie-custody",
+        "recovery-slot",
     ] {
         fs::write(fixture.root.join(marker), b"test-owned recovery request").unwrap();
     }
@@ -263,26 +277,61 @@ fn replacement_requests_drain_from_original_guardian_without_taking_custody() {
     assert!(guardian.is_live().unwrap());
     assert!(!fixture.root.join("contender-acquired.json").exists());
 
+    let signal_barrier = fixture.root.join("hold-requested-group-signal");
+    if hold_leaf {
+        fs::write(&signal_barrier, b"hold actual group signal for negative control").unwrap();
+    }
     request_original_guardian_drain(&record, &process, Duration::from_secs(1)).unwrap();
     assert_eq!(read_owner(&record).unwrap()["guardian_drain"], "requested");
-    wait_until_within(Duration::from_secs(1), || !process.is_live().unwrap());
-    // The original service still holds its open lifeline but cannot reap
-    // the dead worker. The guardian and writer gate preserve custody here.
+    if hold_leaf {
+        fs::write(fixture.root.join("finish-root"), b"leave real leaf alive").unwrap();
+        wait_until_within(Duration::from_secs(1), || {
+            ownership::matches_zombie_birth(&process).unwrap()
+        });
+        assert!(!crate::process_group::observed_group_singleton(worker).unwrap());
+        let before = fixture.heartbeat();
+        wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
+        assert!(read_owner(&record).unwrap().get("guardian_zombie_closure").is_none());
+        assert!(!fixture.root.join("contender-acquired.json").exists());
+        fs::remove_file(signal_barrier).unwrap();
+    }
+    wait_until_within(Duration::from_secs(1), || {
+        fixture.root.join("zombie-custody-held").exists()
+    });
     assert!(stopped(&requester));
     assert!(guardian.is_live().unwrap());
+    assert!(ownership::matches_zombie_birth(&process).unwrap());
+    assert!(crate::process_group::observed_group_singleton(worker).unwrap());
+    assert_eq!(read_owner(&record).unwrap()["guardian_zombie_closure"], true);
     assert!(!fixture.root.join("contender-acquired.json").exists());
-    assert!(!fixture.root.join("test-rescue-used").exists());
+    let next_nonce = format!("{:048x}", 701);
+    let reserve = || {
+        reserve_owner_record_with_slot(
+            &fixture.registry,
+            &next_nonce,
+            Duration::from_secs(1),
+            Some(&recovery_slot()),
+        )
+    };
+    assert_eq!(reserve().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    fs::write(fixture.root.join("release-zombie-custody"), b"release actual SH").unwrap();
 
-    rustix::process::kill_process(target, rustix::process::Signal::CONT).unwrap();
     let acquired = writer.acquired();
-    assert!(!acquired.group_present && !acquired.worker_live);
+    assert!(acquired.group_present, "unreaped worker remains in its group");
+    assert!(!acquired.worker_live);
     assert!(acquired.managed_writer_ready);
     assert_eq!(acquired.lock_identity, (lock.dev(), lock.ino()));
+    assert!(reserve().unwrap().exists());
+    assert!(!record.exists());
+    assert!(
+        stopped(&requester),
+        "writer and successor must be admitted before resuming the parent"
+    );
     assert_eq!(writer.finish().payload_bytes_after_marker, 0);
-    wait_until(|| fixture.root.join("guardian-returned").exists());
     assert!(!guardian.is_live().unwrap());
     assert!(!fixture.root.join("test-rescue-used").exists());
     fs::write(fixture.root.join("recovery-request-test-finished"), b"closed").unwrap();
+    rustix::process::kill_process(target, rustix::process::Signal::CONT).unwrap();
     assert!(server.wait().success());
 }
 

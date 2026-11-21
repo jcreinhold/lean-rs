@@ -430,6 +430,7 @@ fn persist_owner(record: &Path, value: &Value) -> io::Result<()> {
 enum RecoveryWriteCut {
     BeforeRename,
     AfterRename,
+    DirectorySync,
 }
 #[cfg(test)]
 thread_local! {
@@ -461,12 +462,14 @@ fn persist_owner_at(record: &Path, value: &Value, suffix: &str) -> io::Result<()
     fs::rename(&temporary, record)?;
     #[cfg(test)]
     interrupt_recovery_write(suffix, RecoveryWriteCut::AfterRename)?;
-    File::open(
-        record
-            .parent()
-            .ok_or_else(|| invalid("native owner has no directory"))?,
-    )?
-    .sync_all()
+    sync_owner_directory_for(record, suffix)
+}
+fn sync_owner_directory_for(record: &Path, suffix: &str) -> io::Result<()> {
+    #[cfg(test)]
+    interrupt_recovery_write(suffix, RecoveryWriteCut::DirectorySync)?;
+    #[cfg(not(test))]
+    let _ = suffix;
+    File::open(record.parent().ok_or_else(|| invalid("owner directory missing"))?)?.sync_all()
 }
 // Called under the admission lock by this exact live guardian only. Staging is
 // never closure evidence; only the fsynced owner.json publication is authoritative.
@@ -760,6 +763,23 @@ impl Guardian {
             deadline(Duration::from_secs(2))?,
         )
     }
+    #[cfg(target_os = "macos")]
+    fn publish_requested_zombie_closure(&self) -> io::Result<bool> {
+        let record = self
+            .record
+            .as_ref()
+            .ok_or_else(|| invalid("guardian owner record missing"))?;
+        let (worker, guardian) = self
+            .bootstrap_identity
+            .as_ref()
+            .ok_or_else(|| invalid("guardian bootstrap identity missing"))?;
+        let value = read_owner(record)?;
+        if field(&value, "guardian_drain") != "requested" {
+            return Ok(false);
+        }
+        ownership::publish_guardian_zombie_closure(record, worker, guardian)
+    }
+
     fn drain(&self) {
         loop {
             match crate::process_group::group_present(self.worker) {
@@ -771,6 +791,17 @@ impl Guardian {
                     }
                 }
                 Ok(true) => {
+                    #[cfg(target_os = "macos")]
+                    if self.publish_requested_zombie_closure().is_ok_and(|closed| closed) {
+                        #[cfg(test)]
+                        tests::pause_after_zombie_receipt(self);
+                        return;
+                    }
+                    #[cfg(all(test, target_os = "macos"))]
+                    if tests::hold_requested_group_signal(self) {
+                        thread::sleep(POLL);
+                        continue;
+                    }
                     let _requested = native::kill_payload(self.worker);
                 }
                 Err(_) => {}
@@ -784,6 +815,32 @@ impl Guardian {
 #[cfg(test)]
 mod closure_publication_tests {
     use super::*;
+
+    #[test]
+    fn requested_drain_retries_directory_sync_after_uncertain_rename() -> io::Result<()> {
+        let root = std::env::temp_dir().join(format!("lean-drain-retry-{}", std::process::id()));
+        fs::create_dir(&root)?;
+        let record = root.join("owner.json");
+        let initial = json!({"guardian_drain":"available"});
+        fs::write(&record, serde_json::to_vec(&initial)?)?;
+        let read = || -> io::Result<Value> { Ok(serde_json::from_slice(&fs::read(&record)?)?) };
+        let mut value = initial.clone();
+        RECOVERY_WRITE_CUT.with(|cut| cut.set(Some(RecoveryWriteCut::BeforeRename)));
+        assert!(ownership::publish_guardian_drain_request(&record, &mut value).is_err());
+        assert_eq!(read()?, initial);
+        assert!(record.with_extension("recovery-write").exists());
+        let mut value = read()?;
+        RECOVERY_WRITE_CUT.with(|cut| cut.set(Some(RecoveryWriteCut::AfterRename)));
+        assert!(ownership::publish_guardian_drain_request(&record, &mut value).is_err());
+        let mut requested = read()?;
+        assert_eq!(requested["guardian_drain"], "requested");
+        assert!(!record.with_extension("recovery-write").exists());
+        RECOVERY_WRITE_CUT.with(|cut| cut.set(Some(RecoveryWriteCut::DirectorySync)));
+        assert!(ownership::publish_guardian_drain_request(&record, &mut requested).is_err());
+        assert_eq!(read()?, requested);
+        ownership::publish_guardian_drain_request(&record, &mut requested)?;
+        fs::remove_dir_all(root)
+    }
     #[test]
     fn interrupted_closure_staging_is_not_evidence_and_can_retry() -> io::Result<()> {
         let root = std::env::temp_dir().join(format!("lean-closure-retry-{}", std::process::id()));

@@ -349,6 +349,13 @@ pub fn group_present(group: u32) -> io::Result<bool> {
     }
 }
 
+/// The guardian must already pin the original session. This observation
+/// establishes a singleton group only and conveys no signaling authority.
+#[cfg(target_os = "macos")]
+pub(crate) fn observed_group_singleton(leader: u32) -> io::Result<bool> {
+    Ok(macos::members(leader)? == macos::Members::OnlyLeader)
+}
+
 /// Observe whether this live private-group leader is its only member.
 ///
 /// The current process pins its own group identity. This read-only observation
