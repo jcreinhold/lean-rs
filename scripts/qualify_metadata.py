@@ -1656,6 +1656,39 @@ def checked_package_owner(root, selection):
     return owner
 
 
+def prepare_workspace_template(root):
+    # Run the shipped build script unchanged. Both its outer Cargo invocation and
+    # its own cargo metadata must resolve the same private host dependency.
+    relative = Path("templates/shipped-lean-crate")
+    template = root / relative
+    files = subprocess.check_output(["git", "-C", SDK, "ls-files", "-z", "--", relative])
+    for raw in files.rstrip(b"\0").split(b"\0"):
+        rel = Path(os.fsdecode(raw))
+        src, dst = SDK / rel, root / rel
+        require(src.resolve(strict=True) == src and src.is_file(), f"invalid template input: {src}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+    # Preserve the manifest's relative dependencies when moving the template.
+    manifest = template / "Cargo.toml"
+    source = manifest.read_text()
+    data = tomllib.loads(source)
+    for section in ("dependencies", "build-dependencies"):
+        for dependency in data[section].values():
+            if isinstance(dependency, dict) and "path" in dependency:
+                path = dependency["path"]
+                actual = (SDK / relative / path).resolve(strict=True)
+                require(actual.parent == SDK / "crates", "unexpected shipped template dependency")
+                source = source.replace(f'path = "{path}"', f'path = {json.dumps(str(actual))}')
+    manifest.write_text(source)
+    config = template / ".cargo/config.toml"
+    config.parent.mkdir()
+    config.write_text(stream_cargo_patch() + "\n")
+    graph = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--offline", "--format-version", "1"], cwd=template))
+    hosts = [Path(p["manifest_path"]) for p in graph["packages"] if p["name"] == "lean-rs-host"]
+    require(hosts == [root / "crates/lean-rs-host/Cargo.toml"], "shipped template selected another host package")
+
+
 def workspace_tests(expression):
     # The named qualifier published this selection only after its workers closed.
     root = stream_package_root()
@@ -1664,13 +1697,15 @@ def workspace_tests(expression):
         owner = checked_package_owner(root, selection)
         # A later invocation must not retry or remove a package left by an interrupted workspace run.
         (root / "workspace-running").mkdir(mode=0o700)
+        prepare_workspace_template(root)
         result = subprocess.run(
             ["cargo", "nextest", "run", "--workspace", "--profile", "ci", "-E", expression],
-            cwd=SDK,
+            cwd=SDK, env={**os.environ, "LEAN_RS_TEST_PRIVATE_SHIPPED_TEMPLATE": "1"},
         )
         if result.returncode:
             # Keep the package when the test run cannot certify closure.
             raise SystemExit(result.returncode)
+        checked_package_owner(root, selection)
         remove_owned_state(root, owner)
 
 

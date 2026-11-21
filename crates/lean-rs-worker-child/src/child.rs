@@ -4072,10 +4072,39 @@ mod tests {
 
     #[test]
     fn bootstrap_rejects_valid_authorization_for_another_manifest_snapshot() -> Result<(), Box<dyn std::error::Error>> {
-        let prepared = lean_rs_host::host::prepare_host_artifacts()?;
+        // A real, test-owned capability suffices for this byte-identity check.
+        let owner = tempfile::tempdir()?;
+        let project = owner.path().join("lean");
+        std::fs::create_dir(&project)?;
+        std::fs::write(
+            owner.path().join("Cargo.toml"),
+            "[package]\nname = \"snapshot-test\"\nversion = \"0.0.0\"\n",
+        )?;
+        std::fs::write(
+            project.join("lean-toolchain"),
+            format!("leanprover/lean4:v{}\n", lean_toolchain::LEAN_VERSION),
+        )?;
+        std::fs::write(
+            project.join("lakefile.toml"),
+            "name = \"snapshot\"\n[[lean_lib]]\nname = \"Snapshot\"\n",
+        )?;
+        std::fs::write(
+            project.join("lake-manifest.json"),
+            r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[],"name":"snapshot","lakeDir":".lake"}"#,
+        )?;
+        std::fs::write(project.join("Snapshot.lean"), "def Snapshot.value : Nat := 1\n")?;
+        let prepared = lean_toolchain::CargoLeanCapability::new(&project, "Snapshot")
+            .package("snapshot")
+            .module("Snapshot")
+            .private_bootstrap(lean_toolchain::shared_writer::PrivateLakeBootstrap::new(
+                owner.path(),
+                &project,
+            )?)
+            .build_quiet()?;
         let runtime = lean_rs::LeanRuntime::init()?;
         let path = prepared.manifest_path();
-        let admitted = prepared.manifest_json().as_bytes();
+        let snapshot = std::fs::read(path)?;
+        let admitted = snapshot.as_slice();
         let mut other = admitted.to_vec();
         other.push(b'\n');
         let result = super::load_worker_snapshot(runtime, path, admitted, |requested_path, bytes| {
@@ -4083,12 +4112,12 @@ mod tests {
             assert_eq!(bytes, admitted);
             #[allow(
                 unsafe_code,
-                reason = "qualification owns the packaged fixture and approves no export calls"
+                reason = "the test owns the private fixture and approves no export calls"
             )]
-            // SAFETY: other is valid JSON for the same exclusively held bundled fixture.
+            // SAFETY: other names only our freshly compiled Snapshot module, with no dependencies or exports.
             // The production bootstrap must refuse its distinct bytes before loading it.
             Ok(unsafe {
-                lean_rs::module::AuthorizedWorkerSnapshot::attest(runtime, path.to_owned(), other, vec![], ())
+                lean_rs::module::AuthorizedWorkerSnapshot::attest(runtime, path.to_owned(), other, vec![], owner)
             })
         });
         assert!(matches!(result, Err(error) if error.to_string().contains("different manifest snapshot")));

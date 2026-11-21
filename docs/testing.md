@@ -147,7 +147,10 @@ A successful `--emit-host-selection` hands the generation to the next stream com
 identity, manifest and images and removes it after all selected workers close. An explicit checkout manifest can
 also serve as the comparison input to a standalone stream check.
 For the full 4.36 release checks, `--workspace-shims` hands the same generation to `workspace-tests`.
-That command removes it after Nextest succeeds. A failed run retains its state until closure can be established.
+The header-reuse probe imports from that generation. The shipped-template tests use a disposable copy of the tracked
+template with the same host dependency selected for both Cargo and the template build script. The qualifier checks the
+resolved package before Nextest and checks the manifest and image pins again before removing the package.
+A failed run retains its state until closure can be established.
 
 ```sh
 python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \

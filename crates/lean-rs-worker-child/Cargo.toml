@@ -48,6 +48,7 @@ dhat = "0.3"
 lean-rs-worker-parent = { workspace = true }
 lean-rs-worker-protocol = { workspace = true, features = ["harness"] }
 rmp-serde = "1"
+tempfile = "3"
 
 [[bin]]
 name = "lean-rs-worker-child"
