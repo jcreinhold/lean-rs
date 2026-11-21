@@ -66,6 +66,9 @@ pub fn contract() -> io::Result<WriterContract> {
 #[derive(Debug, clap::Args)]
 pub struct WriterLockPathArgs {
     root: PathBuf,
+    /// Include opt-in capabilities without changing the default descriptor.
+    #[arg(long)]
+    capabilities: bool,
 }
 
 /// Emit one bounded project-lock descriptor without acquiring or creating a lock.
@@ -81,8 +84,11 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
         return Err(invalid("existing project directory required"));
     }
     let lock_path = lean_toolchain::shared_writer::project_lock_path(&root)?;
-    let mut bytes = serde_json::to_vec(&json!({"protocol":PROTOCOL,"project_root":root,"lock_path":lock_path}))
-        .map_err(io::Error::other)?;
+    let mut descriptor = json!({"protocol":PROTOCOL,"project_root":root,"lock_path":lock_path});
+    if args.capabilities {
+        descriptor["capabilities"] = json!(["command_only_storage_v1"]);
+    }
+    let mut bytes = serde_json::to_vec(&descriptor).map_err(io::Error::other)?;
     bytes.push(b'\n');
     if bytes.len() as u64 > FRAME_BYTES {
         return Err(invalid("writer lock descriptor exceeds protocol limit"));
@@ -159,6 +165,16 @@ struct Record {
     process: Option<ProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     storage_turn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command_phase: Option<CommandPhase>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CommandPhase {
+    Idle,
+    Starting,
+    Running,
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -257,6 +273,11 @@ fn owner(file: &mut File) -> io::Result<Option<Record>> {
         return Ok(None);
     }
     let record: Record = serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
+    if let Some(phase) = record.command_phase
+        && (record.storage_turn.is_none() || (phase == CommandPhase::Running) != record.process.is_some())
+    {
+        return Err(invalid("writer command phase does not match its turn or process"));
+    }
     let identity = &record.owner;
     if record.version != PROTOCOL
         || identity.version != PROTOCOL
@@ -1035,6 +1056,19 @@ fn execute_with_launcher(
         .stdin(Stdio::piped())
         .stdout(child_stdout)
         .stderr(child_stderr);
+    if let Some(phase) = record.command_phase {
+        if phase != CommandPhase::Idle || record.storage_turn.is_none() || record.process.is_some() {
+            return Err(invalid("command-only writer must be idle before spawn"));
+        }
+        persist_all(
+            file,
+            loans,
+            &Record {
+                command_phase: Some(CommandPhase::Starting),
+                ..record.clone()
+            },
+        )?;
+    }
     let mut descriptors = vec![inherited.as_fd(), file.as_fd()];
     descriptors.extend(loans.iter().map(AsFd::as_fd));
     let mut group = OwnedCommandGroup::spawn_inheriting(command, &descriptors)?;
@@ -1059,6 +1093,7 @@ fn execute_with_launcher(
             loans,
             &Record {
                 process: process.clone(),
+                command_phase: record.command_phase.map(|_| CommandPhase::Running),
                 ..record.clone()
             },
         )?;
@@ -1229,6 +1264,13 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         admission_closed.get()
     };
     let borrowed = inherited.is_some();
+    let command_only = args
+        .storage_request
+        .as_ref()
+        .is_some_and(storage::Request::command_only);
+    if command_only && borrowed {
+        return Err(invalid("command-only storage cannot use caller-owned writer locks"));
+    }
     // This guard coordinates admission only. Artifact EX aliases and process
     // fences still prevent readers after helper death or uncertain cleanup.
     let (locks, _demand) = if let Some(locks) = inherited {
@@ -1273,13 +1315,14 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         },
         process: None,
         storage_turn: managed.as_ref().map(|(_, charge)| charge.turn().to_owned()),
+        command_phase: command_only.then_some(CommandPhase::Idle),
     };
     persist_all(&mut file, &loans, &record)?;
     // No path or GO is exposed until the exact managed scratch is durable.
     let scratch = match &mut managed {
         Some((parent, charge)) => {
             let scratch = parent.create(charge.turn())?;
-            charge.bind_scratch(scratch.binding()?, admission)?;
+            charge.bind_scratch_for_turn(scratch.binding()?, command_only, admission)?;
             Some(scratch)
         }
         None => None,

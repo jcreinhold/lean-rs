@@ -10,6 +10,8 @@ pub(super) struct Request {
     version: u8,
     floor_bytes: u64,
     budget_bytes: u64,
+    #[serde(default)]
+    command_only: bool,
     roots: Vec<Entry>,
 }
 
@@ -33,6 +35,10 @@ impl Entry {
 }
 
 impl Request {
+    pub(super) fn command_only(&self) -> bool {
+        self.command_only
+    }
+
     pub(super) fn parse(input: &str) -> io::Result<Self> {
         if input.len() > 16 * 1024 {
             return Err(invalid("oversized writer storage request"));

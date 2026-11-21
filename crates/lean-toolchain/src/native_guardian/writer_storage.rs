@@ -105,6 +105,8 @@ struct Charge {
     secondary_locks: Vec<(PathBuf, u64, u64)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scratch: Option<StorageRoot>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    command_only: bool,
 }
 
 impl Charge {
@@ -175,6 +177,19 @@ impl WriterStorageCharge {
     /// Refuses an unapproved, substituted, or already bound scratch directory.
     /// An incomplete write leaves the charge fenced.
     pub fn bind_scratch(&mut self, scratch: StorageRoot, timeout: Duration) -> io::Result<()> {
+        self.bind_scratch_for_turn(scratch, false, timeout)
+    }
+
+    /// Bind scratch and the caller’s command-only opt-in to the same charge.
+    /// # Errors
+    /// Returns the same binding and durable-write errors as Self::bind_scratch.
+    #[doc(hidden)]
+    pub fn bind_scratch_for_turn(
+        &mut self,
+        scratch: StorageRoot,
+        command_only: bool,
+        timeout: Duration,
+    ) -> io::Result<()> {
         if self.writer != std::process::id() || self.charge.scratch.is_some() {
             return Err(invalid(
                 "writer storage scratch already bound or belongs to another writer",
@@ -199,6 +214,7 @@ impl WriterStorageCharge {
             return Err(invalid("writer storage charge changed before scratch binding"));
         }
         self.charge.scratch = Some(scratch);
+        self.charge.command_only = command_only;
         let bytes = serde_json::to_vec(&self.charge).map_err(io::Error::other)?;
         if bytes.len() > MAX_OWNER_BYTES {
             return Err(invalid("writer storage charge too large"));
@@ -378,6 +394,7 @@ fn reserve(
         budget,
         roots: roots.iter().cloned().collect(),
         scratch: None,
+        command_only: false,
         secondary_locks: custody
             .iter()
             .skip(1)

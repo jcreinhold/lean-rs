@@ -17,18 +17,29 @@ fn root(role: &str, path: &Path) -> Value {
 }
 
 fn start(project: &Path, registry: &Path, scratch: &Path, budget: u64) -> io::Result<Child> {
+    start_storage(project, registry, scratch, budget, false)
+}
+
+fn start_storage(
+    project: &Path,
+    registry: &Path,
+    scratch: &Path,
+    budget: u64,
+    command_only: bool,
+) -> io::Result<Child> {
     let lock = lean_toolchain::shared_writer::project_lock_path(project)?;
+    let mut request = json!({"version":1,"floor_bytes":1,"budget_bytes":budget,
+        "roots":[root("project",project),root("registry",registry),root("scratch_parent",scratch)]});
+    if command_only {
+        request["command_only"] = json!(true);
+    }
     Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"))
         .arg("writer")
         .arg(project)
         .arg(lock)
         .arg("3")
         .arg("--storage-request")
-        .arg(
-            json!({"version":1,"floor_bytes":1,"budget_bytes":budget,
-        "roots":[root("project",project),root("registry",registry),root("scratch_parent",scratch)]})
-            .to_string(),
-        )
+        .arg(request.to_string())
         .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", registry)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -99,18 +110,20 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
         assert!(child.wait()?.success());
         assert!(!assets.exists());
     }
-    let mut abandoned = start(&a, &registry, &scratch, budget)?;
+    let mut abandoned = start_storage(&a, &registry, &scratch, budget, true)?;
     let mut reader = BufReader::new(abandoned.stdout.take().expect("managed replies"));
     let locked = reply(&mut reader)?;
     let assets = Path::new(locked["asset_dir"].as_str().expect("abandoned scratch"));
     let lock = lean_toolchain::shared_writer::project_lock_path(&a)?;
     let locked_owner: Value = serde_json::from_slice(&fs::read(&lock)?)?;
     let turn = locked_owner["storage_turn"].as_str().expect("managed lock turn");
+    assert_eq!(locked_owner["command_phase"], "idle");
     assert_eq!(
         assets.file_name().and_then(|name| name.to_str()),
         Some(format!("lean-writer-assets-{turn}").as_str())
     );
     let charge: Value = serde_json::from_slice(&fs::read(registry.join(".writer-storage-v1").join(turn))?)?;
+    assert_eq!(charge["command_only"], true);
     let scratch_identity = assets.metadata()?;
     assert_eq!(
         charge["scratch"],
@@ -169,6 +182,17 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
     assert!(refused.stdout.is_empty());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("prior writer storage custody remains open"));
     assert_eq!(serde_json::from_slice::<Value>(&fs::read(&lock)?)?, locked_owner);
+
+    // Exercise passive admission with a real session owner and a test-owned
+    // fault cut after Starting, before a process identity could be committed.
+    let mut starting = locked_owner;
+    starting["command_phase"] = json!("starting");
+    let mut bytes = serde_json::to_vec(&starting)?;
+    bytes.push(b'\n');
+    fs::write(&lock, bytes)?;
+    assert!(!lean_toolchain::shared_writer::previous_writer_stopped(
+        &fs::File::open(&lock)?
+    )?);
     Ok(())
 }
 
@@ -235,5 +259,28 @@ fn sdk_writer_shares_the_standalone_reserve() -> io::Result<()> {
     send(&mut successor, &json!({"action":"close"}))?;
     assert!(successor.wait()?.success());
     assert_eq!(fs::read_dir(&scratch)?.count(), 0);
+    Ok(())
+}
+
+#[test]
+fn command_only_capability_is_explicit_and_default_descriptor_is_unchanged() -> io::Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).canonicalize()?;
+    for advertise in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+        command.arg("writer-lock-path").arg(&root);
+        if advertise {
+            command.arg("--capabilities");
+        }
+        let output = command.output()?;
+        assert!(output.status.success());
+        let descriptor: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(descriptor["project_root"], json!(root));
+        assert_eq!(descriptor["protocol"], 1);
+        if advertise {
+            assert_eq!(descriptor["capabilities"], json!(["command_only_storage_v1"]));
+        } else {
+            assert!(descriptor.get("capabilities").is_none());
+        }
+    }
     Ok(())
 }

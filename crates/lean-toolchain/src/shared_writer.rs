@@ -393,6 +393,17 @@ pub fn previous_writer_stopped(file: &File) -> io::Result<bool> {
     let process = record
         .get("process")
         .ok_or_else(|| invalid("writer ownership record omits process disposition"))?;
+    if let Some(phase) = record.get("command_phase") {
+        let turn = field(&record, "storage_turn").as_str();
+        if !turn.is_some_and(|turn| turn.len() == 32 && turn.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+            return Err(invalid("writer command phase has no exact turn"));
+        }
+        match (phase.as_str(), process.is_null()) {
+            (Some("starting"), true) => return Ok(false),
+            (Some("idle"), true) | (Some("running"), false) => {}
+            _ => return Err(invalid("writer command phase and process differ")),
+        }
+    }
     if process.is_null() {
         return Ok(true);
     }

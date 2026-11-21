@@ -281,3 +281,9 @@ admission lock. A retained charge fences overlapping locks even for an unbudgete
 Deploy this only with cooperating writers using the same registry. A torn binding or interrupted close retains the
 fence. A restarted writer still needs proof that caller-owned writes ended and the exact scratch was durably removed
 before it can reclaim the charge.
+
+A standalone helper can advertise `command_only_storage_v1` in the `capabilities` array returned by
+`writer-lock-path ROOT --capabilities`. The original descriptor is unchanged without the flag. Only callers that
+keep protected writes inside writer commands may opt in with `"command_only": true` in the storage request.
+The matching lock records publish Starting before spawn, Running with the exact process before GO, and Idle after
+group and descriptor closure. Partial transitions remain fenced. Command-only records supply no restart settlement.
