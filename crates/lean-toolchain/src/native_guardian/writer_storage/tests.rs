@@ -92,7 +92,10 @@ fn publish_idle_records(locks: &[(PathBuf, File)], turn: &str, scratch_identity:
         "command_phase": "idle"
     });
     if let Some(digest) = scratch_identity {
-        record["scratch_identity"] = serde_json::json!(digest);
+        record
+            .as_object_mut()
+            .unwrap()
+            .insert("scratch_identity".to_owned(), serde_json::json!(digest));
     }
     for (_, file) in locks {
         let mut file = file.try_clone()?;
@@ -582,7 +585,10 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
         let idle = fs::read(secondary)?;
         let record: serde_json::Value = serde_json::from_slice(&idle)?;
         let mut changed = record.clone();
-        changed["scratch_identity"] = serde_json::json!("a".repeat(64));
+        changed
+            .as_object_mut()
+            .unwrap()
+            .insert("scratch_identity".to_owned(), serde_json::json!("a".repeat(64)));
         fs::write(secondary, format!("{changed}\n"))?;
         let refusal = snapshot.reclaim(&locks, no_pin, |()| Ok(())).unwrap_err();
         assert!(refusal.to_string().contains("scratch identity"));
