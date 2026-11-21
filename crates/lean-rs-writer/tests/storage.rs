@@ -103,6 +103,14 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
     let mut reader = BufReader::new(abandoned.stdout.take().expect("managed replies"));
     let locked = reply(&mut reader)?;
     let assets = Path::new(locked["asset_dir"].as_str().expect("abandoned scratch"));
+    send(
+        &mut abandoned,
+        &json!({"action":"run","command":["/usr/bin/true"],"timeout":3}),
+    )?;
+    assert_eq!(reply(&mut reader)?["state"], "started");
+    let stopped = reply(&mut reader)?;
+    assert_eq!(stopped["state"], "stopped");
+    assert_eq!(stopped["owned_work_stopped"], true);
     drop(abandoned.stdin.take());
     assert!(!abandoned.wait()?.success());
     assert!(assets.is_dir());
@@ -114,6 +122,22 @@ fn two_projects_share_one_reserve_until_explicit_close() -> io::Result<()> {
             .contains("insufficient space for outstanding full-turn writer budgets")
     );
     assert_eq!(fs::read_dir(&scratch)?.count(), 1);
+
+    // This harness owns the exact scratch and has no caller-owned writes. Its
+    // observations are not durable proof that a restarted writer can use.
+    fs::remove_dir(assets)?;
+    assert!(!assets.exists());
+    let mut restarted = start(&a, &registry, &scratch, budget)?;
+    let _restart_control = restarted.stdin.take().expect("restart lifeline");
+    let refused = restarted.wait_with_output()?;
+    assert!(!refused.status.success());
+    assert!(refused.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("prior writer storage custody remains open"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert_eq!(fs::read_dir(&scratch)?.count(), 0);
     Ok(())
 }
 
