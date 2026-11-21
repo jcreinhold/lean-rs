@@ -99,10 +99,12 @@ fn main() {
         // Use a fresh parent environment without mutating the test process.
         let status = std::process::Command::new(env::current_exe().expect("test executable"))
             .arg("--test-launch-input-parent")
-            // Cargo/Nextest inject these library search paths for test executables.
-            // This self-contained fake child needs neither.
-            .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
+            // The self-contained fake parent needs none of the test runner's loader overrides.
             .env_remove("LD_LIBRARY_PATH")
+            .env_remove("LD_PRELOAD")
+            .env_remove("DYLD_LIBRARY_PATH")
+            .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
+            .env_remove("DYLD_INSERT_LIBRARIES")
             .env(INPUT_ENV, "ambient")
             .env(FAKE_CHILD_ENV, "launch_input")
             .status()
