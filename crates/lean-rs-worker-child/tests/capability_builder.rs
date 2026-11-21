@@ -1332,20 +1332,35 @@ mod qualified_pool {
             .collect())
     }
 
-    fn authorization_pids(path: &Path, offset: usize) -> Result<(usize, Vec<u32>)> {
+    fn check_authorization(path: &Path, offset: usize, pid: u32, portable: bool) -> Result<usize> {
         let bytes = fs::read(path)?;
         let suffix = bytes.get(offset..).ok_or("authorization log shrank")?;
-        let pids = std::str::from_utf8(suffix)?
-            .lines()
-            .map(|line| {
-                line.split_once(' ')
-                    .ok_or("invalid authorization event")?
-                    .0
-                    .parse::<u32>()
-                    .map_err(Into::into)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok((bytes.len(), pids))
+        let mut events = Vec::new();
+        for line in std::str::from_utf8(suffix)?.lines() {
+            let (worker, event) = line.split_once(' ').ok_or("invalid authorization event")?;
+            assert_eq!(
+                worker.parse::<u32>()?,
+                pid,
+                "authorization belongs to a different generation"
+            );
+            events.push(event);
+        }
+        if portable {
+            assert_eq!(
+                events,
+                [
+                    "worker-started",
+                    "verified-deployment",
+                    "authorize-fixed-metadata-builder_opens_worker_capability_and_validates_metadata",
+                    "authorize-host-load",
+                    "verified-global-interop-initializer",
+                    "authorize-checked-typed-import",
+                ]
+            );
+        } else {
+            assert_eq!(events.len(), 5, "reviewed worker authorization trace differs");
+        }
+        Ok(bytes.len())
     }
 
     fn owner_identities(owners: &Path, generation: &str) -> Result<(NativeProcessIdentity, NativeProcessIdentity)> {
@@ -1365,22 +1380,68 @@ mod qualified_pool {
     }
 
     #[test]
+    fn portable_guardian_entry() {
+        if std::env::var_os("LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD").is_some() {
+            lean_toolchain::native_guardian::run_guardian_cli().unwrap();
+        }
+    }
+
+    #[test]
     #[ignore = "named qualified metadata deployment and checked two-launch authorization required"]
     fn failed_validator_releases_pool_slot_before_fresh_key() -> Result<()> {
-        let selection: serde_json::Value = serde_json::from_str(
-            option_env!("LEAN_RS_TEST_QUALIFIED_METADATA").ok_or("missing checked metadata deployment")?,
-        )?;
-        let owners = PathBuf::from(
-            selection
-                .get("owners")
-                .and_then(serde_json::Value::as_str)
-                .ok_or("missing ownership registry")?,
-        );
+        let ordinary = super::ordinary_typed_selection::ordinary_stream_selection();
+        let (owners, events, guardian) = if let Some(selected) = ordinary {
+            use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+
+            let state = selected
+                .json_manifest
+                .parent()
+                .ok_or("missing portable fixture state")?;
+            let owners = state.join("owners");
+            fs::DirBuilder::new().mode(0o700).create(&owners)?;
+            let guardian = state.join("guardian.sh");
+            let executable = std::env::current_exe()?;
+            let quoted = executable
+                .to_str()
+                .ok_or("guardian executable path is not UTF-8")?
+                .replace('\'', "'\\''");
+            fs::write(
+                &guardian,
+                format!("#!/bin/sh\nexec '{quoted}' --exact qualified_pool::portable_guardian_entry --nocapture\n"),
+            )?;
+            fs::set_permissions(&guardian, fs::Permissions::from_mode(0o700))?;
+            (owners, state.join("app/native-events.log"), Some(guardian))
+        } else {
+            let selection: serde_json::Value = serde_json::from_str(
+                option_env!("LEAN_RS_TEST_QUALIFIED_METADATA").ok_or("missing checked metadata deployment")?,
+            )?;
+            let owners = PathBuf::from(
+                selection
+                    .get("owners")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("missing ownership registry")?,
+            );
+            let events = owners
+                .parent()
+                .ok_or("ownership registry has no deployment root")?
+                .join("app/native-events.log");
+            (owners, events, None)
+        };
         assert_eq!(owners.canonicalize()?, owners);
-        let events = owners
-            .parent()
-            .ok_or("ownership registry has no deployment root")?
-            .join("app/native-events.log");
+        let open = |tracker: &LeanWorkerProcessTracker| {
+            let base = builder(tracker);
+            if let (Some(selected), Some(guardian)) = (ordinary, guardian.as_ref()) {
+                base.worker_child(
+                    lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&selected.worker, &selected.sysroot)
+                        .checked_native_loader_environment()
+                        .native_guardian(guardian)
+                        .lifetime_directory(&owners),
+                )
+                .require_host_runtime(Default::default())
+            } else {
+                base
+            }
+        };
         let events_before = match fs::read(&events) {
             Ok(bytes) => bytes.len(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
@@ -1394,7 +1455,7 @@ mod qualified_pool {
             compiled_header_sha256: Some("00".repeat(32)),
             ..LeanWorkerHostRuntimeExpectation::default()
         };
-        let first = builder(&tracker).require_host_runtime(invalid);
+        let first = open(&tracker).require_host_runtime(invalid);
         let Err(error) = pool.acquire_lease(first) else {
             return Err("invalid runtime expectation unexpectedly opened".into());
         };
@@ -1420,15 +1481,10 @@ mod qualified_pool {
             "failed worker identity remained present"
         );
         assert!(!guardian.is_live()?, "failed worker guardian remained live");
-        let (events_after_failure, first_pids) = authorization_pids(&events, events_before)?;
-        assert_eq!(first_pids.len(), 5, "first worker authorization trace differs");
-        assert!(
-            first_pids.iter().all(|pid| *pid == process.pid),
-            "first authorization trace does not belong to the failed generation"
-        );
+        let events_after_failure = check_authorization(&events, events_before, process.pid, ordinary.is_some())?;
 
         {
-            let lease = pool.acquire_lease(builder(&tracker))?;
+            let lease = pool.acquire_lease(open(&tracker))?;
             assert_eq!(
                 lease.snapshot().workers,
                 1,
@@ -1454,12 +1510,7 @@ mod qualified_pool {
             "successful worker identity remained present after pool drop"
         );
         assert!(!guardian.is_live()?, "successful worker guardian remained live");
-        let (_, second_pids) = authorization_pids(&events, events_after_failure)?;
-        assert_eq!(second_pids.len(), 5, "second worker authorization trace differs");
-        assert!(
-            second_pids.iter().all(|pid| *pid == process.pid),
-            "second authorization trace does not belong to the successful generation"
-        );
+        check_authorization(&events, events_after_failure, process.pid, ordinary.is_some())?;
         Ok(())
     }
 }

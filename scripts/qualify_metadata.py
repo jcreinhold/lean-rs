@@ -1427,6 +1427,8 @@ INTEROP_METADATA_TESTS = (
     ("pool", "metadata_mismatch_is_typed"),
 )
 INTEROP_METADATA_CASES = frozenset(name for _, name in INTEROP_METADATA_TESTS)
+PORTABLE_POOL_RECOVERY = "failed_validator_releases_pool_slot_before_fresh_key"
+PORTABLE_POOL_AUTHORITY = "builder_opens_worker_capability_and_validates_metadata"
 NO_EXPORTS_CASE = "missing_metadata_and_doctor_exports_are_typed_worker_errors"
 INTEROP_DOCTOR_EVENTS = {
     "runtime_and_capability_metadata_are_separate": "authorize-fixed-metadata",
@@ -1920,8 +1922,10 @@ def run_stream_group(
     select_nextest_runner(env, profile)
     selected = {name: target for target, name in INTEROP_TESTS}
     for name in cases or selected:
-        target = selected[name]
-        env["LEAN_RS_METADATA_STREAM_CASE"] = name
+        pool_recovery = name == PORTABLE_POOL_RECOVERY
+        target = "capability_builder" if pool_recovery else selected[name]
+        authority = PORTABLE_POOL_AUTHORITY if pool_recovery else name
+        env["LEAN_RS_METADATA_STREAM_CASE"] = authority
         run(
             [
                 "cargo",
@@ -1938,12 +1942,13 @@ def run_stream_group(
                 "lean-rs-worker-child",
                 "--test",
                 target,
+                *(["--run-ignored", "only"] if pool_recovery else []),
                 "-E",
-                scoped_tests(target, (name,)),
+                scoped_tests(target, (f"qualified_pool::{name}" if pool_recovery else name,)),
             ],
             SDK,
         )
-        counts = (1, 1)
+        counts = (2, 2) if pool_recovery else (1, 1)
         if name == INTEROP_LEGACY_CASE:
             marker = "admit-fixed-direct-interop"
         elif name in INTEROP_FOREIGN_IMPORT_CASES:
@@ -1956,7 +1961,7 @@ def run_stream_group(
             marker = INTEROP_DOCTOR_EVENTS[name]
         elif name in SDK_SHAPE_GRANTS_BY_WORKER or name in PLANNER_SHAPE_TESTS:
             marker = "authorize-fixed-shape"
-        elif name in INTEROP_METADATA_CASES:
+        elif pool_recovery or name in INTEROP_METADATA_CASES:
             marker = "authorize-fixed-metadata"
         elif name in {
             IMPORT_PLANNING_CASE,
@@ -1966,7 +1971,7 @@ def run_stream_group(
             marker = "authorize-fixed-json"
         else:
             marker = "authorize-fixed-stream"
-        grant_event = f"{marker}-{name}".encode()
+        grant_event = f"{marker}-{authority}".encode()
         grant_order = None
         if name in POOL_BATCH_GRANTS:
             grant_order = (grant_event,) + (BATCH_GRANT,) * POOL_BATCH_GRANTS[name]
@@ -2675,7 +2680,7 @@ def main():
     )
     stream.add_argument("shim_manifest", type=Path)
     stream.add_argument(
-        "--case", action="append", choices=[name for _, name in INTEROP_TESTS]
+        "--case", action="append", choices=[*(name for _, name in INTEROP_TESTS), PORTABLE_POOL_RECOVERY]
     )
     run = commands.add_parser(
         "run", help="execute the selected tests against a reviewed deployment"

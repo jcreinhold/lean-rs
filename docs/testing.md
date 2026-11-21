@@ -162,6 +162,15 @@ Repeat `--case` for each test. Run `interop-stream --help` to see the accepted n
 checks the fixture and verifies that each case's workers exit. These focused checks do not replace
 `scripts/prerelease.sh`, which prepares the fixtures and runs the release checks.
 
+On macOS, the SDK-only cold-open custody regression uses the same host manifest and an SDK guardian launched by
+the test executable. It checks a rejected worker, closure of its worker group and guardian, and successful reuse
+of the same one-slot pool by a fresh worker.
+
+```sh
+python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \
+  --case failed_validator_releases_pool_slot_before_fresh_key
+```
+
 ### Reviewed-writer metadata checks on macOS arm64
 
 The separate `prepare` and `run` commands use a reviewed writer and run the metadata positive and
