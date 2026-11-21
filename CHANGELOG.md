@@ -9,6 +9,18 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.3]
+
+- Lean callers can use `verifyDeclarationBatchCompactWithSetup` for setup-aware verification with bounded display
+  evidence. Compact verification reserves space for later verdicts and reports when diagnostic or axiom output
+  was truncated.
+- Cooperating writers can opt into storage admission with `SharedWriter::open_with_storage_request` and confirm
+  helper exit with `SharedWriter::close`. Retained charges protect the exact project locks and scratch directory
+  across restarts. Automatic scratch recovery requires a proven idle command-only turn.
+- Managed native requests can arm a hard guardian deadline. Recovery preserves artifact read custody until exact
+  closure is confirmed and keeps execution evidence separate from proof results. Worker protocol 13 is unchanged.
+- Release verification uses locked Cargo packaging, and CI lints all workflows and their shell scripts.
+
 ## [0.10.2]
 
 - `LeanWorkerChild::application_launch_input` sends an application-defined UTF-8 value of up to 4096 bytes to the
