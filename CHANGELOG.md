@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.4]
+
+- `LeanWorkerNativeScope::prepare_with_socket_directory` lets callers place a guarded scope's Unix socket in an
+  application-owned private directory. The durable generation and capacity records stay in the configured registry.
+- Standalone writers can opt into command-only recovery and stage a SHA-256-bound source handoff of up to 256 KiB
+  under the admitted project lock union. The helper binds the handoff to the original turn before dispatch.
+- Inspect a retained writer storage turn and explicitly settle eligible scratch, including deep directory trees,
+  after verifying durable idle custody across the original lock union. Opportunistic cleanup keeps its depth and
+  entry limits. The interrupted command's result remains unknown. Proofs recovery remains disabled.
+
 ## [0.10.3]
 
 - Lean callers can use `verifyDeclarationBatchCompactWithSetup` for setup-aware verification with bounded display
