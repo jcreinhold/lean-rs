@@ -347,9 +347,12 @@ missing observation. A preview expires as soon as the locks are released.
 
 `lean_rs_writer::recover_idle_writer_storage_turn` repeats the inspection. A successful settlement requires
 matching Idle records for that turn on every original inode, an explicit empty process disposition, and the
-original command-only scope. It reopens every charged directory, checks the selected charge file, and uses the
-same descriptor-relative scratch cleanup as ordinary recovery. Cleanup intent is synced before removal. A retry
-can finish after removal if the intent was durable and the original scratch parent still matches. The report
+original command-only scope. It reopens every charged directory and checks the selected charge file.
+Opportunistic disjoint admission limits cleanup to 32 levels and 4096 entries. Explicit recovery walks the
+selected tree through held directory descriptors while retaining its original exclusive locks. A filesystem
+boundary, an I/O error or a process descriptor limit can interrupt cleanup and leave the turn charged.
+Cleanup intent is synced before removal. A retry can finish after removal if the intent was durable and
+the original scratch parent still matches. The report
 keeps the interrupted job's result unknown. A second call finds no remaining turn to settle. If cleanup finished
 but final registry publication could not be confirmed, the report says `settlement_unconfirmed`. Inspect the
 same turn again before making another admission decision.

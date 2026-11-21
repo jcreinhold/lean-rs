@@ -302,7 +302,7 @@ pub(super) fn exact_turn(registry: &StorageRoot, turn: &str, recover: bool) -> (
                 &locks,
                 |binding, marked| parent.pin_recovery(binding, marked),
                 |pinned| {
-                    parent.finish_bounded_recovery(pinned, until)?;
+                    parent.finish_recovery(pinned)?;
                     cleanup_finished = true;
                     Ok(())
                 },

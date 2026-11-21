@@ -143,6 +143,15 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     assert_eq!(stopped["owned_work_stopped"], true);
     assert_eq!(stopped["exit_code"], 0);
     assert_eq!(stopped["stdout"], "x");
+    let deep = (0..35).fold(scratch.clone(), |p, _| p.join("child"));
+    send(
+        &mut writer,
+        &json!({"action":"run","command":["/bin/mkdir","-p",deep],"timeout":3}),
+    )?;
+    assert_eq!(reply(&mut reader)?["state"], "started");
+    let stopped = reply(&mut reader)?;
+    assert_eq!(stopped["owned_work_stopped"], true);
+    assert_eq!(stopped["exit_code"], 0);
     drop(writer.stdin.take());
     assert!(!writer.wait()?.success());
     let preview = inspect(false);
@@ -238,22 +247,42 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
     assert_eq!(inspect(true)["state"], "refused");
     assert_eq!(fs::read(&entry)?, saved_charge);
     fs::rename(displaced, &scratch)?;
-    // The bounded production walker commits intent before reaching its depth limit.
-    let deep = (0..35).fold(scratch.clone(), |p, _| p.join("child"));
-    fs::create_dir_all(&deep)?;
-    assert!(
-        inspect(true)["reason"]
-            .as_str()
-            .is_some_and(|why| why.contains("depth exceeds"))
-    );
+    // A disjoint admission attempts cleanup but leaves the deep turn charged.
+    let other = fixture.join("disjoint-project");
+    fs::create_dir(&other)?;
+    let mut disjoint = start(&other, &registry.path, &scratch_parent, 1)?;
+    let mut replies = BufReader::new(disjoint.stdout.take().expect("disjoint writer replies"));
+    assert_eq!(reply(&mut replies)?["state"], "locked");
+    assert!(deep.is_dir());
     let marked: Value = serde_json::from_slice(&fs::read(&entry)?)?;
     assert_eq!(marked["scratch_cleanup_started"], true);
-    // Model the separate cut after removing the exact directory and before
-    // settling. Recovery has to sync the parent before it can settle.
-    fs::remove_dir_all(&scratch)?;
+    send(&mut disjoint, &json!({"action":"close"}))?;
+    assert!(disjoint.wait()?.success());
+
+    // Interrupt the actual operator walk with a kernel descriptor limit.
+    // The normal retry resumes using the original directory and custody.
+    let recover = operator("recover");
+    let interrupted = Command::new("/bin/sh")
+        .args(["-c", "ulimit -n 32 && exec \"$@\"", "limited-recovery"])
+        .arg(recover.get_program())
+        .args(recover.get_args())
+        .arg("--acknowledge-unknown-result")
+        .output()?;
+    assert!(!interrupted.status.success());
+    let report: Value = serde_json::from_slice(&interrupted.stdout)?;
+    assert_eq!(report["state"], "refused");
+    assert_eq!(report["old_result"], "unknown");
+    let fd_limit = io::Error::from(rustix::io::Errno::MFILE).to_string();
+    assert!(
+        report["reason"].as_str().is_some_and(|s| s.contains(&fd_limit)),
+        "{report}"
+    );
+    assert!(deep.is_dir());
+    assert_eq!(serde_json::from_slice::<Value>(&fs::read(&entry)?)?, marked);
     let recovered = inspect(true);
     assert_eq!(recovered["state"], "settled", "{recovered}");
     assert_eq!(recovered["old_result"], "unknown");
+    assert!(!scratch.exists());
     assert!(!entry.exists());
     assert_eq!(inspect(true)["state"], "refused");
     Ok(())
