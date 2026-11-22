@@ -587,17 +587,94 @@ fn try_recovery_union(charge: &Charge, until: Instant) -> io::Result<Vec<(PathBu
         if Instant::now() >= until {
             return Err(expired());
         }
-        let flags = OFlags::RDWR | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let file = File::from(open(path, flags, Mode::empty())?);
-        crate::writer_lock::validate_artifact_lock(&file, path, None)?;
-        let held = file.metadata()?;
-        if (held.dev(), held.ino()) != (device, inode) {
-            return Err(invalid("writer recovery lock inode changed"));
-        }
-        try_hold_recovery_lock(&file)?;
+        let file = try_hold_existing_lock(path, (device, inode))?;
         locks.push((path.clone(), file));
     }
     Ok(locks)
+}
+
+fn try_hold_existing_lock(path: &Path, expected: (u64, u64)) -> io::Result<File> {
+    let flags = OFlags::RDWR | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file = File::from(open(path, flags, Mode::empty())?);
+    crate::writer_lock::validate_artifact_lock(&file, path, None)?;
+    let held = file.metadata()?;
+    if (held.dev(), held.ino()) != expected {
+        return Err(invalid("writer lock inode changed"));
+    }
+    try_hold_recovery_lock(&file)?;
+    crate::writer_lock::validate_artifact_lock(&file, path, None)?;
+    Ok(file)
+}
+
+/// Run an operator's launcher-selector transition while the original project
+/// lock union and registry admission are fenced. Both launcher cohorts must
+/// already be stopped. The short callback updates selectors only; it must not
+/// launch work or enter native admission. Old binaries can ignore selectors
+/// when invoked directly, so they must remain unreachable after the switch.
+///
+/// `pinned_locks` contains the pre-cutover path, device and inode for every
+/// artifact domain of `workspaces`. The registry must be the selected registry.
+/// The callback is never called on a contention, changed inode, unresolved
+/// writer, native generation, or storage charge.
+///
+/// # Errors
+/// Returns invalid scope, contention, unsettled custody or transition errors.
+#[doc(hidden)]
+pub fn with_drained_project<T>(
+    registry: &StorageRoot,
+    workspaces: &[PathBuf],
+    pinned_locks: &[(PathBuf, u64, u64)],
+    timeout: Duration,
+    switch: impl FnOnce() -> io::Result<T>,
+) -> io::Result<T> {
+    let until = deadline(timeout)?;
+    if registry_directory()? != registry.path {
+        return Err(invalid("cutover registry differs from configured registry"));
+    }
+    let root = registry.open()?;
+    let paths = || -> io::Result<BTreeSet<PathBuf>> {
+        crate::shared_writer::project_artifact_root_union(workspaces)?
+            .iter()
+            .map(|path| crate::shared_writer::project_lock_path(path))
+            .collect()
+    };
+    let expected = paths()?;
+    if expected.is_empty() || pinned_locks.len() != expected.len() {
+        return Err(invalid("cutover requires the exact original project lock union"));
+    }
+    let pins: std::collections::BTreeMap<_, _> = pinned_locks
+        .iter()
+        .map(|(path, device, inode)| (path.clone(), (*device, *inode)))
+        .collect();
+    if !pins.keys().eq(expected.iter()) {
+        return Err(invalid("cutover requires the exact original project lock union"));
+    }
+    let mut held = Vec::new();
+    for (path, identity) in &pins {
+        if Instant::now() >= until {
+            return Err(expired());
+        }
+        let lock = try_hold_existing_lock(path, *identity)?;
+        if !crate::shared_writer::previous_writer_stopped(&lock)? {
+            return Err(prior_custody());
+        }
+        held.push((path, lock));
+    }
+    // Match ordinary writer order: project EX precedes registry admission.
+    let _admission = ownership::lock_admission_at(&root, until, false)?;
+    registry.open()?;
+    ownership::check_drained_locked(&registry.path, until)?;
+    registry.open()?;
+    if paths()? != expected {
+        return Err(invalid("cutover project lock union changed"));
+    }
+    for (path, lock) in &held {
+        crate::writer_lock::validate_artifact_lock(lock, path, None)?;
+    }
+    if Instant::now() >= until {
+        return Err(expired());
+    }
+    switch()
 }
 
 fn try_hold_recovery_lock(file: &File) -> io::Result<()> {

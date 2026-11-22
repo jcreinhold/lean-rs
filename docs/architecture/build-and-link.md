@@ -278,6 +278,13 @@ further commands even if local validation refuses before delivery. After control
 observe successful cleanup through its original exact child waiter. For charged writers the helper returns success
 only after explicit close and charge settlement. Older or embedded helpers that do not advertise this interface refuse permitted execution.
 
+A launcher cutover or rollback can use `writer_storage::with_drained_project` once both supported launcher
+cohorts have been stopped. The registry drain alone does not account for an uncharged helper. The SDK also takes
+the exact pre-cutover project and dependency lock inodes exclusively, checks previous writer evidence, and keeps
+the complete union and registry admission locked through the short selector update. The selector update never
+starts a helper. Start only the selected cohort afterward. An older executable invoked directly can bypass launcher
+selection, so the operator must revoke its supported launch routes before enabling the replacement.
+
 A cooperating SDK caller can opt into the standalone writer's v1 storage admission with
 `SharedWriter::open_with_storage_request`. Supply the same bounded JSON request as
 `lean-rs-writer writer --storage-request`, with the launcher's registry, project, selected scratch parent and

@@ -670,3 +670,126 @@ fn exact_recoverers_release_partial_locks_and_settle_once() -> io::Result<()> {
     assert!(WriterStorageTurn::inspect(&registry, &turn).is_err());
     Ok(())
 }
+
+#[test]
+fn project_cutover_fences_old_flock_and_requires_settled_registry() {
+    const REENTRY: &str = "LEAN_RS_TEST_DRAINED_PROJECT";
+    let Some(base) = std::env::var_os(REENTRY) else {
+        let fixture = Fixture::new();
+        let name = format!(
+            "{}::project_cutover_fences_old_flock_and_requires_settled_registry",
+            module_path!().split_once("::").unwrap().1
+        );
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &name, "--nocapture"])
+            .env(REENTRY, &fixture.0)
+            .env(super::super::OWNERS_DIRECTORY_ENV, fixture.0.join("owners"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    };
+    let base = PathBuf::from(base);
+    let project = base.join("first");
+    let unrelated = base.join("second");
+    let (path, old_owner) = lock(&project);
+    let metadata = old_owner.metadata().unwrap();
+    let mut pins = [(path.clone(), metadata.dev(), metadata.ino())];
+    let registry = expected(base.join("owners"));
+    let unrelated_lock = [lock(&unrelated)];
+    let switch = || -> io::Result<()> { Err(invalid("selector switch unexpectedly invoked")) };
+    let run = |pins: &[(PathBuf, u64, u64)]| {
+        with_drained_project::<()>(&registry, std::slice::from_ref(&project), pins, TIMEOUT, switch)
+    };
+    assert_eq!(run(&pins).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    drop(old_owner);
+    let charge = request(&base, &unrelated_lock).unwrap();
+    let error = run(&pins).unwrap_err();
+    assert!(error.to_string().contains("writer storage custody remains open"));
+    let [(_, unrelated_file)] = &unrelated_lock;
+    charge.settle_after_cleanup(unrelated_file, Ok(()), TIMEOUT).unwrap();
+
+    let nonce = "6".repeat(48);
+    let owner = ownership::reserve_owner_record(&registry.path, &nonce, TIMEOUT).unwrap();
+    assert!(
+        run(&pins)
+            .unwrap_err()
+            .to_string()
+            .contains("native generation custody remains open")
+    );
+    ownership::retire_preparing_owner_record(&owner, &nonce).unwrap();
+
+    if let Some(helper) = std::env::var_os("LEAN_RS_TEST_CUTOVER_OLD_WRITER") {
+        use std::io::{BufRead as _, BufReader};
+        let launch = || {
+            let mut command = Command::new(&helper);
+            command
+                .arg("writer")
+                .arg(&project)
+                .arg(&path)
+                .arg("0.1")
+                .env("TMPDIR", &base)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            command
+        };
+        let mut old = Helper(launch().spawn().unwrap());
+        let mut line = String::new();
+        BufReader::new(old.0.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let ready: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(ready.get("state"), Some(&serde_json::json!("locked")));
+        assert_eq!(run(&pins).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        old.0
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"action\":\"close\"}\n")
+            .unwrap();
+        assert!(old.0.wait().unwrap().success());
+        with_drained_project(&registry, std::slice::from_ref(&project), &pins, TIMEOUT, || {
+            let refused = launch().output()?;
+            assert!(!refused.status.success());
+            assert!(
+                refused.stdout.is_empty(),
+                "old writer must not report Ready during selector switch"
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    let contender = OpenOptions::new().read(true).write(true).open(&path).unwrap();
+    with_drained_project(&registry, std::slice::from_ref(&project), &pins, TIMEOUT, || {
+        assert!(matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+        let root = registry.open()?;
+        assert_eq!(
+            ownership::try_lock_admission_at(&root).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        Ok(())
+    })
+    .unwrap();
+    contender.try_lock().unwrap();
+    assert_eq!(contender.metadata().unwrap().ino(), metadata.ino());
+    drop(contender);
+    fs::rename(&path, path.with_extension("original")).unwrap();
+    File::create(&path).unwrap();
+    assert!(
+        run(&pins)
+            .unwrap_err()
+            .to_string()
+            .contains("writer lock inode changed")
+    );
+    let [pin] = &mut pins;
+    let [(unrelated, _)] = &unrelated_lock;
+    pin.0 = unrelated.clone();
+    assert!(
+        run(&pins)
+            .unwrap_err()
+            .to_string()
+            .contains("exact original project lock union")
+    );
+}
