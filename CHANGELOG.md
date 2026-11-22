@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.8]
+
+- Managed standalone writers advertise `lake_module_setup_capture_v1`. The selected Lake setup-file command
+  stages its complete stdout as `module-setup.json` in charged scratch on success and returns its SHA-256 digest.
+  Capture is limited to the smaller of 16 MiB and the turn's byte budget.
+- Managed helpers and Rust `SharedWriter` callers can close and settle after a verified stopped command failure.
+  The failed command yields no usable result, and the writer rejects further commands.
+
 ## [0.10.7]
 
 - On macOS, matched managed installations can opt into a guardian-owned drain slot with
