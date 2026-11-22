@@ -17,6 +17,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   requires matching worker parent and child versions.
 - The guardian rejects caller-reported progress and enforces the original hard deadline when trusted activity is
   unavailable.
+- Owner-record collection preserves the original guardian's closure receipt while the terminal worker's process group
+  still exists. A replacement can verify closure for that exact generation before the original broker reaps the worker.
 
 ## [0.10.9]
 
