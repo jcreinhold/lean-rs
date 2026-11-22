@@ -117,6 +117,34 @@ private unsafe def checkProjectFileQueries : IO Unit := do
     | throw (IO.userError "diagnostics ignored the missing setup-selected artifact")
   unless failure.diagnostics.any (·.severity matches .error) do throw (IO.userError "missing import diagnostic")
 
+  let .headerParseFailed tiny ← diagnostics (setupFor (olean.addExtension "absent")) 1 65536
+    | throw (IO.userError "small header budget hid the import failure")
+  unless tiny.diagnostics.isEmpty && (tiny.truncated matches .truncated) do
+    throw (IO.userError "unreportable header error was marked complete")
+
+  let atHostBudget := fun text => do
+    Lean.enableInitializersExecution
+    fileDiagnosticsWithSetup (setupFor olean) text ⟨4096, 65536⟩ "Example" "OutlineFile.lean" 200000 65536 "{}"
+  let .ok clean _ ← atHostBudget source | throw (IO.userError "clean file failed")
+  unless clean.items matches #[.ok "diagnostics" (.diagnostics { diagnostics := #[], truncated := .complete })] do
+    throw (IO.userError "clean file did not return complete empty diagnostics")
+  -- First exhaust only the host's diagnostic body ceiling, then exceed its whole batch ceiling.
+  for noiseChars in [3000, 35000] do
+    let noise := String.ofList (List.replicate noiseChars 'λ')
+    let noisy := messages ++ "#check \"" ++ noise ++ "\"\n#check MissingFirst\n#check MissingSecond\n"
+    let .ok prioritized _ ← atHostBudget noisy | throw (IO.userError "noisy file failed")
+    let #[.ok "diagnostics" (.diagnostics bounded)] := prioritized.items
+      | throw (IO.userError "noisy output displaced the typed diagnostics item")
+    let some first := bounded.diagnostics[0]? | throw (IO.userError "missing first error")
+    let some second := bounded.diagnostics[1]? | throw (IO.userError "missing second error")
+    unless (bounded.truncated matches .truncated) &&
+        (first.severity matches .error) && first.message.contains "MissingFirst" && first.position.any (·.line == 6) &&
+        (second.severity matches .error) && second.message.contains "MissingSecond" && second.position.any (·.line == 7) &&
+        bounded.diagnostics.filterMap (fun d => d.position.map (·.line)) == #[6, 7, 4, 3, 5] &&
+        bounded.diagnostics.all (·.fileLabel == "OutlineFile.lean") &&
+        bounded.diagnostics.foldl (init := 0) (fun n d => n + d.message.utf8ByteSize) ≤ 4096 do
+      throw (IO.userError "bounded diagnostics lost severity order, positions, or truncation")
+
 unsafe def main : IO Unit := do
   checkVerdict "fixtureAxiom" true
   checkVerdict "False.intro" false

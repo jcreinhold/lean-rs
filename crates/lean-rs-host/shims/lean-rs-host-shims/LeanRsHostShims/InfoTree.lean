@@ -1510,6 +1510,32 @@ private def diagnosticBytes (diagnostic : LeanRsFixture.Elaboration.Diagnostic) 
 private def failureBytes (failure : LeanRsFixture.Elaboration.ElabFailure) : Nat :=
   failure.diagnostics.foldl (init := 0) fun bytes diagnostic => bytes + diagnosticBytes diagnostic
 
+/-- Spend the diagnostic body and batch budgets in severity order. Clip text on
+    a UTF-8 boundary while preserving the original file and range of each row. -/
+private def boundedFileDiagnostics (messages : MessageLog) (fileLabel : String) (bodyBytes totalBytes : Nat) :
+    IO LeanRsFixture.Elaboration.ElabFailure := do
+  let entries := messages.reportedPlusUnreported
+  let mut result := emptyFailure
+  let mut bodyLeft := bodyBytes
+  let mut totalLeft := totalBytes
+  for severity in [MessageSeverity.error, .warning, .information] do
+    for msg in entries do
+      if msg.severity != severity then continue
+      if bodyLeft == 0 || totalLeft == 0 then return { result with truncated := .truncated }
+      let one ← failureFromMessages (MessageLog.empty.add msg) 1 fileLabel
+      let some diagnostic := one.diagnostics[0]? | continue
+      let overhead := diagnosticBytes diagnostic - diagnostic.message.utf8ByteSize
+      if overhead > totalLeft then return { result with truncated := .truncated }
+      let limit := min bodyLeft (totalLeft - overhead)
+      if diagnostic.message.utf8ByteSize > limit then
+        let text := (diagnostic.message.sliceTo (diagnostic.message.posLE ⟨limit⟩)).toString
+        if text.isEmpty then return { result with truncated := .truncated }
+        return { diagnostics := result.diagnostics.push { diagnostic with message := text }, truncated := .truncated }
+      result := { result with diagnostics := result.diagnostics.push diagnostic }
+      bodyLeft := bodyLeft - diagnostic.message.utf8ByteSize
+      totalLeft := totalLeft - diagnosticBytes diagnostic
+  return result
+
 private def localInfoBytes (info : LocalInfo) : Nat :=
   info.name.utf8ByteSize + info.binderInfo.utf8ByteSize + renderedBytes info.typeStr +
     match info.value with
@@ -1603,11 +1629,11 @@ private def selectorDeclarationOutline (candidates : Array DeclarationCandidate)
 
 private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
-    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (missing : Array String) :
+    (budgets : ModuleQueryOutputBudgets) (totalRemaining : Nat) (fileLabel : String) (missing : Array String) :
     IO ModuleQueryBatchResult := do
   match selector with
   | .diagnostics _ =>
-    let failure ← failureFromMessages messages budgets.perFieldBytes.toUSize fileLabel
+    let failure ← boundedFileDiagnostics messages fileLabel budgets.perFieldBytes totalRemaining
     pure <| .diagnostics (doc.offsetFailure failure)
   | .proofState _ line column =>
     pure <| .proofState (← runProofState doc trees candidates line column budgets .pretty)
@@ -1672,9 +1698,10 @@ private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelect
       totalTruncated := true
     else
       try
-        let result ← batchResultFor selector doc messages trees candidates budgets fileLabel missing
+        let result ← batchResultFor selector doc messages trees candidates budgets (totalLimit - spent) fileLabel missing
         let bytes := batchResultBytes result
-        if spent + bytes > totalLimit then
+        let noDiagnosticFits := result matches .diagnostics { diagnostics := #[], truncated := .truncated }
+        if noDiagnosticFits || spent + bytes > totalLimit then
           items := items.push (.budgetExceeded id "module query selector would exceed the batch total byte budget")
           totalTruncated := true
         else
@@ -2000,7 +2027,9 @@ private def resolveModuleHeader (env : Environment) (header : Lean.Elab.HeaderSy
 
 private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String) (policy : ModuleQueryCachePolicy)
-    (old? : Option ModuleSnapshot := none) (setup? : Option ModuleSetup := none) :
+    (old? : Option ModuleSnapshot := none) (setup? : Option ModuleSetup := none)
+    (headerFailure : MessageLog → IO LeanRsFixture.Elaboration.ElabFailure :=
+      fun msgs => failureFromMessages msgs diagBytes fileLabel) :
     IO (Except (LeanRsFixture.Elaboration.ElabFailure × Nat) (ModuleSnapshot × ModuleQueryTimings)) := do
   let headerStart ← IO.monoMsNow
   let opts ← LeanRsFixture.Elaboration.buildOptions heartbeats optionsJson
@@ -2011,7 +2040,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
   let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
     let elapsed ← elapsedMicrosSince headerStart
-    return .error (← failureFromMessages headerMessages diagBytes fileLabel, elapsed)
+    return .error (← headerFailure headerMessages, elapsed)
 
   let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
   let loadedModules := env.header.moduleNames.map (·.toString)
@@ -2035,7 +2064,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       pure (env, headerMessages)
   let headerMicros ← elapsedMicrosSince headerStart
   if initialMessages.hasErrors then
-    return .error (← failureFromMessages initialMessages diagBytes fileLabel, headerMicros)
+    return .error (← headerFailure initialMessages, headerMicros)
 
   let opts ← if missing.isEmpty then LeanRsFixture.Elaboration.resolveOptions opts heartbeats else pure opts
   let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
@@ -3160,11 +3189,12 @@ private def queryFileWithSetup (setup : ModuleSetup) (source : String) (budgets 
     (namespaceContext fileLabel : String) (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     (selectors : MessageLog → Array ModuleQuerySelector)
     : IO ModuleQueryBatchOutcome := do
+  let limits := { budgets with perFieldBytes := min budgets.perFieldBytes diagBytes.toNat }
   match ← buildModuleSnapshot (← mkEmptyEnvironment) source namespaceContext fileLabel heartbeats diagBytes
-      optionsJson (oneShotPolicy source fileLabel) none (some setup) with
+      optionsJson (oneShotPolicy source fileLabel) none (some setup)
+      (fun msgs => boundedFileDiagnostics msgs fileLabel limits.perFieldBytes limits.totalBytes) with
   | .error (failure, _) => return .headerParseFailed failure
   | .ok (snapshot, _) =>
-    let limits := { budgets with perFieldBytes := min budgets.perFieldBytes diagBytes.toNat }
     let result ← runBatchSelectorsWithCandidates (selectors snapshot.messages) snapshot.document snapshot.messages
       snapshot.trees snapshot.candidates limits fileLabel snapshot.missing
     return .ok result snapshot.imports
