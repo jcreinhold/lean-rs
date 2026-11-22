@@ -9,6 +9,13 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.12]
+
+- Managed hosts can bind one standalone writer stage to the exact helper's Ready identity and the original
+  boot-clock deadline. The helper and its blocked exec wrapper check the same expiry, and the caller retains
+  the existing explicit close and retirement checks.
+- An attempted permitted run seals further execution even if local validation refuses before delivery.
+
 ## [0.10.11]
 
 - A managed host can cancel the exact already-admitted declaration inspection with its worker cancellation token.
