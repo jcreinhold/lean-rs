@@ -6,10 +6,11 @@ use lean_rs::host_bridge::{
 };
 use lean_rs::module::{
     AuthorizedWorkerSnapshot, HostImportOptions, LeanLibrary, LoadedHostArtifacts, TrustedHostCapability,
-    TrustedHostImports,
+    TrustedHostImports, TrustedWorkerCapability,
 };
 use lean_rs::{LeanResult, LeanRuntime};
 use lean_rs_host::host::LeanPreparedHostArtifacts;
+use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -21,6 +22,20 @@ pub struct WorkerSourceContext<'a, 'cap> {
     pub environment: &'a HostEnvironment<'static>,
     /// Original immutable import authority.
     pub imports: &'a TrustedHostImports<'static, 'cap>,
+}
+
+/// The actual bounded input to a checked worker String → IO String export.
+pub struct WorkerStringCall<'a> {
+    /// The admitted manifest-backed worker capability for this session.
+    pub capability: &'a TrustedWorkerCapability<'static>,
+    /// Project root associated with the opened worker session.
+    pub project_root: &'a str,
+    /// Protocol operation used to address the export.
+    pub operation: WorkerExportOperation,
+    /// Exact named export the request will invoke.
+    pub export: &'a str,
+    /// Unmodified payload from the bounded worker frame.
+    pub request_json: &'a str,
 }
 
 /// Application-owned read admission for one canonical manifest in a protected artifact root.
@@ -95,8 +110,9 @@ pub trait WorkerAuthority: Send + Sync {
     /// Returns an error if the manifest path cannot be approved or custody cannot be acquired.
     fn manifest_read(&self, requested: &Path) -> LeanResult<WorkerManifestRead>;
     /// Verify the actual images and hold custody for the exact requested manifest and symbol contracts.
-    /// Permission covers every protocol-valid payload dispatched to each approved export.
-    /// The application must only admit exports safe for that input domain.
+    /// Without a narrower authorization hook, permission covers every
+    /// protocol-valid payload dispatched to each approved export. The
+    /// application must only admit exports safe for that input domain.
     ///
     /// # Errors
     /// Returns an error if the snapshot, image or requested export contract cannot be verified.
@@ -106,6 +122,16 @@ pub trait WorkerAuthority: Send + Sync {
         path: &Path,
         snapshot: &[u8],
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>>;
+    /// Narrow an already admitted String → IO String export to an exact call.
+    ///
+    /// The default preserves snapshot-wide payload authority. This hook cannot
+    /// admit a different export, manifest, image, or ABI.
+    ///
+    /// # Errors
+    /// Return an error to refuse this payload before native export entry.
+    fn authorize_worker_string_call(&self, _call: WorkerStringCall<'_>) -> LeanResult<()> {
+        Ok(())
+    }
     /// Select generated imports for this exact admitted project capability.
     ///
     /// Ordinary sessions use default Lake roots unless the application opts in.

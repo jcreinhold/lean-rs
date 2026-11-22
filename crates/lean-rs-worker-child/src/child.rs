@@ -1,4 +1,4 @@
-use crate::authority::{WorkerAuthority, WorkerSourceContext, worker_authority};
+use crate::authority::{WorkerAuthority, WorkerSourceContext, WorkerStringCall, worker_authority};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -1779,6 +1779,14 @@ impl HostAnchor {
     }
 }
 
+fn with_authorized_worker_string(
+    request: String,
+    authorize: impl FnOnce(&str) -> Result<(), WorkerCallError>,
+) -> Result<String, WorkerCallError> {
+    authorize(&request)?;
+    Ok(request)
+}
+
 fn with_validated_source<C, R>(
     context: C,
     observed_roots: Option<&[String]>,
@@ -2113,12 +2121,8 @@ impl HostSessionState {
         request_json: String,
     ) -> Result<LeanWorkerCapabilityMetadata, CapabilityJsonError> {
         let raw = self
-            .worker_bindings_for(WorkerExportOperation::Metadata, export)
-            .map_err(CapabilityJsonError::from_worker_call)?
-            .string_io(WorkerExportOperation::Metadata, export)
-            .map_err(CapabilityJsonError::from_worker_call)?
-            .call(request_json)
-            .map_err(CapabilityJsonError::Host)?;
+            .worker_string_call(WorkerExportOperation::Metadata, export, request_json)
+            .map_err(CapabilityJsonError::from_worker_call)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
@@ -2128,20 +2132,43 @@ impl HostSessionState {
         request_json: String,
     ) -> Result<LeanWorkerDoctorReport, CapabilityJsonError> {
         let raw = self
-            .worker_bindings_for(WorkerExportOperation::Doctor, export)
-            .map_err(CapabilityJsonError::from_worker_call)?
-            .string_io(WorkerExportOperation::Doctor, export)
-            .map_err(CapabilityJsonError::from_worker_call)?
-            .call(request_json)
-            .map_err(CapabilityJsonError::Host)?;
+            .worker_string_call(WorkerExportOperation::Doctor, export, request_json)
+            .map_err(CapabilityJsonError::from_worker_call)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
     fn json_command(&mut self, export: &str, request_json: String) -> Result<String, WorkerCallError> {
-        self.worker_bindings_for(WorkerExportOperation::JsonCommand, export)?
-            .string_io(WorkerExportOperation::JsonCommand, export)?
-            .call(request_json)
-            .map_err(WorkerCallError::Host)
+        self.worker_string_call(WorkerExportOperation::JsonCommand, export, request_json)
+    }
+
+    fn worker_string_call(
+        &mut self,
+        operation: WorkerExportOperation,
+        export: &str,
+        request_json: String,
+    ) -> Result<String, WorkerCallError> {
+        with_authorized_worker_string(request_json, |request_json| {
+            if let Some(bindings) = &self.worker_bindings {
+                worker_authority()
+                    .and_then(|authority| {
+                        authority.authorize_worker_string_call(WorkerStringCall {
+                            capability: bindings.capability,
+                            project_root: &self.key.project_root,
+                            operation,
+                            export,
+                            request_json,
+                        })
+                    })
+                    .map_err(WorkerCallError::Host)?;
+            }
+            Ok(())
+        })
+        .and_then(|request_json| {
+            self.worker_bindings_for(operation, export)?
+                .string_io(operation, export)?
+                .call(request_json)
+                .map_err(WorkerCallError::Host)
+        })
     }
 
     fn infer_type(
@@ -4063,6 +4090,26 @@ mod tests {
         LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerSessionImportProfile,
     };
+
+    #[test]
+    fn string_export_requires_approval_of_the_exact_unmodified_payload() {
+        let exact = r#"{"name":"admitted","limit":3}"#;
+        for (input, allowed) in [(exact, true), (r#"{"name":"other","limit":3}"#, false)] {
+            let mut entered = false;
+            let result = super::with_authorized_worker_string(input.to_owned(), |observed| {
+                if observed == exact {
+                    Ok(())
+                } else {
+                    Err(super::WorkerCallError::Host(lean_rs::error::host_internal(
+                        "payload refused",
+                    )))
+                }
+            })
+            .inspect(|_| entered = true);
+            assert_eq!(entered, allowed);
+            assert_eq!(result.ok().as_deref(), allowed.then_some(input));
+        }
+    }
 
     #[test]
     fn source_grant_requires_validation_of_the_retained_import_order() {
