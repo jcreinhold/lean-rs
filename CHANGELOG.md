@@ -9,6 +9,13 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.13]
+
+- Managed launchers can fence the exact project lock union and native admission while changing the launcher
+  selector. The transition requires prior writer custody and registry work to be settled and preserves lock inodes.
+- A missing registry admission lock now gives explicit first-use initialization guidance without creating a
+  replacement mutex during cutover or rollback.
+
 ## [0.10.12]
 
 - Managed hosts can bind one standalone writer stage to the exact helper's Ready identity and the original
