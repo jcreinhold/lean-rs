@@ -43,6 +43,7 @@ struct Arm {
 #[serde(rename_all = "snake_case")]
 enum ArmOp {
     ArmHardDeadline,
+    ArmReaderHardDeadline,
 }
 
 #[derive(Default)]
@@ -105,7 +106,12 @@ impl OwnerDeadline {
     /// Observe EOF or accept one arm. The authenticated parent socket is
     /// already nonblocking. Each poll does one bounded read and at most
     /// one nonblocking ACK write; expiry never waits for a partial frame.
-    pub(super) fn poll_parent(&mut self, parent: &mut UnixStream, nonce: &str) -> io::Result<bool> {
+    pub(super) fn poll_parent(
+        &mut self,
+        parent: &mut UnixStream,
+        nonce: &str,
+        reads_retained: bool,
+    ) -> io::Result<bool> {
         let mut scratch = [0; MAX_ARM_FRAME];
         let count = match parent.read(&mut scratch) {
             Ok(0) => return Ok(true),
@@ -137,7 +143,9 @@ impl OwnerDeadline {
             return Err(invalid("native guardian arm cannot be pipelined"));
         }
         let arm: Arm = serde_json::from_slice(&self.input).map_err(io::Error::other)?;
-        let ArmOp::ArmHardDeadline = arm.op;
+        if matches!(arm.op, ArmOp::ArmReaderHardDeadline) && !reads_retained {
+            return Err(invalid("managed reader arm requires retained read descriptors"));
+        }
         if arm.protocol != PROTOCOL || arm.nonce != nonce {
             return Err(invalid("native guardian arm binding differs"));
         }

@@ -17,6 +17,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - An attempted permitted run seals further execution even if local validation refuses before delivery.
 - After a permitted run closes its control pipe, the parent can still confirm cleanup through the exact helper
   exit observed by its original child waiter.
+- External managed readers can arm their original boot-clock deadline on the exact guardian scope after it retains
+  read descriptors. The existing startup acknowledgment and the guarded payload release remain separate.
 
 ## [0.10.11]
 

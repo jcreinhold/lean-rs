@@ -986,6 +986,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerN
 pub struct lean_rs_worker_parent::LeanWorkerNativeScopeLease(_)
 impl lean_rs_worker_parent::LeanWorkerNativeScopeLease
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::acknowledge(&mut self) -> std::io::error::Result<()>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::arm_admitted_reader_deadline(&mut self, &lean_toolchain::native_guardian::ownership::NativeGuardianDrainBinding, [u8; 16], u64, u64) -> std::io::error::Result<()>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::cleanup_inputs(&self) -> std::io::error::Result<()>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::cleanup_pending(&self) -> bool
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::custody_closed(&self) -> std::io::error::Result<bool>
@@ -993,6 +994,7 @@ pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::group_absent(&self) ->
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::guardian_alive(&self) -> std::io::error::Result<bool>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::input_directory(&self) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::kill(&mut self) -> std::io::error::Result<()>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::managed_guardian_binding(&self) -> std::io::error::Result<lean_toolchain::native_guardian::ownership::NativeGuardianDrainBinding>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::owner(&self) -> std::io::error::Result<&lean_toolchain::native_guardian::ownership::NativeProcessIdentity>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::request_stop(&self) -> std::io::error::Result<()>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::take_stderr(&mut self) -> core::option::Option<std::process::ChildStderr>

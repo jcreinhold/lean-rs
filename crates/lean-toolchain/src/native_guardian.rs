@@ -756,6 +756,7 @@ impl Guardian {
                         .as_mut()
                         .ok_or_else(|| invalid("native guardian parent missing"))?,
                     &self.nonce,
+                    !self.loans.is_empty(),
                 )?
             {
                 return Ok(());

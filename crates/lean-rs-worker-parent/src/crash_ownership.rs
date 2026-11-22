@@ -352,6 +352,48 @@ impl LeanWorkerNativeScopeLease {
         self.0.acknowledge_lifetime()
     }
 
+    /// Observe the exact Running guardian scope for an external managed reader.
+    ///
+    /// # Errors
+    /// Refuses an unavailable, unguarded or changed generation.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn managed_guardian_binding(&self) -> io::Result<native_guardian::NativeGuardianDrainBinding> {
+        self.lifetime()?.managed_guardian_binding()
+    }
+
+    /// Arm the already admitted external reader's original deadline after read retention.
+    ///
+    /// Keep the bootstrap blocked until it has acknowledged the entire expected read
+    /// union and this call has verified the guardian's exact deadline ACK. The
+    /// caller must match the stored admission boot to the expected binding.
+    ///
+    /// # Errors
+    /// Refuses stale identity, missing retained reads, expired time or an
+    /// unconfirmed ACK. Never release the payload or retry an unconfirmed arm.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn arm_admitted_reader_deadline(
+        &mut self,
+        expected: &native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+    ) -> io::Result<()> {
+        self.lifetime()?.validate_managed_scope(expected)?;
+        let lease = self
+            .0
+            .lifetime
+            .as_mut()
+            .ok_or_else(|| io::Error::other("native custody lease missing"))?;
+        lease.arm_deadline(
+            &ManagedRequestDeadline {
+                attempt,
+                stage,
+                expires_ns,
+            },
+            "arm_reader_hard_deadline",
+        )
+    }
+
     /// Request cleanup from the sole guardian, without signalling a stored PID.
     ///
     /// # Errors
@@ -854,6 +896,10 @@ impl ParentLifetimeLease {
     }
 
     pub(crate) fn arm_managed_request(&mut self, arm: &ManagedRequestDeadline) -> io::Result<()> {
+        self.arm_deadline(arm, "arm_hard_deadline")
+    }
+
+    fn arm_deadline(&mut self, arm: &ManagedRequestDeadline, op: &str) -> io::Result<()> {
         if !self.guarded || !self.running_published {
             return Err(io::Error::other(
                 "managed request requires an acknowledged independent guardian",
@@ -868,7 +914,7 @@ impl ParentLifetimeLease {
             "attempt":arm.attempt, "stage":arm.stage, "expires_ns":arm.expires_ns
         });
         let request = serde_json::json!({
-            "op":"arm_hard_deadline", "protocol":native_guardian::PROTOCOL, "nonce":self.nonce,
+            "op":op, "protocol":native_guardian::PROTOCOL, "nonce":self.nonce,
             "attempt":arm.attempt, "stage":arm.stage, "expires_ns":arm.expires_ns
         });
         let mut bytes = serde_json::to_vec(&request).map_err(io::Error::other)?;

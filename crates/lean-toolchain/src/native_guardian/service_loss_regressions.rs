@@ -962,7 +962,7 @@ fn guardian_deadline_rejects_malformed_and_duplicate_arm() {
     guardian.set_nonblocking(true).unwrap();
     let mut state = deadlines::OwnerDeadline::default();
     parent.write_all(b"{\"op\":\"arm_hard_deadline\"}\n").unwrap();
-    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert!(state.poll_parent(&mut guardian, NONCE, false).is_err());
     assert!(!state.armed(), "malformed request cannot authorize GO");
 
     let progress = frame(&json!({
@@ -972,7 +972,7 @@ fn guardian_deadline_rejects_malformed_and_duplicate_arm() {
     .unwrap();
     let mut state = deadlines::OwnerDeadline::default();
     parent.write_all(&progress).unwrap();
-    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert!(state.poll_parent(&mut guardian, NONCE, false).is_err());
     assert!(!state.armed(), "caller progress cannot authorize GO");
 
     let mut state = deadlines::OwnerDeadline::default();
@@ -987,17 +987,37 @@ fn guardian_deadline_rejects_malformed_and_duplicate_arm() {
         })
     };
     parent.write_all(&frame(&request(expires)).unwrap()).unwrap();
-    assert!(!state.poll_parent(&mut guardian, NONCE).unwrap());
+    assert!(!state.poll_parent(&mut guardian, NONCE, false).unwrap());
     parent.set_nonblocking(true).unwrap();
     let ack = read_frame(&mut parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
     assert_eq!(field(&ack, "state"), "hard_deadline_armed");
 
     let extension = expires.saturating_add(Duration::from_secs(60));
     parent.write_all(&frame(&request(extension)).unwrap()).unwrap();
-    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert!(state.poll_parent(&mut guardian, NONCE, false).is_err());
     assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
     parent.write_all(&progress).unwrap();
-    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert!(state.poll_parent(&mut guardian, NONCE, false).is_err());
     assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
     wait_until_within(Duration::from_secs(1), || state.expired().unwrap());
+}
+
+#[test]
+fn external_reader_deadline_refuses_before_read_custody() {
+    let (mut parent, mut guardian) = UnixStream::pair().unwrap();
+    guardian.set_nonblocking(true).unwrap();
+    let mut state = deadlines::OwnerDeadline::default();
+    let expires = deadlines::boot_ticks().unwrap().saturating_add(Duration::from_secs(10));
+    let arm = frame(&json!({
+        "op": "arm_reader_hard_deadline", "protocol": PROTOCOL, "nonce": NONCE,
+        "attempt": ([9_u8; 16]), "stage": 1,
+        "expires_ns": u64::try_from(expires.as_nanos()).unwrap(),
+    }))
+    .unwrap();
+    parent.write_all(&arm).unwrap();
+    let error = state.poll_parent(&mut guardian, NONCE, false).unwrap_err();
+    assert!(error.to_string().contains("retained read descriptors"));
+    assert!(!state.armed());
+    parent.set_nonblocking(true).unwrap();
+    assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
 }
