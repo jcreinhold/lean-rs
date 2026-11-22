@@ -258,6 +258,17 @@ fn slot_binding(registry: &Path, record: &Value) -> NativeGuardianDrainBinding {
     }
 }
 
+#[test]
+fn fixture_collect_original_closure() {
+    let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let ready = root.join(format!("closure-collector-ready-{}", std::process::id()));
+    fs::write(ready, b"ready to collect").unwrap();
+    wait_until(|| root.join("closure-collectors-go").exists());
+    collect_closed_owner_records(&root.join("owners"), Duration::from_secs(1)).unwrap();
+}
+
 fn assert_requested_zombie_closure(hold_leaf: bool, use_slot: bool) {
     let fixture = Fixture::new();
     for marker in [
@@ -446,8 +457,35 @@ fn assert_requested_zombie_closure(hold_leaf: bool, use_slot: bool) {
     assert!(!acquired.worker_live);
     assert!(acquired.managed_writer_ready);
     assert_eq!(acquired.lock_identity, (lock.dev(), lock.ino()));
+    if use_slot {
+        let spawn = || {
+            TestChild(
+                fixture_command(
+                    &fixture.root,
+                    "native_guardian::tests::service_loss_regressions::fixture_collect_original_closure",
+                )
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap(),
+            )
+        };
+        let mut first = spawn();
+        let mut second = spawn();
+        wait_until(|| {
+            [first.0.id(), second.0.id()]
+                .into_iter()
+                .all(|pid| fixture.root.join(format!("closure-collector-ready-{pid}")).exists())
+        });
+        fs::write(fixture.root.join("closure-collectors-go"), b"collect concurrently").unwrap();
+        assert!(first.wait().success() && second.wait().success());
+        assert!(stopped(&requester));
+        let mut wrong = expected.clone();
+        wrong.worker.start.push_str("-changed");
+        assert!(observe_original_guardian_closure(&fixture.registry, &wrong, Duration::from_secs(1)).is_err());
+        assert!(observe_original_guardian_closure(&fixture.registry, &expected, Duration::from_secs(1)).unwrap());
+    }
     assert!(reserve().unwrap().exists());
-    assert!(!record.exists());
+    assert!(record.exists());
     assert!(
         stopped(&requester),
         "writer and successor must be admitted before resuming the parent"
@@ -466,6 +504,20 @@ fn assert_requested_zombie_closure(hold_leaf: bool, use_slot: bool) {
     fs::write(fixture.root.join("recovery-request-test-finished"), b"closed").unwrap();
     rustix::process::kill_process(target, rustix::process::Signal::CONT).unwrap();
     assert!(server.wait().success());
+    assert!(!crate::process_group::group_present(worker).unwrap());
+    assert_eq!(
+        collect_closed_owner_records(&fixture.registry, Duration::from_secs(1))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock, // the independently reserved successor is still open
+    );
+    assert!(!record.exists());
+    assert_eq!(
+        observe_original_guardian_closure(&fixture.registry, &expected, Duration::from_secs(1))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::NotFound,
+    );
 }
 
 pub(super) fn recovery_slot() -> NativeCapacitySlot {

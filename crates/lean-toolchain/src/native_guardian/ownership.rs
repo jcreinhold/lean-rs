@@ -562,7 +562,7 @@ pub(super) fn matches_original_guardian_binding(
     Ok(())
 }
 
-fn read_drain_slot_owner(generation: &File, record: &Path) -> io::Result<Value> {
+fn read_bound_owner_at(generation: &File, record: &Path) -> io::Result<Value> {
     use rustix::fs::{Mode, OFlags, openat};
     use std::io::Read as _;
 
@@ -629,7 +629,7 @@ fn drain_slot(registry: &Path, expected: &NativeGuardianDrainBinding) -> io::Res
     if (bound.dev(), bound.ino()) != (current.dev(), current.ino()) {
         return Err(invalid("original guardian generation directory changed"));
     }
-    let value = read_drain_slot_owner(&generation, &directory.join("owner.json"))?;
+    let value = read_bound_owner_at(&generation, &directory.join("owner.json"))?;
     matches_original_guardian_binding(&value, expected)?;
     if !slot_protocol(&value) {
         return Err(invalid("original guardian did not advertise the slot drain protocol"));
@@ -640,6 +640,63 @@ fn drain_slot(registry: &Path, expected: &NativeGuardianDrainBinding) -> io::Res
         return Err(invalid("original guardian generation directory changed"));
     }
     Ok((value, slot))
+}
+
+/// Observe closure of the exact retained guardian generation under admission.
+///
+/// This observes native custody only. A missing record supplies no proof.
+///
+/// # Errors
+/// Refuses a missing or changed binding, an unavailable observation, or an
+/// admission lock that cannot be acquired within the caller's budget.
+#[doc(hidden)]
+pub fn observe_original_guardian_closure(
+    registry: &Path,
+    expected: &NativeGuardianDrainBinding,
+    timeout: Duration,
+) -> io::Result<bool> {
+    use rustix::fs::{Mode, OFlags, open, openat};
+
+    let until = deadline(timeout)?;
+    if !valid_nonce(&expected.generation) {
+        return Err(invalid("invalid native recovery generation"));
+    }
+    validate_boot_uuid(&expected.boot)?;
+    validate_registry(registry)?;
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let namespace = File::from(open(registry, flags, Mode::empty())?);
+    let _lock = lock_admission_at(&namespace, until, false)?;
+    let check_namespace = || {
+        validate_registry(registry)?;
+        let current = fs::symlink_metadata(registry)?;
+        let opened = namespace.metadata()?;
+        if (current.dev(), current.ino()) != (expected.registry_device, expected.registry_inode)
+            || (opened.dev(), opened.ino()) != (current.dev(), current.ino())
+        {
+            return Err(invalid("original guardian registry identity changed"));
+        }
+        Ok(())
+    };
+    check_namespace()?;
+    let name = format!("worker-{}", expected.generation);
+    let generation = File::from(openat(&namespace, name.as_str(), flags, Mode::empty())?);
+    let directory = registry.join(name);
+    validate_registry(&directory)?;
+    let value = read_bound_owner_at(&generation, &directory.join("owner.json"))?;
+    matches_original_guardian_binding(&value, expected)?;
+    if field(&value, "phase") != "running" {
+        return Err(invalid(
+            "original guardian closure requires the retained running record",
+        ));
+    }
+    let closed = record_can_be_removed(&value)?;
+    check_namespace()?;
+    let current = fs::symlink_metadata(directory)?;
+    let retained = generation.metadata()?;
+    if (current.dev(), current.ino()) != (retained.dev(), retained.ino()) {
+        return Err(invalid("original guardian generation directory changed"));
+    }
+    Ok(closed)
 }
 
 /// Offer drain to the original guardian without acquiring admission ownership.
@@ -1277,6 +1334,10 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
             Err(error) => return Err(error),
         };
         if record_can_be_removed(&value)? {
+            // While the stopped broker cannot reap its terminal worker, the
+            // existing receipt is the only attributable proof of closure.
+            let retain_receipt = field(&value, "guardian_zombie_closure") == true
+                && crate::process_group::group_present(checked_identity(field(&value, "process"))?.process_group)?;
             // Keep the committed record parseable through partial asset cleanup.
             let directory = File::open(entry.path())?;
             if slot_protocol(&value) || drain_slot::exists(&directory)? {
@@ -1304,6 +1365,9 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                     Err(error) => return Err(error),
                 }
+            }
+            if retain_receipt {
+                continue;
             }
             fs::remove_file(record)?;
             fs::remove_dir(entry.path())?;
