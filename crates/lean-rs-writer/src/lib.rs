@@ -1498,6 +1498,13 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                         setup.as_ref(),
                         send,
                     )? {
+                        // Ok(false) follows group and descriptor closure, the synced
+                        // custody update, and delivery of stopped/no_result. A managed
+                        // caller may still finish its writes and explicitly settle.
+                        if scratch.is_some() {
+                            confirmed_close =
+                                matches!(input.recv(), Ok(Ok(frame)) if frame == json!({"action":"close"}));
+                        }
                         break;
                     }
                 }

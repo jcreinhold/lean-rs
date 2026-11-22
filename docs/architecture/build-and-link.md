@@ -273,7 +273,9 @@ A cooperating SDK caller can opt into the standalone writer's v1 storage admissi
 all other approved storage roots. Include the known Lake artifact cache even for a no-build/no-cache command.
 Retain the writer through caller-owned writes. Keep each command's result and separately check the consuming
 `SharedWriter::close` result, which waits for the helper to exit successfully. Dropping the control channel or
-losing the close result does not confirm settlement or authorize replay.
+losing the close result does not confirm settlement or authorize replay. After a confirmed `stopped/no_result`
+and successful custody-record update, the managed helper accepts only an explicit `{"action":"close"}`.
+The original command still has no usable result. EOF or any other frame retains the charge.
 
 The capability `lake_module_setup_capture_v1` stages the required stdout of the selected
 `lake --no-build --no-cache setup-file FILE` in charged scratch. Use the canonical project as cwd, its pinned

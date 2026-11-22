@@ -640,3 +640,58 @@ fn charged_lake_setup_preserves_required_bytes_and_close() -> io::Result<()> {
     assert_eq!(fs::read_dir(&scratch)?.count(), 0);
     Ok(())
 }
+
+#[test]
+fn stopped_overflow_accepts_only_explicit_close_for_its_charge() -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    for action in ["close", "run", "EOF"] {
+        let temp = tempfile::tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))?;
+        let base = temp.path().canonicalize()?;
+        let (project, registry, scratch) = (base.join("project"), base.join("owners"), base.join("scratch"));
+        for path in [&project, &registry, &scratch] {
+            fs::create_dir(path)?;
+        }
+        fs::set_permissions(&registry, fs::Permissions::from_mode(0o700))?;
+        let mut child = start(&project, &registry, &scratch, 1024 * 1024)?;
+        let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+        let locked = reply(&mut reader)?;
+        let assets = Path::new(field(&locked, "asset_dir").as_str().expect("charged scratch"));
+        let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
+        let owner: Value = serde_json::from_slice(&fs::read(&lock)?)?;
+        let charge = registry
+            .join(".writer-storage-v1")
+            .join(field(&owner, "storage_turn").as_str().expect("admitted turn"));
+        send(
+            &mut child,
+            &json!({"action":"run","timeout":3,
+            "command":["/usr/bin/printf","%s","x".repeat(64 * 1024 + 1)]}),
+        )?;
+        assert_eq!(field(&reply(&mut reader)?, "state"), "started");
+        let mut terminal = reply(&mut reader)?;
+        if field(&terminal, "state") == "still_running" {
+            terminal = reply(&mut reader)?;
+        }
+        assert_eq!(field(&terminal, "state"), "stopped");
+        assert_eq!(field(&terminal, "result"), "no_result");
+        assert_eq!(field(&terminal, "owned_work_stopped"), true);
+        assert_eq!(field(&terminal, "reason"), "writer captured output limit exceeded");
+        let stopped: Value = serde_json::from_slice(&fs::read(lock)?)?;
+        assert!(field(&stopped, "process").is_null());
+        assert!(charge.is_file() && assets.is_dir());
+        let marker = project.join("second-command-ran");
+        match action {
+            "close" => send(&mut child, &json!({"action":"close"}))?,
+            "run" => send(
+                &mut child,
+                &json!({"action":"run","command":["/usr/bin/touch",marker],"timeout":3}),
+            )?,
+            _ => drop(child.stdin.take()),
+        }
+        assert_eq!(child.wait()?.success(), action == "close");
+        assert_eq!(reader.read_line(&mut String::new())?, 0);
+        assert!(!marker.exists());
+        assert_eq!(assets.is_dir(), action != "close");
+        assert_eq!(charge.is_file(), action != "close");
+    }
+    Ok(())
+}
