@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.10]
+
+- Managed hosts can reserve shared project and shim artifact reads before opening a Lean session. After the original
+  guardian acknowledges the hard deadline, the same worker opens the session, verifies its runtime metadata, and
+  performs one admitted declaration inspection. The SDK reports the inspection and retirement separately. This route
+  requires matching worker parent and child versions.
+- The guardian rejects caller-reported progress and enforces the original hard deadline when trusted activity is
+  unavailable.
+
 ## [0.10.9]
 
 - Managed hosts can inspect a declaration on the guardian receiver named by an already-consumed durable launch grant.

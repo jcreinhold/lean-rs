@@ -153,6 +153,8 @@ pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::import_profile:
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::imports: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::mode: lean_rs_worker_protocol::protocol::HostSessionMode
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::project_root: alloc::string::String
+pub lean_rs_worker_protocol::protocol::Request::PrepareHostRead
+pub lean_rs_worker_protocol::protocol::Request::PrepareHostRead::project_root: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery::query: lean_rs_worker_protocol::types::LeanWorkerModuleQuery
@@ -234,6 +236,7 @@ pub lean_rs_worker_protocol::protocol::Response::Error::message: alloc::string::
 pub lean_rs_worker_protocol::protocol::Response::HeaderImportRecycle
 pub lean_rs_worker_protocol::protocol::Response::HealthOk
 pub lean_rs_worker_protocol::protocol::Response::HostArtifactEpochChanged
+pub lean_rs_worker_protocol::protocol::Response::HostReadPrepared
 pub lean_rs_worker_protocol::protocol::Response::HostReadReleased
 pub lean_rs_worker_protocol::protocol::Response::HostRuntimeMetadata
 pub lean_rs_worker_protocol::protocol::Response::HostRuntimeMetadata::metadata: lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
