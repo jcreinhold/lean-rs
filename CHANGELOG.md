@@ -9,6 +9,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.11]
+
 - A managed host can cancel the exact already-admitted declaration inspection with its worker cancellation token.
   Cancellation preserves the original hard deadline and reports retirement separately.
 - Worker applications can narrow a manifest-approved String export to an exact metadata, doctor, or JSON command
