@@ -209,6 +209,16 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
+        self.inspect_declaration_managed_once_with(request, arm, prepared, |_| {})
+    }
+
+    fn inspect_declaration_managed_once_with(
+        &mut self,
+        request: LeanWorkerDeclarationInspectionRequest,
+        arm: &ManagedRequestDeadline,
+        prepared: Option<&LeanWorkerSessionConfig>,
+        before_retirement: impl FnOnce(&mut Self),
+    ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
         if self.generation_dispatch.is_some()
             || !matches!(self.state, WorkerSupervisorState::Idle { .. })
@@ -261,6 +271,7 @@ impl LeanWorker {
                 Err(unexpected_response(OPERATION, &response))
             }
         })();
+        before_retirement(self);
         self.seal_generation_dispatch_internal();
         let retirement = self.shutdown_child(ShutdownIntent::KillOnly);
         Ok(ManagedInspectionOutcome { result, retirement })

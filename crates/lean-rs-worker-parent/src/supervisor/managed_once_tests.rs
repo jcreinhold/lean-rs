@@ -244,8 +244,46 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
                 .is_err()
         );
         assert_eq!(worker.next_request_id, next, "stale scope must send no bytes");
-        let ManagedInspectionOutcome { result, retirement } =
-            inspect(&mut worker, &registry, "Nat.add_zero", &original).expect("attempt managed declaration inspection");
+        let ManagedInspectionOutcome { result, retirement } = if case == "success" {
+            let request = LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero");
+            worker
+                .validate_managed_receiver(&expected)
+                .expect("first grant has its exact live receiver");
+            worker.inspect_declaration_managed_once_with(request.clone(), &original, None, |receiver| {
+                receiver
+                    .validate_managed_receiver(&expected)
+                    .expect("original worker still live before replay");
+                assert_eq!(
+                    receiver.current_native_generation_id(),
+                    Some(expected.generation.as_str())
+                );
+                assert_eq!(
+                    std::fs::read_to_string(root.join("dispatch")).expect("first frame arrived"),
+                    "request\n"
+                );
+                let next = receiver.next_request_id;
+                let duplicate = receiver.inspect_admitted_declaration_once(
+                    request,
+                    &expected,
+                    original.attempt,
+                    original.stage,
+                    original.expires_ns,
+                );
+                assert!(matches!(
+                    duplicate,
+                    Err(LeanWorkerError::ShutdownInProgress {
+                        operation: "worker_inspect_declaration_managed_once"
+                    })
+                ));
+                assert_eq!(receiver.next_request_id, next, "refused replay must send no frame");
+                receiver
+                    .validate_managed_receiver(&expected)
+                    .expect("refusal still owns the same live worker");
+            })
+        } else {
+            inspect(&mut worker, &registry, "Nat.add_zero", &original)
+        }
+        .expect("attempt managed declaration inspection");
         if retirement_pending {
             assert!(matches!(retirement, Err(LeanWorkerError::WaitTimeout { .. })));
             assert_eq!(tracker.active_processes(), 1);
