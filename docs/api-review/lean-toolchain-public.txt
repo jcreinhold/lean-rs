@@ -40,6 +40,27 @@ pub fn lean_toolchain::manifest_validation::check_fingerprint(&lean_toolchain::m
 pub fn lean_toolchain::manifest_validation::check_staleness(&std::path::Path, &lean_toolchain::manifest_validation::CapabilityManifest, &mut alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>)
 pub fn lean_toolchain::manifest_validation::check_static(&std::path::Path) -> lean_toolchain::LeanLoaderReport
 pub mod lean_toolchain::native_guardian
+pub enum lean_toolchain::native_guardian::NativeGuardianDrainStatus
+pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Accepted
+pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Empty
+pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Pending
+pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Refused
+impl core::clone::Clone for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+pub fn lean_toolchain::native_guardian::NativeGuardianDrainStatus::clone(&self) -> lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::cmp::Eq for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+pub fn lean_toolchain::native_guardian::NativeGuardianDrainStatus::eq(&self, &lean_toolchain::native_guardian::NativeGuardianDrainStatus) -> bool
+impl core::fmt::Debug for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+pub fn lean_toolchain::native_guardian::NativeGuardianDrainStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::marker::Freeze for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::marker::Send for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::marker::Sync for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::marker::Unpin for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainStatus
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainStatus
 pub enum lean_toolchain::native_guardian::NativeOwnerObservation
 pub lean_toolchain::native_guardian::NativeOwnerObservation::Absent
 pub lean_toolchain::native_guardian::NativeOwnerObservation::Present
@@ -182,6 +203,7 @@ impl core::marker::Unpin for lean_toolchain::native_guardian::NativeReadDomain
 impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeReadDomain
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeReadDomain
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeReadDomain
+pub const lean_toolchain::native_guardian::DRAIN_SLOT_ENV: &str
 pub const lean_toolchain::native_guardian::EXECUTABLE_ENV: &str
 pub const lean_toolchain::native_guardian::MAX_OWNER_BYTES: usize
 pub const lean_toolchain::native_guardian::MAX_OWNER_RECORDS: usize

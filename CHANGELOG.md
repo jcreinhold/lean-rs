@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.7]
+
+- On macOS, matched managed installations can opt into a guardian-owned drain slot with
+  `LEAN_RS_WORKER_GUARDIAN_DRAIN_SLOT=1`. The original guardian checks the offer against its exact generation,
+  records its decision durably, and retains custody through verified closure.
+- Legacy drain requests require an explicit legacy advertisement before taking the registry admission lock.
+  The request checks the advertisement again while holding that lock.
+
 ## [0.10.6]
 
 - Bounded file diagnostics spend their output budget on errors before warnings and information. Clipped messages
