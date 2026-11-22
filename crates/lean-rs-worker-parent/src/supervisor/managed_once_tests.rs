@@ -443,8 +443,68 @@ struct RealDispatch {
     expires_ns: u64,
 }
 
+const PREPARED_FREEZE: &str = "LEAN_RS_TEST_MANAGED_PREPARED_FREEZE_ROOT";
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct PreparedBarrier {
+    worker: Identity,
+    guardian: Identity,
+    lock: PathBuf,
+    expires_ns: u64,
+}
+
+fn signal_pid(pid: u32) -> rustix::process::Pid {
+    rustix::process::Pid::from_raw(i32::try_from(pid).expect("fixture PID fits")).expect("positive fixture PID")
+}
+
+/// Called only after the exact guardian ACK and successful prepared open and
+/// custody query. The worker is stopped before any inspection byte is written.
+pub(super) fn before_prepared_inspection_dispatch(worker: &LeanWorker, arm: &ManagedRequestDeadline) {
+    use rustix::process::{Signal, WaitId, WaitIdOptions, kill_process, waitid};
+    let Some(root) = std::env::var_os(PREPARED_FREEZE).map(PathBuf::from) else {
+        return;
+    };
+    let barrier: PreparedBarrier =
+        serde_json::from_slice(&std::fs::read(root.join("prepared")).expect("read acknowledged custody"))
+            .expect("decode prepared custody");
+    let owned = worker.child.as_ref().expect("exact active child");
+    assert_eq!(owned.id(), barrier.worker.pid);
+    assert_eq!(arm.expires_ns, barrier.expires_ns);
+    assert!(worker.host_runtime_metadata().is_some());
+    assert_eq!(
+        Identity::capture(owned.id()).expect("read exact worker birth"),
+        Some(barrier.worker),
+    );
+    let pid = signal_pid(owned.id());
+    kill_process(pid, Signal::STOP).expect("stop exact disposable worker before inspection");
+    let until = Instant::now()
+        .checked_add(Duration::from_secs(1))
+        .expect("stopped worker observation limit");
+    loop {
+        if waitid(
+            WaitId::Pid(pid),
+            WaitIdOptions::STOPPED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        )
+        .expect("observe child stop without consuming its wait")
+        .is_some_and(|status| status.stopped())
+        {
+            break;
+        }
+        assert!(Instant::now() < until, "worker did not reach the pre-result barrier");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::fs::write(
+        root.join("before-inspection"),
+        b"guardian armed; worker stopped before request bytes",
+    )
+    .expect("publish pre-result barrier");
+}
+
 pub(super) fn after_real_dispatch(worker: &LeanWorker, arm: &ManagedRequestDeadline) {
-    let Some(root) = std::env::var_os(REAL_FREEZE).map(PathBuf::from) else {
+    let Some(root) = std::env::var_os(PREPARED_FREEZE)
+        .or_else(|| std::env::var_os(REAL_FREEZE))
+        .map(PathBuf::from)
+    else {
         return;
     };
     let exact = Identity::capture(worker.child.as_ref().expect("active real Lean child").id())
@@ -486,7 +546,7 @@ fn real_lean_managed_deadline_and_expired_dispatch() {
         let root = selected.scratch.join(case);
         std::fs::create_dir(&root).expect("create clean disposable case");
         if case == "frozen" {
-            check_frozen_real_requester(&root);
+            check_frozen_real_requester(&root, false);
         } else if case == "prepared_handle" {
             check_prepared_handle(&selected, &root);
         } else {
@@ -556,7 +616,7 @@ fn real_lean_managed_deadline_and_expired_dispatch() {
     std::fs::remove_dir_all(selected.scratch.join("owners")).expect("remove registry after exact closure");
 }
 
-fn check_frozen_real_requester(root: &Path) {
+fn check_frozen_real_requester(root: &Path, prepared: bool) {
     struct Requester(std::process::Child);
     impl Drop for Requester {
         fn drop(&mut self) {
@@ -566,15 +626,19 @@ fn check_frozen_real_requester(root: &Path) {
             }
         }
     }
+    let (entry, control) = if prepared {
+        ("cold_prepared_requester_fixture", PREPARED_FREEZE)
+    } else {
+        ("real_lean_requester_fixture", REAL_FREEZE)
+    };
     let mut requester = Requester(
         Command::new(std::env::current_exe().expect("parent test binary"))
-            .args(["--exact", &format!("{THIS}real_lean_requester_fixture"), "--nocapture"])
-            .env(REAL_FREEZE, root)
+            .args(["--exact", &format!("{THIS}{entry}"), "--nocapture"])
+            .env(control, root)
             .spawn()
             .expect("spawn isolated requester"),
     );
-    let pid = rustix::process::Pid::from_raw(i32::try_from(requester.0.id()).expect("requester PID fits"))
-        .expect("positive requester PID");
+    let pid = signal_pid(requester.0.id());
     let until = Instant::now()
         .checked_add(Duration::from_secs(30))
         .expect("bounded requester startup deadline");
@@ -594,6 +658,24 @@ fn check_frozen_real_requester(root: &Path) {
     let RealDispatch { worker, expires_ns } =
         serde_json::from_slice(&std::fs::read(root.join("dispatched")).expect("real dispatch evidence"))
             .expect("parse exact real dispatch evidence");
+    let custody = prepared.then(|| {
+        assert!(
+            root.join("before-inspection").is_file(),
+            "guardian ACK and worker stop must precede dispatch"
+        );
+        let barrier: PreparedBarrier =
+            serde_json::from_slice(&std::fs::read(root.join("prepared")).expect("read retained custody"))
+                .expect("decode retained custody");
+        assert_eq!(barrier.worker, worker);
+        assert_eq!(barrier.expires_ns, expires_ns);
+        let contender = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&barrier.lock)
+            .expect("open exact lock for competing writer");
+        assert!(matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+        (barrier, contender)
+    });
     let hard = Duration::from_nanos(expires_ns);
     let tick = || lean_toolchain::native_guardian::guardian_deadline_ticks().expect("guardian clock");
     assert!(tick() < hard && worker.is_live().expect("live worker before expiry"));
@@ -612,15 +694,64 @@ fn check_frozen_real_requester(root: &Path) {
             .expect("requester still owns opened lifeline")
             .is_none()
     );
+    if let Some((barrier, contender)) = &custody {
+        assert!(
+            barrier
+                .guardian
+                .is_live()
+                .expect("exact guardian remains live while requester is suspended")
+        );
+        assert!(
+            !root.join("retired").exists(),
+            "stopped execution cannot announce custody closure"
+        );
+        assert!(matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+    }
     rustix::process::kill_process(pid, rustix::process::Signal::CONT).expect("resume requester to reap");
     assert!(requester.0.wait().expect("reaped requester").success());
     assert!(!lean_toolchain::process_group::group_present(worker.process_group).expect("exact group absence"));
+    if let Some((barrier, contender)) = custody {
+        assert!(root.join("retired").is_file());
+        assert!(
+            !barrier
+                .guardian
+                .is_live()
+                .expect("guardian retired after requester reaped")
+        );
+        contender
+            .try_lock()
+            .expect("overlapping writer can lock only after exact retirement");
+    }
 }
 
 #[test]
 #[ignore = "requires the O3 owner's pinned prepared-project worker and exact launch input"]
 fn cold_managed_inspection_uses_prepared_project_loans() {
     let selected = RealInput::selected();
+    let root = selected.scratch.join("cold-managed");
+    std::fs::create_dir(&root).expect("create private cold test case");
+    run_cold_prepared_inspection(selected, &root, false);
+    std::fs::remove_dir_all(root).expect("remove closed test fixture");
+}
+
+#[test]
+fn cold_prepared_requester_fixture() {
+    if let Some(root) = std::env::var_os(PREPARED_FREEZE).map(PathBuf::from) {
+        run_cold_prepared_inspection(RealInput::selected(), &root, true);
+    }
+}
+
+#[test]
+#[ignore = "requires the O3 owner's pinned prepared-project worker and exact launch input"]
+fn cold_prepared_guardian_stops_frozen_request_before_result() {
+    let selected = RealInput::selected();
+    let root = selected.scratch.join("cold-frozen");
+    std::fs::create_dir(&root).expect("create private cold frozen test case");
+    check_frozen_real_requester(&root, true);
+    std::fs::remove_dir_all(root).expect("remove test fixture after verified closure");
+}
+
+fn run_cold_prepared_inspection(selected: RealInput, root: &Path, freeze: bool) {
     let application = std::env::var("LEAN_RS_TEST_MANAGED_ARTIFACT_APPLICATION")
         .expect("O3's exact prepared generation launch input");
     let imports: Vec<String> = serde_json::from_str(
@@ -629,10 +760,8 @@ fn cold_managed_inspection_uses_prepared_project_loans() {
     .expect("typed prepared imports");
     let declaration =
         std::env::var("LEAN_RS_TEST_MANAGED_ARTIFACT_DECLARATION").expect("known theorem in the prepared project");
-    let root = selected.scratch.join("cold-managed");
-    std::fs::create_dir(&root).expect("create private cold test case");
     write_guardian_script(
-        &root,
+        root,
         &std::env::current_exe().expect("portable guardian fixture executable"),
     );
     let tracker = LeanWorkerProcessTracker::new();
@@ -672,6 +801,19 @@ fn cold_managed_inspection_uses_prepared_project_loans() {
             })),
         "the original guardian must retain the actual project lock before arm"
     );
+    if freeze {
+        let barrier = PreparedBarrier {
+            worker: binding.worker.clone(),
+            guardian: binding.guardian.clone(),
+            lock: lean_toolchain::shared_writer::project_lock_path(&selected.fixture).expect("exact project lock"),
+            expires_ns: original.expires_ns,
+        };
+        std::fs::write(
+            root.join("prepared"),
+            serde_json::to_vec(&barrier).expect("encode original custody"),
+        )
+        .expect("retain original owner and deadline evidence for the test");
+    }
     let outcome = handle
         .inspect_admitted_declaration_with_imports_once(
             &imports,
@@ -682,12 +824,21 @@ fn cold_managed_inspection_uses_prepared_project_loans() {
             original.expires_ns,
         )
         .expect("dispatch through the original guarded prepared handle");
-    assert!(matches!(
-        outcome.result.expect("real Lean theorem lookup"),
-        LeanWorkerDeclarationInspectionResult::Found { declaration: found }
-            if found.name == declaration
-    ));
+    if freeze {
+        assert!(
+            outcome.result.is_err(),
+            "stopped worker did not emit an inspection result"
+        );
+    } else {
+        assert!(matches!(
+            outcome.result.expect("real Lean theorem lookup"),
+            LeanWorkerDeclarationInspectionResult::Found { declaration: found }
+                if found.name == declaration
+        ));
+    }
     outcome.retirement.expect("close worker and guardian custody");
     assert_eq!(tracker.active_processes(), 0);
-    std::fs::remove_dir_all(&root).expect("remove closed test fixture");
+    if freeze {
+        std::fs::write(root.join("retired"), b"exact owner confirmed closure").expect("publish confirmed retirement");
+    }
 }

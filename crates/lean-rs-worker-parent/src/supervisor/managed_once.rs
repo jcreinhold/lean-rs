@@ -238,6 +238,8 @@ impl LeanWorker {
             let token = managed_token(arm)?;
             if let Some(config) = prepared {
                 self.open_managed_artifact_session(config, &token, arm.expires_ns)?;
+                #[cfg(all(test, target_os = "macos"))]
+                tests::before_prepared_inspection_dispatch(self, arm);
             }
             let now = Instant::now();
             self.write_request_bounded_inner(
