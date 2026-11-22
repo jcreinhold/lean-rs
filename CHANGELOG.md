@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.6]
+
+- Bounded file diagnostics spend their output budget on errors before warnings and information. Clipped messages
+  preserve source positions and report truncation.
+- A failed pool replacement retains custody of its native scope. The same pool key can reopen after retirement
+  of that scope is confirmed.
+- Managed replacements can bind a drain request to the original registry, boot, generation, and process identities
+  with `NativeGuardianDrainBinding`. A successful request confirms durable delivery to the original guardian.
+
 ## [0.10.5]
 
 - Lean callers can get a bounded declaration outline or file diagnostics from the current source using

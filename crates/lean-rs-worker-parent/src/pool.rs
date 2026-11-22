@@ -1592,7 +1592,11 @@ mod tests {
         let root = state.to_str().expect("UTF-8 fixture root").replace('\'', "'\\''");
         std::fs::write(
             &guardian_script,
-            format!("#!/bin/sh\nexport LEAN_RS_TEST_POOL_REOPEN_ROOT='{root}'\nexec '{quoted}' --exact pool::tests::pool_reopen_guardian_fixture --nocapture\n"),
+            format!(
+                "#!/bin/sh\n\
+                 export LEAN_RS_TEST_POOL_REOPEN_ROOT='{root}'\n\
+                 exec '{quoted}' --exact pool::tests::pool_reopen_guardian_fixture --nocapture\n"
+            ),
         )
         .expect("write disposable guardian launcher");
         std::fs::set_permissions(&guardian_script, std::fs::Permissions::from_mode(0o700))
@@ -1648,7 +1652,10 @@ mod tests {
                     .filter_map(Result::ok)
                     .filter_map(|entry| std::fs::read(entry.path().join("owner.json")).ok())
                     .filter_map(|record| serde_json::from_slice::<Value>(&record).ok())
-                    .filter_map(|record| serde_json::from_value::<NativeProcessIdentity>(record.get("guardian")?.clone()).ok())
+                    .filter_map(|record| {
+                        let guardian = record.get("guardian")?.clone();
+                        serde_json::from_value::<NativeProcessIdentity>(guardian).ok()
+                    })
                     .find(|identity| identity.is_live().expect("observe exact guardian"));
                 drop(replacement);
                 Err(LeanWorkerError::Protocol { message: "original replacement refusal".to_owned() })

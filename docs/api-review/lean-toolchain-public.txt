@@ -105,6 +105,29 @@ impl core::marker::Unpin for lean_toolchain::native_guardian::NativeCapacitySlot
 impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeCapacitySlot
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeCapacitySlot
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeCapacitySlot
+pub struct lean_toolchain::native_guardian::NativeGuardianDrainBinding
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::boot: alloc::string::String
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::generation: alloc::string::String
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::guardian: lean_toolchain::native_guardian::NativeProcessIdentity
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::parent: lean_toolchain::native_guardian::NativeProcessIdentity
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::registry_device: u64
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::registry_inode: u64
+pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::worker: lean_toolchain::native_guardian::NativeProcessIdentity
+impl core::clone::Clone for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+pub fn lean_toolchain::native_guardian::NativeGuardianDrainBinding::clone(&self) -> lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::cmp::Eq for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+pub fn lean_toolchain::native_guardian::NativeGuardianDrainBinding::eq(&self, &lean_toolchain::native_guardian::NativeGuardianDrainBinding) -> bool
+impl core::fmt::Debug for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+pub fn lean_toolchain::native_guardian::NativeGuardianDrainBinding::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::marker::Freeze for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::marker::Send for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::marker::Sync for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::marker::Unpin for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainBinding
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainBinding
 pub struct lean_toolchain::native_guardian::NativeProcessIdentity
 pub lean_toolchain::native_guardian::NativeProcessIdentity::pid: u32
 pub lean_toolchain::native_guardian::NativeProcessIdentity::process_group: u32
