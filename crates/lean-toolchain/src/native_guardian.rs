@@ -36,6 +36,8 @@ pub const PROTOCOL: u32 = 1;
 pub const EXECUTABLE_ENV: &str = "LEAN_RS_WORKER_GUARDIAN_EXECUTABLE";
 /// One authoritative owner namespace shared by native workers and managed writers.
 pub const OWNERS_DIRECTORY_ENV: &str = "LEAN_RS_WORKER_OWNERS_DIRECTORY";
+/// Opt into the one-stage stopped-parent drain slot in a matched installation.
+pub const DRAIN_SLOT_ENV: &str = "LEAN_RS_WORKER_GUARDIAN_DRAIN_SLOT";
 const CONTROL_ENV: &str = "LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD";
 const WORKER_ENV: &str = "LEAN_RS_NATIVE_GUARDIAN_WORKER_PID";
 const SOCKET_ENV: &str = "LEAN_RS_WORKER_PARENT_SOCKET";
@@ -59,6 +61,7 @@ mod deadlines;
 pub fn guardian_deadline_ticks() -> io::Result<Duration> {
     deadlines::boot_ticks()
 }
+mod drain_slot;
 mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};
@@ -66,10 +69,11 @@ mod ownership;
 #[doc(hidden)]
 pub mod writer_storage;
 pub use ownership::{
-    NativeCapacitySlot, NativeGuardianDrainBinding, NativeOwnerObservation, NativeProcessIdentity,
-    claim_native_recovery, collect_closed_owner_records, dispatch_owner_record, publish_startup_owner,
-    registry_directory, request_bound_original_guardian_drain, request_original_guardian_drain, reserve_owner_record,
-    reserve_owner_record_with_slot, retire_preparing_owner_record, retire_unspawned_owner_record,
+    NativeCapacitySlot, NativeGuardianDrainBinding, NativeGuardianDrainStatus, NativeOwnerObservation,
+    NativeProcessIdentity, claim_native_recovery, collect_closed_owner_records, dispatch_owner_record,
+    observe_original_guardian_drain, publish_startup_owner, registry_directory, request_bound_original_guardian_drain,
+    request_original_guardian_drain, reserve_owner_record, reserve_owner_record_with_slot,
+    retire_preparing_owner_record, retire_unspawned_owner_record, submit_original_guardian_drain,
 };
 
 /// One actual shared lock and epoch protected by a native generation.
@@ -646,8 +650,10 @@ impl Guardian {
             .bootstrap_identity
             .as_ref()
             .ok_or_else(|| invalid("guardian bootstrap identity missing"))?;
-        let drain_guardian =
-            ownership::publish_guardian_drain_support(&record, worker, guardian)?.then(|| guardian.clone());
+        let use_drain_slot = std::env::var_os(DRAIN_SLOT_ENV).is_some_and(|mode| mode == "1");
+        let drain_guardian = ownership::publish_guardian_drain_support(&record, worker, guardian, use_drain_slot)?
+            .then(|| guardian.clone());
+        let mut sampled_stopped = false;
         self.parent_identity = Some(serde_json::from_value(field(&value, "parent").clone()).map_err(io::Error::other)?);
         self.record = Some(record.clone());
         self.parent = Some(parent);
@@ -690,7 +696,12 @@ impl Guardian {
                 last_recovery_poll = Instant::now();
                 // An unavailable registry never supplies a request. The
                 // independently owned deadline and lifeline remain active.
-                if ownership::original_guardian_drain_requested(&record, guardian).is_ok_and(|requested| requested) {
+                let decision = if use_drain_slot {
+                    ownership::consume_guardian_drain_slot(&record, guardian, &mut sampled_stopped)
+                } else {
+                    ownership::original_guardian_drain_requested(&record, guardian)
+                };
+                if decision.is_ok_and(|requested| requested) {
                     return Ok(());
                 }
             }

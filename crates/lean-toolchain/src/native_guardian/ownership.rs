@@ -1,4 +1,5 @@
 //! Shared exact identities and bounded owner-record admission.
+use super::drain_slot::{self, Slot, State as SlotState};
 use super::{MAX_OWNER_RECORDS, POLL, deadline, expired, field, invalid, persist_owner, read_owner, valid_nonce};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -250,6 +251,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
                     | "capacity_slot"
                     | "recovery_claim"
                     | "original_worker_boot"
+                    | "guardian_drain_protocol"
                     | "guardian_drain"
                     | "guardian_zombie_closure"
             )
@@ -276,6 +278,11 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             || !matches!(drain.as_str(), Some("available" | "requested")))
     {
         return Err(invalid("invalid original guardian drain state"));
+    }
+    if let Some(protocol) = value.get("guardian_drain_protocol")
+        && (protocol != SLOT_PROTOCOL || value.get("guardian_drain").is_none())
+    {
+        return Err(invalid("invalid guardian drain protocol"));
     }
     if let Some(closed) = value.get("guardian_zombie_closure")
         && (closed != true || field(value, "guardian_drain") != "requested")
@@ -513,6 +520,168 @@ pub struct NativeGuardianDrainBinding {
     pub guardian: NativeProcessIdentity,
 }
 
+const SLOT_PROTOCOL: &str = "slot-v1";
+
+/// Generation-level status of the original guardian's one drain slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGuardianDrainStatus {
+    Empty,
+    Pending,
+    Refused,
+    Accepted,
+}
+
+fn slot_protocol(value: &Value) -> bool {
+    field(value, "guardian_drain_protocol") == SLOT_PROTOCOL
+}
+
+fn refuse_slot_protocol(value: &Value) -> io::Result<()> {
+    if slot_protocol(value) {
+        return Err(invalid("slot generation requires guardian-owned drain"));
+    }
+    Ok(())
+}
+
+fn matches_drain_binding(value: &Value, expected: &NativeGuardianDrainBinding) -> io::Result<()> {
+    verify_original_worker_boot(value)?;
+    if field(value, "generation_id") != expected.generation.as_str()
+        || !field(value, "original_worker_boot")
+            .as_str()
+            .is_some_and(|boot| boot.eq_ignore_ascii_case(&expected.boot))
+        || checked_identity(field(value, "parent"))? != expected.parent
+        || checked_identity(field(value, "process"))? != expected.worker
+        || checked_identity(field(value, "guardian"))? != expected.guardian
+    {
+        return Err(invalid("original guardian drain binding changed"));
+    }
+    Ok(())
+}
+
+fn read_drain_slot_owner(generation: &File, record: &Path) -> io::Result<Value> {
+    use rustix::fs::{Mode, OFlags, openat};
+    use std::io::Read as _;
+
+    let open = || {
+        openat(
+            generation,
+            "owner.json",
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map(File::from)
+    };
+    let mut file = open()?;
+    let opened = file.metadata()?;
+    if !opened.is_file() || opened.nlink() != 1 || opened.len() > super::MAX_OWNER_BYTES as u64 {
+        return Err(invalid("native drain owner record identity or size invalid"));
+    }
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take((super::MAX_OWNER_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    let named = open()?.metadata()?;
+    if (opened.dev(), opened.ino()) != (named.dev(), named.ino())
+        || named.nlink() != 1
+        || bytes.len() > super::MAX_OWNER_BYTES
+    {
+        return Err(busy("native drain owner record changed during bounded read"));
+    }
+    super::validate_owner_record_path(record, serde_json::from_slice(&bytes).map_err(io::Error::other)?)
+}
+
+fn drain_slot(registry: &Path, expected: &NativeGuardianDrainBinding) -> io::Result<(Value, Slot)> {
+    if !valid_nonce(&expected.generation) {
+        return Err(invalid("invalid native recovery generation"));
+    }
+    validate_boot_uuid(&expected.boot)?;
+    validate_registry(registry)?;
+    let namespace = File::from(rustix::fs::open(
+        registry,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?);
+    let root = namespace.metadata()?;
+    if (root.dev(), root.ino()) != (expected.registry_device, expected.registry_inode) {
+        return Err(invalid("original guardian registry identity changed"));
+    }
+    let name = format!("worker-{}", expected.generation);
+    let generation = File::from(rustix::fs::openat(
+        &namespace,
+        name.as_str(),
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?);
+    let directory = registry.join(name);
+    validate_registry(&directory)?;
+    let bound = generation.metadata()?;
+    let current = fs::symlink_metadata(&directory)?;
+    if (bound.dev(), bound.ino()) != (current.dev(), current.ino()) {
+        return Err(invalid("original guardian generation directory changed"));
+    }
+    let value = read_drain_slot_owner(&generation, &directory.join("owner.json"))?;
+    matches_drain_binding(&value, expected)?;
+    if !slot_protocol(&value) {
+        return Err(invalid("original guardian did not advertise the slot drain protocol"));
+    }
+    let slot = Slot::open(&generation)?.ok_or_else(|| invalid("original guardian drain slot unavailable"))?;
+    let current = fs::symlink_metadata(&directory)?;
+    if (bound.dev(), bound.ino()) != (current.dev(), current.ino()) {
+        return Err(invalid("original guardian generation directory changed"));
+    }
+    Ok((value, slot))
+}
+
+/// Offer drain to the original guardian without acquiring admission ownership.
+/// Success means the exact generation's offer was inserted or coalesced.
+/// # Errors
+/// Refuses missing, mismatched, legacy or unavailable custody.
+#[doc(hidden)]
+pub fn submit_original_guardian_drain(registry: &Path, expected: &NativeGuardianDrainBinding) -> io::Result<()> {
+    let (value, slot) = drain_slot(registry, expected)?;
+    if field(&value, "guardian_drain") == "requested" || slot.state()? == SlotState::Accepted {
+        return Ok(());
+    }
+    if !expected.guardian.is_live()? {
+        return Err(busy("original guardian is unavailable"));
+    }
+    slot.offer()?;
+    #[cfg(all(test, target_os = "macos"))]
+    super::tests::pause_slot_sender()?;
+    Ok(())
+}
+
+/// Observe an exact generation's offer independently of submission.
+/// Acceptance confirms the guardian's durable decision, never custody closure.
+/// # Errors
+/// Missing or inconsistent evidence leaves the observation unknown.
+#[doc(hidden)]
+pub fn observe_original_guardian_drain(
+    registry: &Path,
+    expected: &NativeGuardianDrainBinding,
+) -> io::Result<NativeGuardianDrainStatus> {
+    let (value, slot) = drain_slot(registry, expected)?;
+    match slot.state()? {
+        SlotState::Accepted => {
+            // The guardian may have published its decision after our first read.
+            let (current, _) = drain_slot(registry, expected)?;
+            if field(&current, "guardian_drain") != "requested" {
+                return Err(invalid("guardian acceptance marker has no matching decision"));
+            }
+            Ok(NativeGuardianDrainStatus::Accepted)
+        }
+        _ if field(&value, "guardian_drain") == "requested" => Ok(NativeGuardianDrainStatus::Pending),
+        SlotState::Pending => Ok(NativeGuardianDrainStatus::Pending),
+        SlotState::Refused => Ok(NativeGuardianDrainStatus::Refused),
+        SlotState::Empty => Ok(NativeGuardianDrainStatus::Empty),
+    }
+}
+
 /// Ask one original guardian to drain an exact generation in the expected registry.
 ///
 /// The registry and authenticated owner binding are checked under the same
@@ -542,6 +711,8 @@ pub fn request_bound_original_guardian_drain(
             | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
     )?);
+    let record = registry.join(format!("worker-{}/owner.json", expected.generation));
+    refuse_slot_protocol(&read_owner(&record)?)?;
     let _lock = lock_admission_at(&root, until, false)?;
     let matches_registry = |metadata: &fs::Metadata| {
         (metadata.dev(), metadata.ino()) == (expected.registry_device, expected.registry_inode)
@@ -556,8 +727,8 @@ pub fn request_bound_original_guardian_drain(
     check_registry()?;
     let generation_dir = registry.join(format!("worker-{}", expected.generation));
     validate_registry(&generation_dir)?;
-    let record = generation_dir.join("owner.json");
     let mut value = read_owner(&record)?;
+    refuse_slot_protocol(&value)?;
     verify_original_worker_boot(&value)?;
     if field(&value, "generation_id") != expected.generation.as_str()
         || !field(&value, "original_worker_boot")
@@ -590,6 +761,7 @@ pub fn request_original_guardian_drain(
     worker: &NativeProcessIdentity,
     timeout: Duration,
 ) -> io::Result<()> {
+    refuse_slot_protocol(&read_owner(record)?)?;
     let _lock = lock_publication(record, timeout)?;
     validate_registry(
         record
@@ -597,6 +769,7 @@ pub fn request_original_guardian_drain(
             .ok_or_else(|| invalid("native owner directory missing"))?,
     )?;
     let mut value = read_owner(record)?;
+    refuse_slot_protocol(&value)?;
     verify_original_worker_boot(&value)?;
     check_guardian_drain_worker(&value, worker)?;
     check_guardian_drain_eligibility(&value)?;
@@ -637,6 +810,7 @@ pub(super) fn publish_guardian_drain_support(
     record: &Path,
     worker: &NativeProcessIdentity,
     guardian: &NativeProcessIdentity,
+    use_slot: bool,
 ) -> io::Result<bool> {
     if !cfg!(target_os = "macos") {
         return Ok(false);
@@ -660,13 +834,66 @@ pub(super) fn publish_guardian_drain_support(
         .as_object_mut()
         .ok_or_else(|| invalid("native owner object missing"))?
         .insert("guardian_drain".to_owned(), json!("available"));
+    if use_slot {
+        let directory = record.parent().ok_or_else(|| invalid("owner directory missing"))?;
+        validate_registry(directory)?;
+        Slot::create(&File::open(directory)?)?;
+        value
+            .as_object_mut()
+            .ok_or_else(|| invalid("native owner object missing"))?
+            .insert("guardian_drain_protocol".to_owned(), json!(SLOT_PROTOCOL));
+    }
     persist_owner(record, &value)?;
+    Ok(true)
+}
+
+pub(super) fn consume_guardian_drain_slot(
+    record: &Path,
+    guardian: &NativeProcessIdentity,
+    sampled_stopped: &mut bool,
+) -> io::Result<bool> {
+    let directory = record.parent().ok_or_else(|| invalid("owner directory missing"))?;
+    let generation = File::open(directory)?;
+    let slot = Slot::open(&generation)?.ok_or_else(|| invalid("original guardian drain slot unavailable"))?;
+    if !*sampled_stopped && slot.state()? != SlotState::Pending {
+        return Ok(false);
+    }
+    let registry = directory.parent().ok_or_else(|| invalid("owner registry missing"))?;
+    let _lock = try_lock_admission_at(&File::open(registry)?)?;
+    let mut value = read_owner(record)?;
+    verify_original_worker_boot(&value)?;
+    if !slot_protocol(&value)
+        || checked_identity(field(&value, "guardian"))? != *guardian
+        || guardian.pid != std::process::id()
+    {
+        return Err(invalid("original guardian slot owner differs"));
+    }
+    if !*sampled_stopped {
+        if slot.state()? != SlotState::Pending {
+            return Ok(false);
+        }
+        // If an earlier refusal renamed successfully but failed to sync, finish
+        // its durability work before deciding the freshly inserted offer.
+        slot.sync()?;
+        let parent = checked_identity(field(&value, "parent"))?;
+        let worker = checked_identity(field(&value, "process"))?;
+        if !parent.is_stopped()? || NativeProcessIdentity::capture(worker.pid)?.as_ref() != Some(&worker) {
+            slot.refuse()?;
+            return Ok(false);
+        }
+        *sampled_stopped = true;
+    }
+    publish_guardian_drain_request(record, &mut value)?;
+    // This marker witnesses the already synced decision. Failure may obscure
+    // observation, but must not inhibit the original guardian's drain.
+    let _observation = slot.mark_accepted();
     Ok(true)
 }
 
 pub(super) fn original_guardian_drain_requested(record: &Path, guardian: &NativeProcessIdentity) -> io::Result<bool> {
     let value = read_owner(record)?;
     validate_owner_header(&value)?;
+    refuse_slot_protocol(&value)?;
     if checked_identity(field(&value, "guardian"))? != *guardian || guardian.pid != std::process::id() {
         return Err(invalid("original guardian drain owner differs"));
     }
@@ -856,6 +1083,9 @@ fn collect_unpublished(directory: &Path) -> io::Result<()> {
     {
         return Err(invalid("unrecognized unpublished native directory"));
     }
+    if drain_slot::exists(&File::open(directory)?)? {
+        return Err(busy("ownerless guardian drain slot is unresolved"));
+    }
     let mut temporary = Vec::new();
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
@@ -1043,6 +1273,20 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
         };
         if record_can_be_removed(&value)? {
             // Keep the committed record parseable through partial asset cleanup.
+            let directory = File::open(entry.path())?;
+            if slot_protocol(&value) || drain_slot::exists(&directory)? {
+                loop {
+                    match Slot::collect_closed(&directory) {
+                        Ok(()) => break,
+                        Err(error) if error.raw_os_error() == Some(libc::ENOTEMPTY) => {
+                            if std::time::Instant::now() >= until {
+                                return Err(busy("late guardian drain offer interrupted collection"));
+                            }
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
             super::cleanup_generation_inputs(&entry.path())?;
             for name in [
                 "owner.write",

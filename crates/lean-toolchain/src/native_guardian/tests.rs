@@ -264,6 +264,14 @@ pub(super) fn hold_requested_group_signal(guardian: &Guardian) -> bool {
     })
 }
 
+pub(super) fn pause_slot_sender() -> io::Result<()> {
+    if let Some(root) = std::env::var_os("LEAN_RS_TEST_DRAIN_SLOT_SENDER").map(PathBuf::from) {
+        fs::write(root.join("slot-sender-inserted"), b"offer inserted before return")?;
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::STOP)?;
+    }
+    Ok(())
+}
+
 pub(super) fn hold_service_loss_group_signal() -> bool {
     std::env::var_os(ROOT_ENV).map(PathBuf::from).is_some_and(|root| {
         if !root.join("hold-service-loss-signal").exists() {

@@ -221,15 +221,44 @@ fn stopped(process: &NativeProcessIdentity) -> bool {
 
 #[test]
 fn replacement_requests_drain_from_original_guardian_without_taking_custody() {
-    assert_requested_zombie_closure(false);
+    assert_requested_zombie_closure(false, false);
 }
 
 #[test]
 fn surviving_leaf_prevents_zombie_closure_until_original_guardian_drains_it() {
-    assert_requested_zombie_closure(true);
+    assert_requested_zombie_closure(true, false);
 }
 
-fn assert_requested_zombie_closure(hold_leaf: bool) {
+#[test]
+fn stopped_sender_does_not_delay_slot_guardian_or_same_inode_successor() {
+    assert_requested_zombie_closure(false, true);
+}
+
+#[test]
+fn fixture_slot_sender() {
+    let Some(root) = std::env::var_os("LEAN_RS_TEST_DRAIN_SLOT_SENDER").map(PathBuf::from) else {
+        return;
+    };
+    let registry = root.join("owners");
+    let record = registry.join(format!("worker-{NONCE}/owner.json"));
+    let binding = slot_binding(&registry, &read_owner(&record).unwrap());
+    submit_original_guardian_drain(&registry, &binding).unwrap();
+}
+
+fn slot_binding(registry: &Path, record: &Value) -> NativeGuardianDrainBinding {
+    let metadata = fs::metadata(registry).unwrap();
+    NativeGuardianDrainBinding {
+        registry_device: metadata.dev(),
+        registry_inode: metadata.ino(),
+        generation: record["generation_id"].as_str().unwrap().to_owned(),
+        boot: record["original_worker_boot"].as_str().unwrap().to_owned(),
+        parent: serde_json::from_value(record["parent"].clone()).unwrap(),
+        worker: serde_json::from_value(record["process"].clone()).unwrap(),
+        guardian: serde_json::from_value(record["guardian"].clone()).unwrap(),
+    }
+}
+
+fn assert_requested_zombie_closure(hold_leaf: bool, use_slot: bool) {
     let fixture = Fixture::new();
     for marker in [
         "reap-after-recovery-request",
@@ -240,12 +269,12 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
     ] {
         fs::write(fixture.root.join(marker), b"test-owned recovery request").unwrap();
     }
-    let mut server = TestChild(
-        fixture_command(&fixture.root, "native_guardian::tests::fixture_server")
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap(),
-    );
+    let mut service = fixture_command(&fixture.root, "native_guardian::tests::fixture_server");
+    service.stderr(Stdio::inherit());
+    if use_slot {
+        service.env(DRAIN_SLOT_ENV, "1");
+    }
+    let mut server = TestChild(service.spawn().unwrap());
     wait_until(|| fixture.root.join("server-ready").exists());
     let ready: Value = serde_json::from_slice(&fs::read(fixture.root.join("server-ready")).unwrap()).unwrap();
     let worker = pid(field(&ready, "worker")).unwrap();
@@ -255,22 +284,22 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
     let record = fixture.registry.join(format!("worker-{NONCE}")).join("owner.json");
     let original = read_owner(&record).unwrap();
     assert_eq!(original["guardian_drain"], "available");
-    assert_eq!(
-        request_original_guardian_drain(&record, &process, Duration::from_secs(1))
-            .unwrap_err()
-            .kind(),
-        io::ErrorKind::WouldBlock,
-    );
-    let registry = fs::metadata(&fixture.registry).unwrap();
-    let expected = NativeGuardianDrainBinding {
-        registry_device: registry.dev(),
-        registry_inode: registry.ino(),
-        generation: NONCE.to_owned(),
-        boot: original["original_worker_boot"].as_str().unwrap().to_owned(),
-        parent: requester.clone(),
-        worker: process.clone(),
-        guardian: guardian.clone(),
-    };
+    let expected = slot_binding(&fixture.registry, &original);
+    if use_slot {
+        assert!(request_original_guardian_drain(&record, &process, Duration::from_secs(1)).is_err());
+        assert!(request_bound_original_guardian_drain(&fixture.registry, &expected, Duration::from_secs(1)).is_err());
+        submit_original_guardian_drain(&fixture.registry, &expected).unwrap();
+        wait_until(|| {
+            observe_original_guardian_drain(&fixture.registry, &expected).unwrap() == NativeGuardianDrainStatus::Refused
+        });
+    } else {
+        assert_eq!(
+            request_original_guardian_drain(&record, &process, Duration::from_secs(1))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::WouldBlock,
+        );
+    }
     let lock = fs::metadata(fixture.lock()).unwrap();
     let writer = Contender::start(&fixture, worker);
 
@@ -312,7 +341,13 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
             ..expected.clone()
         },
     ] {
-        assert!(request_bound_original_guardian_drain(&fixture.registry, &changed, Duration::from_secs(1)).is_err());
+        if use_slot {
+            assert!(submit_original_guardian_drain(&fixture.registry, &changed).is_err());
+        } else {
+            assert!(
+                request_bound_original_guardian_drain(&fixture.registry, &changed, Duration::from_secs(1)).is_err()
+            );
+        }
         assert_eq!(read_owner(&record).unwrap(), original);
     }
     let before = fixture.heartbeat();
@@ -324,8 +359,27 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
     if hold_leaf {
         fs::write(&signal_barrier, b"hold actual group signal for negative control").unwrap();
     }
-    request_bound_original_guardian_drain(&fixture.registry, &expected, Duration::from_secs(1)).unwrap();
-    assert_eq!(read_owner(&record).unwrap()["guardian_drain"], "requested");
+    let mut sender = if use_slot {
+        let mut sender = TestChild(
+            fixture_command(
+                &fixture.root,
+                "native_guardian::tests::service_loss_regressions::fixture_slot_sender",
+            )
+            .env("LEAN_RS_TEST_DRAIN_SLOT_SENDER", &fixture.root)
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+        );
+        let exact = NativeProcessIdentity::capture(sender.0.id()).unwrap().unwrap();
+        wait_until(|| fixture.root.join("slot-sender-inserted").exists() && stopped(&exact));
+        assert!(sender.0.try_wait().unwrap().is_none());
+        submit_original_guardian_drain(&fixture.registry, &expected).unwrap();
+        Some((sender, exact))
+    } else {
+        request_bound_original_guardian_drain(&fixture.registry, &expected, Duration::from_secs(1)).unwrap();
+        assert_eq!(read_owner(&record).unwrap()["guardian_drain"], "requested");
+        None
+    };
     if hold_leaf {
         fs::write(fixture.root.join("finish-root"), b"leave real leaf alive").unwrap();
         wait_until_within(Duration::from_secs(1), || {
@@ -342,6 +396,12 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
         fixture.root.join("zombie-custody-held").exists()
     });
     assert!(stopped(&requester));
+    if use_slot {
+        assert_eq!(
+            observe_original_guardian_drain(&fixture.registry, &expected).unwrap(),
+            NativeGuardianDrainStatus::Accepted,
+        );
+    }
     assert!(guardian.is_live().unwrap());
     assert!(ownership::matches_zombie_birth(&process).unwrap());
     assert!(crate::process_group::observed_group_singleton(worker).unwrap());
@@ -371,6 +431,14 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
         "writer and successor must be admitted before resuming the parent"
     );
     assert_eq!(writer.finish().payload_bytes_after_marker, 0);
+    if let Some((mut sender, exact)) = sender.take() {
+        assert!(
+            stopped(&exact),
+            "cleanup and reuse completed while submitter was stopped before return"
+        );
+        sender.0.kill().unwrap();
+        assert_eq!(sender.wait().signal(), Some(libc::SIGKILL));
+    }
     assert!(!guardian.is_live().unwrap());
     assert!(!fixture.root.join("test-rescue-used").exists());
     fs::write(fixture.root.join("recovery-request-test-finished"), b"closed").unwrap();
