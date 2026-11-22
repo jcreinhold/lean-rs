@@ -61,6 +61,10 @@ mod deadlines;
 pub fn guardian_deadline_ticks() -> io::Result<Duration> {
     deadlines::boot_ticks()
 }
+pub(crate) fn writer_boot_session() -> io::Result<String> {
+    ownership::current_boot_session()
+}
+
 mod drain_slot;
 /// Validate immutable Running ownership before an admitted request uses its
 /// existing private guardian lifeline.

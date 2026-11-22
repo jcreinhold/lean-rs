@@ -721,3 +721,6 @@ fn stopped_overflow_accepts_only_explicit_close_for_its_charge() -> io::Result<(
     }
     Ok(())
 }
+
+#[path = "storage/stage_permit.rs"]
+mod stage_permit;

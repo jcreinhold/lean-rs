@@ -681,6 +681,7 @@ pub struct SharedWriter {
     helper: Helper,
     receiver: mpsc::Receiver<io::Result<Value>>,
     owner: Value,
+    stage_ready: Option<WriterStageReady>,
     root: PathBuf,
     write_roots: Vec<PathBuf>,
     workspaces: Vec<PathBuf>,
@@ -688,6 +689,88 @@ pub struct SharedWriter {
     managed: bool,
     asset_dir: PathBuf,
     _controller_locks: Vec<File>,
+}
+
+/// Boot-qualified identity of the exact helper holding Ready custody.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WriterStageReady {
+    version: u32,
+    pid: u32,
+    start: String,
+    session: u32,
+    boot: String,
+}
+
+impl WriterStageReady {
+    /// Private wire constructor for the standalone helper's authenticated Ready receipt.
+    #[doc(hidden)]
+    pub fn for_helper(pid: u32, start: String, session: u32) -> io::Result<Self> {
+        Ok(Self {
+            version: 1,
+            pid,
+            start,
+            session,
+            boot: crate::native_guardian::writer_boot_session()?,
+        })
+    }
+
+    /// Actual helper process identifier.
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Exact process birth identity on this platform.
+    pub fn start(&self) -> &str {
+        &self.start
+    }
+
+    /// Exact private session identifier.
+    pub fn session(&self) -> u32 {
+        self.session
+    }
+
+    /// Kernel boot identity qualifying the deadline and process birth.
+    pub fn boot(&self) -> &str {
+        &self.boot
+    }
+}
+
+/// One stage on an exact Ready helper with an immutable suspend-inclusive expiry.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WriterStagePermit {
+    ready: WriterStageReady,
+    expires_ns: u64,
+}
+
+impl WriterStagePermit {
+    /// Bind the original job boot and expiry in nanoseconds on the guardian boot clock.
+    ///
+    /// # Errors
+    /// Refuses a Ready helper from another boot or an already expired stage.
+    pub fn new(ready: WriterStageReady, admission_boot: &str, expires_ns: u64) -> io::Result<Self> {
+        if !ready.boot.eq_ignore_ascii_case(admission_boot) {
+            return Err(invalid("writer permit admission belongs to another boot"));
+        }
+        let permit = Self { ready, expires_ns };
+        permit.check(&permit.ready)?;
+        Ok(permit)
+    }
+
+    /// Private standalone-helper check, also used in the blocked exec wrapper.
+    #[doc(hidden)]
+    pub fn check(&self, ready: &WriterStageReady) -> io::Result<Duration> {
+        if self.ready != *ready {
+            return Err(invalid("writer permit differs from exact Ready helper"));
+        }
+        let budget =
+            Duration::from_nanos(self.expires_ns).saturating_sub(crate::native_guardian::guardian_deadline_ticks()?);
+        if budget.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "writer stage permit expired"));
+        }
+        Ok(budget)
+    }
 }
 
 #[cfg(unix)]
@@ -907,6 +990,7 @@ impl SharedWriter {
                 helper,
                 receiver,
                 owner: Value::Null,
+                stage_ready: None,
                 root: root.to_path_buf(),
                 write_roots: roots.to_vec(),
                 workspaces: workspaces.to_vec(),
@@ -934,6 +1018,18 @@ impl SharedWriter {
                 return Err(invalid("writer asset custody has no canonical private directory"));
             }
             client.asset_dir = asset_dir;
+            if let Some(ready) = locked.get("stage_ready") {
+                let ready: WriterStageReady = serde_json::from_value(ready.clone())?;
+                if ready.version != 1
+                    || owner["pid"] != ready.pid
+                    || owner["start"] != ready.start
+                    || owner["session"] != ready.session
+                    || ready.boot != crate::native_guardian::writer_boot_session()?
+                {
+                    return Err(invalid("writer stage readiness differs from exact helper"));
+                }
+                client.stage_ready = Some(ready);
+            }
             client.owner = owner.clone();
             Ok(client)
         })()
@@ -998,6 +1094,37 @@ impl SharedWriter {
         }
     }
 
+    /// Inspect the exact Ready helper before admitting its one permitted stage.
+    ///
+    /// # Errors
+    /// Refuses a legacy helper, a sealed scope, or a previously spent permit.
+    pub fn stage_ready(&self) -> io::Result<&WriterStageReady> {
+        self.stage_ready
+            .as_ref()
+            .filter(|_| self.stage == StageState::Ready)
+            .ok_or_else(|| invalid("writer stage readiness is unavailable"))
+    }
+
+    /// Run the one permitted stage with the original boot-clock expiry.
+    ///
+    /// # Errors
+    /// Returns pre-delivery refusal or the existing cancellation and retirement evidence.
+    pub fn run_permitted(
+        &mut self,
+        command: &Command,
+        permit: WriterStagePermit,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+    ) -> io::Result<Output> {
+        let budget = self
+            .stage_ready()
+            .and_then(|ready| permit.check(ready))
+            .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
+        self.stage_ready = None;
+        let permit =
+            serde_json::to_value(permit).map_err(|error| failure(WriterDisposition::NotStarted, error.into()))?;
+        self.run_inner(command, budget, Some(&permit), cancelled)
+    }
+
     /// Run once and retain the helper lock for later stages and metadata writes.
     ///
     /// # Errors
@@ -1017,6 +1144,17 @@ impl SharedWriter {
         &mut self,
         command: &Command,
         timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+    ) -> io::Result<Output> {
+        self.stage_ready = None;
+        self.run_inner(command, timeout, None, cancelled)
+    }
+
+    fn run_inner(
+        &mut self,
+        command: &Command,
+        timeout: Duration,
+        permit: Option<&Value>,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Output> {
         use std::os::unix::process::ExitStatusExt;
@@ -1057,11 +1195,12 @@ impl SharedWriter {
                 );
             }
             let cwd = command.get_current_dir().unwrap_or(&self.root);
-            Ok((
-                command_deadline,
-                reply_deadline,
-                json!({"action":"run","command":args,"cwd":cwd,"env":env,"timeout":timeout.as_secs_f64()}),
-            ))
+            let request = if let Some(permit) = permit {
+                json!({"action":"run_permitted","command":args,"cwd":cwd,"env":env,"permit":permit})
+            } else {
+                json!({"action":"run","command":args,"cwd":cwd,"env":env,"timeout":timeout.as_secs_f64()})
+            };
+            Ok((command_deadline, reply_deadline, request))
         })()
         .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
         let (command_deadline, reply_deadline, request) = prepared;
@@ -1116,6 +1255,13 @@ impl SharedWriter {
                 ));
             }
             match field(&frame, "state").as_str() {
+                Some("stage_refused") if permit.is_some() && process.is_none() && reason.is_none() => {
+                    self.stage = StageState::CloseOnly;
+                    return Err(failure(
+                        WriterDisposition::NotStarted,
+                        invalid(field(&frame, "reason").as_str().unwrap_or("writer stage refused")),
+                    ));
+                }
                 Some("started") if process.is_none() => {
                     let identity = field(&frame, "process");
                     if !valid_process(identity, &self.owner) {
@@ -1216,7 +1362,11 @@ impl SharedWriter {
                         })
                     })()
                     .map_err(|error| stopped_failure(&error, &frame))?;
-                    self.stage = StageState::Ready;
+                    self.stage = if permit.is_some() {
+                        StageState::CloseOnly
+                    } else {
+                        StageState::Ready
+                    };
                     return Ok(output);
                 }
                 _ => {

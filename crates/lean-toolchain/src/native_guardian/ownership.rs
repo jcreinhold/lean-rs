@@ -197,12 +197,17 @@ pub(super) fn validate_boot_uuid(boot: &str) -> io::Result<()> {
     }
 }
 
+pub(crate) fn current_boot_session() -> io::Result<String> {
+    let boot = native::boot_session()?;
+    validate_boot_uuid(&boot)?;
+    Ok(boot)
+}
+
 /// Capture the local installation and kernel boot directly at admission. These
 /// identify the observing host; neither one describes where delegated work ran.
 pub(super) fn writer_origin() -> io::Result<(String, String)> {
     use sha2::{Digest as _, Sha256};
-    let boot = native::boot_session()?;
-    validate_boot_uuid(&boot)?;
+    let boot = current_boot_session()?;
     let machine = native::machine_identity()?;
     if machine.iter().all(|byte| *byte == 0) {
         return Err(invalid("local machine identity unavailable"));

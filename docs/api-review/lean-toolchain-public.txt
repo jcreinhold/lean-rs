@@ -368,6 +368,8 @@ pub fn lean_toolchain::shared_writer::SharedWriter::open_with_write_roots(&std::
 pub fn lean_toolchain::shared_writer::SharedWriter::project_root(&self) -> &std::path::Path
 pub fn lean_toolchain::shared_writer::SharedWriter::run(&mut self, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
 pub fn lean_toolchain::shared_writer::SharedWriter::run_cancellable(&mut self, &std::process::Command, core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<std::process::Output>
+pub fn lean_toolchain::shared_writer::SharedWriter::run_permitted(&mut self, &std::process::Command, lean_toolchain::shared_writer::WriterStagePermit, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<std::process::Output>
+pub fn lean_toolchain::shared_writer::SharedWriter::stage_ready(&self) -> std::io::error::Result<&lean_toolchain::shared_writer::WriterStageReady>
 pub fn lean_toolchain::shared_writer::SharedWriter::write_roots(&self) -> &[std::path::PathBuf]
 impl core::marker::Freeze for lean_toolchain::shared_writer::SharedWriter
 impl core::marker::Send for lean_toolchain::shared_writer::SharedWriter
@@ -400,6 +402,47 @@ impl core::marker::Unpin for lean_toolchain::shared_writer::WriterFailure
 impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterFailure
+pub struct lean_toolchain::shared_writer::WriterStagePermit
+impl lean_toolchain::shared_writer::WriterStagePermit
+pub fn lean_toolchain::shared_writer::WriterStagePermit::new(lean_toolchain::shared_writer::WriterStageReady, &str, u64) -> std::io::error::Result<Self>
+impl core::fmt::Debug for lean_toolchain::shared_writer::WriterStagePermit
+pub fn lean_toolchain::shared_writer::WriterStagePermit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for lean_toolchain::shared_writer::WriterStagePermit
+pub fn lean_toolchain::shared_writer::WriterStagePermit::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::shared_writer::WriterStagePermit
+pub fn lean_toolchain::shared_writer::WriterStagePermit::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_toolchain::shared_writer::WriterStagePermit
+impl core::marker::Send for lean_toolchain::shared_writer::WriterStagePermit
+impl core::marker::Sync for lean_toolchain::shared_writer::WriterStagePermit
+impl core::marker::Unpin for lean_toolchain::shared_writer::WriterStagePermit
+impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterStagePermit
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterStagePermit
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterStagePermit
+pub struct lean_toolchain::shared_writer::WriterStageReady
+impl lean_toolchain::shared_writer::WriterStageReady
+pub fn lean_toolchain::shared_writer::WriterStageReady::boot(&self) -> &str
+pub fn lean_toolchain::shared_writer::WriterStageReady::pid(&self) -> u32
+pub fn lean_toolchain::shared_writer::WriterStageReady::session(&self) -> u32
+pub fn lean_toolchain::shared_writer::WriterStageReady::start(&self) -> &str
+impl core::clone::Clone for lean_toolchain::shared_writer::WriterStageReady
+pub fn lean_toolchain::shared_writer::WriterStageReady::clone(&self) -> lean_toolchain::shared_writer::WriterStageReady
+impl core::cmp::Eq for lean_toolchain::shared_writer::WriterStageReady
+impl core::cmp::PartialEq for lean_toolchain::shared_writer::WriterStageReady
+pub fn lean_toolchain::shared_writer::WriterStageReady::eq(&self, &lean_toolchain::shared_writer::WriterStageReady) -> bool
+impl core::fmt::Debug for lean_toolchain::shared_writer::WriterStageReady
+pub fn lean_toolchain::shared_writer::WriterStageReady::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::shared_writer::WriterStageReady
+impl serde_core::ser::Serialize for lean_toolchain::shared_writer::WriterStageReady
+pub fn lean_toolchain::shared_writer::WriterStageReady::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::shared_writer::WriterStageReady
+pub fn lean_toolchain::shared_writer::WriterStageReady::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_toolchain::shared_writer::WriterStageReady
+impl core::marker::Send for lean_toolchain::shared_writer::WriterStageReady
+impl core::marker::Sync for lean_toolchain::shared_writer::WriterStageReady
+impl core::marker::Unpin for lean_toolchain::shared_writer::WriterStageReady
+impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterStageReady
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterStageReady
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterStageReady
 pub const lean_toolchain::shared_writer::MAX_WRITER_LOCK_LOANS: usize
 pub const lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV: &str
 pub fn lean_toolchain::shared_writer::inherited_writer_locks() -> std::io::error::Result<core::option::Option<alloc::vec::Vec<(std::path::PathBuf, std::fs::File)>>>

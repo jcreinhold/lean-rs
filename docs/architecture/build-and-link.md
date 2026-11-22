@@ -267,6 +267,15 @@ The helper builds Lake `lean_lib` shared facets for the host platform. It does n
 publish Lake packages. The generic and host shim sources are bundled with their owning Rust crates; this helper is the
 path those crates and downstream examples use to materialize the dylibs.
 
+A managed Rust caller can obtain the exact standalone helper identity from `SharedWriter::stage_ready` after
+the lock-custody handshake and before any command. Bind that identity and the originally admitted boot and absolute
+expiry on the guardian's suspend-inclusive boot clock into `WriterStagePermit`. `run_permitted` sends a
+dedicated one-use action. The helper verifies the exact Ready identity and original expiry before launch,
+and the existing blocked wrapper verifies both again immediately before exec. The helper observes the
+same expiry while the command runs and uses its existing process and descriptor closure protocol. Either
+success or pre-launch refusal spends that helper's permitted stage. Close still requires the existing separate
+receipt. Older or embedded helpers that do not advertise this interface refuse permitted execution.
+
 A cooperating SDK caller can opt into the standalone writer's v1 storage admission with
 `SharedWriter::open_with_storage_request`. Supply the same bounded JSON request as
 `lean-rs-writer writer --storage-request`, with the launcher's registry, project, selected scratch parent and

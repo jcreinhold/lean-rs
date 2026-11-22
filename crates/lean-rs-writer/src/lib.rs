@@ -27,6 +27,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lean_toolchain::process_group::OwnedCommandGroup;
+use lean_toolchain::shared_writer::{WriterStagePermit, WriterStageReady};
 use lean_toolchain::writer_demand::{ReadAdmission, WriterDemand};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::io::{FdFlags, fcntl_setfd};
@@ -897,6 +898,9 @@ pub fn run_exec() -> io::Result<()> {
             }
         }
     }
+    if let Some(permit) = stage_permit(&message)? {
+        permit.check(&stage_ready(&committed.owner)?)?;
+    }
     Err(command.exec())
 }
 
@@ -1060,6 +1064,23 @@ fn write_launch(
     Ok(())
 }
 
+fn stage_ready(owner: &Owner) -> io::Result<WriterStageReady> {
+    WriterStageReady::for_helper(owner.pid, owner.start.clone(), owner.session)
+}
+
+fn stage_permit(message: &Value) -> io::Result<Option<WriterStagePermit>> {
+    if field(message, "action") == "run_permitted" {
+        if message.get("timeout").is_some() {
+            return Err(invalid("writer stage permit cannot carry a relative timeout"));
+        }
+        return Ok(Some(serde_json::from_value(field(message, "permit").clone())?));
+    }
+    if message.get("permit").is_some() {
+        return Err(invalid("writer stage permit requires its dedicated action"));
+    }
+    Ok(None)
+}
+
 const DESCENDANT_EXIT_GRACE: Duration = Duration::from_millis(100);
 
 #[allow(
@@ -1079,11 +1100,22 @@ fn execute_with_launcher(
     mut emit: impl FnMut(&Value) -> io::Result<()>,
 ) -> io::Result<bool> {
     canonical(root)?;
-    let timeout = duration(
-        field(message, "timeout")
-            .as_f64()
-            .ok_or_else(|| invalid("writer timeout required"))?,
-    )?;
+    let permit = stage_permit(message)?;
+    let permit_ready = permit.as_ref().map(|_| stage_ready(&record.owner)).transpose()?;
+    let timeout = match permit.as_ref().zip(permit_ready.as_ref()) {
+        Some((permit, ready)) => match permit.check(ready) {
+            Ok(timeout) => timeout,
+            Err(error) => {
+                emit(&json!({"state":"stage_refused","owner":record.owner,"reason":error.to_string()}))?;
+                return Ok(true);
+            }
+        },
+        None => duration(
+            field(message, "timeout")
+                .as_f64()
+                .ok_or_else(|| invalid("writer timeout required"))?,
+        )?,
+    };
     let started = Instant::now();
     let deadline = started
         .checked_add(timeout)
@@ -1202,8 +1234,16 @@ fn execute_with_launcher(
                 reason.get_or_insert_with(|| "writer leader exited with surviving owned work".to_owned());
             }
         }
-        if started.elapsed() >= timeout {
-            reason.get_or_insert_with(|| "writer deadline expired".to_owned());
+        match permit.as_ref().zip(permit_ready.as_ref()) {
+            Some((permit, ready)) => {
+                if let Err(error) = permit.check(ready) {
+                    reason.get_or_insert_with(|| error.to_string());
+                }
+            }
+            None if started.elapsed() >= timeout => {
+                reason.get_or_insert_with(|| "writer deadline expired".to_owned());
+            }
+            None => {}
         }
         if let Some(why) = &reason {
             if !notified {
@@ -1423,6 +1463,9 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
             .keep()
             .canonicalize()?,
     };
+    let ready_identity = stage_ready(&record.owner).ok();
+    let mut first_stage = true;
+    let mut permit_consumed = false;
     let mut confirmed_close = false;
     let result = (|| -> io::Result<()> {
         let mut ready = serde_json::Map::from_iter([
@@ -1431,6 +1474,9 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
             ("lock_loans".to_owned(), receipt),
             ("asset_dir".to_owned(), json!(asset_dir)),
         ]);
+        if let Some(identity) = &ready_identity {
+            ready.insert("stage_ready".to_owned(), json!(identity));
+        }
         if let Some(handoff) = charge.as_ref().and_then(|c| c.handoff_receipt()) {
             ready.insert("handoff".to_owned(), handoff);
         }
@@ -1438,7 +1484,16 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         while let Ok(message) = input.recv() {
             let message = message?;
             match field(&message, "action").as_str() {
-                Some(action @ ("stage_handoff" | "run")) => {
+                Some(action @ ("stage_handoff" | "run" | "run_permitted")) => {
+                    if permit_consumed || (action == "run_permitted" && (!first_stage || ready_identity.is_none())) {
+                        send(&json!({"state":"stage_refused","owner":record.owner,
+                            "reason":"writer stage permit is not available"}))?;
+                        continue;
+                    }
+                    if action != "stage_handoff" {
+                        first_stage = false;
+                        permit_consumed = action == "run_permitted";
+                    }
                     // Re-derive the declared graph immediately before this stage.
                     // Unknown or expanded graphs never release a command body.
                     for required in workspace_domains(&workspaces)? {
