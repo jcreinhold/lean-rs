@@ -9,12 +9,13 @@ import sys
 from pathlib import Path
 
 OPTIONAL_META = "lean-rs-host-shims/LeanRsHostShims/Meta.lean"
+OPTIONAL_INFO_TREE = "lean-rs-host-shims/LeanRsHostShims/InfoTree.lean"
 WHNF = "lean_rs_host_meta_whnf"
 OPTIONAL_SHIM_SOURCES = (
     "lean-rs-host-shims/LeanRsHostShims.lean",
     "lean-rs-host-shims/LeanRsHostShims/Elaboration.lean",
     "lean-rs-host-shims/LeanRsHostShims/Environment.lean",
-    "lean-rs-host-shims/LeanRsHostShims/InfoTree.lean",
+    OPTIONAL_INFO_TREE,
     "lean-rs-host-shims/LeanRsHostShims/Interop.lean",
     "lean-rs-host-shims/LeanRsHostShims/Meta.lean",
     "lean-rs-host-shims/lake-manifest.json",
@@ -35,9 +36,10 @@ OPTIONAL_SHIM_SOURCES = (
 def optional_shim_source(sdk, name):
     path = sdk / "crates/lean-rs-host/shims" / name
     assert path == path.resolve(strict=True) and path.is_file()
+    limit = (148 if name == OPTIONAL_INFO_TREE else 144) * 1024
     with path.open("rb") as stream:
-        data = stream.read(144 * 1024 + 1)
-    assert len(data) <= 144 * 1024
+        data = stream.read(limit + 1)
+    assert len(data) <= limit, f"optional shim source exceeds {limit} bytes: {name}"
     if name == OPTIONAL_META:
         attribute = f"@[export {WHNF}]\n".encode()
         assert data.count(attribute) == 1
