@@ -66,10 +66,10 @@ mod ownership;
 #[doc(hidden)]
 pub mod writer_storage;
 pub use ownership::{
-    NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, claim_native_recovery,
-    collect_closed_owner_records, dispatch_owner_record, publish_startup_owner, registry_directory,
-    request_original_guardian_drain, reserve_owner_record, reserve_owner_record_with_slot,
-    retire_preparing_owner_record, retire_unspawned_owner_record,
+    NativeCapacitySlot, NativeGuardianDrainBinding, NativeOwnerObservation, NativeProcessIdentity,
+    claim_native_recovery, collect_closed_owner_records, dispatch_owner_record, publish_startup_owner,
+    registry_directory, request_bound_original_guardian_drain, request_original_guardian_drain, reserve_owner_record,
+    reserve_owner_record_with_slot, retire_preparing_owner_record, retire_unspawned_owner_record,
 };
 
 /// One actual shared lock and epoch protected by a native generation.

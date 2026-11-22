@@ -501,6 +501,79 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
     lock_admission(root, deadline(timeout)?, false)
 }
 
+/// Exact original scope expected by a managed replacement requester.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeGuardianDrainBinding {
+    pub registry_device: u64,
+    pub registry_inode: u64,
+    pub generation: String,
+    pub boot: String,
+    pub parent: NativeProcessIdentity,
+    pub worker: NativeProcessIdentity,
+    pub guardian: NativeProcessIdentity,
+}
+
+/// Ask one original guardian to drain an exact generation in the expected registry.
+///
+/// The registry and authenticated owner binding are checked under the same
+/// admission lock as publication. Success means durable delivery only. The
+/// original custodian still owns stop and closure, and only while supported
+/// by the existing stopped-parent protocol.
+///
+/// # Errors
+/// Refuses a changed binding, a responsive or absent parent, an unavailable
+/// guardian, or indeterminate validation or publication.
+#[doc(hidden)]
+pub fn request_bound_original_guardian_drain(
+    registry: &Path,
+    expected: &NativeGuardianDrainBinding,
+    timeout: Duration,
+) -> io::Result<()> {
+    let until = deadline(timeout)?;
+    if !valid_nonce(&expected.generation) {
+        return Err(invalid("invalid native recovery generation"));
+    }
+    validate_boot_uuid(&expected.boot)?;
+    let root = File::from(rustix::fs::open(
+        registry,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?);
+    let _lock = lock_admission_at(&root, until, false)?;
+    let matches_registry = |metadata: &fs::Metadata| {
+        (metadata.dev(), metadata.ino()) == (expected.registry_device, expected.registry_inode)
+    };
+    let check_registry = || {
+        validate_registry(registry)?;
+        if !matches_registry(&root.metadata()?) || !matches_registry(&fs::symlink_metadata(registry)?) {
+            return Err(invalid("original guardian registry identity changed"));
+        }
+        Ok(())
+    };
+    check_registry()?;
+    let generation_dir = registry.join(format!("worker-{}", expected.generation));
+    validate_registry(&generation_dir)?;
+    let record = generation_dir.join("owner.json");
+    let mut value = read_owner(&record)?;
+    verify_original_worker_boot(&value)?;
+    if field(&value, "generation_id") != expected.generation.as_str()
+        || !field(&value, "original_worker_boot")
+            .as_str()
+            .is_some_and(|boot| boot.eq_ignore_ascii_case(&expected.boot))
+        || checked_identity(field(&value, "parent"))? != expected.parent
+        || checked_identity(field(&value, "guardian"))? != expected.guardian
+    {
+        return Err(invalid("original guardian drain binding changed"));
+    }
+    check_guardian_drain_worker(&value, &expected.worker)?;
+    check_guardian_drain_eligibility(&value)?;
+    check_registry()?;
+    publish_guardian_drain_request(&record, &mut value)
+}
+
 /// Ask the original live guardian to drain a scope whose service is stopped.
 ///
 /// This is a request to the existing custodian. Success confirms only durable
@@ -525,17 +598,19 @@ pub fn request_original_guardian_drain(
     )?;
     let mut value = read_owner(record)?;
     verify_original_worker_boot(&value)?;
-    if checked_identity(field(&value, "process"))? != *worker
+    check_guardian_drain_worker(&value, worker)?;
+    check_guardian_drain_eligibility(&value)?;
+    publish_guardian_drain_request(record, &mut value)
+}
+
+fn check_guardian_drain_worker(value: &Value, worker: &NativeProcessIdentity) -> io::Result<()> {
+    if checked_identity(field(value, "process"))? != *worker
         || NativeProcessIdentity::capture(worker.pid)?.as_ref() != Some(worker)
-        || !matches!(
-            field(&value, "guardian_drain").as_str(),
-            Some("available" | "requested")
-        )
+        || !matches!(field(value, "guardian_drain").as_str(), Some("available" | "requested"))
     {
         return Err(invalid("original guardian drain binding changed or unavailable"));
     }
-    check_guardian_drain_eligibility(&value)?;
-    publish_guardian_drain_request(record, &mut value)
+    Ok(())
 }
 
 pub(super) fn publish_guardian_drain_request(record: &Path, value: &mut Value) -> io::Result<()> {

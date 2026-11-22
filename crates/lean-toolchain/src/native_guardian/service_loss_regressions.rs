@@ -261,6 +261,16 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
             .kind(),
         io::ErrorKind::WouldBlock,
     );
+    let registry = fs::metadata(&fixture.registry).unwrap();
+    let expected = NativeGuardianDrainBinding {
+        registry_device: registry.dev(),
+        registry_inode: registry.ino(),
+        generation: NONCE.to_owned(),
+        boot: original["original_worker_boot"].as_str().unwrap().to_owned(),
+        parent: requester.clone(),
+        worker: process.clone(),
+        guardian: guardian.clone(),
+    };
     let lock = fs::metadata(fixture.lock()).unwrap();
     let writer = Contender::start(&fixture, worker);
 
@@ -272,6 +282,39 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
     let mut stale = process.clone();
     "wrong-recovery-birth".clone_into(&mut stale.start);
     assert!(request_original_guardian_drain(&record, &stale, Duration::from_secs(1)).is_err());
+    for changed in [
+        NativeGuardianDrainBinding {
+            registry_device: expected.registry_device ^ 1,
+            ..expected.clone()
+        },
+        NativeGuardianDrainBinding {
+            registry_inode: expected.registry_inode ^ 1,
+            ..expected.clone()
+        },
+        NativeGuardianDrainBinding {
+            generation: format!("{:048x}", 800),
+            ..expected.clone()
+        },
+        NativeGuardianDrainBinding {
+            boot: "00000000-0000-4000-8000-000000000000".to_owned(),
+            ..expected.clone()
+        },
+        NativeGuardianDrainBinding {
+            parent: process.clone(),
+            ..expected.clone()
+        },
+        NativeGuardianDrainBinding {
+            worker: stale,
+            ..expected.clone()
+        },
+        NativeGuardianDrainBinding {
+            guardian: requester.clone(),
+            ..expected.clone()
+        },
+    ] {
+        assert!(request_bound_original_guardian_drain(&fixture.registry, &changed, Duration::from_secs(1)).is_err());
+        assert_eq!(read_owner(&record).unwrap(), original);
+    }
     let before = fixture.heartbeat();
     wait_until_within(Duration::from_millis(200), || fixture.heartbeat() > before);
     assert!(guardian.is_live().unwrap());
@@ -281,7 +324,7 @@ fn assert_requested_zombie_closure(hold_leaf: bool) {
     if hold_leaf {
         fs::write(&signal_barrier, b"hold actual group signal for negative control").unwrap();
     }
-    request_original_guardian_drain(&record, &process, Duration::from_secs(1)).unwrap();
+    request_bound_original_guardian_drain(&fixture.registry, &expected, Duration::from_secs(1)).unwrap();
     assert_eq!(read_owner(&record).unwrap()["guardian_drain"], "requested");
     if hold_leaf {
         fs::write(fixture.root.join("finish-root"), b"leave real leaf alive").unwrap();
