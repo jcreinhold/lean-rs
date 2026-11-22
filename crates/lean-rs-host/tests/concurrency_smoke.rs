@@ -17,19 +17,19 @@
 mod fixture;
 
 use std::path::PathBuf;
-use std::sync::{Barrier, Mutex};
+use std::sync::{Barrier, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use lean_rs::{LeanRuntime, LeanThreadGuard};
-use lean_rs_host::{LeanCapabilities, LeanHost, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanHost, LeanProgressEvent, LeanProgressSink, SessionPool};
 
 fn fixture_lake_root() -> PathBuf {
     fixture::native_fixture_root()
 }
 
 fn initialized_fixture<'h>(host: &'h LeanHost<'static>) -> LeanCapabilities<'static, 'h> {
-    // Native setup rejects racing initialization. The threads meet at the
-    // barrier after this lock is released, then import and query independently.
+    // Native setup rejects racing initialization, so serialize capability setup.
     static FIXTURE_INIT: Mutex<()> = Mutex::new(());
     let _guard = FIXTURE_INIT.lock().expect("fixture initialization lock");
     fixture::native_capabilities(host).expect("worker loads capabilities")
@@ -77,41 +77,98 @@ fn independent_worker_sessions_run_in_parallel() {
     let lake_root = fixture_lake_root();
 
     const WORKERS: usize = 4;
-    let barrier = std::sync::Arc::new(Barrier::new(WORKERS));
-    let mut handles = Vec::with_capacity(WORKERS);
-    for worker_id in 0..WORKERS {
-        let barrier = std::sync::Arc::clone(&barrier);
-        let lake_root = lake_root.clone();
-        handles.push(thread::spawn(move || {
-            let runtime = LeanRuntime::init().expect("worker init must succeed");
-            let _guard = LeanThreadGuard::attach(runtime);
-            let host = LeanHost::from_lake_project(runtime, lake_root).expect("worker host opens");
-            let caps = initialized_fixture(&host);
-            // Stagger session imports past a barrier so several threads
-            // do Lean work simultaneously.
-            barrier.wait();
-            let mut session = caps
-                .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
-                .expect("worker imports its own session");
 
-            let decl = session
-                .query_declaration("LeanRsFixture.Handles.nameAnonymous", None)
-                .expect("query_declaration on a fixture name succeeds");
-            drop(decl);
+    #[derive(Default)]
+    struct WorkerBarrier {
+        arrived: Mutex<usize>,
+        all_arrived: Condvar,
+    }
 
-            let names = session
-                .list_declarations(None)
-                .expect("list_declarations succeeds on imported session");
-            assert!(
-                !names.is_empty(),
-                "worker {worker_id}: list_declarations must see at least one name",
-            );
-            drop(names);
-        }));
+    impl WorkerBarrier {
+        fn wait(&self, phase: &str) {
+            let count = {
+                let mut arrived = self.arrived.lock().expect("worker barrier lock");
+                *arrived = arrived.saturating_add(1);
+                *arrived
+            };
+            if count == WORKERS {
+                self.all_arrived.notify_all();
+            }
+            // A failed worker must not leave the others blocked indefinitely.
+            let count = *self
+                .all_arrived
+                .wait_timeout_while(
+                    self.arrived.lock().expect("worker barrier lock"),
+                    Duration::from_secs(180),
+                    |count| *count < WORKERS,
+                )
+                .expect("worker barrier wait")
+                .0;
+            assert_eq!(count, WORKERS, "every worker must reach {phase}");
+        }
     }
-    for handle in handles {
-        handle.join().expect("worker thread must not panic");
+
+    impl LeanProgressSink for WorkerBarrier {
+        fn report(&self, event: LeanProgressEvent) {
+            if event.phase == "declaration_kind_bulk" && event.current == 1 {
+                self.wait("the first lookup inside Lean");
+            }
+        }
     }
+
+    let setup = Mutex::new(());
+    let sessions_ready = WorkerBarrier::default();
+    let queries_in_flight = WorkerBarrier::default();
+    thread::scope(|scope| {
+        for worker_id in 0..WORKERS {
+            let lake_root = lake_root.clone();
+            let (setup, sessions_ready, queries_in_flight) = (&setup, &sessions_ready, &queries_in_flight);
+            scope.spawn(move || {
+                let runtime = LeanRuntime::init().expect("worker init must succeed");
+                let _guard = LeanThreadGuard::attach(runtime);
+                // Imports take the production process-wide lock. Set up one
+                // session at a time on its own worker before starting queries.
+                let setup_guard = setup.lock().expect("session setup lock");
+                let host = LeanHost::from_lake_project(runtime, lake_root).expect("worker host opens");
+                let caps = initialized_fixture(&host);
+                let mut session = caps
+                    .session(&fixture::native_imports(&caps, "LeanRsFixture.Handles"), None, None)
+                    .expect("worker imports its own session");
+                drop(setup_guard);
+                sessions_ready.wait("session setup");
+
+                // The first progress event runs inside the Lean call. Keep
+                // each second lookup pending until all four calls are in flight.
+                let kinds = session
+                    .declaration_kind_bulk(
+                        &["LeanRsFixture.Handles.nameAnonymous", "LeanRsFixture.Handles.nameMkStr"],
+                        None,
+                        Some(queries_in_flight),
+                    )
+                    .expect("overlapping bulk queries succeed");
+                assert_eq!(kinds, ["definition", "definition"]);
+
+                let decl = session
+                    .query_declaration("LeanRsFixture.Handles.nameAnonymous", None)
+                    .expect("query_declaration on a fixture name succeeds");
+                drop(decl);
+
+                let names = session
+                    .list_declarations(None)
+                    .expect("list_declarations succeeds on imported session");
+                assert!(
+                    !names.is_empty(),
+                    "worker {worker_id}: list_declarations must see at least one name",
+                );
+                drop(names);
+            });
+        }
+    });
+    assert_eq!(
+        queries_in_flight.arrived.into_inner().expect("worker barrier lock"),
+        WORKERS,
+        "every query must report progress from Lean"
+    );
 }
 
 #[test]
