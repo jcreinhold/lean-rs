@@ -16,7 +16,7 @@ pub(super) const MAX_HANDOFF_BYTES: usize = 256 * 1024;
 pub(super) struct Request {
     version: u8,
     floor_bytes: u64,
-    budget_bytes: u64,
+    pub(super) budget_bytes: u64,
     #[serde(default)]
     command_only: bool,
     #[serde(default, deserialize_with = "present_digest")]

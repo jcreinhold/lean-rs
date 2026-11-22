@@ -275,6 +275,15 @@ Retain the writer through caller-owned writes. Keep each command's result and se
 `SharedWriter::close` result, which waits for the helper to exit successfully. Dropping the control channel or
 losing the close result does not confirm settlement or authorize replay.
 
+The capability `lake_module_setup_capture_v1` stages the required stdout of the selected
+`lake --no-build --no-cache setup-file FILE` in charged scratch. Use the canonical project as cwd, its pinned
+Elan Lake executable, and exactly three command environment entries: `LEAN_HOST_MCP_CAPTURE_MODULE_SETUP=1`,
+`LAKE_CACHE_DIR` set to the locked asset directory, and `LAKE_ARTIFACT_CACHE=false`. Only a complete successful
+command publishes `module-setup.json` and returns its lowercase SHA-256 as stdout. Required stdout is limited
+to the smaller of 16 MiB and the turn's byte budget. Stderr retains at most 64 KiB and continues draining.
+Read and verify the staged bytes under the same charge, then close the writer explicitly. A failed or lost close
+leaves settlement unconfirmed. Unmarked commands keep their ordinary output limits and result format.
+
 The managed writer records one turn ID on the full project-lock union and binds the exact scratch path, device
 and inode in the existing charge before exposing scratch or accepting work. The project locks precede the registry
 admission lock. A retained charge fences overlapping locks even for an unbudgeted invocation of the current writer.

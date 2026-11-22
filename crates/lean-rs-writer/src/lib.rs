@@ -96,7 +96,8 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
             json!([
                 "command_only_storage_v1",
                 "command_only_handoff_v1",
-                "command_only_handoff_approval_v1"
+                "command_only_handoff_approval_v1",
+                "lake_module_setup_capture_v1"
             ]),
         );
     }
@@ -917,6 +918,8 @@ struct Capture {
     descriptor: rustix::fd::OwnedFd,
     bytes: Vec<u8>,
     overflowed: bool,
+    limit: usize,
+    eof: bool,
 }
 
 impl Capture {
@@ -930,42 +933,75 @@ impl Capture {
                 descriptor: read,
                 bytes: Vec::new(),
                 overflowed: false,
+                limit: CAPTURE_BYTES,
+                eof: false,
             },
             Stdio::from(write),
         ))
     }
 
     fn read_available(&mut self) -> io::Result<bool> {
-        if self.overflowed {
-            return Ok(true);
-        }
         let mut buffer = [0_u8; 4096];
         // Bound each poll even under continuous output or interrupt delivery.
+        // After overflow, keep draining without retaining more bytes while the
+        // existing owner requests stop and observes closure.
         for _ in 0..32 {
             match rustix::io::read(&self.descriptor, &mut buffer) {
-                Ok(0) => return Ok(false),
+                Ok(0) => {
+                    self.eof = true;
+                    return Ok(self.overflowed);
+                }
                 Ok(count) => {
-                    let keep = count.min(CAPTURE_BYTES.saturating_sub(self.bytes.len()));
+                    let keep = count.min(self.limit.saturating_sub(self.bytes.len()));
                     self.bytes.extend_from_slice(
                         buffer
                             .get(..keep)
                             .ok_or_else(|| invalid("capture read count invalid"))?,
                     );
-                    if keep < count {
+                    if keep < count && !self.overflowed {
                         self.overflowed = true;
+                        // Report the first overflow before another read can fail.
+                        // Later polls still drain and discard within the budget.
                         return Ok(true);
                     }
                 }
-                Err(error) if error == rustix::io::Errno::AGAIN => return Ok(false),
+                Err(error) if error == rustix::io::Errno::AGAIN => return Ok(self.overflowed),
                 Err(error) if error == rustix::io::Errno::INTR => {}
                 Err(error) => return Err(error.into()),
             }
         }
-        Ok(false)
+        Ok(self.overflowed)
     }
 
     fn text(&self) -> String {
         String::from_utf8_lossy(&self.bytes).into_owned()
+    }
+}
+
+fn poll_output(
+    stdout: &mut Capture,
+    stderr: &mut Capture,
+    module_setup: bool,
+    read_error: &str,
+    reason: &mut Option<String>,
+) {
+    for (capture, required) in [(stdout, true), (stderr, !module_setup)] {
+        match capture.read_available() {
+            Ok(true) if required => {
+                reason.get_or_insert_with(|| {
+                    if module_setup {
+                        "Lake module setup exceeds capture or storage budget"
+                    } else {
+                        "writer captured output limit exceeded"
+                    }
+                    .to_owned()
+                });
+            }
+            Err(error) => {
+                reason.get_or_insert_with(|| format!("{read_error}: {error}"));
+            }
+            Ok(_) => {}
+        }
     }
 }
 
@@ -1026,19 +1062,6 @@ fn write_launch(
 
 const DESCENDANT_EXIT_GRACE: Duration = Duration::from_millis(100);
 
-fn execute(
-    message: &Value,
-    root: &Path,
-    lock_path: &Path,
-    file: &mut File,
-    loans: &[File],
-    record: &Record,
-    input: &Receiver<io::Result<Value>>,
-) -> io::Result<bool> {
-    let launcher = std::env::current_exe()?;
-    execute_with_launcher(message, root, lock_path, file, loans, record, input, &launcher, send)
-}
-
 #[allow(
     clippy::too_many_arguments,
     reason = "private lifecycle seam keeps actual process and lock custody testable"
@@ -1052,6 +1075,7 @@ fn execute_with_launcher(
     record: &Record,
     input: &Receiver<io::Result<Value>>,
     launcher: &Path,
+    setup: Option<&module_setup::Destination<'_>>,
     mut emit: impl FnMut(&Value) -> io::Result<()>,
 ) -> io::Result<bool> {
     canonical(root)?;
@@ -1066,6 +1090,9 @@ fn execute_with_launcher(
         .ok_or_else(|| invalid("writer timeout is too large"))?;
     let (mut stdout, child_stdout) = Capture::pipe()?;
     let (mut stderr, child_stderr) = Capture::pipe()?;
+    if let Some(destination) = setup {
+        stdout.limit = destination.limit;
+    }
     let (barrier, inherited) = pipe()?;
     fcntl_setfd(&barrier, FdFlags::CLOEXEC)?;
     fcntl_setfl(&barrier, fcntl_getfl(&barrier)? | OFlags::NONBLOCK)?;
@@ -1101,7 +1128,7 @@ fn execute_with_launcher(
     // the command before its complete actual identity has been synced.
     let mut process = None;
     let mut cancelled = false;
-    let setup = (|| -> io::Result<()> {
+    let launch_result = (|| -> io::Result<()> {
         process = Some(ProcessIdentity {
             pid: group.id(),
             process_group: group.id(),
@@ -1136,7 +1163,9 @@ fn execute_with_launcher(
         drop(channel);
         emit(&json!({"state":"started","process":process,"owner":record.owner}))
     })();
-    let mut reason = setup.err().map(|error| format!("writer launch failed: {error}"));
+    let mut reason = launch_result
+        .err()
+        .map(|error| format!("writer launch failed: {error}"));
     let mut notified = false;
     let mut descendant_exit_started = None;
     loop {
@@ -1153,17 +1182,13 @@ fn execute_with_launcher(
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
-        for capture in [&mut stdout, &mut stderr] {
-            match capture.read_available() {
-                Ok(true) => {
-                    reason.get_or_insert_with(|| "writer captured output limit exceeded".to_owned());
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    reason.get_or_insert_with(|| format!("writer output read failed: {error}"));
-                }
-            }
-        }
+        poll_output(
+            &mut stdout,
+            &mut stderr,
+            setup.is_some(),
+            "writer output read failed",
+            &mut reason,
+        );
         let status = match group.try_wait() {
             Ok(status) => status,
             Err(error) => {
@@ -1214,18 +1239,46 @@ fn execute_with_launcher(
                 if let Err(error) = &cleared {
                     reason.get_or_insert_with(|| format!("writer closed but ownership record cleanup failed: {error}"));
                 }
-                for capture in [&mut stdout, &mut stderr] {
-                    match capture.read_available() {
-                        Ok(true) => {
-                            reason.get_or_insert_with(|| "writer captured output limit exceeded".to_owned());
-                        }
-                        Ok(false) => {}
-                        Err(error) => {
-                            reason.get_or_insert_with(|| format!("writer final output read failed: {error}"));
-                        }
+                poll_output(
+                    &mut stdout,
+                    &mut stderr,
+                    setup.is_some(),
+                    "writer final output read failed",
+                    &mut reason,
+                );
+                // With the group closed, drain buffered required bytes to EOF. An
+                // open empty pipe or an excess byte refuses publication.
+                while setup.is_some() && reason.is_none() && !stdout.eof {
+                    let before = stdout.bytes.len();
+                    poll_output(
+                        &mut stdout,
+                        &mut stderr,
+                        true,
+                        "writer final output read failed",
+                        &mut reason,
+                    );
+                    if stdout.bytes.len() == before {
+                        break;
                     }
                 }
-                let captured_stdout = stdout.text();
+                let captured_stdout = if let Some(destination) = setup {
+                    if !stdout.eof {
+                        reason.get_or_insert_with(|| "incomplete Lake module setup stdout".into());
+                    }
+                    if status.success() && reason.is_none() && !group.intervened() {
+                        match destination.publish(&stdout.bytes) {
+                            Ok(digest) => digest,
+                            Err(error) => {
+                                reason.get_or_insert_with(|| format!("could not stage Lake module setup: {error}"));
+                                String::new()
+                            }
+                        }
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    stdout.text()
+                };
                 let captured_stderr = stderr.text();
                 let unavailable = reason.is_some() || group.intervened();
                 // Physical closure is a distinct terminal fact even when the
@@ -1431,7 +1484,20 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                     if pending_handoff.is_some() {
                         return Err(invalid("command requires a staged handoff"));
                     }
-                    if !execute(&message, &args.root, &args.lock, &mut file, &loans, &record, &input)? {
+                    let setup =
+                        module_setup::select(&message, &args.root, scratch.as_ref(), args.storage_request.as_ref())?;
+                    if !execute_with_launcher(
+                        &message,
+                        &args.root,
+                        &args.lock,
+                        &mut file,
+                        &loans,
+                        &record,
+                        &input,
+                        &std::env::current_exe()?,
+                        setup.as_ref(),
+                        send,
+                    )? {
                         break;
                     }
                 }
@@ -1540,6 +1606,7 @@ mod lifecycle_tests;
 #[path = "shared_writer/sdk_contract_tests.rs"]
 mod sdk_contract_tests;
 
+mod module_setup;
 mod scratch;
 mod storage;
 

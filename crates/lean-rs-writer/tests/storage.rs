@@ -318,7 +318,8 @@ fn command_only_capability_is_explicit_and_default_descriptor_is_unchanged() -> 
                 &json!([
                     "command_only_storage_v1",
                     "command_only_handoff_v1",
-                    "command_only_handoff_approval_v1"
+                    "command_only_handoff_approval_v1",
+                    "lake_module_setup_capture_v1"
                 ])
             );
             assert_eq!(field(&descriptor, "handoff_max_bytes"), 262_144);
@@ -500,3 +501,142 @@ mod exact_turn;
 
 #[path = "storage/handoff.rs"]
 mod handoff;
+
+#[test]
+#[ignore = "requires the workspace-pinned Elan installation"]
+fn charged_lake_setup_preserves_required_bytes_and_close() -> io::Result<()> {
+    use sha2::{Digest as _, Sha256};
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let temp = tempfile::tempdir_in(workspace.join("target"))?;
+    let base = temp.path().canonicalize()?;
+    let project = base.join("project");
+    let registry = base.join("owners");
+    let scratch = base.join("scratch");
+    for dir in [&project, &registry, &scratch] {
+        fs::create_dir(dir)?;
+    }
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(&registry, fs::Permissions::from_mode(0o700))?;
+    let pin = fs::read_to_string(workspace.join("lean-toolchain"))?;
+    fs::write(project.join("lean-toolchain"), &pin)?;
+    let id = pin
+        .trim()
+        .strip_prefix("leanprover/lean4:")
+        .expect("workspace Elan release");
+    let home = std::env::var_os("ELAN_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|p| p.join(".elan")))
+        .expect("Elan home");
+    let lake = home
+        .join("toolchains")
+        .join(format!("leanprover--lean4---{id}"))
+        .join("bin/lake")
+        .canonicalize()?;
+    fs::write(
+        project.join("lake-manifest.json"),
+        br#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"demo","lakeDir":".lake"}"#,
+    )?;
+    let source = project.join("Demo.lean");
+    fs::write(&source, "prelude\n")?;
+    let bad_project = base.join("bad-project");
+    fs::create_dir(&bad_project)?;
+    fs::write(bad_project.join("lean-toolchain"), &pin)?;
+    fs::copy(
+        project.join("lake-manifest.json"),
+        bad_project.join("lake-manifest.json"),
+    )?;
+    fs::write(bad_project.join("lakefile.toml"), "bad = [")?;
+    let bad_source = bad_project.join("Bad.lean");
+    fs::write(&bad_source, "prelude\n")?;
+    let option = "x".repeat(72 * 1024);
+    fs::write(
+        project.join("lakefile.toml"),
+        format!("name = \"demo\"\n[[lean_lib]]\nname = \"Demo\"\nleanOptions = {{ fixture = \"{option}\" }}\n"),
+    )?;
+    for (budget, overflow) in [(1024 * 1024, false), (64 * 1024, true)] {
+        let mut child = start_storage(&project, &registry, &scratch, budget, overflow)?;
+        let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+        let locked = reply(&mut reader)?;
+        assert_eq!(field(&locked, "state"), "locked");
+        let assets = Path::new(field(&locked, "asset_dir").as_str().expect("charged scratch"));
+        let staged = assets.join("module-setup.json");
+        send(
+            &mut child,
+            &json!({"action":"run","cwd":project,"timeout":10,
+            "command":[lake,"--no-build","--no-cache","setup-file",source],
+            "env":{"LEAN_HOST_MCP_CAPTURE_MODULE_SETUP":"1","LAKE_CACHE_DIR":assets,"LAKE_ARTIFACT_CACHE":"false"}}),
+        )?;
+        assert_eq!(field(&reply(&mut reader)?, "state"), "started");
+        let mut result = reply(&mut reader)?;
+        if field(&result, "state") == "still_running" {
+            result = reply(&mut reader)?;
+        }
+        assert_eq!(field(&result, "state"), "stopped");
+        assert_eq!(field(&result, "owned_work_stopped"), true);
+        if overflow {
+            assert_eq!(field(&result, "result"), "no_result");
+            assert!(
+                field(&result, "reason")
+                    .as_str()
+                    .expect("overflow reason")
+                    .contains("exceeds")
+            );
+            assert_eq!(field(&result, "stdout"), "");
+            assert!(!staged.exists());
+            assert!(!child.wait()?.success());
+            assert!(assets.is_dir(), "unconfirmed close must retain the charge");
+        } else {
+            assert_eq!(field(&result, "exit_code"), 0, "{}", field(&result, "stderr"));
+            assert_eq!(field(&result, "result"), "result");
+            let bytes = fs::read(&staged)?;
+            assert!(bytes.len() > 64 * 1024);
+            let setup: Value = serde_json::from_slice(&bytes)?;
+            assert_eq!(
+                field(field(&setup, "options"), "fixture").as_str(),
+                Some(option.as_str())
+            );
+            let digest = field(&result, "stdout").as_str().expect("hex digest");
+            assert_eq!(digest.len(), 64);
+            for (encoded, expected) in digest.as_bytes().as_chunks::<2>().0.iter().zip(Sha256::digest(&bytes)) {
+                assert_eq!(encoded, format!("{expected:02x}").as_bytes());
+            }
+            send(&mut child, &json!({"action":"close"}))?;
+            assert!(child.wait()?.success());
+            assert!(!assets.exists());
+        }
+    }
+    // The command-only owner can recover the exact stopped turn. An ordinary
+    // command still reports its own exit and stdout, without a setup file.
+    let mut child = start_storage(&bad_project, &registry, &scratch, 1024 * 1024, true)?;
+    let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+    let locked = reply(&mut reader)?;
+    let assets = Path::new(field(&locked, "asset_dir").as_str().expect("fresh charged scratch"));
+    assert_eq!(fs::read_dir(&scratch)?.count(), 1);
+    send(
+        &mut child,
+        &json!({"action":"run","command":["/usr/bin/printf","ordinary"],"timeout":3}),
+    )?;
+    assert_eq!(field(&reply(&mut reader)?, "state"), "started");
+    let ordinary = reply(&mut reader)?;
+    assert_eq!(field(&ordinary, "exit_code"), 0);
+    assert_eq!(field(&ordinary, "stdout"), "ordinary");
+    assert!(!assets.join("module-setup.json").exists());
+    // Lake's own error remains usable. A failed command publishes no setup.
+    send(
+        &mut child,
+        &json!({"action":"run","cwd":bad_project,"timeout":10,
+        "command":[lake,"--no-build","--no-cache","setup-file",bad_source],
+        "env":{"LEAN_HOST_MCP_CAPTURE_MODULE_SETUP":"1","LAKE_CACHE_DIR":assets,"LAKE_ARTIFACT_CACHE":"false"}}),
+    )?;
+    assert_eq!(field(&reply(&mut reader)?, "state"), "started");
+    let failure = reply(&mut reader)?;
+    assert_eq!(field(&failure, "result"), "result");
+    assert!(field(&failure, "exit_code").as_i64().expect("Lake exit") != 0);
+    assert!(!field(&failure, "stderr").as_str().expect("Lake diagnostic").is_empty());
+    assert_eq!(field(&failure, "stdout"), "");
+    assert!(!assets.join("module-setup.json").exists());
+    send(&mut child, &json!({"action":"close"}))?;
+    assert!(child.wait()?.success());
+    assert_eq!(fs::read_dir(&scratch)?.count(), 0);
+    Ok(())
+}

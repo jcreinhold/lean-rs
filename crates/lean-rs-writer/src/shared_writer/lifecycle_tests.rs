@@ -143,6 +143,7 @@ impl Fixture {
             &self.record,
             input,
             &self.launcher,
+            None,
             emit,
         )
     }
