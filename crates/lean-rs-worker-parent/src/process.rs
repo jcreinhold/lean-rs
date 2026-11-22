@@ -553,8 +553,18 @@ impl OwnedChild {
             .acknowledge()
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn validate_managed_scope(
+        &self,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+    ) -> io::Result<()> {
+        self.lifetime
+            .as_ref()
+            .ok_or_else(|| io::Error::other("managed worker lifetime lease missing"))?
+            .validate_managed_scope(expected)
+    }
+
     #[cfg(unix)]
-    #[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
     pub(crate) fn arm_managed_request(
         &mut self,
         arm: &crate::crash_ownership::ManagedRequestDeadline,

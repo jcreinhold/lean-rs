@@ -147,6 +147,48 @@ fn worker(root: &Path) -> (LeanWorker, LeanWorkerProcessTracker, u32) {
     (worker, tracker, pid)
 }
 
+fn scope(worker: &LeanWorker, registry: &Path) -> lean_toolchain::native_guardian::NativeGuardianDrainBinding {
+    use std::os::unix::fs::MetadataExt as _;
+    #[derive(serde::Deserialize)]
+    struct Record {
+        generation_id: String,
+        original_worker_boot: String,
+        parent: Identity,
+        process: Identity,
+        guardian: Identity,
+    }
+    let generation = worker.current_native_generation_id().expect("exact owned generation");
+    let path = registry.join(format!("worker-{generation}/owner.json"));
+    let record: Record = serde_json::from_slice(&std::fs::read(path).expect("read exact owner record"))
+        .expect("decode guarded owner identities");
+    let metadata = registry.metadata().expect("read private registry identity");
+    lean_toolchain::native_guardian::NativeGuardianDrainBinding {
+        registry_device: metadata.dev(),
+        registry_inode: metadata.ino(),
+        generation: record.generation_id,
+        boot: record.original_worker_boot,
+        parent: record.parent,
+        worker: record.process,
+        guardian: record.guardian,
+    }
+}
+
+fn inspect(
+    worker: &mut LeanWorker,
+    registry: &Path,
+    name: &str,
+    arm: &ManagedRequestDeadline,
+) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
+    let expected = scope(worker, registry);
+    worker.inspect_admitted_declaration_once(
+        LeanWorkerDeclarationInspectionRequest::new(name),
+        &expected,
+        arm.attempt,
+        arm.stage,
+        arm.expires_ns,
+    )
+}
+
 fn arm() -> ManagedRequestDeadline {
     ManagedRequestDeadline {
         attempt: [7; 16],
@@ -183,9 +225,26 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
                 .arm_managed_request(&arm())
                 .expect("arm the first managed request");
         }
-        let ManagedInspectionOutcome { result, retirement } = worker
-            .inspect_declaration_managed_once(LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero"), &arm())
-            .expect("attempt managed declaration inspection");
+        let registry = root.join("owners");
+        let expected = scope(&worker, &registry);
+        let mut stale = expected.clone();
+        stale.boot = "00000000-0000-0000-0000-000000000000".to_owned();
+        let original = arm();
+        let next = worker.next_request_id;
+        assert!(
+            worker
+                .inspect_admitted_declaration_once(
+                    LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero"),
+                    &stale,
+                    original.attempt,
+                    original.stage,
+                    original.expires_ns,
+                )
+                .is_err()
+        );
+        assert_eq!(worker.next_request_id, next, "stale scope must send no bytes");
+        let ManagedInspectionOutcome { result, retirement } =
+            inspect(&mut worker, &registry, "Nat.add_zero", &original).expect("attempt managed declaration inspection");
         if retirement_pending {
             assert!(matches!(retirement, Err(LeanWorkerError::WaitTimeout { .. })));
             assert_eq!(tracker.active_processes(), 1);
@@ -207,7 +266,13 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
         }
         assert!(
             worker
-                .inspect_declaration_managed_once(LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero"), &arm())
+                .inspect_admitted_declaration_once(
+                    LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero"),
+                    &expected,
+                    original.attempt,
+                    original.stage,
+                    original.expires_ns,
+                )
                 .is_err()
         );
         assert_eq!(tracker.active_processes(), 0);
@@ -335,13 +400,15 @@ fn real_lean_requester_fixture() {
     let Some(root) = std::env::var_os(REAL_FREEZE).map(PathBuf::from) else {
         return;
     };
-    let mut worker = RealInput::selected().worker(&root);
-    let outcome = worker
-        .inspect_declaration_managed_once(
-            LeanWorkerDeclarationInspectionRequest::new("LeanRsFixture.SourceRanges.knownTheorem"),
-            &arm(),
-        )
-        .expect("run one disposable real Lean request");
+    let selected = RealInput::selected();
+    let mut worker = selected.worker(&root);
+    let outcome = inspect(
+        &mut worker,
+        &selected.scratch.join("owners"),
+        "LeanRsFixture.SourceRanges.knownTheorem",
+        &arm(),
+    )
+    .expect("run one disposable real Lean request");
     outcome.retirement.expect("requester reaps after resume");
 }
 
@@ -366,18 +433,36 @@ fn real_lean_managed_deadline_and_expired_dispatch() {
                         .as_nanos(),
                 )
                 .expect("clock fits in u64 nanos");
+                let from_previous = scope(&worker, &selected.scratch.join("owners"));
                 worker
                     .shutdown_child(ShutdownIntent::KillOnly)
                     .expect("close initial generation");
                 worker = selected.worker(&root);
+                let next = worker.next_request_id;
+                assert!(
+                    worker
+                        .inspect_admitted_declaration_once(
+                            LeanWorkerDeclarationInspectionRequest::new("LeanRsFixture.SourceRanges.knownTheorem"),
+                            &from_previous,
+                            original.attempt,
+                            original.stage,
+                            original.expires_ns,
+                        )
+                        .is_err()
+                );
+                assert_eq!(
+                    worker.next_request_id, next,
+                    "old grant cannot dispatch on a replacement"
+                );
             }
             let next = worker.next_request_id;
-            let outcome = worker
-                .inspect_declaration_managed_once(
-                    LeanWorkerDeclarationInspectionRequest::new("LeanRsFixture.SourceRanges.knownTheorem"),
-                    &original,
-                )
-                .expect("enter managed inspection boundary");
+            let outcome = inspect(
+                &mut worker,
+                &selected.scratch.join("owners"),
+                "LeanRsFixture.SourceRanges.knownTheorem",
+                &original,
+            )
+            .expect("enter managed inspection boundary");
             outcome.retirement.expect("prove actual custody closure");
             if case == "expiry" {
                 assert!(matches!(outcome.result, Err(LeanWorkerError::Setup { .. })));

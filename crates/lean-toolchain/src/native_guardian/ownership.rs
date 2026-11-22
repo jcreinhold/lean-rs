@@ -544,7 +544,10 @@ fn require_legacy_drain_advertisement(value: &Value) -> io::Result<()> {
     validate_owner_header(value)
 }
 
-fn matches_drain_binding(value: &Value, expected: &NativeGuardianDrainBinding) -> io::Result<()> {
+pub(super) fn matches_original_guardian_binding(
+    value: &Value,
+    expected: &NativeGuardianDrainBinding,
+) -> io::Result<()> {
     verify_original_worker_boot(value)?;
     if field(value, "generation_id") != expected.generation.as_str()
         || !field(value, "original_worker_boot")
@@ -627,7 +630,7 @@ fn drain_slot(registry: &Path, expected: &NativeGuardianDrainBinding) -> io::Res
         return Err(invalid("original guardian generation directory changed"));
     }
     let value = read_drain_slot_owner(&generation, &directory.join("owner.json"))?;
-    matches_drain_binding(&value, expected)?;
+    matches_original_guardian_binding(&value, expected)?;
     if !slot_protocol(&value) {
         return Err(invalid("original guardian did not advertise the slot drain protocol"));
     }

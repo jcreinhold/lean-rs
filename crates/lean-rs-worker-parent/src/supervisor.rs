@@ -7637,3 +7637,5 @@ mod dispatch_pin_tests;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "supervisor/managed_once.rs"]
 mod managed_once;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use managed_once::ManagedInspectionOutcome;

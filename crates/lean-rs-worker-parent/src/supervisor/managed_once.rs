@@ -1,8 +1,4 @@
-//! Internal one-shot adapter, pending O3's production caller.
-#![allow(
-    dead_code,
-    reason = "this contract is exercised by the focused SDK regression until O3 adopts it"
-)]
+//! One-shot operation for a trusted adapter that has consumed its durable launch grant.
 
 use super::{
     Arc, GenerationDispatchRestriction, Instant, LeanWorker, LeanWorkerCancellationToken,
@@ -13,15 +9,51 @@ use super::{
 use crate::crash_ownership::ManagedRequestDeadline;
 
 /// The already observed reply and the separately observed retirement.
-pub(crate) struct ManagedInspectionOutcome {
-    pub(crate) result: Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError>,
-    pub(crate) retirement: Result<LeanWorkerShutdownReport, LeanWorkerError>,
+#[doc(hidden)]
+pub struct ManagedInspectionOutcome {
+    pub result: Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError>,
+    pub retirement: Result<LeanWorkerShutdownReport, LeanWorkerError>,
 }
 
 impl LeanWorker {
+    /// Inspect a declaration using the binding from a trusted host's already
+    /// consumed durable grant. The facts have no launch authority on their own.
+    /// The caller keeps the original grant private and consumes it exactly once.
+    ///
+    /// # Errors
+    /// Refuses a mismatched receiver or unavailable generation. After accepting
+    /// the exact receiver, dispatch and retirement outcomes are recorded separately.
+    #[doc(hidden)]
+    pub fn inspect_admitted_declaration_once(
+        &mut self,
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+    ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
+        self.child
+            .as_ref()
+            .ok_or(LeanWorkerError::ShutdownInProgress {
+                operation: "worker_inspect_declaration_managed_once",
+            })?
+            .validate_managed_scope(expected)
+            .map_err(|error| LeanWorkerError::Setup {
+                message: format!("managed receiver refused: {error}"),
+            })?;
+        self.inspect_declaration_managed_once(
+            request,
+            &ManagedRequestDeadline {
+                attempt,
+                stage,
+                expires_ns,
+            },
+        )
+    }
+
     /// Execute exactly one managed inspection on this already-open generation.
     /// Preserve the typed outcome and report retirement separately.
-    pub(crate) fn inspect_declaration_managed_once(
+    fn inspect_declaration_managed_once(
         &mut self,
         request: LeanWorkerDeclarationInspectionRequest,
         arm: &ManagedRequestDeadline,

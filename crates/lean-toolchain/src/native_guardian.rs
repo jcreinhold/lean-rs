@@ -62,6 +62,36 @@ pub fn guardian_deadline_ticks() -> io::Result<Duration> {
     deadlines::boot_ticks()
 }
 mod drain_slot;
+/// Validate immutable Running ownership before an admitted request uses its
+/// existing private guardian lifeline.
+///
+/// # Errors
+/// Refuses stale registry, boot, process identities or unavailable custody.
+#[doc(hidden)]
+pub fn validate_managed_guardian_scope(record: &Path, expected: &NativeGuardianDrainBinding) -> io::Result<()> {
+    let directory = record.parent().ok_or_else(|| invalid("owner directory missing"))?;
+    let registry = directory.parent().ok_or_else(|| invalid("owner registry missing"))?;
+    let metadata = fs::symlink_metadata(registry)?;
+    if !metadata.is_dir()
+        || registry.canonicalize()? != registry
+        || (metadata.dev(), metadata.ino()) != (expected.registry_device, expected.registry_inode)
+        || directory != registry.join(format!("worker-{}", expected.generation))
+        || record != directory.join("owner.json")
+    {
+        return Err(invalid("managed guardian registry binding changed"));
+    }
+    let value = read_owner(record)?;
+    ownership::matches_original_guardian_binding(&value, expected)?;
+    if field(&value, "phase") != "running"
+        || !expected.parent.is_live()?
+        || !expected.worker.is_live()?
+        || !expected.guardian.is_live()?
+    {
+        return Err(invalid("managed guardian scope is not live and running"));
+    }
+    Ok(())
+}
+
 mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};

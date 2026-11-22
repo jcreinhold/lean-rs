@@ -761,14 +761,12 @@ impl ParentLifetime {
     }
 }
 /// One original managed attempt/stage and its immutable same-boot deadline.
-#[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
 pub(crate) struct ManagedRequestDeadline {
     pub(crate) attempt: [u8; 16],
     pub(crate) stage: u64,
     pub(crate) expires_ns: u64,
 }
 
-#[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
 impl ManagedRequestDeadline {
     pub(crate) fn remaining(&self) -> io::Result<Duration> {
         let remaining =
@@ -828,7 +826,26 @@ impl ParentLifetimeLease {
             write_before_deadline(&mut self.stream, b"durable-owner-ready\n", self.deadline)
         }
     }
-    #[allow(dead_code, reason = "internal managed adapter pending its O3 caller")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn validate_managed_scope(
+        &self,
+        expected: &native_guardian::NativeGuardianDrainBinding,
+    ) -> io::Result<()> {
+        if !self.running_published
+            || self.guarded_generation_id() != Some(expected.generation.as_str())
+            || self.owner != expected.worker
+            || self.guardian.as_ref() != Some(&expected.guardian)
+            || self.generation.parent != expected.parent
+            || std::process::id() != expected.parent.pid
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "managed grant names another receiver",
+            ));
+        }
+        native_guardian::validate_managed_guardian_scope(&self.record, expected)
+    }
+
     pub(crate) fn arm_managed_request(&mut self, arm: &ManagedRequestDeadline) -> io::Result<()> {
         if !self.guarded || !self.running_published {
             return Err(io::Error::other(
