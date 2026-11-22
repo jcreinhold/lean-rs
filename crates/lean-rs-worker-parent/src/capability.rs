@@ -1421,6 +1421,41 @@ pub struct LeanWorkerHostHandle {
 }
 
 impl LeanWorkerHostHandle {
+    /// Observe the exact guarded generation currently owned by this handle.
+    /// The trusted adapter uses this identity when binding its durable grant.
+    ///
+    /// # Errors
+    /// Refuses an unavailable or unguarded generation.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn managed_guardian_binding(
+        &self,
+    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
+        self.worker.managed_guardian_binding()
+    }
+
+    /// Spend the trusted adapter's admitted declaration request on the
+    /// already-open session of this exact handle. The operation does not open
+    /// a session or replace the worker. The original absolute boot-clock
+    /// deadline is unchanged. The result and retirement are reported separately.
+    ///
+    /// # Errors
+    /// Refuses an unavailable session or mismatched generation. The operation
+    /// requires the exact guardian ACK before writing any request bytes.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn inspect_admitted_declaration_once(
+        &mut self,
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
+        self.worker
+            .inspect_admitted_declaration_once(request, expected, attempt, stage, expires_ns)
+    }
+
     /// Open a worker session for this host handle.
     ///
     /// The builder does not open one, so the first call here is also where a

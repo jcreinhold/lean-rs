@@ -554,6 +554,16 @@ impl OwnedChild {
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn managed_guardian_binding(
+        &self,
+    ) -> io::Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding> {
+        self.lifetime
+            .as_ref()
+            .ok_or_else(|| io::Error::other("managed worker lifetime lease missing"))?
+            .managed_guardian_binding()
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn validate_managed_scope(
         &self,
         expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,

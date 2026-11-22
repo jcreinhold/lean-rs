@@ -92,6 +92,42 @@ pub fn validate_managed_guardian_scope(record: &Path, expected: &NativeGuardianD
     Ok(())
 }
 
+/// Observe the exact current guardian binding for this private Running record.
+/// This is identity evidence. The caller retains the separate admission grant.
+///
+/// # Errors
+/// Refuses an invalid or unavailable Running generation.
+#[doc(hidden)]
+pub fn observe_managed_guardian_binding(record: &Path) -> io::Result<NativeGuardianDrainBinding> {
+    let registry = record
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| invalid("owner registry missing"))?;
+    ownership::validate_registry(registry)?;
+    let metadata = fs::symlink_metadata(registry)?;
+    let value = read_owner(record)?;
+    ownership::verify_original_worker_boot(&value)?;
+    let text = |name| {
+        field(&value, name)
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| invalid(format!("managed owner field {name} missing")))
+    };
+    let identity = |name| serde_json::from_value(field(&value, name).clone()).map_err(io::Error::other);
+    if field(&value, "phase") != "running" {
+        return Err(invalid("managed guardian scope is not running"));
+    }
+    Ok(NativeGuardianDrainBinding {
+        registry_device: metadata.dev(),
+        registry_inode: metadata.ino(),
+        generation: text("generation_id")?,
+        boot: text("original_worker_boot")?,
+        parent: identity("parent")?,
+        worker: identity("process")?,
+        guardian: identity("guardian")?,
+    })
+}
+
 mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};

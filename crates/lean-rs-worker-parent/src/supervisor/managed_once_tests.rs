@@ -71,9 +71,10 @@ fn worker_fixture() {
 
 fn write_guardian_script(root: &Path, executable: &Path) {
     let binary = executable.to_string_lossy().replace('\'', "'\\''");
+    let fixture = root.to_string_lossy().replace('\'', "'\\''");
     std::fs::write(
         root.join("guardian"),
-        format!("#!/bin/sh\nexec '{binary}' --exact {THIS}guardian_fixture --nocapture\n"),
+        format!("#!/bin/sh\nexport {ROOT}='{fixture}'\nexec '{binary}' --exact {THIS}guardian_fixture --nocapture\n"),
     )
     .expect("write fixture guardian script");
     std::fs::set_permissions(root.join("guardian"), std::fs::Permissions::from_mode(0o700))
@@ -369,6 +370,71 @@ impl RealInput {
     }
 }
 
+fn check_prepared_handle(selected: &RealInput, root: &Path) {
+    let executable = std::env::current_exe().expect("portable guardian fixture executable");
+    write_guardian_script(root, &executable);
+    let child = crate::LeanWorkerChild::for_toolchain(&selected.worker, &selected.sysroot)
+        .checked_native_loader_environment()
+        .shared_writer_executable(&selected.helper)
+        .native_guardian(root.join("guardian"))
+        .lifetime_directory(selected.scratch.join("owners"))
+        .lifetime_socket_directory(&selected.scratch)
+        .prepared_host_artifacts(selected.prepared.clone());
+    let tracker = LeanWorkerProcessTracker::new();
+    let mut handle = crate::LeanWorkerHostHandleBuilder::shims_only(
+        &selected.fixture,
+        ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"],
+    )
+    .worker_child(child)
+    .process_tracker(tracker.clone())
+    .open()
+    .expect("open the normal prepared Lean host handle");
+    let expected = handle
+        .managed_guardian_binding()
+        .expect("observe exact guarded receiver");
+    let mut wrong = expected.clone();
+    wrong.generation = "0".repeat(48);
+    let original = arm();
+    let request = || LeanWorkerDeclarationInspectionRequest::new("LeanRsFixture.SourceRanges.knownTheorem");
+    assert!(handle.inspect_admitted_declaration_once(
+        request(), &wrong, original.attempt, original.stage, original.expires_ns,
+    ).is_err());
+    assert_eq!(
+        handle
+            .managed_guardian_binding()
+            .expect("wrong binding did not replace the receiver"),
+        expected
+    );
+    let ManagedInspectionOutcome { result, retirement } = handle
+        .inspect_admitted_declaration_once(
+            request(),
+            &expected,
+            original.attempt,
+            original.stage,
+            original.expires_ns,
+        )
+        .expect("authenticated managed inspection on the prepared handle");
+    assert!(matches!(
+        result.expect("typed Lean reply preserved"),
+        LeanWorkerDeclarationInspectionResult::Found { declaration }
+            if declaration.name == "LeanRsFixture.SourceRanges.knownTheorem"
+    ));
+    retirement.expect("prepared handle custody has retired");
+    assert_eq!(tracker.active_processes(), 0);
+    assert!(handle.managed_guardian_binding().is_err());
+    assert!(
+        handle
+            .inspect_admitted_declaration_once(
+                request(),
+                &expected,
+                original.attempt,
+                original.stage,
+                original.expires_ns,
+            )
+            .is_err()
+    );
+}
+
 type Identity = lean_toolchain::native_guardian::NativeProcessIdentity;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -416,11 +482,13 @@ fn real_lean_requester_fixture() {
 #[ignore = "requires a pinned prepared Lean 4.36 SDK fixture through LEAN_RS_TEST_MANAGED_REAL_INPUT"]
 fn real_lean_managed_deadline_and_expired_dispatch() {
     let selected = RealInput::selected();
-    for case in ["success", "expiry", "frozen"] {
+    for case in ["prepared_handle", "success", "expiry", "frozen"] {
         let root = selected.scratch.join(case);
         std::fs::create_dir(&root).expect("create clean disposable case");
         if case == "frozen" {
             check_frozen_real_requester(&root);
+        } else if case == "prepared_handle" {
+            check_prepared_handle(&selected, &root);
         } else {
             let mut worker = selected.worker(&root);
             let mut original = arm();

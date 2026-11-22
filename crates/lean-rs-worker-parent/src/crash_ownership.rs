@@ -827,6 +827,13 @@ impl ParentLifetimeLease {
         }
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn managed_guardian_binding(&self) -> io::Result<native_guardian::NativeGuardianDrainBinding> {
+        let observed = native_guardian::observe_managed_guardian_binding(&self.record)?;
+        self.validate_managed_scope(&observed)?;
+        Ok(observed)
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn validate_managed_scope(
         &self,
         expected: &native_guardian::NativeGuardianDrainBinding,

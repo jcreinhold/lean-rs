@@ -16,6 +16,25 @@ pub struct ManagedInspectionOutcome {
 }
 
 impl LeanWorker {
+    pub(crate) fn managed_guardian_binding(
+        &self,
+    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
+        if self.generation_dispatch.is_some() || self.cleanup_pending() {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: "managed_guardian_binding",
+            });
+        }
+        self.child
+            .as_ref()
+            .ok_or(LeanWorkerError::ShutdownInProgress {
+                operation: "managed_guardian_binding",
+            })?
+            .managed_guardian_binding()
+            .map_err(|error| LeanWorkerError::Setup {
+                message: format!("managed guardian binding unavailable: {error}"),
+            })
+    }
+
     /// Inspect a declaration using the binding from a trusted host's already
     /// consumed durable grant. The facts have no launch authority on their own.
     /// The caller keeps the original grant private and consumes it exactly once.
