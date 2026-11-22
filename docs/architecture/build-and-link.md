@@ -274,7 +274,9 @@ dedicated one-use action. The helper verifies the exact Ready identity and origi
 and the existing blocked wrapper verifies both again immediately before exec. The helper observes the
 same expiry while the command runs and uses its existing process and descriptor closure protocol. The clock check
 and exec are separate operations; scheduling can cross the cutoff between them. An attempted permitted run seals
-further commands even if local validation refuses before delivery. Close still requires the existing separate receipt. Older or embedded helpers that do not advertise this interface refuse permitted execution.
+further commands even if local validation refuses before delivery. After control closes, the parent can still
+observe successful cleanup through its original exact child waiter. For charged writers the helper returns success
+only after explicit close and charge settlement. Older or embedded helpers that do not advertise this interface refuse permitted execution.
 
 A cooperating SDK caller can opt into the standalone writer's v1 storage admission with
 `SharedWriter::open_with_storage_request`. Supply the same bounded JSON request as

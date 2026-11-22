@@ -258,3 +258,59 @@ fn locally_expired_permit_seals_the_public_writer_until_close() -> io::Result<()
     assert!(fs::read_dir(scratch)?.next().is_none());
     Ok(())
 }
+
+#[test]
+fn permitted_writer_waits_for_exact_helper_exit_after_control_closes() -> io::Result<()> {
+    const FIXTURE: &str = "LEAN_RS_TEST_PERMITTED_CLOSE";
+    const TEST: &str = "stage_permit::permitted_writer_waits_for_exact_helper_exit_after_control_closes";
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let fixture = StageFixture::new()?;
+        let status = Command::new(std::env::current_exe()?)
+            .args(["--exact", TEST, "--nocapture"])
+            .env(FIXTURE, fixture.temp.path().canonicalize()?)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &fixture.registry)
+            .env("TMPDIR", fixture.temp.path().canonicalize()?)
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let base = Path::new(&base);
+    let project = base.join("demo");
+    let registry = base.join("owners");
+    let scratch = base.join("scratch");
+    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+    let timeout = Duration::from_secs(10);
+    let request = json!({"version":1,"floor_bytes":1,"budget_bytes":1024 * 1024,
+        "roots":[root("project",&project),root("registry",&registry),root("scratch_parent",&scratch)]});
+    for managed in [false, true] {
+        let mut writer = if managed {
+            SharedWriter::open_with_storage_request(helper, &project, &[], &request.to_string(), timeout, &|| false)?
+        } else {
+            SharedWriter::open(helper, &project, timeout)?
+        };
+        let ready = writer.stage_ready()?.clone();
+        let cutoff = expiry(Duration::from_secs(1))?;
+        let permit = WriterStagePermit::new(ready.clone(), ready.boot(), cutoff)?;
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30");
+        let expired = || guardian_deadline_ticks().map_or(true, |ticks| ticks.as_nanos() >= u128::from(cutoff));
+        let failure = writer
+            .run_permitted(&command, permit, &expired)
+            .expect_err("cancelled stage has no result");
+        let failure = WriterFailure::from_io(&failure).expect("typed stop");
+        assert_eq!(failure.disposition, WriterDisposition::Stopped);
+        let stopped = failure.stop_receipt.as_ref().expect("exact command closure");
+        assert_eq!(field(stopped, "owned_work_stopped"), true);
+        let assets = writer.asset_dir().to_owned();
+        let closed = writer.close(timeout);
+        if managed {
+            let error = closed.expect_err("EOF cannot settle a charged writer");
+            assert!(error.to_string().contains("writer cleanup failed"), "{error}");
+            assert!(assets.is_dir(), "the charge still owns scratch");
+        } else {
+            closed?;
+            assert!(!assets.exists(), "successful helper exit followed cleanup");
+        }
+    }
+    Ok(())
+}

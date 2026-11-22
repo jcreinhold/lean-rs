@@ -682,6 +682,7 @@ pub struct SharedWriter {
     receiver: mpsc::Receiver<io::Result<Value>>,
     owner: Value,
     stage_ready: Option<WriterStageReady>,
+    permitted_attempt: bool,
     root: PathBuf,
     write_roots: Vec<PathBuf>,
     workspaces: Vec<PathBuf>,
@@ -991,6 +992,7 @@ impl SharedWriter {
                 receiver,
                 owner: Value::Null,
                 stage_ready: None,
+                permitted_attempt: false,
                 root: root.to_path_buf(),
                 write_roots: roots.to_vec(),
                 workspaces: workspaces.to_vec(),
@@ -1131,6 +1133,7 @@ impl SharedWriter {
                 invalid("writer stage readiness is unavailable"),
             )
         })?;
+        self.permitted_attempt = true;
         let budget = permit
             .check(&ready)
             .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
@@ -1404,23 +1407,30 @@ impl SharedWriter {
     /// a managed writer without an explicit close leaves settlement unconfirmed.
     ///
     /// # Errors
-    /// A sealed writer, failed close delivery, timeout or unsuccessful exit leaves
-    /// cleanup unconfirmed. A managed, verified stopped/no-result turn can only close.
+    /// A timeout or unsuccessful exact helper exit leaves cleanup unconfirmed.
+    /// For a permitted attempt, the helper can complete cleanup after control
+    /// closes. Its successful exit remains observable through the original child
+    /// waiter. Legacy turns still require successful explicit close delivery.
     /// Do not replay a command on this basis.
     pub fn close(mut self, timeout: Duration) -> io::Result<()> {
         let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or_else(|| invalid("writer close deadline overflow"))?;
-        if self.stage == StageState::Unconfirmed {
+        if self.stage == StageState::Unconfirmed && !self.permitted_attempt {
             return Err(invalid("sealed writer cannot confirm cleanup"));
         }
-        let input = self
+        let delivery = self
             .helper
             .input
-            .as_mut()
-            .ok_or_else(|| invalid("writer control closed"))?;
-        send_until(input, &json!({"action":"close"}), deadline, &|| false)?;
-        drop(self.helper.input.take());
+            .take()
+            .ok_or_else(|| invalid("writer control closed"))
+            .and_then(|mut input| send_until(&mut input, &json!({"action":"close"}), deadline, &|| false));
+        // On the permit-capable standalone helper, successful exit is possible
+        // only after owned command and descriptor closure and successful cleanup.
+        // Preserve legacy explicit settlement and never treat pipe state as proof.
+        if !self.permitted_attempt {
+            delivery?;
+        }
         let status = self
             .helper
             .exit

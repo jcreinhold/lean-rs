@@ -15,6 +15,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   boot-clock deadline. The helper and its blocked exec wrapper check the same expiry, and the caller retains
   the existing explicit close and retirement checks.
 - An attempted permitted run seals further execution even if local validation refuses before delivery.
+- After a permitted run closes its control pipe, the parent can still confirm cleanup through the exact helper
+  exit observed by its original child waiter.
 
 ## [0.10.11]
 
