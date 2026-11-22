@@ -1,10 +1,10 @@
 //! One-shot operation for a trusted adapter that has consumed its durable launch grant.
 
 use super::{
-    Arc, GenerationDispatchRestriction, Instant, LeanWorker, LeanWorkerCancellationToken,
+    Arc, GenerationDispatchRestriction, HostSessionMode, Instant, LeanWorker, LeanWorkerCancellationToken,
     LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerError,
-    LeanWorkerShutdownReport, OwnedChild, Request, Response, ShutdownIntent, WorkerSupervisorState,
-    unexpected_response,
+    LeanWorkerSessionConfig, LeanWorkerShutdownReport, OwnedChild, Request, Response, ShutdownIntent,
+    WorkerSupervisorState, unexpected_response,
 };
 use crate::crash_ownership::ManagedRequestDeadline;
 
@@ -35,6 +35,144 @@ impl LeanWorker {
             })
     }
 
+    pub(crate) fn prepare_managed_artifact_read(
+        &mut self,
+        config: &LeanWorkerSessionConfig,
+        expires_ns: u64,
+    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
+        const OPERATION: &str = "prepare_managed_artifact_read";
+        if !self.config.shared_artifact_reads
+            || self.host_read_active
+            || !matches!(self.state, WorkerSupervisorState::Idle { .. })
+        {
+            return Err(LeanWorkerError::ShutdownInProgress { operation: OPERATION });
+        }
+        let expected = self.managed_guardian_binding()?;
+        let original = ManagedRequestDeadline {
+            attempt: [0; 16],
+            stage: 0,
+            expires_ns,
+        };
+        let result = (|| {
+            let token = managed_token(&original)?;
+            let response = self.managed_frame(
+                Request::PrepareHostRead {
+                    project_root: config.project_root_string(),
+                },
+                OPERATION,
+                &token,
+                expires_ns,
+            )?;
+            if !matches!(response, Response::HostReadPrepared) {
+                return Err(unexpected_response(OPERATION, &response));
+            }
+            self.host_read_active = true;
+            let observed = self.managed_guardian_binding()?;
+            if observed != expected {
+                return Err(LeanWorkerError::ShutdownInProgress { operation: OPERATION });
+            }
+            Ok(expected)
+        })();
+        if result.is_err() {
+            drop(self.shutdown_child(ShutdownIntent::KillOnly));
+        }
+        result
+    }
+
+    pub(crate) fn inspect_admitted_prepared_declaration_once(
+        &mut self,
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        arm: &ManagedRequestDeadline,
+        config: &LeanWorkerSessionConfig,
+    ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
+        self.validate_managed_receiver(expected)?;
+        self.inspect_declaration_managed_once(request, arm, Some(config))
+    }
+
+    fn validate_managed_receiver(
+        &self,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+    ) -> Result<(), LeanWorkerError> {
+        self.child
+            .as_ref()
+            .ok_or(LeanWorkerError::ShutdownInProgress {
+                operation: "worker_inspect_declaration_managed_once",
+            })?
+            .validate_managed_scope(expected)
+            .map_err(|error| LeanWorkerError::Setup {
+                message: format!("managed receiver refused: {error}"),
+            })
+    }
+
+    fn managed_frame(
+        &mut self,
+        request: Request,
+        operation: &'static str,
+        token: &LeanWorkerCancellationToken,
+        expires_ns: u64,
+    ) -> Result<Response, LeanWorkerError> {
+        let now = Instant::now();
+        self.write_request_bounded_inner(
+            request,
+            operation,
+            Some(token),
+            self.config.request_timeout,
+            Some(expires_ns),
+        )?;
+        self.request_started = Some(now);
+        self.record_request(false);
+        self.read_response_with_progress(operation, None, Some(token))
+    }
+
+    fn open_managed_artifact_session(
+        &mut self,
+        config: &LeanWorkerSessionConfig,
+        token: &LeanWorkerCancellationToken,
+        expires_ns: u64,
+    ) -> Result<(), LeanWorkerError> {
+        const OPEN: &str = "open_managed_artifact_session";
+        let project_root = config.project_root_string();
+        let response = self.managed_frame(
+            Request::OpenHostSession {
+                project_root: project_root.clone(),
+                mode: HostSessionMode::ShimsOnly,
+                imports: config.imports().to_vec(),
+                import_profile: config.import_profile(),
+            },
+            OPEN,
+            token,
+            expires_ns,
+        )?;
+        if !matches!(
+            response,
+            Response::HostSessionOpened { .. } | Response::HostSessionReused { .. }
+        ) {
+            return Err(unexpected_response(OPEN, &response));
+        }
+        const METADATA: &str = "managed_host_runtime_metadata";
+        let response = self.managed_frame(Request::HostRuntimeMetadata, METADATA, token, expires_ns)?;
+        let Response::HostRuntimeMetadata { metadata } = response else {
+            return Err(unexpected_response(METADATA, &response));
+        };
+        if let Some(expected) = config.host_runtime_expectation() {
+            expected
+                .validate(&metadata)
+                .map_err(|message| LeanWorkerError::Protocol { message })?;
+        }
+        if !metadata.artifact_read_epochs.as_ref().is_some_and(|epochs| {
+            epochs
+                .iter()
+                .any(|epoch| epoch.project_root == project_root && !epoch.epoch.is_empty())
+        }) {
+            return Err(LeanWorkerError::Protocol {
+                message: "worker did not report actual project artifact read custody".to_owned(),
+            });
+        }
+        self.host_runtime_metadata = Some(metadata);
+        Ok(())
+    }
+
     /// Inspect a declaration using the binding from a trusted host's already
     /// consumed durable grant. The facts have no launch authority on their own.
     /// The caller keeps the original grant private and consumes it exactly once.
@@ -51,15 +189,7 @@ impl LeanWorker {
         stage: u64,
         expires_ns: u64,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
-        self.child
-            .as_ref()
-            .ok_or(LeanWorkerError::ShutdownInProgress {
-                operation: "worker_inspect_declaration_managed_once",
-            })?
-            .validate_managed_scope(expected)
-            .map_err(|error| LeanWorkerError::Setup {
-                message: format!("managed receiver refused: {error}"),
-            })?;
+        self.validate_managed_receiver(expected)?;
         self.inspect_declaration_managed_once(
             request,
             &ManagedRequestDeadline {
@@ -67,6 +197,7 @@ impl LeanWorker {
                 stage,
                 expires_ns,
             },
+            None,
         )
     }
 
@@ -76,11 +207,12 @@ impl LeanWorker {
         &mut self,
         request: LeanWorkerDeclarationInspectionRequest,
         arm: &ManagedRequestDeadline,
+        prepared: Option<&LeanWorkerSessionConfig>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
         if self.generation_dispatch.is_some()
             || !matches!(self.state, WorkerSupervisorState::Idle { .. })
-            || self.open_session_keys.is_empty()
+            || prepared.map_or_else(|| self.open_session_keys.is_empty(), |_| !self.host_read_active)
             || !self.child.as_ref().is_some_and(OwnedChild::has_guardian)
         {
             return Err(LeanWorkerError::ShutdownInProgress { operation: OPERATION });
@@ -103,14 +235,11 @@ impl LeanWorker {
             child.arm_managed_request(arm).map_err(|error| LeanWorkerError::Setup {
                 message: format!("managed request arm refused: {error}"),
             })?;
+            let token = managed_token(arm)?;
+            if let Some(config) = prepared {
+                self.open_managed_artifact_session(config, &token, arm.expires_ns)?;
+            }
             let now = Instant::now();
-            let remaining = arm.remaining().map_err(|error| LeanWorkerError::Setup {
-                message: error.to_string(),
-            })?;
-            let end = now.checked_add(remaining).ok_or_else(|| LeanWorkerError::Setup {
-                message: "managed request deadline exceeds local clock".to_owned(),
-            })?;
-            let token = LeanWorkerCancellationToken::new().with_deadline(end);
             self.write_request_bounded_inner(
                 Request::InspectDeclaration { request },
                 OPERATION,
@@ -134,6 +263,17 @@ impl LeanWorker {
         let retirement = self.shutdown_child(ShutdownIntent::KillOnly);
         Ok(ManagedInspectionOutcome { result, retirement })
     }
+}
+
+fn managed_token(arm: &ManagedRequestDeadline) -> Result<LeanWorkerCancellationToken, LeanWorkerError> {
+    let now = Instant::now();
+    let remaining = arm.remaining().map_err(|error| LeanWorkerError::Setup {
+        message: error.to_string(),
+    })?;
+    let end = now.checked_add(remaining).ok_or_else(|| LeanWorkerError::Setup {
+        message: "managed request deadline exceeds local clock".to_owned(),
+    })?;
+    Ok(LeanWorkerCancellationToken::new().with_deadline(end))
 }
 
 #[cfg(all(test, target_os = "macos"))]

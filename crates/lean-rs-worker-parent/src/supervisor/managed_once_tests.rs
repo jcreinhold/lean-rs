@@ -616,3 +616,78 @@ fn check_frozen_real_requester(root: &Path) {
     assert!(requester.0.wait().expect("reaped requester").success());
     assert!(!lean_toolchain::process_group::group_present(worker.process_group).expect("exact group absence"));
 }
+
+#[test]
+#[ignore = "requires the O3 owner's pinned prepared-project worker and exact launch input"]
+fn cold_managed_inspection_uses_prepared_project_loans() {
+    let selected = RealInput::selected();
+    let application = std::env::var("LEAN_RS_TEST_MANAGED_ARTIFACT_APPLICATION")
+        .expect("O3's exact prepared generation launch input");
+    let imports: Vec<String> = serde_json::from_str(
+        &std::env::var("LEAN_RS_TEST_MANAGED_ARTIFACT_IMPORTS").expect("prepared project imports"),
+    )
+    .expect("typed prepared imports");
+    let declaration =
+        std::env::var("LEAN_RS_TEST_MANAGED_ARTIFACT_DECLARATION").expect("known theorem in the prepared project");
+    let root = selected.scratch.join("cold-managed");
+    std::fs::create_dir(&root).expect("create private cold test case");
+    write_guardian_script(
+        &root,
+        &std::env::current_exe().expect("portable guardian fixture executable"),
+    );
+    let tracker = LeanWorkerProcessTracker::new();
+    let registry = selected.scratch.join("owners");
+    let child = crate::LeanWorkerChild::for_toolchain(&selected.worker, &selected.sysroot)
+        .checked_native_loader_environment()
+        .shared_writer_executable(&selected.helper)
+        .native_guardian(root.join("guardian"))
+        .lifetime_directory(&registry)
+        .lifetime_socket_directory(&selected.scratch)
+        .prepared_host_artifacts(selected.prepared)
+        .shared_artifact_reads(true)
+        .application_launch_input(&application)
+        .expect("bind exact prepared project input");
+    let mut handle = crate::LeanWorkerHostHandleBuilder::shims_only(&selected.fixture, std::iter::empty::<String>())
+        .worker_child(child)
+        .process_tracker(tracker.clone())
+        .open()
+        .expect("open cold prepared handle without importing");
+    assert!(handle.host_runtime_metadata().is_none());
+    let original = arm();
+    let binding = handle
+        .prepare_managed_artifact_read(imports.clone(), original.expires_ns)
+        .expect("retain actual artifact union before any session open");
+    assert!(handle.host_runtime_metadata().is_none());
+    let record: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(registry.join(format!("worker-{}/owner.json", binding.generation)))
+            .expect("read original acknowledged guardian record"),
+    )
+    .expect("parse retained domains");
+    assert!(
+        record
+            .get("protected_domains")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|domains| domains.iter().any(|domain| {
+                domain.get("project_root").and_then(serde_json::Value::as_str) == selected.fixture.to_str()
+            })),
+        "the original guardian must retain the actual project lock before arm"
+    );
+    let outcome = handle
+        .inspect_admitted_declaration_with_imports_once(
+            &imports,
+            LeanWorkerDeclarationInspectionRequest::new(&declaration),
+            &binding,
+            original.attempt,
+            original.stage,
+            original.expires_ns,
+        )
+        .expect("dispatch through the original guarded prepared handle");
+    assert!(matches!(
+        outcome.result.expect("real Lean theorem lookup"),
+        LeanWorkerDeclarationInspectionResult::Found { declaration: found }
+            if found.name == declaration
+    ));
+    outcome.retirement.expect("close worker and guardian custody");
+    assert_eq!(tracker.active_processes(), 0);
+    std::fs::remove_dir_all(&root).expect("remove closed test fixture");
+}

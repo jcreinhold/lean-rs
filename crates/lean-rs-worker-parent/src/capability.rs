@@ -1026,7 +1026,12 @@ impl LeanWorkerHostHandleBuilder {
         if !session_config.imports().is_empty() {
             let _session = worker.open_session(&session_config, None, None)?;
         }
-        Ok(LeanWorkerHostHandle { worker, session_config })
+        Ok(LeanWorkerHostHandle {
+            worker,
+            session_config,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            managed_artifact_read: None,
+        })
     }
 }
 
@@ -1418,6 +1423,8 @@ impl LeanWorkerCapability {
 pub struct LeanWorkerHostHandle {
     worker: LeanWorker,
     session_config: LeanWorkerSessionConfig,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    managed_artifact_read: Option<(LeanWorkerSessionConfig, u64)>,
 }
 
 impl LeanWorkerHostHandle {
@@ -1432,6 +1439,24 @@ impl LeanWorkerHostHandle {
         &self,
     ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
         self.worker.managed_guardian_binding()
+    }
+
+    /// Prepare the exact shared read union without importing or initializing Lean
+    /// project code. The returned binding is for durable admission on this handle.
+    ///
+    /// # Errors
+    /// Refuses an unavailable owner, expired preparation budget or lock failure.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn prepare_managed_artifact_read(
+        &mut self,
+        imports: Vec<String>,
+        expires_ns: u64,
+    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
+        let config = self.session_config.with_imports(imports);
+        let binding = self.worker.prepare_managed_artifact_read(&config, expires_ns)?;
+        self.managed_artifact_read = Some((config, expires_ns));
+        Ok(binding)
     }
 
     /// Spend the trusted adapter's admitted declaration request on the
@@ -1456,6 +1481,45 @@ impl LeanWorkerHostHandle {
             .inspect_admitted_declaration_once(request, expected, attempt, stage, expires_ns)
     }
 
+    /// Run the admitted session open and declaration request using the exact
+    /// prepared read union and the one original hard deadline.
+    ///
+    /// # Errors
+    /// Refuses missing or mismatched storage preparation or receiver identity.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn inspect_admitted_declaration_with_imports_once(
+        &mut self,
+        imports: &[String],
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
+        let (config, original_expiry) = self
+            .managed_artifact_read
+            .as_ref()
+            .ok_or_else(|| LeanWorkerError::Setup {
+                message: "managed inspection requires its prepared artifact loan".to_owned(),
+            })?;
+        if *original_expiry != expires_ns || config.imports() != imports {
+            return Err(LeanWorkerError::Setup {
+                message: "managed artifact preparation differs from the admitted request".to_owned(),
+            });
+        }
+        self.worker.inspect_admitted_prepared_declaration_once(
+            request,
+            expected,
+            &crate::crash_ownership::ManagedRequestDeadline {
+                attempt,
+                stage,
+                expires_ns,
+            },
+            config,
+        )
+    }
+
     /// Open a worker session for this host handle.
     ///
     /// The builder does not open one, so the first call here is also where a
@@ -1474,6 +1538,12 @@ impl LeanWorkerHostHandle {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if self.managed_artifact_read.is_some() {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: "open_worker_session",
+            });
+        }
         self.worker.open_session(&self.session_config, cancellation, progress)
     }
 
@@ -1492,6 +1562,12 @@ impl LeanWorkerHostHandle {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if self.managed_artifact_read.is_some() {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: "open_worker_session",
+            });
+        }
         let config = self.session_config.with_imports(imports);
         self.worker.open_session(&config, cancellation, progress)
     }

@@ -132,6 +132,10 @@ pub enum Request {
     HostRuntimeMetadata,
     /// Close this child's read aliases after a known terminal host operation.
     ReleaseHostRead,
+    /// Collect and retain the shims-only artifact union without opening Lean.
+    PrepareHostRead {
+        project_root: String,
+    },
     LoadFixtureCapability {
         manifest_path: String,
     },
@@ -281,6 +285,8 @@ pub enum Response {
     HostArtifactEpochChanged,
     /// The child closed its read aliases without issuing an explicit unlock.
     HostReadReleased,
+    /// The exact prepared read union is retained for the next session open.
+    HostReadPrepared,
     HealthOk,
     /// Actual checked bindings and toolchain facts of the current host session.
     HostRuntimeMetadata {

@@ -445,6 +445,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     let writer = ProtocolWriter::new();
     let mut host_session: Option<HostSessionState> = None;
     let mut host_read: Option<ArtifactReadScope> = None;
+    let mut prepared_read_root: Option<String> = None;
     let mut read_admission_failed = false;
     let mut artifact_epochs: Option<Vec<lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch>> = None;
     // Imported environments this child holds but is not currently serving, MRU
@@ -521,7 +522,11 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             && host_read.is_none()
             && !matches!(
                 &request,
-                Request::Health | Request::Terminate | Request::OpenHostSession { .. } | Request::ReleaseHostRead
+                Request::Health
+                    | Request::Terminate
+                    | Request::OpenHostSession { .. }
+                    | Request::PrepareHostRead { .. }
+                    | Request::ReleaseHostRead
             )
         {
             write_response(
@@ -534,7 +539,24 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        if let Some(state) = host_session.as_mut()
+        if prepared_read_root.is_some()
+            && !matches!(
+                &request,
+                Request::OpenHostSession { .. } | Request::ReleaseHostRead | Request::Terminate
+            )
+        {
+            write_response(
+                &writer,
+                Response::Error {
+                    code: "lean_rs.worker.artifact_read_active".to_owned(),
+                    message: "prepared artifact custody requires its session open or retirement".to_owned(),
+                },
+            )?;
+            continue;
+        }
+
+        if !matches!(&request, Request::PrepareHostRead { .. })
+            && let Some(state) = host_session.as_mut()
             && let Err(err) = state
                 .session
                 .configure_header_import_budget(session_import_bytes, header_budget)
@@ -542,6 +564,19 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             write_response(&writer, error_response(&err))?;
             continue;
         }
+        let (request, prepare_only) = if let Request::PrepareHostRead { project_root } = request {
+            (
+                Request::OpenHostSession {
+                    project_root,
+                    mode: HostSessionMode::ShimsOnly,
+                    imports: Vec::new(),
+                    import_profile: lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile::default(),
+                },
+                true,
+            )
+        } else {
+            (request, false)
+        };
         match request {
             Request::Health => {
                 write_response(&writer, Response::HealthOk)?;
@@ -549,6 +584,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             Request::ReleaseHostRead => {
                 // Closing aliases leaves inherited body descriptors locked.
                 host_read = None;
+                prepared_read_root = None;
                 write_response(&writer, Response::HostReadReleased)?;
             }
             Request::LoadFixtureCapability { manifest_path } => {
@@ -581,19 +617,36 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 write_response(&writer, response)?;
             }
+            Request::PrepareHostRead { .. } => {
+                return Err(std::io::Error::other("untranslated read preparation request").into());
+            }
             Request::OpenHostSession {
                 project_root,
                 mode,
                 imports,
                 import_profile,
             } => {
+                if prepare_only && !shared_reads {
+                    write_response(
+                        &writer,
+                        Response::Error {
+                            code: "lean_rs.worker.artifact_read_required".to_owned(),
+                            message: "managed read preparation requires a guarded prepared worker".to_owned(),
+                        },
+                    )?;
+                    continue;
+                }
                 if read_admission_failed {
                     // A failed guardian exchange may already have retained
                     // custody. Retire this generation before another admission.
                     write_response(&writer, Response::HostArtifactEpochChanged)?;
                     continue;
                 }
-                if host_read.is_some() {
+                let uses_prepared_read = !prepare_only
+                    && mode == HostSessionMode::ShimsOnly
+                    && prepared_read_root.as_deref() == Some(project_root.as_str())
+                    && host_read.is_some();
+                if host_read.is_some() && !uses_prepared_read {
                     write_response(
                         &writer,
                         Response::Error {
@@ -636,7 +689,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
                 }
-                if shared_reads {
+                if shared_reads && !uses_prepared_read {
                     let allow_wait = artifact_epochs.is_none();
                     let read = std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE")
                         .ok_or_else(|| std::io::Error::other("shared artifact helper is not configured"))
@@ -697,6 +750,12 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     )?;
                     continue;
                 }
+                if prepare_only {
+                    prepared_read_root = Some(project_root);
+                    write_response(&writer, Response::HostReadPrepared)?;
+                    continue;
+                }
+                prepared_read_root = None;
                 let anchor = match ready_host_anchor(
                     runtime,
                     &mut anchors,
