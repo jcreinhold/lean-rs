@@ -9,6 +9,12 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.9]
+
+- Managed hosts can inspect a declaration on the guardian receiver named by an already-consumed durable launch grant.
+  The SDK binds dispatch to that receiver and the original deadline, and reports the inspection result and worker
+  retirement separately.
+
 ## [0.10.8]
 
 - Managed standalone writers advertise `lake_module_setup_capture_v1`. The selected Lake setup-file command
