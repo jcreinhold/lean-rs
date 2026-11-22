@@ -913,6 +913,16 @@ fn guardian_deadline_rejects_malformed_and_duplicate_arm() {
     assert!(state.poll_parent(&mut guardian, NONCE).is_err());
     assert!(!state.armed(), "malformed request cannot authorize GO");
 
+    let progress = frame(&json!({
+        "op": "progress", "protocol": PROTOCOL, "nonce": NONCE,
+        "attempt": ([7_u8; 16]), "stage": 1, "sequence": 1,
+    }))
+    .unwrap();
+    let mut state = deadlines::OwnerDeadline::default();
+    parent.write_all(&progress).unwrap();
+    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert!(!state.armed(), "caller progress cannot authorize GO");
+
     let mut state = deadlines::OwnerDeadline::default();
     let expires = deadlines::boot_ticks()
         .unwrap()
@@ -932,6 +942,9 @@ fn guardian_deadline_rejects_malformed_and_duplicate_arm() {
 
     let extension = expires.saturating_add(Duration::from_secs(60));
     parent.write_all(&frame(&request(extension)).unwrap()).unwrap();
+    assert!(state.poll_parent(&mut guardian, NONCE).is_err());
+    assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    parent.write_all(&progress).unwrap();
     assert!(state.poll_parent(&mut guardian, NONCE).is_err());
     assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
     wait_until_within(Duration::from_secs(1), || state.expired().unwrap());
