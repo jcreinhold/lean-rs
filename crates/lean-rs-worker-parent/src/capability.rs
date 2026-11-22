@@ -1497,6 +1497,34 @@ impl LeanWorkerHostHandle {
         stage: u64,
         expires_ns: u64,
     ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
+        self.inspect_admitted_declaration_with_imports_once_cancellable(
+            imports, request, expected, attempt, stage, expires_ns, None,
+        )
+    }
+
+    /// Run the exact consumed declaration attempt with optional caller cancellation.
+    ///
+    /// Cancellation applies to the original owned receiver only. It cannot
+    /// extend the hard deadline or establish a retirement receipt.
+    ///
+    /// # Errors
+    /// Refuses missing or mismatched artifact preparation or receiver identity.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "preserve the exact grant fields and optional cancellation at this boundary"
+    )]
+    pub fn inspect_admitted_declaration_with_imports_once_cancellable(
+        &mut self,
+        imports: &[String],
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
         let (config, original_expiry) = self
             .managed_artifact_read
             .as_ref()
@@ -1517,6 +1545,7 @@ impl LeanWorkerHostHandle {
                 expires_ns,
             },
             config,
+            cancellation,
         )
     }
 

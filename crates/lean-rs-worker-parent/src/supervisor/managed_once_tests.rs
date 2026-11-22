@@ -58,6 +58,12 @@ fn worker_fixture() {
             .message;
         writeln!(&mut ledger, "request").expect("record managed request dispatch");
         assert!(matches!(message, Message::Request(Request::InspectDeclaration { .. })));
+        if root.join("hold-inspection-reply").exists() {
+            let until = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < until && !root.join("release-inspection-reply").exists() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
         write_frame(
             &mut output,
             Message::Response(Response::DeclarationInspection {
@@ -249,7 +255,7 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
             worker
                 .validate_managed_receiver(&expected)
                 .expect("first grant has its exact live receiver");
-            worker.inspect_declaration_managed_once_with(request.clone(), &original, None, |receiver| {
+            worker.inspect_declaration_managed_once_with(request.clone(), &original, None, None, |receiver| {
                 receiver
                     .validate_managed_receiver(&expected)
                     .expect("original worker still live before replay");
@@ -587,6 +593,100 @@ pub(super) fn after_real_dispatch(worker: &LeanWorker, arm: &ManagedRequestDeadl
     std::fs::rename(pending, root.join("dispatched")).expect("publish accepted pipe dispatch");
     let own = rustix::process::getpid();
     rustix::process::kill_process(own, rustix::process::Signal::STOP).expect("suspend disposable requester");
+}
+
+#[test]
+fn managed_cancellation_stops_only_the_original_live_receiver_without_replay() {
+    use crate::LeanWorkerCancellationToken;
+    let fixture = std::env::temp_dir().join(format!("lean-managed-cancel-{}", std::process::id()));
+    std::fs::create_dir(&fixture).expect("create cancellation fixture directory");
+    let root = fixture.canonicalize().expect("resolve cancellation fixture directory");
+    std::fs::write(root.join("hold-inspection-reply"), b"hold the first reply").expect("hold reply");
+    let (mut worker, tracker, pid) = worker(&root);
+    let expected = scope(&worker, &root.join("owners"));
+    assert_eq!(expected.worker.pid, pid);
+    let request = LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero");
+    let original = arm();
+    let token = LeanWorkerCancellationToken::new();
+    let waiter_token = token.clone();
+    let ledger = root.join("dispatch");
+    let child = expected.worker.clone();
+    let canceller = std::thread::spawn(move || {
+        let until = Instant::now() + Duration::from_secs(2);
+        while std::fs::read_to_string(&ledger).ok().as_deref() != Some("request\n") {
+            assert!(Instant::now() < until, "the actual worker must receive one inspection");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(child.is_live().expect("exact worker observation"));
+        waiter_token.cancel();
+    });
+    worker
+        .validate_managed_receiver(&expected)
+        .expect("validate exact managed receiver");
+    let outcome = worker
+        .inspect_declaration_managed_once_with(request.clone(), &original, None, Some(&token), |_| {})
+        .expect("consumed managed request");
+    canceller.join().expect("cancellation followed actual dispatch");
+    assert!(matches!(outcome.result, Err(LeanWorkerError::Cancelled { .. })));
+    outcome.retirement.expect("retirement must independently close");
+    assert_eq!(tracker.active_processes(), 0);
+    assert!(!expected.worker.is_live().expect("old worker no longer live"));
+    assert!(!expected.guardian.is_live().expect("old guardian no longer live"));
+    assert!(
+        worker
+            .inspect_admitted_declaration_once(
+                request,
+                &expected,
+                original.attempt,
+                original.stage,
+                original.expires_ns
+            )
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("dispatch")).expect("read actual inspection frames"),
+        "request\n"
+    );
+    let replacement_root = root.join("r");
+    std::fs::create_dir(&replacement_root).expect("create independent receiver fixture");
+    let (mut replacement, replacement_tracker, _) = self::worker(&replacement_root);
+    let replacement_scope = scope(&replacement, &replacement_root.join("owners"));
+    assert_ne!(expected.worker, replacement_scope.worker);
+    assert!(token.is_cancelled());
+    let next = replacement.next_request_id;
+    assert!(
+        replacement
+            .inspect_admitted_declaration_once(
+                LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero"),
+                &expected,
+                original.attempt,
+                original.stage,
+                original.expires_ns,
+            )
+            .is_err()
+    );
+    assert_eq!(replacement.next_request_id, next);
+    replacement
+        .validate_managed_receiver(&replacement_scope)
+        .expect("old cancellation left replacement live");
+    let fresh = inspect(
+        &mut replacement,
+        &replacement_root.join("owners"),
+        "Nat.add_zero",
+        &arm(),
+    )
+    .expect("independent grant is unaffected");
+    assert_eq!(
+        fresh.result.expect("independent response"),
+        LeanWorkerDeclarationInspectionResult::Unsupported
+    );
+    fresh.retirement.expect("close independent receiver");
+    assert_eq!(replacement_tracker.active_processes(), 0);
+    assert_eq!(
+        std::fs::read_to_string(replacement_root.join("dispatch")).expect("fresh frames"),
+        "request\n"
+    );
+    std::fs::remove_dir_all(fixture).expect("remove closed cancellation fixture");
 }
 
 #[test]

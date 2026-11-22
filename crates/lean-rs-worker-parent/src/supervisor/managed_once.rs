@@ -54,7 +54,7 @@ impl LeanWorker {
             expires_ns,
         };
         let result = (|| {
-            let token = managed_token(&original)?;
+            let token = managed_token(&original, None)?;
             let response = self.managed_frame(
                 Request::PrepareHostRead {
                     project_root: config.project_root_string(),
@@ -85,9 +85,10 @@ impl LeanWorker {
         expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
         arm: &ManagedRequestDeadline,
         config: &LeanWorkerSessionConfig,
+        cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         self.validate_managed_receiver(expected)?;
-        self.inspect_declaration_managed_once(request, arm, Some(config))
+        self.inspect_declaration_managed_once_with(request, arm, Some(config), cancellation, |_| {})
     }
 
     fn validate_managed_receiver(
@@ -209,7 +210,7 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
-        self.inspect_declaration_managed_once_with(request, arm, prepared, |_| {})
+        self.inspect_declaration_managed_once_with(request, arm, prepared, None, |_| {})
     }
 
     fn inspect_declaration_managed_once_with(
@@ -217,6 +218,7 @@ impl LeanWorker {
         request: LeanWorkerDeclarationInspectionRequest,
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
         before_retirement: impl FnOnce(&mut Self),
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
@@ -238,6 +240,8 @@ impl LeanWorker {
             sealed: false,
         });
         let result = (|| {
+            let token = managed_token(arm, cancellation)?;
+            self.check_request_cancelled(OPERATION, Some(&token))?;
             let child = self
                 .child
                 .as_mut()
@@ -245,7 +249,6 @@ impl LeanWorker {
             child.arm_managed_request(arm).map_err(|error| LeanWorkerError::Setup {
                 message: format!("managed request arm refused: {error}"),
             })?;
-            let token = managed_token(arm)?;
             if let Some(config) = prepared {
                 self.open_managed_artifact_session(config, &token, arm.expires_ns)?;
                 #[cfg(all(test, target_os = "macos"))]
@@ -278,7 +281,10 @@ impl LeanWorker {
     }
 }
 
-fn managed_token(arm: &ManagedRequestDeadline) -> Result<LeanWorkerCancellationToken, LeanWorkerError> {
+fn managed_token(
+    arm: &ManagedRequestDeadline,
+    cancellation: Option<&LeanWorkerCancellationToken>,
+) -> Result<LeanWorkerCancellationToken, LeanWorkerError> {
     let now = Instant::now();
     let remaining = arm.remaining().map_err(|error| LeanWorkerError::Setup {
         message: error.to_string(),
@@ -286,7 +292,7 @@ fn managed_token(arm: &ManagedRequestDeadline) -> Result<LeanWorkerCancellationT
     let end = now.checked_add(remaining).ok_or_else(|| LeanWorkerError::Setup {
         message: "managed request deadline exceeds local clock".to_owned(),
     })?;
-    Ok(LeanWorkerCancellationToken::new().with_deadline(end))
+    Ok(cancellation.cloned().unwrap_or_default().with_deadline(end))
 }
 
 #[cfg(all(test, target_os = "macos"))]
