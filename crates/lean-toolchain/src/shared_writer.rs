@@ -667,6 +667,14 @@ impl Drop for Helper {
     }
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StageState {
+    Ready,
+    Unconfirmed,
+    CloseOnly,
+}
+
 /// One helper lifetime, retained across commands and caller-owned metadata writes.
 #[cfg(unix)]
 pub struct SharedWriter {
@@ -676,7 +684,8 @@ pub struct SharedWriter {
     root: PathBuf,
     write_roots: Vec<PathBuf>,
     workspaces: Vec<PathBuf>,
-    active: bool,
+    stage: StageState,
+    managed: bool,
     asset_dir: PathBuf,
     _controller_locks: Vec<File>,
 }
@@ -901,7 +910,8 @@ impl SharedWriter {
                 root: root.to_path_buf(),
                 write_roots: roots.to_vec(),
                 workspaces: workspaces.to_vec(),
-                active: false,
+                stage: StageState::Ready,
+                managed: storage_request.is_some(),
                 asset_dir: PathBuf::new(),
                 _controller_locks: duplicates,
             };
@@ -1010,7 +1020,7 @@ impl SharedWriter {
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Output> {
         use std::os::unix::process::ExitStatusExt;
-        if self.active {
+        if self.stage != StageState::Ready {
             return Err(failure(
                 WriterDisposition::Unknown,
                 invalid("writer scope is sealed; no replay"),
@@ -1055,7 +1065,7 @@ impl SharedWriter {
         })()
         .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
         let (command_deadline, reply_deadline, request) = prepared;
-        self.active = true;
+        self.stage = StageState::Unconfirmed;
         let delivery = self
             .helper
             .input
@@ -1068,12 +1078,13 @@ impl SharedWriter {
         }
         let mut process: Option<Value> = None;
         loop {
-            if cancelled() && reason.is_none() {
-                reason = Some("writer operation cancelled".to_owned());
+            if cancelled() {
+                reason.get_or_insert_with(|| "writer operation cancelled".to_owned());
                 self.cancel();
             }
             let remaining = reply_deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
+                self.cancel();
                 return Err(failure(
                     WriterDisposition::Unknown,
                     io::Error::new(
@@ -1125,7 +1136,16 @@ impl SharedWriter {
                                 .to_owned(),
                         );
                     }
-                    self.cancel();
+                    // The identified managed helper already owns the stop. Keep
+                    // control available solely for a later verified terminal and close.
+                    // Unknown replies and ambiguous launch delivery still seal via EOF.
+                    if !(self.managed
+                        && field(&frame, "state") == "still_running"
+                        && field(&frame, "result") == "no_result"
+                        && process.as_ref() == Some(field(&frame, "process")))
+                    {
+                        self.cancel();
+                    }
                 }
                 Some("stopped") => {
                     // H can close a setup failure before sending Started. One
@@ -1150,6 +1170,17 @@ impl SharedWriter {
                         || field(&frame, "intervened") != false
                         || field(&frame, "result") != "result"
                     {
+                        if self.managed
+                            && self.helper.input.is_some()
+                            && field(&frame, "result") == "no_result"
+                            && field(&frame, "intervened") == true
+                            && field(&frame, "cancelled").is_boolean()
+                        {
+                            self.stage = StageState::CloseOnly;
+                            if reason.is_none() {
+                                reason = field(&frame, "reason").as_str().map(str::to_owned);
+                            }
+                        }
                         return Err(stopped_failure(
                             &io::Error::new(
                                 io::ErrorKind::Interrupted,
@@ -1185,7 +1216,7 @@ impl SharedWriter {
                         })
                     })()
                     .map_err(|error| stopped_failure(&error, &frame))?;
-                    self.active = false;
+                    self.stage = StageState::Ready;
                     return Ok(output);
                 }
                 _ => {
@@ -1205,12 +1236,13 @@ impl SharedWriter {
     ///
     /// # Errors
     /// A sealed writer, failed close delivery, timeout or unsuccessful exit leaves
-    /// cleanup unconfirmed. Do not replay a command on this basis.
+    /// cleanup unconfirmed. A managed, verified stopped/no-result turn can only close.
+    /// Do not replay a command on this basis.
     pub fn close(mut self, timeout: Duration) -> io::Result<()> {
         let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or_else(|| invalid("writer close deadline overflow"))?;
-        if self.active {
+        if self.stage == StageState::Unconfirmed {
             return Err(invalid("sealed writer cannot confirm cleanup"));
         }
         let input = self

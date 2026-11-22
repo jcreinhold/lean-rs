@@ -285,6 +285,32 @@ fn sdk_writer_shares_the_standalone_reserve() -> io::Result<()> {
         String::from_utf8_lossy(&refused.stderr)
             .contains("insufficient space for outstanding full-turn writer budgets")
     );
+    // A provisional stop on overflow is followed by an exact terminal receipt.
+    // The borrowed-lock SDK caller may settle this turn, but cannot run again.
+    let mut flood = Command::new("/usr/bin/printf");
+    flood.args(["%s", &"x".repeat(64 * 1024 + 1)]);
+    let overflow = writer.run(&flood, timeout).expect_err("unusable overflow result");
+    let stopped = lean_toolchain::shared_writer::WriterFailure::from_io(&overflow).expect("typed closed failure");
+    assert_eq!(
+        stopped.disposition,
+        lean_toolchain::shared_writer::WriterDisposition::Stopped
+    );
+    assert_eq!(stopped.detail, "writer captured output limit exceeded");
+    assert_eq!(
+        field(
+            stopped.stop_receipt.as_ref().expect("terminal receipt"),
+            "owned_work_stopped"
+        ),
+        true
+    );
+    let marker = a.join("replayed");
+    assert!(
+        writer
+            .run(Command::new("/usr/bin/touch").arg(&marker), timeout)
+            .is_err()
+    );
+    assert!(!marker.exists());
+    assert!(assets.is_dir());
     writer.close(timeout)?;
     assert_eq!(output.status.code(), Some(1));
     assert!(!assets.exists());
