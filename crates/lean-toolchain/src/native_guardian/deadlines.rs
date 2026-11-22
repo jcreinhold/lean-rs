@@ -21,6 +21,13 @@ pub(super) struct AuthenticatedActivity {
     pub(super) observed_at: Duration,
 }
 
+#[allow(dead_code, reason = "authenticated activity sources are not wired yet")]
+pub(super) enum ActivityObservation {
+    Advance(AuthenticatedActivity),
+    KnownInactive,
+    Unavailable,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Arm {
@@ -64,15 +71,19 @@ impl OwnerDeadline {
 
     /// Missing or unattributable observations use the original hard bound.
     /// Keep the last accepted sequence across gaps so replay cannot renew it.
-    pub(super) fn observe_activity(&mut self, now: Duration, activity: Option<AuthenticatedActivity>) {
+    pub(super) fn observe_activity(&mut self, now: Duration, activity: ActivityObservation) {
         let Some(arm) = &self.arm else { return };
         let hard = Duration::from_nanos(arm.expires_ns);
         if now >= self.soft.unwrap_or(hard) {
             return;
         }
-        let Some(activity) = activity else {
-            self.soft = None;
-            return;
+        let activity = match activity {
+            ActivityObservation::Advance(activity) => activity,
+            ActivityObservation::KnownInactive => return,
+            ActivityObservation::Unavailable => {
+                self.soft = None;
+                return;
+            }
         };
         if activity.attempt != arm.attempt
             || activity.stage != arm.stage
@@ -138,7 +149,7 @@ impl OwnerDeadline {
         // Neither supported process-group implementation attributes complete
         // fork and exit usage to this attempt, so start with the hard bound.
         let now = boot_ticks()?;
-        self.observe_activity(now, None);
+        self.observe_activity(now, ActivityObservation::Unavailable);
         if self.expires_at().is_some_and(|expires| now >= expires) {
             return Ok(true);
         }
@@ -196,34 +207,38 @@ mod tests {
             }),
             ..OwnerDeadline::default()
         };
-        let observation = |attempt, stage, sequence, at| AuthenticatedActivity {
-            attempt,
-            stage,
-            sequence,
-            observed_at: seconds(at),
+        let observation = |attempt, stage, sequence, at| {
+            ActivityObservation::Advance(AuthenticatedActivity {
+                attempt,
+                stage,
+                sequence,
+                observed_at: seconds(at),
+            })
         };
         assert_eq!(owner.expires_at(), Some(seconds(1000)));
-        owner.observe_activity(seconds(6), Some(observation([8; 16], 4, 1, 5)));
-        owner.observe_activity(seconds(6), Some(observation([7; 16], 3, 1, 5)));
-        owner.observe_activity(seconds(6), Some(observation([7; 16], 4, 1, 7)));
+        owner.observe_activity(seconds(6), observation([8; 16], 4, 1, 5));
+        owner.observe_activity(seconds(6), observation([7; 16], 3, 1, 5));
+        owner.observe_activity(seconds(6), observation([7; 16], 4, 1, 7));
         assert_eq!(owner.expires_at(), Some(seconds(1000)));
-        owner.observe_activity(seconds(6), Some(observation([7; 16], 4, 1, 5)));
+        owner.observe_activity(seconds(6), observation([7; 16], 4, 1, 5));
         assert_eq!(owner.expires_at(), Some(seconds(605)));
-        owner.observe_activity(seconds(10), None);
-        owner.observe_activity(seconds(11), Some(observation([7; 16], 4, 1, 10)));
+        owner.observe_activity(seconds(9), ActivityObservation::KnownInactive);
+        assert_eq!(owner.expires_at(), Some(seconds(605)));
+        owner.observe_activity(seconds(10), ActivityObservation::Unavailable);
+        owner.observe_activity(seconds(11), observation([7; 16], 4, 1, 10));
         assert_eq!(owner.expires_at(), Some(seconds(1000)));
-        owner.observe_activity(seconds(41), Some(observation([7; 16], 4, 2, 40)));
+        owner.observe_activity(seconds(41), observation([7; 16], 4, 2, 40));
         assert_eq!(owner.expires_at(), Some(seconds(640)));
-        owner.observe_activity(seconds(42), Some(observation([7; 16], 4, 3, 39)));
+        owner.observe_activity(seconds(42), observation([7; 16], 4, 3, 39));
         assert_eq!(owner.expires_at(), Some(seconds(640)));
-        owner.observe_activity(seconds(501), Some(observation([7; 16], 4, 3, 500)));
+        owner.observe_activity(seconds(501), observation([7; 16], 4, 3, 500));
         assert_eq!(owner.expires_at(), Some(seconds(1000)));
-        owner.observe_activity(seconds(1001), Some(observation([7; 16], 4, 4, 1001)));
+        owner.observe_activity(seconds(1001), observation([7; 16], 4, 4, 1001));
         assert_eq!(owner.last_activity, Some((3, seconds(500))));
 
         owner.soft = Some(seconds(700));
-        owner.observe_activity(seconds(701), None);
-        owner.observe_activity(seconds(701), Some(observation([7; 16], 4, 4, 701)));
+        owner.observe_activity(seconds(701), ActivityObservation::Unavailable);
+        owner.observe_activity(seconds(701), observation([7; 16], 4, 4, 701));
         assert_eq!(owner.expires_at(), Some(seconds(700)));
     }
 }
