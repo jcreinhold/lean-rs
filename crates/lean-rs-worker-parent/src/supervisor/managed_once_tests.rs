@@ -322,6 +322,36 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
         } else {
             assert_eq!(dispatch.expect("read successful dispatch ledger"), "request\n");
         }
+        if case == "success" {
+            let (mut replacement, replacement_tracker, replacement_pid) = self::worker(&root);
+            let replacement_binding = scope(&replacement, &registry);
+            assert_eq!(replacement_binding.registry_inode, expected.registry_inode);
+            assert_ne!(replacement_binding.generation, expected.generation);
+            assert_ne!(replacement_binding.worker, expected.worker);
+            assert_eq!(replacement_tracker.active_processes(), 1);
+            original
+                .remaining()
+                .expect("original grant still unexpired at replacement");
+            let next = replacement.next_request_id;
+            assert!(matches!(
+                replacement.inspect_admitted_declaration_once(
+                    LeanWorkerDeclarationInspectionRequest::new("Nat.add_zero"),
+                    &expected,
+                    original.attempt,
+                    original.stage,
+                    original.expires_ns,
+                ),
+                Err(LeanWorkerError::Setup { message }) if message.contains("managed grant names another receiver")
+            ));
+            assert_eq!(replacement.next_request_id, next, "replacement refusal sends no frame");
+            assert_eq!(scope(&replacement, &registry), replacement_binding);
+            replacement
+                .shutdown_child(ShutdownIntent::KillOnly)
+                .expect("retire the actual replacement");
+            assert_eq!(replacement_tracker.active_processes(), 0);
+            assert!(!lean_toolchain::process_group::group_present(replacement_pid).unwrap());
+            assert_eq!(std::fs::read_to_string(root.join("dispatch")).unwrap(), "request\n");
+        }
     }
     std::fs::remove_dir_all(fixture).expect("remove managed fixture directory");
 }
