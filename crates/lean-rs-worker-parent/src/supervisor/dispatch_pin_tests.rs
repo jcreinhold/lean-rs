@@ -804,9 +804,13 @@ enum EarlierTag {
 
 thread_local! {
     static NEXT_TERMINAL_TAG: Cell<Option<EarlierTag>> = const { Cell::new(None) };
+    static EXPIRE_ON_NEXT_TERMINAL: Cell<bool> = const { Cell::new(false) };
 }
 
-pub(super) fn tag_fixture_terminal(mut event: RequestReaderEvent) -> RequestReaderEvent {
+pub(super) fn observe_fixture_terminal(
+    mut event: RequestReaderEvent,
+    deadline: &mut Option<Instant>,
+) -> RequestReaderEvent {
     if let RequestReaderEvent::Terminal {
         generation, request_id, ..
     } = &mut event
@@ -816,8 +820,59 @@ pub(super) fn tag_fixture_terminal(mut event: RequestReaderEvent) -> RequestRead
             Some(EarlierTag::Request(old)) => *request_id = Some(old),
             None => {}
         }
+        if EXPIRE_ON_NEXT_TERMINAL.replace(false) {
+            // Model the parent resuming at expiry after a successful receive.
+            assert!(deadline.is_some(), "the fixture needs a configured deadline");
+            *deadline = Some(Instant::now());
+        }
     }
     event
+}
+
+#[test]
+fn configured_deadline_rejects_dequeued_success_and_restarts() {
+    let fixture = Fixture::new();
+    let mut worker = fixture.worker();
+    let original_pid = pid(&worker);
+    let original_generation = worker.generation;
+    let request_id = worker.next_request_id;
+    let checkpoint = worker.request_checkpoint();
+    let configured_timeout = worker.config.request_timeout;
+
+    EXPIRE_ON_NEXT_TERMINAL.set(true);
+    let result = command(&mut worker);
+    let terminal_observed = !EXPIRE_ON_NEXT_TERMINAL.replace(false);
+    let receipt = worker.confirmed_request_stop_since(&checkpoint).cloned();
+    let successor_pid = pid(&worker);
+    let successor_generation = worker.generation;
+    let restarts = worker.stats.restarts;
+    let next = command(&mut worker);
+    let stopped = reap(worker);
+
+    assert!(terminal_observed, "the real terminal must reach the receive boundary");
+    assert!(
+        matches!(&result, Err(LeanWorkerError::Timeout { operation: "worker_json_command", duration, resource })
+            if *duration == configured_timeout && resource.work_entered_child),
+        "{result:?}"
+    );
+    let receipt = receipt.expect("the original request's child was reaped");
+    assert_eq!(receipt.operation(), "worker_json_command");
+    assert_eq!(receipt.request_id(), request_id.0);
+    assert_eq!(receipt.worker_generation(), original_generation.0);
+    assert_eq!(receipt.process_id(), original_pid);
+    assert_eq!(restarts, 1);
+    assert_ne!(successor_generation, original_generation);
+    assert_ne!(successor_pid, original_pid);
+    assert_eq!(next.expect("a new request succeeds on the successor"), "fixture-ok");
+    assert!(stopped.is_ok(), "{stopped:?}");
+
+    let events = fixture.events();
+    let command_pids: Vec<_> = events
+        .iter()
+        .filter(|event| event.op == "json_command")
+        .map(|event| event.pid)
+        .collect();
+    assert_eq!(command_pids, [original_pid, successor_pid], "{events:?}");
 }
 
 #[test]

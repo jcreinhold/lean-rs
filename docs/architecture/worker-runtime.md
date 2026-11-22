@@ -399,9 +399,10 @@ Stderr drains from startup into a 64 KiB byte tail. After exit, collection allow
 its reader even if a descendant still holds the pipe open. Stdout readers also receive a stop signal before joining. No
 pipe thread needs a descendant to close an inherited descriptor before it can stop.
 
-Request deadlines include writing stdin and reading the response. Cancellation, timeout, or a write I/O error kills and
-reaps the child: a possibly partial frame is never reused. Encoding and frame-size errors before writing do not retire a
-healthy worker. Sending the shutdown request also has a deadline. Stderr is diagnostic output, never proof evidence.
+Request deadlines include writing stdin and reading the response. The parent checks expiry again after dequeuing a
+frame, before accepting it. Cancellation, timeout, or a write I/O error kills and reaps the child: a possibly partial
+frame is never reused. Encoding and frame-size errors before writing do not retire a healthy worker. Sending the
+shutdown request also has a deadline. Stderr is diagnostic output, never proof evidence.
 
 These deadlines bound pipe waits, not arbitrary synchronous caller callbacks or serialization. Killing, reaping, and
 starting a replacement also take time after a request expires. If the OS cannot confirm exit, cleanup returns an error

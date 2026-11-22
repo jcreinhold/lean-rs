@@ -16,6 +16,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   Capture is limited to the smaller of 16 MiB and the turn's byte budget.
 - Managed helpers and Rust `SharedWriter` callers can close and settle after a verified stopped command failure.
   The failed command yields no usable result, and the writer rejects further commands.
+- The worker supervisor checks the request deadline again after dequeueing a response, so a late response follows
+  the existing timeout recovery path.
 
 ## [0.10.7]
 

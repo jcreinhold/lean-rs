@@ -442,9 +442,9 @@ impl LeanWorkerConfig {
 
     /// Set the maximum time to wait for one request's terminal response.
     ///
-    /// The request timeout starts after the request frame is written. It covers
+    /// The request timeout starts before writing the request frame. It covers
     /// live rows, diagnostics, progress events, and the terminal response. On
-    /// timeout, the supervisor kills and replaces the child process.
+    /// timeout, the supervisor kills the child and replaces it when policy permits.
     #[must_use]
     pub fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
@@ -4665,6 +4665,8 @@ impl LeanWorker {
         let timeout = frame_timeout(started, self.config.request_timeout, operation_deadline);
         let deadline = started.checked_add(timeout);
         let scoped_frame_deadline = operation_deadline.and(deadline);
+        #[cfg(all(test, unix))]
+        let mut deadline = deadline;
         let streaming = data.is_some();
         let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
@@ -4892,15 +4894,16 @@ impl LeanWorker {
                     }
                 },
             };
-            // A response can already be queued when the parent resumes.
-            // Observe explicit cancellation or expiry before accepting it.
-            if scoped_frame_deadline.is_some_and(|end| {
-                cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) || Instant::now() >= end
-            }) {
+            #[cfg(all(test, unix))]
+            let event = dispatch_pin_tests::observe_fixture_terminal(event, &mut deadline);
+            // A response can already be queued when the parent resumes after expiry.
+            // Let the existing interruption paths resolve expiry and scoped cancellation.
+            if deadline.is_some_and(|end| Instant::now() >= end)
+                || (scoped_frame_deadline.is_some()
+                    && cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled))
+            {
                 continue;
             }
-            #[cfg(all(test, unix))]
-            let event = dispatch_pin_tests::tag_fixture_terminal(event);
             let stale = if event.generation() != self.generation {
                 Some(stale_worker_output_error(
                     operation,
