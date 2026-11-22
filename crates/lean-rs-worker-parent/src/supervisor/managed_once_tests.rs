@@ -355,8 +355,14 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
                 .shutdown_child(ShutdownIntent::KillOnly)
                 .expect("retire the actual replacement");
             assert_eq!(replacement_tracker.active_processes(), 0);
-            assert!(!lean_toolchain::process_group::group_present(replacement_pid).unwrap());
-            assert_eq!(std::fs::read_to_string(root.join("dispatch")).unwrap(), "request\n");
+            assert!(
+                !lean_toolchain::process_group::group_present(replacement_pid)
+                    .expect("check replacement group closure")
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("dispatch")).expect("read original frame ledger"),
+                "request\n"
+            );
         }
     }
     std::fs::remove_dir_all(fixture).expect("remove managed fixture directory");

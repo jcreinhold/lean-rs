@@ -20,7 +20,21 @@ impl<'a, 'cap> core::marker::Unpin for lean_rs_worker_child::WorkerSourceContext
 impl<'a, 'cap> core::marker::UnsafeUnpin for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
 impl<'a, 'cap> core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
 impl<'a, 'cap> core::panic::unwind_safe::UnwindSafe for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+pub struct lean_rs_worker_child::WorkerStringCall<'a>
+pub lean_rs_worker_child::WorkerStringCall::capability: &'a lean_rs::module::trusted::TrustedWorkerCapability<'static>
+pub lean_rs_worker_child::WorkerStringCall::export: &'a str
+pub lean_rs_worker_child::WorkerStringCall::operation: lean_rs_worker_protocol::worker_exports::WorkerExportOperation
+pub lean_rs_worker_child::WorkerStringCall::project_root: &'a str
+pub lean_rs_worker_child::WorkerStringCall::request_json: &'a str
+impl<'a> core::marker::Freeze for lean_rs_worker_child::WorkerStringCall<'a>
+impl<'a> !core::marker::Send for lean_rs_worker_child::WorkerStringCall<'a>
+impl<'a> !core::marker::Sync for lean_rs_worker_child::WorkerStringCall<'a>
+impl<'a> core::marker::Unpin for lean_rs_worker_child::WorkerStringCall<'a>
+impl<'a> core::marker::UnsafeUnpin for lean_rs_worker_child::WorkerStringCall<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_child::WorkerStringCall<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_child::WorkerStringCall<'a>
 pub trait lean_rs_worker_child::WorkerAuthority: core::marker::Send + core::marker::Sync
+pub fn lean_rs_worker_child::WorkerAuthority::authorize_worker_string_call(&self, lean_rs_worker_child::WorkerStringCall<'_>) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_worker_child::WorkerAuthority::batch<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::source_operations::HostModuleBatch, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::source_operations::HostModuleBatch>>
 pub fn lean_rs_worker_child::WorkerAuthority::cached<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::source_operations::HostCachedModuleBatch, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::source_operations::HostCachedModuleBatch>>
 pub fn lean_rs_worker_child::WorkerAuthority::host(&self, &'static lean_rs::runtime::init::LeanRuntime, &lean_rs_host::host::capabilities::LeanPreparedHostArtifacts) -> lean_rs::error::LeanResult<lean_rs::module::trusted::LoadedHostArtifacts<'static>>
