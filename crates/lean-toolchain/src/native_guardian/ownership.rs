@@ -535,11 +535,13 @@ fn slot_protocol(value: &Value) -> bool {
     field(value, "guardian_drain_protocol") == SLOT_PROTOCOL
 }
 
-fn refuse_slot_protocol(value: &Value) -> io::Result<()> {
-    if slot_protocol(value) {
-        return Err(invalid("slot generation requires guardian-owned drain"));
+fn require_legacy_drain_advertisement(value: &Value) -> io::Result<()> {
+    if value.get("guardian_drain_protocol").is_some()
+        || !matches!(field(value, "guardian_drain").as_str(), Some("available" | "requested"))
+    {
+        return Err(invalid("original guardian did not advertise legacy drain"));
     }
-    Ok(())
+    validate_owner_header(value)
 }
 
 fn matches_drain_binding(value: &Value, expected: &NativeGuardianDrainBinding) -> io::Result<()> {
@@ -712,7 +714,7 @@ pub fn request_bound_original_guardian_drain(
         rustix::fs::Mode::empty(),
     )?);
     let record = registry.join(format!("worker-{}/owner.json", expected.generation));
-    refuse_slot_protocol(&read_owner(&record)?)?;
+    require_legacy_drain_advertisement(&read_owner(&record)?)?;
     let _lock = lock_admission_at(&root, until, false)?;
     let matches_registry = |metadata: &fs::Metadata| {
         (metadata.dev(), metadata.ino()) == (expected.registry_device, expected.registry_inode)
@@ -728,7 +730,7 @@ pub fn request_bound_original_guardian_drain(
     let generation_dir = registry.join(format!("worker-{}", expected.generation));
     validate_registry(&generation_dir)?;
     let mut value = read_owner(&record)?;
-    refuse_slot_protocol(&value)?;
+    require_legacy_drain_advertisement(&value)?;
     verify_original_worker_boot(&value)?;
     if field(&value, "generation_id") != expected.generation.as_str()
         || !field(&value, "original_worker_boot")
@@ -761,7 +763,7 @@ pub fn request_original_guardian_drain(
     worker: &NativeProcessIdentity,
     timeout: Duration,
 ) -> io::Result<()> {
-    refuse_slot_protocol(&read_owner(record)?)?;
+    require_legacy_drain_advertisement(&read_owner(record)?)?;
     let _lock = lock_publication(record, timeout)?;
     validate_registry(
         record
@@ -769,7 +771,7 @@ pub fn request_original_guardian_drain(
             .ok_or_else(|| invalid("native owner directory missing"))?,
     )?;
     let mut value = read_owner(record)?;
-    refuse_slot_protocol(&value)?;
+    require_legacy_drain_advertisement(&value)?;
     verify_original_worker_boot(&value)?;
     check_guardian_drain_worker(&value, worker)?;
     check_guardian_drain_eligibility(&value)?;
@@ -893,7 +895,7 @@ pub(super) fn consume_guardian_drain_slot(
 pub(super) fn original_guardian_drain_requested(record: &Path, guardian: &NativeProcessIdentity) -> io::Result<bool> {
     let value = read_owner(record)?;
     validate_owner_header(&value)?;
-    refuse_slot_protocol(&value)?;
+    require_legacy_drain_advertisement(&value)?;
     if checked_identity(field(&value, "guardian"))? != *guardian || guardian.pid != std::process::id() {
         return Err(invalid("original guardian drain owner differs"));
     }

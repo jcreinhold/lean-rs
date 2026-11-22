@@ -273,8 +273,30 @@ fn assert_requested_zombie_closure(hold_leaf: bool, use_slot: bool) {
     service.stderr(Stdio::inherit());
     if use_slot {
         service.env(DRAIN_SLOT_ENV, "1");
+        fs::write(fixture.root.join("hold-slot-advertisement"), b"test startup cut").unwrap();
     }
     let mut server = TestChild(service.spawn().unwrap());
+    if use_slot {
+        wait_until(|| fixture.root.join("slot-advertisement-held").exists());
+        let record = fixture.registry.join(format!("worker-{NONCE}/owner.json"));
+        let _lock = ownership::lock_publication(&record, Duration::from_secs(1)).unwrap();
+        let unadvertised = read_owner(&record).unwrap();
+        assert_eq!(unadvertised["phase"], "running");
+        assert!(unadvertised.get("guardian_drain").is_none());
+        assert!(unadvertised.get("guardian_drain_protocol").is_none());
+        let binding = slot_binding(&fixture.registry, &unadvertised);
+        let budget = Duration::from_millis(100);
+        // Without the pre-lock advertisement check these would time out on our
+        // held lock instead of refusing the unadvertised generation.
+        let plain = request_original_guardian_drain(&record, &binding.worker, budget).unwrap_err();
+        let bound = request_bound_original_guardian_drain(&fixture.registry, &binding, budget).unwrap_err();
+        for error in [plain, bound] {
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), "original guardian did not advertise legacy drain");
+        }
+        assert_eq!(read_owner(&record).unwrap(), unadvertised);
+        fs::write(fixture.root.join("release-slot-advertisement"), b"allow startup").unwrap();
+    }
     wait_until(|| fixture.root.join("server-ready").exists());
     let ready: Value = serde_json::from_slice(&fs::read(fixture.root.join("server-ready")).unwrap()).unwrap();
     let worker = pid(field(&ready, "worker")).unwrap();

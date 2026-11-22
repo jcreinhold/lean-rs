@@ -651,6 +651,8 @@ impl Guardian {
             .as_ref()
             .ok_or_else(|| invalid("guardian bootstrap identity missing"))?;
         let use_drain_slot = std::env::var_os(DRAIN_SLOT_ENV).is_some_and(|mode| mode == "1");
+        #[cfg(all(test, target_os = "macos"))]
+        tests::pause_before_slot_advertisement(use_drain_slot)?;
         let drain_guardian = ownership::publish_guardian_drain_support(&record, worker, guardian, use_drain_slot)?
             .then(|| guardian.clone());
         let mut sampled_stopped = false;

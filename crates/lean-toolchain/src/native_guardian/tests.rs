@@ -264,6 +264,22 @@ pub(super) fn hold_requested_group_signal(guardian: &Guardian) -> bool {
     })
 }
 
+pub(super) fn pause_before_slot_advertisement(use_slot: bool) -> io::Result<()> {
+    if use_slot
+        && let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from)
+        && root.join("hold-slot-advertisement").exists()
+    {
+        fs::write(
+            root.join("slot-advertisement-held"),
+            b"running before slot advertisement",
+        )?;
+        wait_until_within(Duration::from_secs(2), || {
+            root.join("release-slot-advertisement").exists()
+        });
+    }
+    Ok(())
+}
+
 pub(super) fn pause_slot_sender() -> io::Result<()> {
     if let Some(root) = std::env::var_os("LEAN_RS_TEST_DRAIN_SLOT_SENDER").map(PathBuf::from) {
         fs::write(root.join("slot-sender-inserted"), b"offer inserted before return")?;
