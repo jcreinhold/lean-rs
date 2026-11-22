@@ -661,7 +661,17 @@ pub fn with_drained_project<T>(
         held.push((path, lock));
     }
     // Match ordinary writer order: project EX precedes registry admission.
-    let _admission = ownership::lock_admission_at(&root, until, false)?;
+    // An empty directory cannot distinguish first use from a lost mutex.
+    let _admission = ownership::lock_admission_at(&root, until, false).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            invalid(concat!(
+                "native admission lock missing: initialize a verified fresh registry through native owner reservation; ",
+                "if previously initialized, keep launchers paused and investigate the lost lock"
+            ))
+        } else {
+            error
+        }
+    })?;
     registry.open()?;
     ownership::check_drained_locked(&registry.path, until)?;
     registry.open()?;

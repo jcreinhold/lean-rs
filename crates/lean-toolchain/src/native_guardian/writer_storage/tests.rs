@@ -703,6 +703,22 @@ fn project_cutover_fences_old_flock_and_requires_settled_registry() {
     };
     assert_eq!(run(&pins).unwrap_err().kind(), io::ErrorKind::WouldBlock);
     drop(old_owner);
+
+    let admission = registry.path.join(".admission.lock");
+    let missing = run(&pins).unwrap_err();
+    assert!(
+        missing
+            .to_string()
+            .contains("initialize a verified fresh registry through native owner reservation")
+    );
+    assert!(!admission.exists());
+    let init_nonce = "4".repeat(48);
+    let initial = ownership::reserve_owner_record(&registry.path, &init_nonce, TIMEOUT).unwrap();
+    ownership::retire_preparing_owner_record(&initial, &init_nonce).unwrap();
+    let initialized = fs::metadata(&admission).unwrap();
+    with_drained_project(&registry, std::slice::from_ref(&project), &pins, TIMEOUT, || Ok(())).unwrap();
+    assert_eq!(fs::metadata(&admission).unwrap().ino(), initialized.ino());
+
     let charge = request(&base, &unrelated_lock).unwrap();
     let error = run(&pins).unwrap_err();
     assert!(error.to_string().contains("writer storage custody remains open"));
@@ -775,6 +791,17 @@ fn project_cutover_fences_old_flock_and_requires_settled_registry() {
     contender.try_lock().unwrap();
     assert_eq!(contender.metadata().unwrap().ino(), metadata.ino());
     drop(contender);
+    let saved_admission = base.join("original-admission");
+    fs::rename(&admission, &saved_admission).unwrap();
+    let missing = run(&pins).unwrap_err();
+    assert!(
+        missing
+            .to_string()
+            .contains("if previously initialized, keep launchers paused")
+    );
+    assert!(!admission.exists());
+    fs::rename(&saved_admission, &admission).unwrap();
+
     fs::rename(&path, path.with_extension("original")).unwrap();
     File::create(&path).unwrap();
     assert!(

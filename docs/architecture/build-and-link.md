@@ -284,6 +284,10 @@ the exact pre-cutover project and dependency lock inodes exclusively, checks pre
 the complete union and registry admission locked through the short selector update. The selector update never
 starts a helper. Start only the selected cohort afterward. An older executable invoked directly can bypass launcher
 selection, so the operator must revoke its supported launch routes before enabling the replacement.
+Initialize a verified first-use registry through normal native owner reservation before the first switch.
+An undispatched reservation may be retired by its original owner without spawning a payload. Cutover never
+creates a missing admission lock because a previously initialized namespace can also appear empty after lock
+loss. Keep launchers paused if the original mutex is missing.
 
 A cooperating SDK caller can opt into the standalone writer's v1 storage admission with
 `SharedWriter::open_with_storage_request`. Supply the same bounded JSON request as
