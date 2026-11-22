@@ -204,3 +204,57 @@ fn permitted_sdk_writer_runs_real_lake_no_build() -> io::Result<()> {
     assert!(!assets.exists());
     Ok(())
 }
+
+#[test]
+fn locally_expired_permit_seals_the_public_writer_until_close() -> io::Result<()> {
+    const FIXTURE: &str = "LEAN_RS_TEST_EXPIRED_WRITER";
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let fixture = StageFixture::new()?;
+        let status = Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "stage_permit::locally_expired_permit_seals_the_public_writer_until_close",
+            ])
+            .env(FIXTURE, fixture.temp.path().canonicalize()?)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &fixture.registry)
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let project = Path::new(&base).join("demo");
+    let registry = Path::new(&base).join("owners");
+    let scratch = Path::new(&base).join("scratch");
+    let request = json!({"version":1,"floor_bytes":1,"budget_bytes":1024 * 1024,
+        "roots":[root("project",&project),root("registry",&registry),root("scratch_parent",&scratch)]});
+    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+    let timeout = Duration::from_secs(10);
+    let mut writer =
+        SharedWriter::open_with_storage_request(helper, &project, &[], &request.to_string(), timeout, &|| false)?;
+    let ready = writer.stage_ready()?.clone();
+    let cutoff = expiry(Duration::from_millis(200))?;
+    let permit = WriterStagePermit::new(ready.clone(), ready.boot(), cutoff)?;
+    while guardian_deadline_ticks()?.as_nanos() < u128::from(cutoff) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let marker = project.join("entry");
+    let mut command = Command::new("/usr/bin/touch");
+    command.arg(&marker);
+    let expired = writer
+        .run_permitted(&command, permit, &|| false)
+        .expect_err("expired locally");
+    let refusal = WriterFailure::from_io(&expired).expect("typed prelaunch refusal");
+    assert_eq!(refusal.disposition, WriterDisposition::NotStarted);
+    assert!(refusal.detail.contains("writer stage permit expired"));
+    assert!(writer.stage_ready().is_err());
+    let replacement = WriterStagePermit::new(ready.clone(), ready.boot(), expiry(timeout)?)?;
+    let refused = writer
+        .run_permitted(&command, replacement, &|| false)
+        .expect_err("fresh permit refused");
+    assert!(refused.to_string().contains("writer scope is sealed"));
+    let refused = writer.run(&command, timeout).expect_err("ordinary run also refused");
+    assert!(refused.to_string().contains("writer scope is sealed"));
+    writer.close(timeout)?;
+    assert!(!marker.exists());
+    assert!(fs::read_dir(scratch)?.next().is_none());
+    Ok(())
+}

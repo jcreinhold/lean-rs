@@ -1107,6 +1107,9 @@ impl SharedWriter {
 
     /// Run the one permitted stage with the original boot-clock expiry.
     ///
+    /// An attempt seals further execution before local validation. A refusal
+    /// before delivery leaves the writer available for explicit close.
+    ///
     /// # Errors
     /// Returns pre-delivery refusal or the existing cancellation and retirement evidence.
     pub fn run_permitted(
@@ -1115,11 +1118,22 @@ impl SharedWriter {
         permit: WriterStagePermit,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Output> {
-        let budget = self
-            .stage_ready()
-            .and_then(|ready| permit.check(ready))
+        if self.stage != StageState::Ready {
+            return Err(failure(
+                WriterDisposition::NotStarted,
+                invalid("writer scope is sealed; no replay"),
+            ));
+        }
+        self.stage = StageState::CloseOnly;
+        let ready = self.stage_ready.take().ok_or_else(|| {
+            failure(
+                WriterDisposition::NotStarted,
+                invalid("writer stage readiness is unavailable"),
+            )
+        })?;
+        let budget = permit
+            .check(&ready)
             .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
-        self.stage_ready = None;
         let permit =
             serde_json::to_value(permit).map_err(|error| failure(WriterDisposition::NotStarted, error.into()))?;
         self.run_inner(command, budget, Some(&permit), cancelled)
@@ -1158,7 +1172,12 @@ impl SharedWriter {
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Output> {
         use std::os::unix::process::ExitStatusExt;
-        if self.stage != StageState::Ready {
+        let expected = if permit.is_some() {
+            StageState::CloseOnly
+        } else {
+            StageState::Ready
+        };
+        if self.stage != expected {
             return Err(failure(
                 WriterDisposition::Unknown,
                 invalid("writer scope is sealed; no replay"),
