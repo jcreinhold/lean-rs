@@ -3217,6 +3217,15 @@ def fileDiagnosticsWithSetup (setup : ModuleSetup) (source : String) (budgets : 
   queryFileWithSetup setup source budgets namespaceContext fileLabel heartbeats diagBytes optionsJson fun _ =>
     #[.diagnostics "diagnostics"]
 
+/-- Project declaration-relative proof state and bounded diagnostics from one elaboration.
+    The caller supplies the exact source with the same trusted setup and initializer
+    custody as `verifyDeclarationBatchWithSetup`. -/
+def fileProofStateWithSetup (setup : ModuleSetup) (source declaration : String) (position : ProofPositionSelector)
+    (budgets : ModuleQueryOutputBudgets) (namespaceContext fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String) : IO ModuleQueryBatchOutcome :=
+  queryFileWithSetup setup source budgets namespaceContext fileLabel heartbeats diagBytes optionsJson fun _ =>
+    #[.proofStateInDeclaration "proof_state" declaration position 0, .diagnostics "diagnostics"]
+
 /-- Supervised setup-aware verification with verdicts independent of display evidence clipping.
     Has the same initializer and custody requirements as `verifyDeclarationBatchWithSetup`. -/
 def verifyDeclarationBatchCompactWithSetup (setup : ModuleSetup) (request : DeclarationVerificationBatchRequest)

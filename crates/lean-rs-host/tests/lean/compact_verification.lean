@@ -145,6 +145,45 @@ private unsafe def checkProjectFileQueries : IO Unit := do
         bounded.diagnostics.foldl (init := 0) (fun n d => n + d.message.utf8ByteSize) ≤ 4096 do
       throw (IO.userError "bounded diagnostics lost severity order, positions, or truncation")
 
+private unsafe def checkSetupProofState : IO Unit := do
+  let dependency := `LeanRsHostShims.Interop
+  let olean ← findOLean dependency
+  let source := "import LeanRsHostShims.Interop\ntheorem positioned : True := by\n  exact True.intro\n" ++
+    "#check MissingProofStateFixture\n"
+  let run := fun (path : System.FilePath) (position : ProofPositionSelector) (total : Nat) =>
+    IO.FS.withTempFile fun file staged => do
+      let setup : ModuleSetup := {
+        name := `Positioned
+        importArts := ({} : NameMap ImportArtifacts).insert dependency (.ofArrays #[#[path]]) }
+      file.putStr (toJson setup).compress
+      file.flush
+      let loaded ← ModuleSetup.load staged
+      Lean.enableInitializersExecution
+      fileProofStateWithSetup loaded source "positioned" position ⟨4096, total⟩ "" "Positioned.lean" 200000 4096 "{}"
+  let .ok result imports ← run olean .entry 65536 | throw (IO.userError "setup proof state failed")
+  let #[.ok "proof_state" (.proofState (.state state)), .ok "diagnostics" (.diagnostics log)] := result.items
+    | throw (IO.userError "missing paired proof state and diagnostics")
+  unless imports == #[dependency.toString] && !result.totalTruncated &&
+      state.declarationName == some "positioned" && state.span.startLine == 3 &&
+      state.goalsBefore.any (·.contains "⊢ True") && state.goalsAfter == state.goalsBefore do
+    throw (IO.userError "wrong goal or position for staged source")
+  unless log.diagnostics.any (fun d => (d.severity matches .error) && d.fileLabel == "Positioned.lean" &&
+      d.position.any (·.line == 4) && d.message.contains "MissingProofStateFixture") do
+    throw (IO.userError "missing body diagnostic from the same source")
+  let .ok after _ ← run olean (.index 0) 65536 | throw (IO.userError "indexed proof state failed")
+  let #[.ok "proof_state" (.proofState (.state indexed)), .ok "diagnostics" _] := after.items
+    | throw (IO.userError "missing indexed proof state")
+  unless indexed.goalsBefore == state.goalsBefore && indexed.goalsAfter.isEmpty do
+    throw (IO.userError "index did not select the post-tactic state")
+  let .ok limited _ ← run olean .entry 1 | throw (IO.userError "tiny proof-state projection failed")
+  unless limited.totalTruncated && (limited.items matches
+      #[.budgetExceeded "proof_state" _, .budgetExceeded "diagnostics" _]) do
+    throw (IO.userError "proof-state batch exceeded the shared output budget")
+  let .headerParseFailed failure ← run (olean.addExtension "absent") .entry 65536
+    | throw (IO.userError "proof state ignored the staged setup's missing artifact")
+  unless failure.diagnostics.any (·.severity matches .error) do
+    throw (IO.userError "missing import refusal diagnostic")
+
 unsafe def main : IO Unit := do
   checkVerdict "fixtureAxiom" true
   checkVerdict "False.intro" false
@@ -152,3 +191,4 @@ unsafe def main : IO Unit := do
   checkVerdict "by skip" false
   checkSharedBudget
   checkProjectFileQueries
+  checkSetupProofState
