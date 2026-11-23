@@ -1000,10 +1000,8 @@ pub struct LeanWorkerDeclarationVerificationFacts {
     /// otherwise.
     #[serde(default)]
     pub candidates: Vec<LeanWorkerDeclarationTargetInfo>,
-    /// `false` when the axiom dependency set could not be computed (the target
-    /// did not resolve, or the walk was not requested): an empty `axioms` then
-    /// means "not computed", not "no axioms". `true` with empty `axioms` is a
-    /// genuine no-nontrivial-axioms result.
+    /// Whether the axiom dependency set was computed. An empty `axioms` list
+    /// is complete only when this flag is true and `axioms_truncated` is false.
     #[serde(default)]
     pub axioms_available: bool,
 }
