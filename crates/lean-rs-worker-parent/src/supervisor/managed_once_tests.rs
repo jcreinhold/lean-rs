@@ -3,7 +3,10 @@
     reason = "fixture failures identify the failed setup, I/O, or assertion"
 )]
 
-use super::{ManagedInspectionOutcome, ManagedRequestDeadline};
+use super::{
+    ManagedInspectionCommand, ManagedInspectionOutcome, ManagedRequestDeadline, ManagedWarmInspectionOutcome,
+    OwnedChild,
+};
 use crate::crash_ownership::{NONCE_ENV, ParentLifetime, SOCKET_ENV};
 use crate::supervisor::{
     BufReader, BufWriter, Command, Duration, Instant, LeanWorker, LeanWorkerDeclarationInspectionRequest,
@@ -1044,4 +1047,119 @@ fn run_cold_prepared_inspection(selected: RealInput, root: &Path, freeze: bool, 
     if freeze {
         std::fs::write(root.join("retired"), b"exact owner confirmed closure").expect("publish confirmed retirement");
     }
+}
+
+thread_local! {
+    static STALE_WARM_FINISH: std::cell::Cell<Option<([u8; 16], u64, u64)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+pub(super) fn refuse_stale_warm_finish(child: &mut OwnedChild, current: &ManagedInspectionCommand) {
+    STALE_WARM_FINISH.with(|stale| {
+        if let Some((attempt, stage, command)) = stale.take() {
+            assert!(command < current.command);
+            let now = lean_toolchain::native_guardian::guardian_deadline_ticks().expect("clock");
+            let expires_ns = u64::try_from(now.saturating_add(Duration::from_millis(100)).as_nanos()).expect("clock");
+            let error = child
+                .finish_managed_request(
+                    &ManagedRequestDeadline {
+                        attempt,
+                        stage,
+                        expires_ns,
+                    },
+                    command,
+                )
+                .expect_err("guardian must not ACK the previous command during the active successor");
+            assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        }
+    });
+}
+
+#[test]
+#[ignore = "requires the matching real SDK worker and private prepared Lean fixture"]
+fn real_lean_managed_warm_two_commands_refuse_stale_finish() {
+    let selected = RealInput::selected();
+    let root = selected.scratch.join("warm");
+    std::fs::create_dir(&root).expect("create private warm test case");
+    write_guardian_script(&root, &std::env::current_exe().expect("guardian fixture executable"));
+    let registry = selected.scratch.join("owners");
+    let child = crate::LeanWorkerChild::for_toolchain(&selected.worker, &selected.sysroot)
+        .checked_native_loader_environment()
+        .shared_writer_executable(&selected.helper)
+        .native_guardian(root.join("guardian"))
+        .lifetime_directory(&registry)
+        .lifetime_socket_directory(&selected.scratch)
+        .prepared_host_artifacts(selected.prepared)
+        .shared_artifact_reads(true);
+    let imports = vec![
+        "LeanRsFixture.Handles".to_owned(),
+        "LeanRsFixture.SourceRanges".to_owned(),
+    ];
+    let tracker = LeanWorkerProcessTracker::new();
+    let mut handle = crate::LeanWorkerHostHandleBuilder::shims_only(&selected.fixture, std::iter::empty::<String>())
+        .worker_child(child)
+        .process_tracker(tracker.clone())
+        .open()
+        .expect("open prepared warm host handle");
+    let original = arm();
+    let binding = handle
+        .prepare_managed_artifact_read(imports.clone(), original.expires_ns)
+        .expect("prepare exact original read custody");
+    let names = ["LeanRsFixture.SourceRanges.knownTheorem", "Nat.add_zero"];
+    for (index, name) in names.into_iter().enumerate() {
+        let command = u64::try_from(index + 1).expect("ordinal");
+        let successor = ManagedRequestDeadline {
+            attempt: [8_u8; 16],
+            ..arm()
+        };
+        let grant = if command == 1 {
+            &original
+        } else {
+            STALE_WARM_FINISH.with(|stale| stale.set(Some((original.attempt, original.stage, 1))));
+            &successor
+        };
+        let saved = root.join(format!("saved-{command}"));
+        let ended = root.join(format!("ended-{command}"));
+        let persist = |path: &Path| {
+            std::fs::File::create(path)
+                .and_then(|file| file.sync_all())
+                .and_then(|()| std::fs::File::open(&root)?.sync_all())
+                .map_err(|error| LeanWorkerError::Setup {
+                    message: error.to_string(),
+                })
+        };
+        let outcome = handle.inspect_admitted_declaration_warm(
+            &imports, LeanWorkerDeclarationInspectionRequest::new(name), &binding,
+            ManagedInspectionCommand {
+                generation: binding.generation.clone(), attempt: grant.attempt, stage: grant.stage, command,
+            },
+            grant.expires_ns, None,
+            |result| {
+                assert!(matches!(result, LeanWorkerDeclarationInspectionResult::Found { declaration } if declaration.name == name));
+                persist(&saved)
+            },
+            || {
+                assert!(saved.exists());
+                persist(&ended)
+            },
+        ).expect("bound managed execution");
+        let retained = match outcome {
+            ManagedWarmInspectionOutcome::Reusable(_) => true,
+            ManagedWarmInspectionOutcome::Retired(outcome) => {
+                outcome
+                    .retirement
+                    .expect("unexpected retirement still confirms closure");
+                assert!(outcome.result.is_ok(), "warm execution failed: {:?}", outcome.result);
+                false
+            }
+        };
+        assert!(retained, "warm execution unexpectedly retired");
+        assert!(ended.exists());
+        assert!(binding.worker.is_live().expect("original worker still live"));
+        assert!(binding.guardian.is_live().expect("original guardian still live"));
+        assert_eq!(tracker.active_processes(), 1);
+    }
+    handle.shutdown().expect("retire original warm generation");
+    assert_eq!(tracker.active_processes(), 0);
+    std::fs::remove_dir_all(root).expect("remove closed warm test case");
 }

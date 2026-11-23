@@ -905,6 +905,10 @@ impl ParentLifetimeLease {
         self.arm_deadline(arm, op, command)
     }
 
+    pub(crate) fn arm_warm_request(&mut self, arm: &ManagedRequestDeadline, command: u64) -> io::Result<()> {
+        self.arm_deadline(arm, "arm_warm_hard_deadline", Some(command))
+    }
+
     fn arm_deadline(&mut self, arm: &ManagedRequestDeadline, op: &str, command: Option<u64>) -> io::Result<()> {
         self.deadline_exchange(arm, op, "hard_deadline_armed", command, Some(arm.expires_ns))
     }

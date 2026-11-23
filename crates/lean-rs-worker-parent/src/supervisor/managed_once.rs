@@ -19,6 +19,25 @@ pub struct ManagedInspectionOutcome {
     pub retirement: Result<LeanWorkerShutdownReport, LeanWorkerError>,
 }
 
+/// A managed command leaves its exact generation reusable only after durable end.
+#[doc(hidden)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "keep the existing one-shot retirement report inline"
+)]
+pub enum ManagedWarmInspectionOutcome {
+    /// Exact finish and durable end were confirmed on the current owner.
+    Reusable(LeanWorkerDeclarationInspectionResult),
+    /// Retirement was requested. Inspect its separate result for closure.
+    Retired(ManagedInspectionOutcome),
+}
+
+pub(crate) struct ManagedFinish<'a> {
+    pub(crate) command: ManagedInspectionCommand,
+    pub(crate) save: SaveManagedInspection<'a>,
+    pub(crate) end: Option<&'a mut dyn FnMut() -> Result<(), LeanWorkerError>>,
+}
+
 impl LeanWorker {
     pub(crate) fn managed_guardian_binding(
         &self,
@@ -93,18 +112,35 @@ impl LeanWorker {
         save: Option<SaveManagedInspection<'_>>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         self.validate_managed_receiver(expected)?;
-        let finish = save.map(|save| {
-            (
-                ManagedInspectionCommand {
-                    generation: expected.generation.clone(),
-                    attempt: arm.attempt,
-                    stage: arm.stage,
-                    command: 1,
-                },
-                save,
-            )
+        let finish = save.map(|save| ManagedFinish {
+            command: ManagedInspectionCommand {
+                generation: expected.generation.clone(),
+                attempt: arm.attempt,
+                stage: arm.stage,
+                command: 1,
+            },
+            save,
+            end: None,
         });
         self.inspect_declaration_managed_once_with(request, arm, Some(config), cancellation, finish, |_| {})
+    }
+
+    pub(crate) fn inspect_admitted_prepared_declaration_warm(
+        &mut self,
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        arm: &ManagedRequestDeadline,
+        config: &LeanWorkerSessionConfig,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        finish: ManagedFinish<'_>,
+    ) -> Result<ManagedWarmInspectionOutcome, LeanWorkerError> {
+        self.validate_managed_receiver(expected)?;
+        if finish.command.generation != expected.generation {
+            return Err(LeanWorkerError::Protocol {
+                message: "managed grant generation differs".to_owned(),
+            });
+        }
+        self.inspect_declaration_managed(request, arm, Some(config), cancellation, Some(finish), |_| {})
     }
 
     fn validate_managed_receiver(
@@ -235,17 +271,49 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
         cancellation: Option<&LeanWorkerCancellationToken>,
-        finish: Option<(ManagedInspectionCommand, SaveManagedInspection<'_>)>,
+        finish: Option<ManagedFinish<'_>>,
         before_retirement: impl FnOnce(&mut Self),
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
+        match self.inspect_declaration_managed(request, arm, prepared, cancellation, finish, before_retirement)? {
+            ManagedWarmInspectionOutcome::Retired(outcome) => Ok(outcome),
+            ManagedWarmInspectionOutcome::Reusable(_) => Err(LeanWorkerError::Protocol {
+                message: "one-shot inspection unexpectedly retained its generation".to_owned(),
+            }),
+        }
+    }
+
+    fn inspect_declaration_managed(
+        &mut self,
+        request: LeanWorkerDeclarationInspectionRequest,
+        arm: &ManagedRequestDeadline,
+        prepared: Option<&LeanWorkerSessionConfig>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        finish: Option<ManagedFinish<'_>>,
+        before_retirement: impl FnOnce(&mut Self),
+    ) -> Result<ManagedWarmInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
-        if self.generation_dispatch.is_some()
+        let warm = finish.as_ref().filter(|finish| finish.end.is_some());
+        let admitted = if let Some(pin) = &self.generation_dispatch {
+            warm.zip(pin.warm_end.as_ref()).is_some_and(|(next, prior)| {
+                pin.sealed
+                    && Arc::ptr_eq(&pin.owner, &self.request_scope)
+                    && pin.generation == self.generation
+                    && self.current_native_generation_id() == Some(pin.native_generation_id.as_str())
+                    && next.command.generation == prior.generation
+                    && next.command.command > prior.command
+                    && (next.command.attempt, next.command.stage) != (prior.attempt, prior.stage)
+            })
+        } else {
+            warm.is_none_or(|first| first.command.command == 1)
+        };
+        if !admitted
             || !matches!(self.state, WorkerSupervisorState::Idle { .. })
             || prepared.map_or_else(|| self.open_session_keys.is_empty(), |_| !self.host_read_active)
             || !self.child.as_ref().is_some_and(OwnedChild::has_guardian)
         {
             return Err(LeanWorkerError::ShutdownInProgress { operation: OPERATION });
         }
+        let resuming = self.generation_dispatch.is_some();
         let native_generation_id = self
             .current_native_generation_id()
             .ok_or(LeanWorkerError::ShutdownInProgress { operation: OPERATION })?
@@ -255,7 +323,9 @@ impl LeanWorker {
             native_generation_id,
             generation: self.generation,
             sealed: false,
+            warm_end: None,
         });
+        let warm_command = warm.map(|finish| finish.command.clone());
         let result = (|| {
             let token = managed_token(arm, cancellation)?;
             self.check_request_cancelled(OPERATION, Some(&token))?;
@@ -263,13 +333,20 @@ impl LeanWorker {
                 .child
                 .as_mut()
                 .ok_or(LeanWorkerError::ShutdownInProgress { operation: OPERATION })?;
-            let ordinal = finish.as_ref().map(|(command, _)| command.command);
-            child
-                .arm_managed_request(arm, ordinal)
-                .map_err(|error| LeanWorkerError::Setup {
-                    message: format!("managed request arm refused: {error}"),
-                })?;
-            if let Some(config) = prepared {
+            let ordinal = finish.as_ref().map(|finish| finish.command.command);
+            let armed = if let Some(command) = &warm_command {
+                child.arm_warm_request(arm, command.command)
+            } else {
+                child.arm_managed_request(arm, ordinal)
+            };
+            armed.map_err(|error| LeanWorkerError::Setup {
+                message: format!("managed request arm refused: {error}"),
+            })?;
+            #[cfg(all(test, target_os = "macos"))]
+            if let Some(command) = &warm_command {
+                tests::refuse_stale_warm_finish(child, command);
+            }
+            if let Some(config) = prepared.filter(|_| !resuming) {
                 self.open_managed_artifact_session(config, &token, arm.expires_ns)?;
                 #[cfg(all(test, target_os = "macos"))]
                 tests::before_prepared_inspection_dispatch(self, arm);
@@ -277,8 +354,8 @@ impl LeanWorker {
             let now = Instant::now();
             self.write_request_bounded_inner(
                 match &finish {
-                    Some((command, _)) => Request::InspectDeclarationFenced {
-                        command: command.clone(),
+                    Some(finish) => Request::InspectDeclarationFenced {
+                        command: finish.command.clone(),
                         request,
                     },
                     None => Request::InspectDeclaration { request },
@@ -294,32 +371,41 @@ impl LeanWorker {
             tests::after_real_dispatch(self, arm);
 
             let response = self.read_response_with_progress(OPERATION, None, Some(&token))?;
-            let (command, save) = match finish {
-                Some((command, save)) => (Some(command), Some(save)),
-                None => (None, None),
-            };
-            let result = inspection_terminal(command, response, OPERATION)?;
-            if let (Some(ordinal), Some(save)) = (ordinal, save) {
+            let expected = finish.as_ref().map(|finish| finish.command.clone());
+            let result = inspection_terminal(expected, response, OPERATION)?;
+            if let Some(finish) = finish {
                 self.check_request_cancelled(OPERATION, Some(&token))?;
-                // This development route always retires. Seal before invoking
-                // the caller so even an unwinding save cannot reopen dispatch.
+                // Seal before either callback, including on unwind.
                 self.seal_generation_dispatch_internal();
-                save(&result)?;
+                (finish.save)(&result)?;
                 self.check_request_cancelled(OPERATION, Some(&token))?;
                 self.child
                     .as_mut()
                     .ok_or(LeanWorkerError::ShutdownInProgress { operation: OPERATION })?
-                    .finish_managed_request(arm, ordinal)
+                    .finish_managed_request(arm, finish.command.command)
                     .map_err(|error| LeanWorkerError::Setup {
                         message: format!("managed request finish unconfirmed: {error}"),
                     })?;
+                if let Some(end) = finish.end {
+                    end()?;
+                }
             }
             Ok(result)
         })();
+        if let Some(command) = warm_command
+            && result.is_ok()
+            && let Some(pin) = &mut self.generation_dispatch
+        {
+            pin.warm_end = Some(command);
+            return result.map(ManagedWarmInspectionOutcome::Reusable);
+        }
         before_retirement(self);
         self.seal_generation_dispatch_internal();
         let retirement = self.shutdown_child(ShutdownIntent::KillOnly);
-        Ok(ManagedInspectionOutcome { result, retirement })
+        Ok(ManagedWarmInspectionOutcome::Retired(ManagedInspectionOutcome {
+            result,
+            retirement,
+        }))
     }
 }
 

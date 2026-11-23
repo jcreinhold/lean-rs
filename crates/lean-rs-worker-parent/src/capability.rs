@@ -1607,6 +1607,58 @@ impl LeanWorkerHostHandle {
         )
     }
 
+    /// Execute a separately consumed grant on this prepared managed generation.
+    ///
+    /// The caller must durably save the terminal result in `save` and record
+    /// the completed attempt in `end`. The latter is called only after the
+    /// original guardian has acknowledged the exact finish.
+    ///
+    /// # Errors
+    /// Refuses a mismatched grant, unavailable generation or different imports.
+    /// After dispatch, an uncertain transition seals and retires the generation.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments, reason = "exact grant and durable callbacks")]
+    pub fn inspect_admitted_declaration_warm(
+        &mut self,
+        imports: &[String],
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        command: lean_rs_worker_protocol::protocol::ManagedInspectionCommand,
+        expires_ns: u64,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        mut save: impl FnMut(&crate::LeanWorkerDeclarationInspectionResult) -> Result<(), LeanWorkerError>,
+        mut end: impl FnMut() -> Result<(), LeanWorkerError>,
+    ) -> Result<crate::ManagedWarmInspectionOutcome, LeanWorkerError> {
+        let (config, original_expiry) = self
+            .managed_artifact_read
+            .as_ref()
+            .ok_or_else(|| LeanWorkerError::Setup {
+                message: "managed inspection requires its prepared artifact loan".to_owned(),
+            })?;
+        if (command.command == 1 && *original_expiry != expires_ns) || config.imports() != imports {
+            return Err(LeanWorkerError::Setup {
+                message: "managed artifact preparation differs from the admitted request".to_owned(),
+            });
+        }
+        self.worker.inspect_admitted_prepared_declaration_warm(
+            request,
+            expected,
+            &crate::crash_ownership::ManagedRequestDeadline {
+                attempt: command.attempt,
+                stage: command.stage,
+                expires_ns,
+            },
+            config,
+            cancellation,
+            crate::supervisor::ManagedFinish {
+                command,
+                save: &mut save,
+                end: Some(&mut end),
+            },
+        )
+    }
+
     /// Open a worker session for this host handle.
     ///
     /// The builder does not open one, so the first call here is also where a

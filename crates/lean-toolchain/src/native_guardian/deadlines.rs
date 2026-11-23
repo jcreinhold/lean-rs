@@ -48,6 +48,8 @@ enum ArmOp {
     Reader,
     #[serde(rename = "arm_fenced_hard_deadline")]
     Fenced,
+    #[serde(rename = "arm_warm_hard_deadline")]
+    Warm,
 }
 
 #[derive(Deserialize)]
@@ -148,7 +150,7 @@ impl OwnerDeadline {
             }
             Err(error) => return Err(error),
         };
-        if self.arm.as_ref().is_some_and(|arm| arm.command.is_none()) || self.finished {
+        if self.arm.as_ref().is_some_and(|arm| arm.command.is_none()) {
             return Err(invalid("native guardian deadline is already armed"));
         }
         if count > MAX_ARM_FRAME.saturating_sub(self.input.len()) {
@@ -170,7 +172,13 @@ impl OwnerDeadline {
             return Err(invalid("native guardian arm cannot be pipelined"));
         }
         let input = std::mem::take(&mut self.input);
-        if let Some(arm) = &self.arm {
+        // A finish may arrive late after another warm command is armed.
+        // Recognize its operation independently from the active arm state.
+        let message: serde_json::Value = serde_json::from_slice(&input).map_err(io::Error::other)?;
+        if message.get("op").and_then(serde_json::Value::as_str) == Some("finish_hard_deadline") {
+            let Some(arm) = self.arm.as_ref().filter(|_| self.active()) else {
+                return Ok(false);
+            };
             let Finish {
                 op: FinishOp::FinishHardDeadline,
                 protocol,
@@ -210,8 +218,17 @@ impl OwnerDeadline {
         }
         let arm: Arm = serde_json::from_slice(&input).map_err(io::Error::other)?;
         if match arm.op {
-            ArmOp::Fenced => arm.command != Some(1),
-            ArmOp::Hard | ArmOp::Reader => arm.command.is_some(),
+            ArmOp::Warm => self.arm.as_ref().map_or_else(
+                || arm.command != Some(1),
+                |previous| {
+                    !self.finished
+                        || !matches!(previous.op, ArmOp::Warm)
+                        || arm.command <= previous.command
+                        || (arm.attempt, arm.stage) == (previous.attempt, previous.stage)
+                },
+            ),
+            ArmOp::Fenced => self.armed() || arm.command != Some(1),
+            ArmOp::Hard | ArmOp::Reader => self.armed() || arm.command.is_some(),
         } {
             return Err(invalid("native guardian arm command differs"));
         }
@@ -232,6 +249,8 @@ impl OwnerDeadline {
         }
         let ack = frame(&ack)?;
         self.arm = Some(arm);
+        self.finished = false;
+        self.last_activity = None;
         // Neither supported process-group implementation attributes complete
         // fork and exit usage to this attempt, so start with the hard bound.
         let now = boot_ticks()?;

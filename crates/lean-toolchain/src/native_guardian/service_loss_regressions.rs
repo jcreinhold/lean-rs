@@ -1024,7 +1024,7 @@ fn external_reader_deadline_refuses_before_read_custody() {
 
 #[test]
 fn production_guardian_authenticates_finish_without_returning_custody() {
-    for case in ["matching", "stale", "expired"] {
+    for case in ["matching", "stale", "expired", "warm-successor"] {
         let fixture = Fixture::new();
         let mut generation = Generation::start(&fixture.root);
         let worker = generation.worker.id();
@@ -1038,10 +1038,15 @@ fn production_guardian_authenticates_finish_without_returning_custody() {
         let until = || deadline(Duration::from_secs(3)).unwrap();
         let parent = generation.parent.as_mut().unwrap();
         let attempt = [7_u8; 16];
+        let arm_op = if case == "warm-successor" {
+            "arm_warm_hard_deadline"
+        } else {
+            "arm_fenced_hard_deadline"
+        };
         write_frame(
             parent,
             &json!({
-                "op":"arm_fenced_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+                "op":arm_op,"protocol":PROTOCOL,"nonce":NONCE,
                 "attempt":attempt,"stage":1,"command":1,"expires_ns":expires_ns
             }),
             until(),
@@ -1083,6 +1088,51 @@ fn production_guardian_authenticates_finish_without_returning_custody() {
                     "attempt":attempt,"stage":1,"command":1
                 })
             );
+            if case == "warm-successor" {
+                let second_expiry = u64::try_from(
+                    deadlines::boot_ticks()
+                        .unwrap()
+                        .saturating_add(Duration::from_secs(2))
+                        .as_nanos(),
+                )
+                .unwrap();
+                let second = [8_u8; 16];
+                write_frame(
+                    parent,
+                    &json!({
+                        "op":"arm_warm_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+                        "attempt":second,"stage":1,"command":2,"expires_ns":second_expiry
+                    }),
+                    until(),
+                )
+                .unwrap();
+                assert_eq!(
+                    read_frame(parent, until()).unwrap(),
+                    json!({
+                        "state":"hard_deadline_armed","protocol":PROTOCOL,"nonce":NONCE,
+                        "attempt":second,"stage":1,"command":2,"expires_ns":second_expiry
+                    })
+                );
+                write_frame(parent, &finish(1), until()).unwrap();
+                let refused = read_frame(parent, deadline(Duration::from_millis(75)).unwrap()).unwrap_err();
+                assert_eq!(refused.kind(), io::ErrorKind::TimedOut);
+                write_frame(
+                    parent,
+                    &json!({
+                        "op":"finish_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+                        "attempt":second,"stage":1,"command":2
+                    }),
+                    until(),
+                )
+                .unwrap();
+                assert_eq!(
+                    read_frame(parent, until()).unwrap(),
+                    json!({
+                        "state":"hard_deadline_finished","protocol":PROTOCOL,"nonce":NONCE,
+                        "attempt":second,"stage":1,"command":2
+                    })
+                );
+            }
             if case == "matching" {
                 wait_until(|| deadlines::boot_ticks().unwrap() >= expires + POLL.saturating_mul(3));
             }

@@ -1735,6 +1735,8 @@ struct GenerationDispatchRestriction {
     native_generation_id: String,
     generation: WorkerGeneration,
     sealed: bool,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    warm_end: Option<lean_rs_worker_protocol::protocol::ManagedInspectionCommand>,
 }
 
 #[cfg(test)]
@@ -1906,6 +1908,8 @@ impl LeanWorker {
             native_generation_id: native_generation_id.to_owned(),
             generation: self.generation,
             sealed: false,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            warm_end: None,
         });
         Ok(binding)
     }
@@ -7637,7 +7641,7 @@ mod dispatch_pin_tests;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "supervisor/managed_once.rs"]
 mod managed_once;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use managed_once::ManagedInspectionOutcome;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub(crate) use managed_once::SaveManagedInspection;
+pub(crate) use managed_once::{ManagedFinish, SaveManagedInspection};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use managed_once::{ManagedInspectionOutcome, ManagedWarmInspectionOutcome};
