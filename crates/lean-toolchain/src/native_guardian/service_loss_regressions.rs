@@ -891,21 +891,25 @@ fn fixture_deadline_server() {
     // Split the actual wire message across reads.
     write_bytes(parent, b"{", deadline(Duration::from_secs(1)).unwrap()).unwrap();
     thread::sleep(POLL.saturating_mul(3));
-    let arm = frame(&json!({
+    let warm = root.join("warm-expiry").exists();
+    let mut request = json!({
         "op":"arm_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
         "attempt":attempt,"stage":1,"expires_ns":expires_ns
-    }))
-    .unwrap();
+    });
+    let mut expected = json!({
+        "state":"hard_deadline_armed","protocol":PROTOCOL,"nonce":NONCE,
+        "attempt":attempt,"stage":1,"expires_ns":expires_ns
+    });
+    if warm {
+        request["op"] = json!("arm_warm_hard_deadline");
+        request["command"] = json!(1);
+        expected["command"] = json!(1);
+    }
+    let arm = frame(&request).unwrap();
     let (_, arm_tail) = arm.split_first().unwrap();
     write_bytes(parent, arm_tail, deadline(Duration::from_secs(1)).unwrap()).unwrap();
     let ack = read_frame(parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
-    assert_eq!(
-        ack,
-        json!({
-            "state":"hard_deadline_armed","protocol":PROTOCOL,"nonce":NONCE,
-            "attempt":attempt,"stage":1,"expires_ns":expires_ns
-        })
-    );
+    assert_eq!(ack, expected);
     write_json(&root, "deadline-armed", &expires_ns);
     assert_eq!(generation.reap().signal(), Some(libc::SIGKILL));
     wait_until(|| root.join("deadline-test-finished").exists());
@@ -913,7 +917,19 @@ fn fixture_deadline_server() {
 
 #[test]
 fn production_guardian_drains_at_deadline_with_requester_stopped() {
+    frozen_requester_drains_at_deadline(false);
+}
+
+#[test]
+fn production_warm_guardian_drains_at_deadline_with_requester_stopped() {
+    frozen_requester_drains_at_deadline(true);
+}
+
+fn frozen_requester_drains_at_deadline(warm: bool) {
     let fixture = Fixture::new();
+    if warm {
+        fs::write(fixture.root.join("warm-expiry"), b"warm").unwrap();
+    }
     fs::write(fixture.root.join("service-loss-watchdog"), b"test-only rescue").unwrap();
     let server = TestChild(
         fixture_command(
@@ -1024,7 +1040,7 @@ fn external_reader_deadline_refuses_before_read_custody() {
 
 #[test]
 fn production_guardian_authenticates_finish_without_returning_custody() {
-    for case in ["matching", "stale", "expired", "warm-successor"] {
+    for case in ["matching", "stale", "expired", "warm-successor", "warm-idle"] {
         let fixture = Fixture::new();
         let mut generation = Generation::start(&fixture.root);
         let worker = generation.worker.id();
@@ -1038,7 +1054,7 @@ fn production_guardian_authenticates_finish_without_returning_custody() {
         let until = || deadline(Duration::from_secs(3)).unwrap();
         let parent = generation.parent.as_mut().unwrap();
         let attempt = [7_u8; 16];
-        let arm_op = if case == "warm-successor" {
+        let arm_op = if matches!(case, "warm-successor" | "warm-idle") {
             "arm_warm_hard_deadline"
         } else {
             "arm_fenced_hard_deadline"
@@ -1133,7 +1149,7 @@ fn production_guardian_authenticates_finish_without_returning_custody() {
                     })
                 );
             }
-            if case == "matching" {
+            if matches!(case, "matching" | "warm-idle") {
                 wait_until(|| deadlines::boot_ticks().unwrap() >= expires + POLL.saturating_mul(3));
             }
             assert!(generation.guardian.is_live().unwrap());
