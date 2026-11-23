@@ -13,6 +13,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 - Supervised Lean callers can use the admitted module setup and exact source to retrieve a declaration's proof state
   with bounded diagnostics, or try independent tactic candidates without editing the source file.
+- Managed writer callers can retain the original helper’s exact exit status after a failed Ready handshake or
+  close timeout and use it alongside their existing settlement checks.
 
 ## [0.10.13]
 
