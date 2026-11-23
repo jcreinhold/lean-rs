@@ -1188,19 +1188,27 @@ fn real_lean_managed_warm_two_commands_refuse_stale_finish() {
             );
             assert!(replay.is_err(), "completed ordinal cannot be consumed again");
         }
-        let outcome = handle.inspect_admitted_declaration_warm(
-            &imports, LeanWorkerDeclarationInspectionRequest::new(name), &binding,
-            exact_command.clone(),
-            grant.expires_ns, None,
-            |result| {
-                assert!(matches!(result, LeanWorkerDeclarationInspectionResult::Found { declaration } if declaration.name == name));
-                persist(&saved)
-            },
-            || {
-                assert!(saved.exists());
-                persist(&ended)
-            },
-        ).expect("bound managed execution");
+        let outcome = handle
+            .inspect_admitted_declaration_warm(
+                &imports,
+                LeanWorkerDeclarationInspectionRequest::new(name),
+                &binding,
+                exact_command.clone(),
+                grant.expires_ns,
+                None,
+                |result| {
+                    assert!(matches!(
+                        result,
+                        LeanWorkerDeclarationInspectionResult::Found { declaration } if declaration.name == name
+                    ));
+                    persist(&saved)
+                },
+                || {
+                    assert!(saved.exists());
+                    persist(&ended)
+                },
+            )
+            .expect("bound managed execution");
         let retained = match outcome {
             ManagedWarmInspectionOutcome::Reusable(_) => true,
             ManagedWarmInspectionOutcome::Retired(outcome) => {
