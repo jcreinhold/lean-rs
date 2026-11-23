@@ -2758,7 +2758,8 @@ mod tests {
 
     #[test]
     fn dependency_content_changes_invalidate_build_and_probe_with_preserved_mtime() {
-        let root = make_project("dependency-content-cache", "MyCapability");
+        const TARGET: &str = "DependencyContentProbeCapability";
+        let root = make_project("dependency-content-cache", TARGET);
         let dependency = make_project("dependency-content-input", "Dependency");
         let callback = dependency.join("c/callback.c");
         write_file(&callback, "int callback(void) { return 1; }\n");
@@ -2770,7 +2771,7 @@ mod tests {
             })
             .to_string(),
         );
-        let builder = CargoLeanCapability::new(&root, "MyCapability");
+        let builder = CargoLeanCapability::new(&root, TARGET);
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
         builder
             .clone()
@@ -2886,10 +2887,11 @@ mod tests {
 
     #[test]
     fn ready_probe_preserves_cache_files_and_rejects_missing_or_changed_inputs() {
-        let root = make_project("ready-probe", "MyCapability");
-        let builder = CargoLeanCapability::new(&root, "MyCapability").package("my_pkg");
+        const TARGET: &str = "ReadyProbeCapability";
+        let root = make_project("ready-probe", TARGET);
+        let builder = CargoLeanCapability::new(&root, TARGET).package("my_pkg");
         assert!(builder.probe_ready_strict().expect("cold read probe").is_none());
-        assert!(!super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()).exists());
+        assert!(!super::cache_path(&root, TARGET, &LakeBuildOptions::default()).exists());
         let built = builder
             .clone()
             .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
@@ -2923,10 +2925,9 @@ mod tests {
         fs::write(built.manifest_path(), manifest_before).expect("restore exact metadata");
         write_file(&root.join("New.lean"), "def newSource := 1");
         assert!(builder.probe_ready_strict().expect("source set changed").is_none());
-        fs::remove_file(super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()))
-            .expect("remove cache key");
+        fs::remove_file(super::cache_path(&root, TARGET, &LakeBuildOptions::default())).expect("remove cache key");
         assert!(builder.probe_ready().expect("missing cache").is_none());
-        assert!(!super::cache_path(&root, "MyCapability", &LakeBuildOptions::default()).exists());
+        assert!(!super::cache_path(&root, TARGET, &LakeBuildOptions::default()).exists());
     }
 
     #[test]
@@ -3078,11 +3079,12 @@ mod tests {
 
     #[test]
     fn ready_probe_requires_recorded_dependency_dylibs_and_matching_sysroot() {
-        let root = make_project("ready-probe-dependency", "MyCapability");
+        const TARGET: &str = "ReadyProbeDependencyCapability";
+        let root = make_project("ready-probe-dependency", TARGET);
         let dependency_path = root.join("libdependency.dylib");
         write_file(&dependency_path, "dependency");
         let sysroot = make_fake_sysroot("ready-probe");
-        let builder = CargoLeanCapability::new(&root, "MyCapability")
+        let builder = CargoLeanCapability::new(&root, TARGET)
             .lean_sysroot(&sysroot)
             .dependency(LeanLibraryDependency::path(&dependency_path));
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
@@ -3095,7 +3097,7 @@ mod tests {
             Some(built.clone())
         );
         assert!(
-            CargoLeanCapability::new(&root, "MyCapability")
+            CargoLeanCapability::new(&root, TARGET)
                 .probe_ready()
                 .expect("different build options")
                 .is_none()
