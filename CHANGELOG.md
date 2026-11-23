@@ -9,6 +9,11 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.14]
+
+- Supervised Lean callers can use the admitted module setup and exact source to retrieve a declaration's proof state
+  with bounded diagnostics, or try independent tactic candidates without editing the source file.
+
 ## [0.10.13]
 
 - Managed launchers can fence the exact project lock union and native admission while changing the launcher

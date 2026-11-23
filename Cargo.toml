@@ -8,16 +8,16 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jcreinhold/lean-rs"
 rust-version = "1.94"
-version = "0.10.13"
+version = "0.10.14"
 
 [workspace.dependencies]
-lean-rs = { path = "crates/lean-rs", version = "0.10.13" }
-lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.10.13" }
-lean-rs-host = { path = "crates/lean-rs-host", version = "0.10.13" }
-lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.10.13" }
-lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.10.13" }
-lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.10.13" }
-lean-toolchain = { path = "crates/lean-toolchain", version = "0.10.13" }
+lean-rs = { path = "crates/lean-rs", version = "0.10.14" }
+lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.10.14" }
+lean-rs-host = { path = "crates/lean-rs-host", version = "0.10.14" }
+lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.10.14" }
+lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.10.14" }
+lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.10.14" }
+lean-toolchain = { path = "crates/lean-toolchain", version = "0.10.14" }
 
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 fs4 = "1.1"
