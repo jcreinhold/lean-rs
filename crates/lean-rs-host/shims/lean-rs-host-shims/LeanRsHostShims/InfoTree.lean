@@ -2048,11 +2048,21 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
   let headerSource := String.Pos.Raw.extract source 0 parserState.pos
   let (commandEnv, initialMessages) ←
     if let some setup := setup? then
-      setup.dynlibs.forM Lean.loadDynlib
-      Lean.Elab.processHeaderCore (HeaderSyntax.startPos header) (setup.imports?.getD (HeaderSyntax.imports header))
-        (setup.isModule || HeaderSyntax.isModule header) opts headerMessages inputCtx
-        (plugins := setup.plugins) (mainModule := setup.name) (package? := setup.package?)
-        (arts := setup.importArts) (headerStx? := some header)
+      -- Setup-backed callers supply an old snapshot only for candidate edits
+      -- within the same attempt and with the same admitted setup. Keep its
+      -- original import environment instead of executing module initializers again.
+      if let some old := old? then
+        if old.headerSource != headerSource || old.fileLabel != fileLabel then
+          let elapsed ← elapsedMicrosSince headerStart
+          return .error (LeanRsFixture.Elaboration.singleErrorFailure
+            "candidate changed the setup-bound file header" fileLabel, elapsed)
+        pure (old.baseEnv, old.headerMessages)
+      else
+        setup.dynlibs.forM Lean.loadDynlib
+        Lean.Elab.processHeaderCore (HeaderSyntax.startPos header) (setup.imports?.getD (HeaderSyntax.imports header))
+          (setup.isModule || HeaderSyntax.isModule header) opts headerMessages inputCtx
+          (plugins := setup.plugins) (mainModule := setup.name) (package? := setup.package?)
+          (arts := setup.importArts) (headerStx? := some header)
     else if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
         resolveModuleHeader env header opts headerMessages inputCtx
@@ -2439,7 +2449,7 @@ private def attemptCandidate
     (heartbeats : UInt64) (diagBytes : USize) (base? : Option ModuleSnapshot) (document : SourceDocument)
     (selected : SelectedTactic)
     (declaration : Option DeclarationTargetInfo) (proofPosition : Option ProofPositionSummary)
-    (candidate : ProofCandidate) : IO ProofAttemptRow := do
+    (candidate : ProofCandidate) (setup? : Option ModuleSetup) : IO ProofAttemptRow := do
   let candidateText := renderStringBoundedWith request.budgets.perFieldBytes candidate.text
   let some (overlay, site) := document.tacticInsertion? selected declaration proofPosition candidate.text
     | return {
@@ -2451,7 +2461,7 @@ private def attemptCandidate
       }
   match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes
       (base?.map (·.optionsJson) |>.getD "{}") (oneShotPolicy overlay fileLabel)
-      base? with
+      base? setup? with
   | .error (failure, _) =>
     let (localFailure, downstreamFailure) := document.splitFailureAtBodySpan site.insertedBodySpan failure
     return {
@@ -2497,7 +2507,7 @@ private def candidateCapRows (candidates : Array ProofCandidate) : Array ProofCa
 
 private def attemptEnvelope
     (env : Environment) (request : ProofAttemptRequest) (namespaceContext fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize) (base : ModuleSnapshot) :
+    (heartbeats : UInt64) (diagBytes : USize) (base : ModuleSnapshot) (setup? : Option ModuleSetup) :
     IO ProofAttemptEnvelope := do
   let (candidates, candidatesTruncated) := candidateCapRows request.candidates
   match ← resolveEditTarget base request.edit with
@@ -2554,7 +2564,7 @@ private def attemptEnvelope
       else
         let row ←
           attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes (some base) base.document
-            selected declaration proofPosition candidate
+            selected declaration proofPosition candidate setup?
         let bytes := attemptRowBytes row
         if spent + bytes > request.budgets.totalBytes then
           rows := rows.push { row with status := .budgetExceeded, outputTruncated := true }
@@ -3092,22 +3102,37 @@ def processModuleQueryBatchCached
       moduleSnapshotCache.set cache2
       projectCachedSnapshot snapshot selectors budgets fileLabel status timings cache2
 
-@[export lean_rs_host_attempt_proof]
-def attemptProof
+private def attemptProofCore
     (env : Environment) (request : ProofAttemptRequest)
-    (namespaceContext : String) (fileLabel : String)
+    (namespaceContext fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
-    : IO ProofAttemptOutcome := do
-  let old? ← cachedSameFileSnapshot? env fileLabel
+    (old? : Option ModuleSnapshot) (setup? : Option ModuleSetup) : IO ProofAttemptOutcome := do
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
-      (oneShotPolicy request.source fileLabel) old? with
+      (oneShotPolicy request.source fileLabel) old? setup? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
-    let envelope ← attemptEnvelope env request namespaceContext fileLabel heartbeats diagBytes snapshot
+    let envelope ← attemptEnvelope env request namespaceContext fileLabel heartbeats diagBytes snapshot setup?
     if snapshot.missing.isEmpty then
       pure <| .ok envelope snapshot.imports
     else
       pure <| .missingImports envelope snapshot.imports snapshot.missing
+
+@[export lean_rs_host_attempt_proof]
+def attemptProof
+    (env : Environment) (request : ProofAttemptRequest)
+    (namespaceContext fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String) : IO ProofAttemptOutcome := do
+  let old? ← cachedSameFileSnapshot? env fileLabel
+  attemptProofCore env request namespaceContext fileLabel heartbeats diagBytes optionsJson old? none
+
+/-- Try independent in-memory proof edits with the same trusted setup for the
+    source and every candidate overlay. The caller owns initializer execution
+    and retains the exact source, setup and matching artifacts through the call. -/
+def attemptProofWithSetup (setup : ModuleSetup) (request : ProofAttemptRequest)
+    (namespaceContext fileLabel : String) (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
+    : IO ProofAttemptOutcome := do
+  attemptProofCore (← mkEmptyEnvironment) request namespaceContext fileLabel heartbeats diagBytes optionsJson
+    none (some setup)
 
 @[export lean_rs_host_verify_declaration]
 def verifyDeclaration

@@ -184,6 +184,49 @@ private unsafe def checkSetupProofState : IO Unit := do
   unless failure.diagnostics.any (·.severity matches .error) do
     throw (IO.userError "missing import refusal diagnostic")
 
+private unsafe def checkSetupProofAttempt : IO Unit := IO.FS.withTempDir fun dir => do
+  let dependency := `StagedTrialFixtureDependency
+  let olean := dir / "StagedTrialFixtureDependency.olean"
+  IO.FS.writeFile (dir / "StagedTrialFixtureDependency.lean") "theorem stagedTrialFact : True := True.intro\n"
+  let compiler := (← findSysroot) / "bin" / "lean"
+  let built ← IO.Process.output {
+    cmd := compiler.toString
+    cwd := some dir
+    args := #["-o", olean.toString, "StagedTrialFixtureDependency.lean"] }
+
+  unless built.exitCode == 0 && (← (← searchPathRef.get).findRootWithExt "olean" dependency).isNone do
+    throw (IO.userError s!"could not isolate staged import: {built.stderr}")
+  let request : ProofAttemptRequest := {
+    source := "import StagedTrialFixtureDependency\ntheorem target : True := by\n  exact True.intro\n" ++
+      "#check MissingTrialDownstream\n"
+    edit := .declaration "target" .entry
+    candidates := #[⟨"closed", "exact stagedTrialFact"⟩, ⟨"failed", "exact MissingTrialCandidate"⟩]
+    budgets := ⟨4096, 65536⟩ }
+  let run := fun (path : System.FilePath) => do
+    let setup : ModuleSetup := {
+      name := `StagedTrial
+      importArts := ({} : NameMap ImportArtifacts).insert dependency (.ofArrays #[#[path]]) }
+    let staged := dir / "module.setup.json"
+    IO.FS.writeFile staged (toJson setup).compress
+    let loaded ← ModuleSetup.load staged
+    Lean.enableInitializersExecution
+    attemptProofWithSetup loaded request "" "StagedTrial.lean" 200000 4096 "{}"
+  let .ok envelope imports ← run olean | throw (IO.userError "staged trial failed")
+  let #[closed, failed] := envelope.candidates | throw (IO.userError "missing staged candidates")
+  unless imports == #[dependency.toString] && envelope.entryGoals.any (·.value.contains "⊢ True") &&
+      closed.id == "closed" && (closed.status matches .closed) &&
+      failed.id == "failed" && (failed.status matches .failed) do
+    throw (IO.userError s!"staged trial: imports={imports}, entry={envelope.entryGoals.map (·.value)},       closed={(closed.status matches .closed)}, failed={(failed.status matches .failed)},       diagnostics={closed.diagnostics.diagnostics.map (·.message)},       downstream={closed.downstreamDiagnostics.diagnostics.map (·.message)}")
+  unless closed.diagnostics.diagnostics.all (fun d => !(d.severity matches .error)) &&
+      failed.diagnostics.diagnostics.any (fun d => (d.severity matches .error) &&
+        d.message.contains "MissingTrialCandidate") &&
+      failed.downstreamDiagnostics.diagnostics.any (fun d => d.message.contains "MissingTrialDownstream") do
+    throw (IO.userError "staged candidate and downstream diagnostics were conflated")
+  let .headerParseFailed failure ← run (olean.addExtension "absent")
+    | throw (IO.userError "trial ignored a missing staged import")
+  unless failure.diagnostics.any (·.severity matches .error) do
+    throw (IO.userError "missing staged import refusal diagnostic")
+
 unsafe def main : IO Unit := do
   checkVerdict "fixtureAxiom" true
   checkVerdict "False.intro" false
@@ -192,3 +235,4 @@ unsafe def main : IO Unit := do
   checkSharedBudget
   checkProjectFileQueries
   checkSetupProofState
+  checkSetupProofAttempt
