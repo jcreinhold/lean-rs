@@ -7,6 +7,7 @@ use super::{
     WorkerSupervisorState, unexpected_response,
 };
 use crate::crash_ownership::ManagedRequestDeadline;
+use lean_rs_worker_protocol::protocol::ManagedInspectionCommand;
 
 /// The already observed reply and the separately observed retirement.
 #[doc(hidden)]
@@ -86,9 +87,16 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         config: &LeanWorkerSessionConfig,
         cancellation: Option<&LeanWorkerCancellationToken>,
+        fenced: bool,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         self.validate_managed_receiver(expected)?;
-        self.inspect_declaration_managed_once_with(request, arm, Some(config), cancellation, |_| {})
+        let command = fenced.then(|| ManagedInspectionCommand {
+            generation: expected.generation.clone(),
+            attempt: arm.attempt,
+            stage: arm.stage,
+            command: 1,
+        });
+        self.inspect_declaration_managed_once_with(request, arm, Some(config), cancellation, command, |_| {})
     }
 
     fn validate_managed_receiver(
@@ -210,7 +218,7 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
-        self.inspect_declaration_managed_once_with(request, arm, prepared, None, |_| {})
+        self.inspect_declaration_managed_once_with(request, arm, prepared, None, None, |_| {})
     }
 
     fn inspect_declaration_managed_once_with(
@@ -219,6 +227,7 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
         cancellation: Option<&LeanWorkerCancellationToken>,
+        command: Option<ManagedInspectionCommand>,
         before_retirement: impl FnOnce(&mut Self),
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
@@ -256,7 +265,13 @@ impl LeanWorker {
             }
             let now = Instant::now();
             self.write_request_bounded_inner(
-                Request::InspectDeclaration { request },
+                match &command {
+                    Some(command) => Request::InspectDeclarationFenced {
+                        command: command.clone(),
+                        request,
+                    },
+                    None => Request::InspectDeclaration { request },
+                },
                 OPERATION,
                 Some(&token),
                 self.config.request_timeout,
@@ -268,16 +283,65 @@ impl LeanWorker {
             tests::after_real_dispatch(self, arm);
 
             let response = self.read_response_with_progress(OPERATION, None, Some(&token))?;
-            if let Response::DeclarationInspection { result } = response {
-                Ok(result)
-            } else {
-                Err(unexpected_response(OPERATION, &response))
-            }
+            inspection_terminal(command, response, OPERATION)
         })();
         before_retirement(self);
         self.seal_generation_dispatch_internal();
         let retirement = self.shutdown_child(ShutdownIntent::KillOnly);
         Ok(ManagedInspectionOutcome { result, retirement })
+    }
+}
+
+fn inspection_terminal(
+    expected: Option<ManagedInspectionCommand>,
+    response: Response,
+    operation: &'static str,
+) -> Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError> {
+    match (expected, response) {
+        (None, Response::DeclarationInspection { result }) => Ok(result),
+        (Some(expected), Response::DeclarationInspectionFinished { command, result }) if expected == command => {
+            Ok(*result)
+        }
+        (_, response) => Err(unexpected_response(operation, &response)),
+    }
+}
+
+#[test]
+fn inspection_terminal_requires_the_exact_fence() {
+    let binding = ManagedInspectionCommand {
+        generation: "original".to_owned(),
+        attempt: [7; 16],
+        stage: 3,
+        command: 1,
+    };
+    let result = LeanWorkerDeclarationInspectionResult::Unsupported;
+    let fenced = |command| Response::DeclarationInspectionFinished {
+        command,
+        result: Box::new(result.clone()),
+    };
+    let ordinary = || Response::DeclarationInspection { result: result.clone() };
+    assert!(inspection_terminal(Some(binding.clone()), fenced(binding.clone()), "test").is_ok());
+    assert!(inspection_terminal(None, ordinary(), "test").is_ok());
+    assert!(inspection_terminal(Some(binding.clone()), ordinary(), "test").is_err());
+    for wrong in [
+        ManagedInspectionCommand {
+            generation: "other".to_owned(),
+            ..binding.clone()
+        },
+        ManagedInspectionCommand {
+            attempt: [8; 16],
+            ..binding.clone()
+        },
+        ManagedInspectionCommand {
+            stage: 4,
+            ..binding.clone()
+        },
+        ManagedInspectionCommand {
+            command: 2,
+            ..binding.clone()
+        },
+    ] {
+        assert!(inspection_terminal(Some(binding.clone()), fenced(wrong), "test").is_err());
     }
 }
 

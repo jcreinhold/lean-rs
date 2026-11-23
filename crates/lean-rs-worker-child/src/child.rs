@@ -488,6 +488,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     };
     writer.set_max_frame_bytes(max_frame_bytes);
 
+    let mut managed_inspection_spent = false;
     loop {
         let frame = read_frame(&mut reader, writer.max_frame_bytes())?;
         let Message::Request(request) = frame.message else {
@@ -1005,6 +1006,25 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 let response = match host_session.as_mut() {
                     Some(state) => match state.declaration_type(&name, max_bytes) {
                         Ok(row) => Response::DeclarationType { row },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::InspectDeclarationFenced { command, request } => {
+                if !shared_reads || command.generation.is_empty() || command.command != 1 || managed_inspection_spent {
+                    return Err(std::io::Error::other("managed inspection command binding differs").into());
+                }
+                // This first slice spends exactly one command on the receiver.
+                // A future guardian finish ACK is required before enabling rearm.
+                managed_inspection_spent = true;
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.inspect_declaration(&request) {
+                        Ok(result) => Response::DeclarationInspectionFinished {
+                            command,
+                            result: Box::new(result),
+                        },
                         Err(err) => error_response(&err),
                     },
                     None => missing_session_response(),

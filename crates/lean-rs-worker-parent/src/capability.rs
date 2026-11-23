@@ -1525,6 +1525,61 @@ impl LeanWorkerHostHandle {
         expires_ns: u64,
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
+        self.inspect_admitted_declaration_with_imports_terminal(
+            imports,
+            request,
+            expected,
+            attempt,
+            stage,
+            expires_ns,
+            cancellation,
+            false,
+        )
+    }
+
+    /// Run one admitted inspection and require a receiver-emitted terminal fence.
+    /// The original deadline stays armed until retirement.
+    ///
+    /// # Errors
+    /// Refuses mismatched preparation or an unmatched receiver response.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments, reason = "exact admitted inspection fields")]
+    pub fn inspect_admitted_declaration_with_imports_fenced_once(
+        &mut self,
+        imports: &[String],
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
+        self.inspect_admitted_declaration_with_imports_terminal(
+            imports,
+            request,
+            expected,
+            attempt,
+            stage,
+            expires_ns,
+            cancellation,
+            true,
+        )
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[allow(clippy::too_many_arguments, reason = "exact admitted inspection fields")]
+    fn inspect_admitted_declaration_with_imports_terminal(
+        &mut self,
+        imports: &[String],
+        request: LeanWorkerDeclarationInspectionRequest,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        fenced: bool,
+    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
         let (config, original_expiry) = self
             .managed_artifact_read
             .as_ref()
@@ -1546,6 +1601,7 @@ impl LeanWorkerHostHandle {
             },
             config,
             cancellation,
+            fenced,
         )
     }
 

@@ -122,6 +122,16 @@ pub enum Message {
     FatalExit(FatalExit),
 }
 
+/// Exact identity of a managed inspection on one authenticated receiver.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedInspectionCommand {
+    pub generation: String,
+    pub attempt: [u8; 16],
+    pub stage: u64,
+    pub command: u64,
+}
+
 /// Parent-issued worker request body.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -212,6 +222,11 @@ pub enum Request {
         max_bytes: usize,
     },
     InspectDeclaration {
+        request: LeanWorkerDeclarationInspectionRequest,
+    },
+    /// Execute a managed inspection and identify its terminal response.
+    InspectDeclarationFenced {
+        command: ManagedInspectionCommand,
         request: LeanWorkerDeclarationInspectionRequest,
     },
     AttemptProof {
@@ -368,6 +383,11 @@ pub enum Response {
     },
     DeclarationInspection {
         result: LeanWorkerDeclarationInspectionResult,
+    },
+    /// This receiver returned from the named managed inspection.
+    DeclarationInspectionFinished {
+        command: ManagedInspectionCommand,
+        result: Box<LeanWorkerDeclarationInspectionResult>,
     },
     ProofAttempt {
         result: LeanWorkerProofAttemptResult,

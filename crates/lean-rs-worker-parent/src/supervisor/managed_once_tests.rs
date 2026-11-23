@@ -255,7 +255,7 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
             worker
                 .validate_managed_receiver(&expected)
                 .expect("first grant has its exact live receiver");
-            worker.inspect_declaration_managed_once_with(request.clone(), &original, None, None, |receiver| {
+            worker.inspect_declaration_managed_once_with(request.clone(), &original, None, None, None, |receiver| {
                 receiver
                     .validate_managed_receiver(&expected)
                     .expect("original worker still live before replay");
@@ -630,7 +630,7 @@ fn managed_cancellation_stops_only_the_original_live_receiver_without_replay() {
         .validate_managed_receiver(&expected)
         .expect("validate exact managed receiver");
     let outcome = worker
-        .inspect_declaration_managed_once_with(request.clone(), &original, None, Some(&token), |_| {})
+        .inspect_declaration_managed_once_with(request.clone(), &original, None, Some(&token), None, |_| {})
         .expect("consumed managed request");
     canceller.join().expect("cancellation followed actual dispatch");
     assert!(matches!(outcome.result, Err(LeanWorkerError::Cancelled { .. })));
@@ -904,14 +904,24 @@ fn cold_managed_inspection_uses_prepared_project_loans() {
     let selected = RealInput::selected();
     let root = selected.scratch.join("cold-managed");
     std::fs::create_dir(&root).expect("create private cold test case");
-    run_cold_prepared_inspection(selected, &root, false);
+    run_cold_prepared_inspection(selected, &root, false, false);
+    std::fs::remove_dir_all(root).expect("remove closed test fixture");
+}
+
+#[test]
+#[ignore = "requires a matching prepared-project worker with the managed fence protocol"]
+fn cold_fenced_inspection_uses_prepared_project_loans() {
+    let selected = RealInput::selected();
+    let root = selected.scratch.join("cold-fenced");
+    std::fs::create_dir(&root).expect("create private cold test case");
+    run_cold_prepared_inspection(selected, &root, false, true);
     std::fs::remove_dir_all(root).expect("remove closed test fixture");
 }
 
 #[test]
 fn cold_prepared_requester_fixture() {
     if let Some(root) = std::env::var_os(PREPARED_FREEZE).map(PathBuf::from) {
-        run_cold_prepared_inspection(RealInput::selected(), &root, true);
+        run_cold_prepared_inspection(RealInput::selected(), &root, true, false);
     }
 }
 
@@ -925,7 +935,7 @@ fn cold_prepared_guardian_stops_frozen_request_before_result() {
     std::fs::remove_dir_all(root).expect("remove test fixture after verified closure");
 }
 
-fn run_cold_prepared_inspection(selected: RealInput, root: &Path, freeze: bool) {
+fn run_cold_prepared_inspection(selected: RealInput, root: &Path, freeze: bool, fenced: bool) {
     let application = std::env::var("LEAN_RS_TEST_MANAGED_ARTIFACT_APPLICATION")
         .expect("O3's exact prepared generation launch input");
     let imports: Vec<String> = serde_json::from_str(
@@ -988,16 +998,28 @@ fn run_cold_prepared_inspection(selected: RealInput, root: &Path, freeze: bool) 
         )
         .expect("retain original owner and deadline evidence for the test");
     }
-    let outcome = handle
-        .inspect_admitted_declaration_with_imports_once(
+    let request = LeanWorkerDeclarationInspectionRequest::new(&declaration);
+    let outcome = if fenced {
+        handle.inspect_admitted_declaration_with_imports_fenced_once(
             &imports,
-            LeanWorkerDeclarationInspectionRequest::new(&declaration),
+            request,
+            &binding,
+            original.attempt,
+            original.stage,
+            original.expires_ns,
+            None,
+        )
+    } else {
+        handle.inspect_admitted_declaration_with_imports_once(
+            &imports,
+            request,
             &binding,
             original.attempt,
             original.stage,
             original.expires_ns,
         )
-        .expect("dispatch through the original guarded prepared handle");
+    }
+    .expect("dispatch through the original guarded prepared handle");
     if freeze {
         assert!(
             outcome.result.is_err(),
