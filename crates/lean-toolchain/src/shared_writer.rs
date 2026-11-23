@@ -580,6 +580,21 @@ fn send_until(
     Ok(())
 }
 
+/// Read-only observation of the one exact child exit reaped by the SDK.
+#[cfg(unix)]
+#[derive(Clone, Debug)]
+pub struct WriterExitObservation(std::sync::Arc<std::sync::OnceLock<std::process::ExitStatus>>);
+
+#[cfg(unix)]
+impl WriterExitObservation {
+    /// Return the exact exit status when available. An absent observation does
+    /// not establish closure, and an unsuccessful status is not settlement.
+    #[must_use]
+    pub fn status(&self) -> Option<std::process::ExitStatus> {
+        self.0.get().copied()
+    }
+}
+
 #[cfg(unix)]
 struct Helper {
     input: Option<ChildStdin>,
@@ -594,7 +609,15 @@ impl Helper {
         clippy::unwrap_in_result,
         reason = "the pre-created receiver cannot exit before this first send; see the proof obligation at send"
     )]
-    fn spawn(command: Command, fds: &[BorrowedFd<'_>]) -> io::Result<(Self, mpsc::Receiver<io::Result<Value>>)> {
+    fn spawn(
+        command: Command,
+        fds: &[BorrowedFd<'_>],
+        observed: Option<&mut Option<WriterExitObservation>>,
+    ) -> io::Result<(Self, mpsc::Receiver<io::Result<Value>>)> {
+        let observation = observed
+            .as_ref()
+            .map(|_| WriterExitObservation(std::sync::Arc::default()));
+        let reaper_observation = observation.clone();
         let (children, incoming) = mpsc::sync_channel::<Child>(1);
         let (sender, receiver) = mpsc::sync_channel(4);
         let (exited, exit) = mpsc::sync_channel(1);
@@ -633,6 +656,9 @@ impl Helper {
                 // Only this thread owns its Child; EOF is not an exit observation.
                 loop {
                     if let Ok(status) = child.wait() {
+                        if let Some(observation) = &reaper_observation {
+                            let _ = observation.0.set(status);
+                        }
                         let _ = exited.send(status);
                         break;
                     }
@@ -646,6 +672,9 @@ impl Helper {
         // panicking operation before recv, and only exits after this sender
         // disconnects. Thus this first send cannot lose its receiver.
         children.send(child).expect("writer reaper exists before helper launch");
+        if let Some(observed) = observed {
+            *observed = observation;
+        }
         let input = input.ok_or_else(|| invalid("writer stdin missing"))?;
         Ok((
             Self {
@@ -816,7 +845,43 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
-        Self::open_with_admission_timeout(executable, root, prepared_roots, timeout, timeout, None, cancelled)
+        Self::open_with_admission_timeout(
+            executable,
+            root,
+            prepared_roots,
+            timeout,
+            timeout,
+            None,
+            cancelled,
+            None,
+        )
+    }
+
+    /// Open with an observation slot that survives Ready failure or consuming close.
+    /// The slot is cleared before admission and filled only for an actual spawn.
+    ///
+    /// # Errors
+    /// Returns the same errors as [`Self::open_with_write_roots`]. An error
+    /// after spawn leaves the exact exit observation in `observed`.
+    pub fn open_with_write_roots_observed(
+        executable: &Path,
+        root: &Path,
+        prepared_roots: &[PathBuf],
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+        observed: &mut Option<WriterExitObservation>,
+    ) -> io::Result<Self> {
+        *observed = None;
+        Self::open_with_admission_timeout(
+            executable,
+            root,
+            prepared_roots,
+            timeout,
+            timeout,
+            None,
+            cancelled,
+            Some(observed),
+        )
     }
 
     /// Open a writer with the standalone helper's v1 managed storage request.
@@ -847,6 +912,7 @@ impl SharedWriter {
             timeout,
             Some(storage_request),
             cancelled,
+            None,
         )
     }
 
@@ -856,9 +922,13 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
-        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, None, cancelled)
+        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, None, cancelled, None)
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one private path preserves the exact spawn observation"
+    )]
     fn open_with_admission_timeout(
         executable: &Path,
         root: &Path,
@@ -867,6 +937,7 @@ impl SharedWriter {
         lock_timeout: Duration,
         storage_request: Option<&str>,
         cancelled: &(impl Fn() -> bool + ?Sized),
+        observed: Option<&mut Option<WriterExitObservation>>,
     ) -> io::Result<Self> {
         (|| {
             let started = Instant::now();
@@ -892,6 +963,7 @@ impl SharedWriter {
                 timeout.saturating_sub(started.elapsed()),
                 storage_request,
                 cancelled,
+                observed,
             )
         })()
         .map_err(|error| failure(WriterDisposition::NotStarted, error))
@@ -906,7 +978,17 @@ impl SharedWriter {
     ) -> io::Result<Self> {
         let workspaces = vec![root.to_path_buf()];
         let roots = crate::write_domains::workspace_union(root, &workspaces)?;
-        Self::open_with_locks_and_workspaces(executable, root, locks, &workspaces, &roots, timeout, None, cancelled)
+        Self::open_with_locks_and_workspaces(
+            executable,
+            root,
+            locks,
+            &workspaces,
+            &roots,
+            timeout,
+            None,
+            cancelled,
+            None,
+        )
     }
 
     #[allow(
@@ -922,6 +1004,7 @@ impl SharedWriter {
         timeout: Duration,
         storage_request: Option<&str>,
         cancelled: &(impl Fn() -> bool + ?Sized),
+        observed: Option<&mut Option<WriterExitObservation>>,
     ) -> io::Result<Self> {
         (|| {
             let deadline = Instant::now()
@@ -986,7 +1069,7 @@ impl SharedWriter {
                 command.arg("--storage-request").arg(request);
             }
             let fds: Vec<_> = duplicates.iter().map(AsFd::as_fd).collect();
-            let (helper, receiver) = Helper::spawn(command, &fds)?;
+            let (helper, receiver) = Helper::spawn(command, &fds, observed)?;
             let mut client = Self {
                 helper,
                 receiver,

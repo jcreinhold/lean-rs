@@ -314,3 +314,78 @@ fn permitted_writer_waits_for_exact_helper_exit_after_control_closes() -> io::Re
     }
     Ok(())
 }
+
+#[test]
+fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Result<()> {
+    const FIXTURE: &str = "LEAN_RS_TEST_WRITER_EXIT_OBSERVATION";
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let fixture = StageFixture::new()?;
+        let status = Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "stage_permit::writer_exit_observation_survives_failed_ready_and_close_timeout",
+            ])
+            .env(FIXTURE, fixture.temp.path().canonicalize()?)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &fixture.registry)
+            .env("TMPDIR", fixture.temp.path().canonicalize()?)
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let base = Path::new(&base);
+    let project = base.join("demo");
+    let timeout = Duration::from_secs(5);
+    let mut observed = None;
+    let open = |helper: &Path, observed: &mut Option<_>| {
+        SharedWriter::open_with_write_roots_observed(helper, &project, &[], timeout, &|| false, observed)
+    };
+    let wait = |observation: &lean_toolchain::shared_writer::WriterExitObservation| {
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(status) = observation.status() {
+                return status;
+            }
+            assert!(started.elapsed() < timeout, "exact helper exit was not observed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+
+    let broken = base.join("bad-ready");
+    let release = base.join("release-bad-ready");
+    fs::write(
+        &broken,
+        "#!/bin/sh\nprintf '{}\\n'\nfor n in 1 2 3 4 5 6 7 8 9 10; do\n  [ ! -e \"$2/../release-bad-ready\" ] || exit 23\n  /bin/sleep 0.5\ndone\nexit 24\n",
+    )?;
+    fs::set_permissions(&broken, fs::Permissions::from_mode(0o700))?;
+    let error = open(&broken, &mut observed).err().expect("invalid Ready");
+    assert!(error.to_string().contains("ownership/lock-custody handshake failed"));
+    let failed_ready = observed.take().expect("actual spawn observed");
+    assert_eq!(failed_ready.status(), None);
+    fs::write(release, [])?;
+    assert_eq!(wait(&failed_ready).code(), Some(23));
+    assert_eq!(failed_ready.status().and_then(|status| status.code()), Some(23));
+    assert!(open(&base.join("absent"), &mut observed).is_err());
+    assert!(observed.is_none());
+
+    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+    let writer = open(helper, &mut observed)?;
+    let pid = rustix::process::Pid::from_raw(i32::try_from(writer.stage_ready()?.pid()).map_err(io::Error::other)?)
+        .expect("exact disposable helper");
+    struct Resume(rustix::process::Pid);
+    impl Drop for Resume {
+        fn drop(&mut self) {
+            let _ = rustix::process::kill_process(self.0, rustix::process::Signal::CONT);
+        }
+    }
+    rustix::process::kill_process(pid, rustix::process::Signal::STOP)?;
+    let resume = Resume(pid);
+    let error = writer
+        .close(Duration::from_millis(25))
+        .expect_err("stopped helper cannot close yet");
+    assert!(error.to_string().contains("writer close unconfirmed"));
+    let pending = observed.expect("close retains the original spawn observation");
+    assert_eq!(pending.status(), None);
+    drop(resume);
+    assert!(wait(&pending).success());
+    Ok(())
+}

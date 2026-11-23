@@ -365,6 +365,7 @@ pub fn lean_toolchain::shared_writer::SharedWriter::open(&std::path::Path, &std:
 pub fn lean_toolchain::shared_writer::SharedWriter::open_cancellable(&std::path::Path, &std::path::Path, core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
 pub fn lean_toolchain::shared_writer::SharedWriter::open_with_storage_request(&std::path::Path, &std::path::Path, &[std::path::PathBuf], &str, core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
 pub fn lean_toolchain::shared_writer::SharedWriter::open_with_write_roots(&std::path::Path, &std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
+pub fn lean_toolchain::shared_writer::SharedWriter::open_with_write_roots_observed(&std::path::Path, &std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized, &mut core::option::Option<lean_toolchain::shared_writer::WriterExitObservation>) -> std::io::error::Result<Self>
 pub fn lean_toolchain::shared_writer::SharedWriter::project_root(&self) -> &std::path::Path
 pub fn lean_toolchain::shared_writer::SharedWriter::run(&mut self, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
 pub fn lean_toolchain::shared_writer::SharedWriter::run_cancellable(&mut self, &std::process::Command, core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<std::process::Output>
@@ -378,6 +379,20 @@ impl core::marker::Unpin for lean_toolchain::shared_writer::SharedWriter
 impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::SharedWriter
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::SharedWriter
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::SharedWriter
+pub struct lean_toolchain::shared_writer::WriterExitObservation(_)
+impl lean_toolchain::shared_writer::WriterExitObservation
+pub fn lean_toolchain::shared_writer::WriterExitObservation::status(&self) -> core::option::Option<std::process::ExitStatus>
+impl core::clone::Clone for lean_toolchain::shared_writer::WriterExitObservation
+pub fn lean_toolchain::shared_writer::WriterExitObservation::clone(&self) -> lean_toolchain::shared_writer::WriterExitObservation
+impl core::fmt::Debug for lean_toolchain::shared_writer::WriterExitObservation
+pub fn lean_toolchain::shared_writer::WriterExitObservation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::shared_writer::WriterExitObservation
+impl core::marker::Send for lean_toolchain::shared_writer::WriterExitObservation
+impl core::marker::Sync for lean_toolchain::shared_writer::WriterExitObservation
+impl core::marker::Unpin for lean_toolchain::shared_writer::WriterExitObservation
+impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterExitObservation
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterExitObservation
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterExitObservation
 pub struct lean_toolchain::shared_writer::WriterFailure
 pub lean_toolchain::shared_writer::WriterFailure::detail: alloc::string::String
 pub lean_toolchain::shared_writer::WriterFailure::disposition: lean_toolchain::shared_writer::WriterDisposition
