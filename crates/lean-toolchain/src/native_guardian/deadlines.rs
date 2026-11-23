@@ -74,11 +74,22 @@ pub(super) struct OwnerDeadline {
     input: Vec<u8>,
     arm: Option<Arm>,
     finished: bool,
+    idle: Option<(Duration, Duration)>,
     soft: Option<Duration>,
     last_activity: Option<(u64, Duration)>,
 }
 
 impl OwnerDeadline {
+    pub(super) fn with_idle_limit(limit: Option<Duration>) -> io::Result<Self> {
+        let idle = limit
+            .map(|limit| boot_ticks().map(|now| (limit, now.saturating_add(limit))))
+            .transpose()?;
+        Ok(Self {
+            idle,
+            ..Self::default()
+        })
+    }
+
     pub(super) fn armed(&self) -> bool {
         self.arm.is_some()
     }
@@ -92,6 +103,7 @@ impl OwnerDeadline {
             .as_ref()
             .filter(|_| !self.finished)
             .map(|arm| self.soft.unwrap_or_else(|| Duration::from_nanos(arm.expires_ns)))
+            .or_else(|| self.idle.map(|(_, until)| until))
     }
 
     pub(super) fn expired(&self) -> io::Result<bool> {
@@ -207,10 +219,14 @@ impl OwnerDeadline {
                 Err(error) if error == rustix::io::Errno::AGAIN => {}
                 Err(error) => return Err(error.into()),
             }
-            if self.expired()? {
+            let now = boot_ticks()?;
+            if self.expires_at().is_some_and(|expiry| now >= expiry) {
                 return Ok(true);
             }
             self.finished = true;
+            if let Some((limit, until)) = &mut self.idle {
+                *until = now.saturating_add(*limit);
+            }
             if parent.write(&ack)? != ack.len() {
                 return Err(invalid("partial native guardian finish ACK"));
             }
@@ -248,12 +264,15 @@ impl OwnerDeadline {
                 .insert("command".to_owned(), json!(command));
         }
         let ack = frame(&ack)?;
+        let now = boot_ticks()?;
+        if self.expires_at().is_some_and(|until| now >= until) {
+            return Ok(true);
+        }
         self.arm = Some(arm);
         self.finished = false;
         self.last_activity = None;
         // Neither supported process-group implementation attributes complete
         // fork and exit usage to this attempt, so start with the hard bound.
-        let now = boot_ticks()?;
         self.observe_activity(now, ActivityObservation::Unavailable);
         if self.expires_at().is_some_and(|expires| now >= expires) {
             return Ok(true);

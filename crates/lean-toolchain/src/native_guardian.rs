@@ -38,6 +38,10 @@ pub const EXECUTABLE_ENV: &str = "LEAN_RS_WORKER_GUARDIAN_EXECUTABLE";
 pub const OWNERS_DIRECTORY_ENV: &str = "LEAN_RS_WORKER_OWNERS_DIRECTORY";
 /// Opt into the one-stage stopped-parent drain slot in a matched installation.
 pub const DRAIN_SLOT_ENV: &str = "LEAN_RS_WORKER_GUARDIAN_DRAIN_SLOT";
+/// Opt in to warm guardian idle retirement using the resolved broker idle seconds.
+/// Zero selects the finite, 30-second managed idle default.
+#[doc(hidden)]
+pub const WARM_IDLE_TIMEOUT_ENV: &str = "LEAN_RS_WORKER_GUARDIAN_WARM_IDLE_SECS";
 const CONTROL_ENV: &str = "LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD";
 const WORKER_ENV: &str = "LEAN_RS_NATIVE_GUARDIAN_WORKER_PID";
 const SOCKET_ENV: &str = "LEAN_RS_WORKER_PARENT_SOCKET";
@@ -609,6 +613,7 @@ struct Guardian {
     loans: Vec<(NativeReadDomain, File)>,
     incoming: Incoming,
     bootstrap_identity: Option<(NativeProcessIdentity, NativeProcessIdentity)>,
+    autonomous_expiry: bool,
 }
 impl Guardian {
     fn prepare_bootstrap_record(&mut self) -> io::Result<()> {
@@ -721,11 +726,26 @@ impl Guardian {
             .bootstrap_identity
             .as_ref()
             .ok_or_else(|| invalid("guardian bootstrap identity missing"))?;
+        let idle = std::env::var_os(WARM_IDLE_TIMEOUT_ENV)
+            .map(|seconds| {
+                let seconds = seconds
+                    .to_str()
+                    .ok_or_else(|| invalid("warm guardian idle seconds invalid"))?
+                    .parse::<u64>()
+                    .map_err(io::Error::other)?;
+                Ok::<_, io::Error>(Duration::from_secs(if seconds == 0 { 30 } else { seconds }))
+            })
+            .transpose()?;
+        let mut hard_deadline = deadlines::OwnerDeadline::with_idle_limit(idle)?;
         let use_drain_slot = std::env::var_os(DRAIN_SLOT_ENV).is_some_and(|mode| mode == "1");
         #[cfg(all(test, target_os = "macos"))]
         tests::pause_before_slot_advertisement(use_drain_slot)?;
-        let drain_guardian = ownership::publish_guardian_drain_support(&record, worker, guardian, use_drain_slot)?
-            .then(|| guardian.clone());
+        let drain_guardian = if idle.is_none() {
+            ownership::publish_guardian_drain_support(&record, worker, guardian, use_drain_slot)?
+                .then(|| guardian.clone())
+        } else {
+            None
+        };
         let mut sampled_stopped = false;
         self.parent_identity = Some(serde_json::from_value(field(&value, "parent").clone()).map_err(io::Error::other)?);
         self.record = Some(record.clone());
@@ -736,10 +756,10 @@ impl Guardian {
             "nonce":self.nonce,"guardian_pid":std::process::id()}),
             until,
         )?;
-        let mut hard_deadline = deadlines::OwnerDeadline::default();
         let mut last_recovery_poll = Instant::now();
         loop {
             if hard_deadline.expired()? {
+                self.autonomous_expiry = idle.is_some();
                 return Ok(());
             }
             // The server endpoint exists only in the server, never in payloads.
@@ -759,6 +779,7 @@ impl Guardian {
                     !self.loans.is_empty(),
                 )?
             {
+                self.autonomous_expiry = idle.is_some() && hard_deadline.expired()?;
                 return Ok(());
             }
             // An armed stage must not enter a synchronous registry read.
@@ -858,11 +879,10 @@ impl Guardian {
             .bootstrap_identity
             .as_ref()
             .ok_or_else(|| invalid("guardian bootstrap identity missing"))?;
-        let value = read_owner(record)?;
-        if field(&value, "guardian_drain") != "requested" {
+        if !self.autonomous_expiry && field(&read_owner(record)?, "guardian_drain") != "requested" {
             return Ok(false);
         }
-        ownership::publish_guardian_zombie_closure(record, worker, guardian)
+        ownership::publish_guardian_zombie_closure(record, worker, guardian, self.autonomous_expiry)
     }
 
     fn drain(&self) {
@@ -982,6 +1002,7 @@ pub fn run_guardian_cli() -> io::Result<()> {
         loans: Vec::new(),
         incoming: Incoming::default(),
         bootstrap_identity: None,
+        autonomous_expiry: false,
     };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if !valid_nonce(&guardian.nonce) {

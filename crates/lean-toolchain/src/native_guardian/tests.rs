@@ -691,6 +691,7 @@ fn pure_protocol_limits_reject_ambiguous_or_unbounded_control() {
         loans: Vec::new(),
         incoming: Incoming::default(),
         bootstrap_identity: None,
+        autonomous_expiry: false,
     };
     assert!(
         guardian

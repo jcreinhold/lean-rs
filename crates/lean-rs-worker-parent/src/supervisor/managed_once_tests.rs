@@ -1090,6 +1090,7 @@ fn real_lean_managed_warm_two_commands_refuse_stale_finish() {
         .lifetime_directory(&registry)
         .lifetime_socket_directory(&selected.scratch)
         .prepared_host_artifacts(selected.prepared)
+        .managed_warm_idle_seconds(30)
         .shared_artifact_reads(true);
     let imports = vec![
         "LeanRsFixture.Handles".to_owned(),

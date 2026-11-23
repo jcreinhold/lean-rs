@@ -2195,6 +2195,13 @@ fn spawn_checked_worker(
         config = config.native_guardian(executable);
     }
     #[cfg(unix)]
+    if let Some(seconds) = worker_child.managed_warm_idle_seconds {
+        config = config.env(
+            lean_toolchain::native_guardian::WARM_IDLE_TIMEOUT_ENV,
+            seconds.to_string(),
+        );
+    }
+    #[cfg(unix)]
     if let Some(slot) = &worker_child.native_capacity_slot {
         config = config.native_capacity_slot(slot.key.clone(), slot.scope.clone(), slot.limit);
     }
@@ -2337,6 +2344,8 @@ pub struct LeanWorkerChild {
     #[cfg(unix)]
     native_guardian_executable: Option<PathBuf>,
     #[cfg(unix)]
+    managed_warm_idle_seconds: Option<u64>,
+    #[cfg(unix)]
     native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
 }
 
@@ -2369,6 +2378,8 @@ impl LeanWorkerChild {
             #[cfg(unix)]
             native_guardian_executable: None,
             #[cfg(unix)]
+            managed_warm_idle_seconds: None,
+            #[cfg(unix)]
             native_capacity_slot: None,
         }
     }
@@ -2392,6 +2403,8 @@ impl LeanWorkerChild {
             lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
+            #[cfg(unix)]
+            managed_warm_idle_seconds: None,
             #[cfg(unix)]
             native_capacity_slot: None,
         }
@@ -2422,6 +2435,8 @@ impl LeanWorkerChild {
             lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
+            #[cfg(unix)]
+            managed_warm_idle_seconds: None,
             #[cfg(unix)]
             native_capacity_slot: None,
         }
@@ -2532,6 +2547,17 @@ impl LeanWorkerChild {
     #[must_use]
     pub fn shared_artifact_reads(mut self, required: bool) -> Self {
         self.shared_artifact_reads = required;
+        self
+    }
+
+    /// Enable independent guardian idle retirement for a managed warm child.
+    /// Pass the broker's resolved idle seconds. Zero selects the 30-second
+    /// finite managed default.
+    #[cfg(unix)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn managed_warm_idle_seconds(mut self, seconds: u64) -> Self {
+        self.managed_warm_idle_seconds = Some(seconds);
         self
     }
 

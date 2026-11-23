@@ -876,16 +876,24 @@ fn fixture_deadline_server() {
     let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
         return;
     };
-    let mut generation = Generation::start(&root);
+    let mut generation = if root.join("bounded-warm-expiry").exists() {
+        Generation::start_with_slot(&root, Some(&recovery_slot()))
+    } else {
+        Generation::start(&root)
+    };
     write_json(&root, "deadline-ready", &generation.worker.id());
+    if root.join("idle-before-arm").exists() {
+        assert_eq!(generation.reap().signal(), Some(libc::SIGKILL));
+        wait_until(|| root.join("deadline-test-finished").exists());
+        return;
+    }
     wait_until(|| root.join("arm-deadline").exists());
-    let expires_ns = u64::try_from(
-        deadlines::boot_ticks()
-            .unwrap()
-            .saturating_add(Duration::from_millis(750))
-            .as_nanos(),
-    )
-    .unwrap();
+    let active = if root.join("active").exists() {
+        Duration::from_millis(1400)
+    } else {
+        Duration::from_millis(750)
+    };
+    let expires_ns = u64::try_from(deadlines::boot_ticks().unwrap().saturating_add(active).as_nanos()).unwrap();
     let parent = generation.parent.as_mut().unwrap();
     let attempt = [7_u8; 16];
     // Split the actual wire message across reads.
@@ -910,6 +918,24 @@ fn fixture_deadline_server() {
     write_bytes(parent, arm_tail, deadline(Duration::from_secs(1)).unwrap()).unwrap();
     let ack = read_frame(parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
     assert_eq!(ack, expected);
+    if root.join("idle-after-finish").exists() {
+        write_frame(
+            parent,
+            &json!({
+                "op":"finish_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+                "attempt":attempt,"stage":1,"command":1
+            }),
+            deadline(Duration::from_secs(1)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_frame(parent, deadline(Duration::from_secs(1)).unwrap()).unwrap(),
+            json!({
+                "state":"hard_deadline_finished","protocol":PROTOCOL,"nonce":NONCE,
+                "attempt":attempt,"stage":1,"command":1
+            })
+        );
+    }
     write_json(&root, "deadline-armed", &expires_ns);
     assert_eq!(generation.reap().signal(), Some(libc::SIGKILL));
     wait_until(|| root.join("deadline-test-finished").exists());
@@ -1185,4 +1211,84 @@ fn queued_guardian_finish_cannot_overtake_parent_eof() {
     assert!(state.poll_parent(&mut guardian, NONCE, false).unwrap());
     assert!(state.active());
     assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+}
+
+#[test]
+fn bounded_warm_guardian_closes_before_the_frozen_requester_reaps() {
+    for case in ["idle-before-arm", "active", "idle-after-finish"] {
+        let fixture = Fixture::new();
+        for marker in [
+            case,
+            "warm-expiry",
+            "bounded-warm-expiry",
+            "hold-zombie-custody",
+            "managed-contender",
+            "service-loss-watchdog",
+        ] {
+            fs::write(fixture.root.join(marker), b"private bounded expiry fixture").unwrap();
+        }
+        let mut server = TestChild(
+            fixture_command(
+                &fixture.root,
+                "native_guardian::tests::service_loss_regressions::fixture_deadline_server",
+            )
+            .env(WARM_IDLE_TIMEOUT_ENV, "1")
+            .spawn()
+            .unwrap(),
+        );
+        wait_until(|| fixture.root.join("deadline-ready").exists());
+        let worker: u32 = serde_json::from_slice(&fs::read(fixture.root.join("deadline-ready")).unwrap()).unwrap();
+        let payload = NativeProcessIdentity::capture(worker).unwrap().unwrap();
+        let record = fixture.registry.join(format!("worker-{NONCE}")).join("owner.json");
+        let value = read_owner(&record).unwrap();
+        let guardian: NativeProcessIdentity = serde_json::from_value(field(&value, "guardian").clone()).unwrap();
+        let lock = fs::metadata(fixture.lock()).unwrap();
+        let reserve = |nonce| {
+            reserve_owner_record_with_slot(&fixture.registry, nonce, Duration::from_secs(1), Some(&recovery_slot()))
+        };
+        let next = format!("{:048x}", 706);
+        let another = format!("{:048x}", 707);
+        let contender = Contender::start(&fixture, worker);
+        if case != "idle-before-arm" {
+            fs::write(fixture.root.join("arm-deadline"), b"arm").unwrap();
+            wait_until(|| fixture.root.join("deadline-armed").exists());
+        }
+        let requester = NativeProcessIdentity::capture(server.0.id()).unwrap().unwrap();
+        let requester_pid = rustix::process::Pid::from_raw(i32::try_from(requester.pid).unwrap()).unwrap();
+        rustix::process::kill_process(requester_pid, rustix::process::Signal::STOP).unwrap();
+        wait_until(|| stopped(&requester));
+        assert!(payload.is_live().unwrap(), "{case} must freeze before expiry");
+        if case == "active" {
+            let expires: u64 = serde_json::from_slice(&fs::read(fixture.root.join("deadline-armed")).unwrap()).unwrap();
+            let checkpoint = Duration::from_nanos(expires).saturating_sub(Duration::from_millis(150));
+            wait_until(|| deadlines::boot_ticks().unwrap() >= checkpoint);
+            assert!(
+                payload.is_live().unwrap(),
+                "the elapsed idle bound cannot shorten the original active deadline"
+            );
+        }
+        wait_until(|| fixture.root.join("zombie-custody-held").exists());
+        assert!(stopped(&requester));
+        assert!(!payload.is_live().unwrap());
+        assert!(ownership::matches_zombie_birth(&payload).unwrap());
+        assert!(crate::process_group::observed_group_singleton(worker).unwrap());
+        assert!(guardian.is_live().unwrap());
+        assert_eq!(field(&read_owner(&record).unwrap(), "guardian_zombie_closure"), true);
+        assert!(!fixture.root.join("contender-acquired.json").exists());
+        assert_eq!(reserve(&next).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        fs::write(fixture.root.join("release-zombie-custody"), b"close actual loan").unwrap();
+
+        let acquired = contender.acquired();
+        assert!(stopped(&requester), "{case} must reuse without reaping");
+        assert!(acquired.group_present && !acquired.worker_live && acquired.managed_writer_ready);
+        assert_eq!(acquired.lock_identity, (lock.dev(), lock.ino()));
+        assert!(!guardian.is_live().unwrap());
+        assert!(reserve(&next).unwrap().exists());
+        assert_eq!(reserve(&another).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(contender.finish().payload_bytes_after_marker, 0);
+        assert!(!fixture.root.join("test-rescue-used").exists());
+        fs::write(fixture.root.join("deadline-test-finished"), b"done").unwrap();
+        rustix::process::kill_process(requester_pid, rustix::process::Signal::CONT).unwrap();
+        assert!(server.wait().success());
+    }
 }
