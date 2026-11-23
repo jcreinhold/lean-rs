@@ -408,21 +408,27 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
 #[test]
 fn request_timeout_cycles_child_and_invalidates_session() {
     let (worker, config) = fixed_stream_configs();
-    let sink = RecordingDataSink::default();
+    let export = "lean_rs_interop_consumer_worker_data_stream_slow_after_row";
+    let expected_row = LeanWorkerDataRow {
+        stream: "rows".to_owned(),
+        sequence: 0,
+        payload: json!({"kind": "before-timeout"}),
+    };
     let mut worker = LeanWorker::spawn(&worker).expect("worker starts");
+    let normal_timeout = worker.request_timeout();
     {
         let mut session = worker.open_session(&config, None, None).expect("worker session opens");
 
+        let ready = RecordingDataSink::default();
+        session
+            .run_data_stream(export, &json!({}), &ready, None, None, None)
+            .expect("slow export completes within the normal fixture timeout");
+        assert_eq!(ready.rows(), vec![expected_row.clone()]);
+
+        let sink = RecordingDataSink::default();
         session.set_request_timeout(Duration::from_millis(50));
         let err = session
-            .run_data_stream(
-                "lean_rs_interop_consumer_worker_data_stream_slow_after_row",
-                &json!({}),
-                &sink,
-                None,
-                None,
-                None,
-            )
+            .run_data_stream(export, &json!({}), &sink, None, None, None)
             .expect_err("slow stream should time out");
 
         match err {
@@ -434,14 +440,10 @@ fn request_timeout_cycles_child_and_invalidates_session() {
             }
             other => panic!("expected timeout, got {other:?}"),
         }
-        assert_eq!(
-            sink.rows(),
-            vec![LeanWorkerDataRow {
-                stream: "rows".to_owned(),
-                sequence: 0,
-                payload: json!({"kind": "before-timeout"}),
-            }],
-            "rows delivered before timeout remain tentative because no terminal summary returned",
+        // The deadline includes dispatch and may elapse before the first row.
+        assert!(
+            [expected_row].starts_with(&sink.rows()),
+            "only the tentative row may precede timeout"
         );
 
         let err = session
@@ -466,6 +468,7 @@ fn request_timeout_cycles_child_and_invalidates_session() {
     );
     assert_eq!(stats.cancelled_restarts, 0);
     assert_eq!(worker.request_timeout(), Duration::from_millis(50));
+    worker.set_request_timeout(normal_timeout);
     worker.health().expect("worker remains usable after timeout restart");
 }
 
