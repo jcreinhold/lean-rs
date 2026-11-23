@@ -1021,3 +1021,102 @@ fn external_reader_deadline_refuses_before_read_custody() {
     parent.set_nonblocking(true).unwrap();
     assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
 }
+
+#[test]
+fn production_guardian_authenticates_finish_without_returning_custody() {
+    for case in ["matching", "stale", "expired"] {
+        let fixture = Fixture::new();
+        let mut generation = Generation::start(&fixture.root);
+        let worker = generation.worker.id();
+        let expires = deadlines::boot_ticks().unwrap()
+            + if case == "stale" {
+                Duration::from_secs(4)
+            } else {
+                Duration::from_millis(750)
+            };
+        let expires_ns = u64::try_from(expires.as_nanos()).unwrap();
+        let until = || deadline(Duration::from_secs(3)).unwrap();
+        let parent = generation.parent.as_mut().unwrap();
+        let attempt = [7_u8; 16];
+        write_frame(
+            parent,
+            &json!({
+                "op":"arm_fenced_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+                "attempt":attempt,"stage":1,"command":1,"expires_ns":expires_ns
+            }),
+            until(),
+        )
+        .unwrap();
+        let ack = read_frame(parent, until()).unwrap();
+        assert_eq!(
+            ack,
+            json!({
+                "state":"hard_deadline_armed","protocol":PROTOCOL,"nonce":NONCE,
+                "attempt":attempt,"stage":1,"command":1,"expires_ns":expires_ns
+            })
+        );
+        let finish = |command| {
+            json!({
+                "op":"finish_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+                "attempt":attempt,"stage":1,"command":command
+            })
+        };
+        if case == "stale" {
+            write_frame(parent, &finish(2), until()).unwrap();
+            let refused = read_frame(parent, deadline(Duration::from_millis(75)).unwrap()).unwrap_err();
+            assert_eq!(refused.kind(), io::ErrorKind::TimedOut);
+            assert!(generation.guardian.is_live().unwrap());
+            assert!(crate::process_group::group_present(worker).unwrap());
+        }
+        if case == "expired" {
+            wait_until(|| deadlines::boot_ticks().unwrap() >= expires);
+        }
+        let sent = write_frame(parent, &finish(1), until());
+        if case == "expired" {
+            assert!(read_frame(parent, until()).is_err(), "{case} finish received an ACK");
+        } else {
+            sent.unwrap();
+            assert_eq!(
+                read_frame(parent, until()).unwrap(),
+                json!({
+                    "state":"hard_deadline_finished","protocol":PROTOCOL,"nonce":NONCE,
+                    "attempt":attempt,"stage":1,"command":1
+                })
+            );
+            if case == "matching" {
+                wait_until(|| deadlines::boot_ticks().unwrap() >= expires + POLL.saturating_mul(3));
+            }
+            assert!(generation.guardian.is_live().unwrap());
+            assert!(crate::process_group::group_present(worker).unwrap());
+            generation.parent.take();
+        }
+        assert_eq!(generation.reap().signal(), Some(libc::SIGKILL), "{case}");
+        wait_until(|| !generation.guardian.is_live().unwrap());
+        assert!(!crate::process_group::group_present(worker).unwrap());
+    }
+}
+
+#[test]
+fn queued_guardian_finish_cannot_overtake_parent_eof() {
+    let (mut parent, mut guardian) = UnixStream::pair().unwrap();
+    guardian.set_nonblocking(true).unwrap();
+    let mut state = deadlines::OwnerDeadline::default();
+    let expires = deadlines::boot_ticks().unwrap() + Duration::from_secs(3);
+    let arm = json!({
+        "op":"arm_fenced_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+        "attempt":([7_u8;16]),"stage":1,"command":1,"expires_ns":u64::try_from(expires.as_nanos()).unwrap()
+    });
+    parent.write_all(&frame(&arm).unwrap()).unwrap();
+    assert!(!state.poll_parent(&mut guardian, NONCE, false).unwrap());
+    parent.set_nonblocking(true).unwrap();
+    read_frame(&mut parent, deadline(Duration::from_secs(1)).unwrap()).unwrap();
+    let finish = json!({
+        "op":"finish_hard_deadline","protocol":PROTOCOL,"nonce":NONCE,
+        "attempt":([7_u8;16]),"stage":1,"command":1
+    });
+    parent.write_all(&frame(&finish).unwrap()).unwrap();
+    parent.shutdown(std::net::Shutdown::Write).unwrap();
+    assert!(state.poll_parent(&mut guardian, NONCE, false).unwrap());
+    assert!(state.active());
+    assert_eq!(parent.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+}

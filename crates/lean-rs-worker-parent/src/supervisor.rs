@@ -7639,3 +7639,5 @@ mod dispatch_pin_tests;
 mod managed_once;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use managed_once::ManagedInspectionOutcome;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) use managed_once::SaveManagedInspection;

@@ -229,7 +229,7 @@ fn real_guardian_gates_managed_inspection_and_retires_once() {
                 .child
                 .as_mut()
                 .expect("fixture worker for duplicate arm")
-                .arm_managed_request(&arm())
+                .arm_managed_request(&arm(), None)
                 .expect("arm the first managed request");
         }
         let registry = root.join("owners");
@@ -1008,6 +1008,13 @@ fn run_cold_prepared_inspection(selected: RealInput, root: &Path, freeze: bool, 
             original.stage,
             original.expires_ns,
             None,
+            |result| {
+                assert!(
+                    matches!(result, LeanWorkerDeclarationInspectionResult::Found { declaration: found }
+                    if found.name == declaration)
+                );
+                Ok(())
+            },
         )
     } else {
         handle.inspect_admitted_declaration_with_imports_once(

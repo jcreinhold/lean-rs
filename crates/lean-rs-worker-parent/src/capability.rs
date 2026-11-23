@@ -1533,12 +1533,13 @@ impl LeanWorkerHostHandle {
             stage,
             expires_ns,
             cancellation,
-            false,
+            None,
         )
     }
 
     /// Run one admitted inspection and require a receiver-emitted terminal fence.
-    /// The original deadline stays armed until retirement.
+    /// The trusted caller must durably save the result in `save` before the
+    /// guardian is asked to finish. The generation retires even on success.
     ///
     /// # Errors
     /// Refuses mismatched preparation or an unmatched receiver response.
@@ -1554,6 +1555,7 @@ impl LeanWorkerHostHandle {
         stage: u64,
         expires_ns: u64,
         cancellation: Option<&LeanWorkerCancellationToken>,
+        mut save: impl FnMut(&crate::LeanWorkerDeclarationInspectionResult) -> Result<(), LeanWorkerError>,
     ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
         self.inspect_admitted_declaration_with_imports_terminal(
             imports,
@@ -1563,7 +1565,7 @@ impl LeanWorkerHostHandle {
             stage,
             expires_ns,
             cancellation,
-            true,
+            Some(&mut save),
         )
     }
 
@@ -1578,7 +1580,7 @@ impl LeanWorkerHostHandle {
         stage: u64,
         expires_ns: u64,
         cancellation: Option<&LeanWorkerCancellationToken>,
-        fenced: bool,
+        save: Option<crate::supervisor::SaveManagedInspection<'_>>,
     ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
         let (config, original_expiry) = self
             .managed_artifact_read
@@ -1601,7 +1603,7 @@ impl LeanWorkerHostHandle {
             },
             config,
             cancellation,
-            fenced,
+            save,
         )
     }
 

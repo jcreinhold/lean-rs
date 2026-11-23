@@ -391,6 +391,7 @@ impl LeanWorkerNativeScopeLease {
                 expires_ns,
             },
             "arm_reader_hard_deadline",
+            None,
         )
     }
 
@@ -895,11 +896,37 @@ impl ParentLifetimeLease {
         native_guardian::validate_managed_guardian_scope(&self.record, expected)
     }
 
-    pub(crate) fn arm_managed_request(&mut self, arm: &ManagedRequestDeadline) -> io::Result<()> {
-        self.arm_deadline(arm, "arm_hard_deadline")
+    pub(crate) fn arm_managed_request(&mut self, arm: &ManagedRequestDeadline, command: Option<u64>) -> io::Result<()> {
+        let op = if command.is_some() {
+            "arm_fenced_hard_deadline"
+        } else {
+            "arm_hard_deadline"
+        };
+        self.arm_deadline(arm, op, command)
     }
 
-    fn arm_deadline(&mut self, arm: &ManagedRequestDeadline, op: &str) -> io::Result<()> {
+    fn arm_deadline(&mut self, arm: &ManagedRequestDeadline, op: &str, command: Option<u64>) -> io::Result<()> {
+        self.deadline_exchange(arm, op, "hard_deadline_armed", command, Some(arm.expires_ns))
+    }
+
+    pub(crate) fn finish_managed_request(&mut self, arm: &ManagedRequestDeadline, command: u64) -> io::Result<()> {
+        self.deadline_exchange(
+            arm,
+            "finish_hard_deadline",
+            "hard_deadline_finished",
+            Some(command),
+            None,
+        )
+    }
+
+    fn deadline_exchange(
+        &mut self,
+        arm: &ManagedRequestDeadline,
+        op: &str,
+        state: &str,
+        command: Option<u64>,
+        expires_ns: Option<u64>,
+    ) -> io::Result<()> {
         if !self.guarded || !self.running_published {
             return Err(io::Error::other(
                 "managed request requires an acknowledged independent guardian",
@@ -909,14 +936,22 @@ impl ParentLifetimeLease {
         let until = base
             .checked_add(arm.remaining()?.min(Duration::from_secs(2)))
             .ok_or_else(|| io::Error::other("invalid managed ACK deadline"))?;
-        let expected = serde_json::json!({
-            "state":"hard_deadline_armed", "protocol":native_guardian::PROTOCOL, "nonce":self.nonce,
-            "attempt":arm.attempt, "stage":arm.stage, "expires_ns":arm.expires_ns
-        });
-        let request = serde_json::json!({
-            "op":op, "protocol":native_guardian::PROTOCOL, "nonce":self.nonce,
-            "attempt":arm.attempt, "stage":arm.stage, "expires_ns":arm.expires_ns
-        });
+        let mut binding = serde_json::Map::from_iter([
+            ("protocol".to_owned(), serde_json::json!(native_guardian::PROTOCOL)),
+            ("nonce".to_owned(), serde_json::json!(self.nonce)),
+            ("attempt".to_owned(), serde_json::json!(arm.attempt)),
+            ("stage".to_owned(), serde_json::json!(arm.stage)),
+        ]);
+        if let Some(command) = command {
+            binding.insert("command".to_owned(), serde_json::json!(command));
+        }
+        if let Some(expires_ns) = expires_ns {
+            binding.insert("expires_ns".to_owned(), serde_json::json!(expires_ns));
+        }
+        let mut request = binding.clone();
+        request.insert("op".to_owned(), serde_json::json!(op));
+        binding.insert("state".to_owned(), serde_json::json!(state));
+        let expected = serde_json::Value::Object(binding);
         let mut bytes = serde_json::to_vec(&request).map_err(io::Error::other)?;
         bytes.push(b'\n');
         write_before_deadline(&mut self.stream, &bytes, until)?;
@@ -925,7 +960,7 @@ impl ParentLifetimeLease {
         if reply != expected {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "managed guardian arm ACK differs",
+                "managed guardian deadline ACK differs",
             ));
         }
         arm.remaining().map(|_| ())

@@ -9,6 +9,9 @@ use super::{
 use crate::crash_ownership::ManagedRequestDeadline;
 use lean_rs_worker_protocol::protocol::ManagedInspectionCommand;
 
+pub(crate) type SaveManagedInspection<'a> =
+    &'a mut dyn FnMut(&LeanWorkerDeclarationInspectionResult) -> Result<(), LeanWorkerError>;
+
 /// The already observed reply and the separately observed retirement.
 #[doc(hidden)]
 pub struct ManagedInspectionOutcome {
@@ -87,16 +90,21 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         config: &LeanWorkerSessionConfig,
         cancellation: Option<&LeanWorkerCancellationToken>,
-        fenced: bool,
+        save: Option<SaveManagedInspection<'_>>,
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         self.validate_managed_receiver(expected)?;
-        let command = fenced.then(|| ManagedInspectionCommand {
-            generation: expected.generation.clone(),
-            attempt: arm.attempt,
-            stage: arm.stage,
-            command: 1,
+        let finish = save.map(|save| {
+            (
+                ManagedInspectionCommand {
+                    generation: expected.generation.clone(),
+                    attempt: arm.attempt,
+                    stage: arm.stage,
+                    command: 1,
+                },
+                save,
+            )
         });
-        self.inspect_declaration_managed_once_with(request, arm, Some(config), cancellation, command, |_| {})
+        self.inspect_declaration_managed_once_with(request, arm, Some(config), cancellation, finish, |_| {})
     }
 
     fn validate_managed_receiver(
@@ -227,7 +235,7 @@ impl LeanWorker {
         arm: &ManagedRequestDeadline,
         prepared: Option<&LeanWorkerSessionConfig>,
         cancellation: Option<&LeanWorkerCancellationToken>,
-        command: Option<ManagedInspectionCommand>,
+        finish: Option<(ManagedInspectionCommand, SaveManagedInspection<'_>)>,
         before_retirement: impl FnOnce(&mut Self),
     ) -> Result<ManagedInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
@@ -255,9 +263,12 @@ impl LeanWorker {
                 .child
                 .as_mut()
                 .ok_or(LeanWorkerError::ShutdownInProgress { operation: OPERATION })?;
-            child.arm_managed_request(arm).map_err(|error| LeanWorkerError::Setup {
-                message: format!("managed request arm refused: {error}"),
-            })?;
+            let ordinal = finish.as_ref().map(|(command, _)| command.command);
+            child
+                .arm_managed_request(arm, ordinal)
+                .map_err(|error| LeanWorkerError::Setup {
+                    message: format!("managed request arm refused: {error}"),
+                })?;
             if let Some(config) = prepared {
                 self.open_managed_artifact_session(config, &token, arm.expires_ns)?;
                 #[cfg(all(test, target_os = "macos"))]
@@ -265,8 +276,8 @@ impl LeanWorker {
             }
             let now = Instant::now();
             self.write_request_bounded_inner(
-                match &command {
-                    Some(command) => Request::InspectDeclarationFenced {
+                match &finish {
+                    Some((command, _)) => Request::InspectDeclarationFenced {
                         command: command.clone(),
                         request,
                     },
@@ -283,7 +294,27 @@ impl LeanWorker {
             tests::after_real_dispatch(self, arm);
 
             let response = self.read_response_with_progress(OPERATION, None, Some(&token))?;
-            inspection_terminal(command, response, OPERATION)
+            let (command, save) = match finish {
+                Some((command, save)) => (Some(command), Some(save)),
+                None => (None, None),
+            };
+            let result = inspection_terminal(command, response, OPERATION)?;
+            if let (Some(ordinal), Some(save)) = (ordinal, save) {
+                self.check_request_cancelled(OPERATION, Some(&token))?;
+                // This development route always retires. Seal before invoking
+                // the caller so even an unwinding save cannot reopen dispatch.
+                self.seal_generation_dispatch_internal();
+                save(&result)?;
+                self.check_request_cancelled(OPERATION, Some(&token))?;
+                self.child
+                    .as_mut()
+                    .ok_or(LeanWorkerError::ShutdownInProgress { operation: OPERATION })?
+                    .finish_managed_request(arm, ordinal)
+                    .map_err(|error| LeanWorkerError::Setup {
+                        message: format!("managed request finish unconfirmed: {error}"),
+                    })?;
+            }
+            Ok(result)
         })();
         before_retirement(self);
         self.seal_generation_dispatch_internal();

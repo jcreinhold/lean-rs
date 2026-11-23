@@ -37,19 +37,41 @@ struct Arm {
     attempt: [u8; 16],
     stage: u64,
     expires_ns: u64,
+    command: Option<u64>,
+}
+
+#[derive(Deserialize)]
+enum ArmOp {
+    #[serde(rename = "arm_hard_deadline")]
+    Hard,
+    #[serde(rename = "arm_reader_hard_deadline")]
+    Reader,
+    #[serde(rename = "arm_fenced_hard_deadline")]
+    Fenced,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Finish {
+    op: FinishOp,
+    protocol: u32,
+    nonce: String,
+    attempt: [u8; 16],
+    stage: u64,
+    command: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum ArmOp {
-    ArmHardDeadline,
-    ArmReaderHardDeadline,
+enum FinishOp {
+    FinishHardDeadline,
 }
 
 #[derive(Default)]
 pub(super) struct OwnerDeadline {
     input: Vec<u8>,
     arm: Option<Arm>,
+    finished: bool,
     soft: Option<Duration>,
     last_activity: Option<(u64, Duration)>,
 }
@@ -59,9 +81,14 @@ impl OwnerDeadline {
         self.arm.is_some()
     }
 
+    pub(super) fn active(&self) -> bool {
+        self.armed() && !self.finished
+    }
+
     fn expires_at(&self) -> Option<Duration> {
         self.arm
             .as_ref()
+            .filter(|_| !self.finished)
             .map(|arm| self.soft.unwrap_or_else(|| Duration::from_nanos(arm.expires_ns)))
     }
 
@@ -121,7 +148,7 @@ impl OwnerDeadline {
             }
             Err(error) => return Err(error),
         };
-        if self.armed() {
+        if self.arm.as_ref().is_some_and(|arm| arm.command.is_none()) || self.finished {
             return Err(invalid("native guardian deadline is already armed"));
         }
         if count > MAX_ARM_FRAME.saturating_sub(self.input.len()) {
@@ -142,17 +169,68 @@ impl OwnerDeadline {
         if newline.checked_add(1) != Some(self.input.len()) {
             return Err(invalid("native guardian arm cannot be pipelined"));
         }
-        let arm: Arm = serde_json::from_slice(&self.input).map_err(io::Error::other)?;
-        if matches!(arm.op, ArmOp::ArmReaderHardDeadline) && !reads_retained {
+        let input = std::mem::take(&mut self.input);
+        if let Some(arm) = &self.arm {
+            let Finish {
+                op: FinishOp::FinishHardDeadline,
+                protocol,
+                nonce: received_nonce,
+                attempt,
+                stage,
+                command,
+            } = serde_json::from_slice(&input).map_err(io::Error::other)?;
+            if protocol != PROTOCOL
+                || received_nonce != nonce
+                || attempt != arm.attempt
+                || stage != arm.stage
+                || Some(command) != arm.command
+            {
+                return Ok(false);
+            }
+            let ack = frame(&json!({
+                "state":"hard_deadline_finished", "protocol":PROTOCOL, "nonce":nonce,
+                "attempt":attempt, "stage":stage, "command":command
+            }))?;
+            // Detect EOF even if the last frame was already queued when
+            // the parent closed its write half. Pipelining is forbidden.
+            match rustix::net::recv(&*parent, &mut [0_u8; 1][..], rustix::net::RecvFlags::PEEK) {
+                Ok((_, 0)) => return Ok(true),
+                Ok(_) => return Err(invalid("native guardian finish cannot be pipelined")),
+                Err(error) if error == rustix::io::Errno::AGAIN => {}
+                Err(error) => return Err(error.into()),
+            }
+            if self.expired()? {
+                return Ok(true);
+            }
+            self.finished = true;
+            if parent.write(&ack)? != ack.len() {
+                return Err(invalid("partial native guardian finish ACK"));
+            }
+            return Ok(false);
+        }
+        let arm: Arm = serde_json::from_slice(&input).map_err(io::Error::other)?;
+        if match arm.op {
+            ArmOp::Fenced => arm.command != Some(1),
+            ArmOp::Hard | ArmOp::Reader => arm.command.is_some(),
+        } {
+            return Err(invalid("native guardian arm command differs"));
+        }
+        if matches!(arm.op, ArmOp::Reader) && !reads_retained {
             return Err(invalid("managed reader arm requires retained read descriptors"));
         }
         if arm.protocol != PROTOCOL || arm.nonce != nonce {
             return Err(invalid("native guardian arm binding differs"));
         }
-        let ack = frame(&json!({
+        let mut ack = json!({
             "state": "hard_deadline_armed", "protocol": PROTOCOL, "nonce": nonce,
             "attempt": arm.attempt, "stage": arm.stage, "expires_ns": arm.expires_ns
-        }))?;
+        });
+        if let Some(command) = arm.command {
+            ack.as_object_mut()
+                .ok_or_else(|| invalid("invalid arm ACK"))?
+                .insert("command".to_owned(), json!(command));
+        }
+        let ack = frame(&ack)?;
         self.arm = Some(arm);
         // Neither supported process-group implementation attributes complete
         // fork and exit usage to this attempt, so start with the hard bound.
@@ -206,12 +284,13 @@ mod tests {
         let seconds = Duration::from_secs;
         let mut owner = OwnerDeadline {
             arm: Some(Arm {
-                op: ArmOp::ArmHardDeadline,
+                op: ArmOp::Hard,
                 protocol: PROTOCOL,
                 nonce: String::new(),
                 attempt: [7; 16],
                 stage: 4,
                 expires_ns: 1_000_000_000_000,
+                command: None,
             }),
             ..OwnerDeadline::default()
         };

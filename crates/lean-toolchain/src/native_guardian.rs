@@ -763,7 +763,7 @@ impl Guardian {
             }
             // An armed stage must not enter a synchronous registry read.
             // Its original deadline and lifeline remain the stop authority.
-            if !hard_deadline.armed()
+            if !hard_deadline.active()
                 && let Some(guardian) = &drain_guardian
                 && last_recovery_poll.elapsed() >= Duration::from_millis(50)
             {
