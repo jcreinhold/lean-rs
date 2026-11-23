@@ -9,6 +9,12 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.15]
+
+- Managed declaration inspections can reuse the same guarded Lean worker after the exact terminal reply, guardian
+  acknowledgement, and durable attempt completion. Warm guardians enforce idle expiry and retain custody until
+  exact closure is confirmed.
+
 ## [0.10.14]
 
 - Supervised Lean callers can use the admitted module setup and exact source to retrieve a declaration's proof state
