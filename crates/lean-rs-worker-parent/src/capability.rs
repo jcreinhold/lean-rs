@@ -1441,6 +1441,23 @@ impl LeanWorkerHostHandle {
         self.worker.managed_guardian_binding()
     }
 
+    /// Check the exact still-held warm generation and its sealed predecessor.
+    ///
+    /// This observation does not consume admission or permit dispatch. Pass
+    /// a separately consumed successor grant to the managed warm operation.
+    ///
+    /// # Errors
+    /// Refuses a missing or mismatched completion, binding or live custody.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn validate_managed_warm_continuation(
+        &self,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        predecessor: &lean_rs_worker_protocol::protocol::ManagedInspectionCommand,
+    ) -> Result<(), LeanWorkerError> {
+        self.worker.validate_managed_warm_continuation(expected, predecessor)
+    }
+
     /// Prepare the exact shared read union without importing or initializing Lean
     /// project code. The returned binding is for durable admission on this handle.
     ///

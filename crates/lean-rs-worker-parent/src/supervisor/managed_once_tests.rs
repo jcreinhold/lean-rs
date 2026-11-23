@@ -1106,6 +1106,16 @@ fn real_lean_managed_warm_two_commands_refuse_stale_finish() {
     let binding = handle
         .prepare_managed_artifact_read(imports.clone(), original.expires_ns)
         .expect("prepare exact original read custody");
+    let first = ManagedInspectionCommand {
+        generation: binding.generation.clone(),
+        attempt: original.attempt,
+        stage: original.stage,
+        command: 1,
+    };
+    assert!(
+        handle.validate_managed_warm_continuation(&binding, &first).is_err(),
+        "no finish before dispatch"
+    );
     let names = ["LeanRsFixture.SourceRanges.knownTheorem", "Nat.add_zero"];
     for (index, name) in names.into_iter().enumerate() {
         let command = u64::try_from(index + 1).expect("ordinal");
@@ -1129,11 +1139,58 @@ fn real_lean_managed_warm_two_commands_refuse_stale_finish() {
                     message: error.to_string(),
                 })
         };
+        let exact_command = ManagedInspectionCommand {
+            generation: binding.generation.clone(),
+            attempt: grant.attempt,
+            stage: grant.stage,
+            command,
+        };
+        if command == 2 {
+            assert!(
+                handle.managed_guardian_binding().is_err(),
+                "generic observation stays sealed"
+            );
+            handle
+                .validate_managed_warm_continuation(&binding, &first)
+                .expect("authenticated predecessor");
+            for wrong in [
+                ManagedInspectionCommand {
+                    attempt: [9; 16],
+                    ..first.clone()
+                },
+                ManagedInspectionCommand {
+                    stage: 0,
+                    ..first.clone()
+                },
+                ManagedInspectionCommand {
+                    command: 2,
+                    ..first.clone()
+                },
+                ManagedInspectionCommand {
+                    generation: "different-generation".to_owned(),
+                    ..first.clone()
+                },
+            ] {
+                assert!(handle.validate_managed_warm_continuation(&binding, &wrong).is_err());
+            }
+            let mut wrong_scope = binding.clone();
+            wrong_scope.guardian = binding.parent.clone();
+            assert!(handle.validate_managed_warm_continuation(&wrong_scope, &first).is_err());
+            let replay = handle.inspect_admitted_declaration_warm(
+                &imports,
+                LeanWorkerDeclarationInspectionRequest::new(name),
+                &binding,
+                first.clone(),
+                grant.expires_ns,
+                None,
+                |_| Ok(()),
+                || Ok(()),
+            );
+            assert!(replay.is_err(), "completed ordinal cannot be consumed again");
+        }
         let outcome = handle.inspect_admitted_declaration_warm(
             &imports, LeanWorkerDeclarationInspectionRequest::new(name), &binding,
-            ManagedInspectionCommand {
-                generation: binding.generation.clone(), attempt: grant.attempt, stage: grant.stage, command,
-            },
+            exact_command.clone(),
             grant.expires_ns, None,
             |result| {
                 assert!(matches!(result, LeanWorkerDeclarationInspectionResult::Found { declaration } if declaration.name == name));
@@ -1155,6 +1212,15 @@ fn real_lean_managed_warm_two_commands_refuse_stale_finish() {
             }
         };
         assert!(retained, "warm execution unexpectedly retired");
+        handle
+            .validate_managed_warm_continuation(&binding, &exact_command)
+            .expect("exact completed pin");
+        if command == 2 {
+            assert!(
+                handle.validate_managed_warm_continuation(&binding, &first).is_err(),
+                "stale completed pin"
+            );
+        }
         assert!(ended.exists());
         assert!(binding.worker.is_live().expect("original worker still live"));
         assert!(binding.guardian.is_live().expect("original guardian still live"));

@@ -58,6 +58,37 @@ impl LeanWorker {
             })
     }
 
+    /// Read-only continuation check. The mutable dispatch still consumes the
+    /// next separately admitted command and repeats the native binding checks.
+    pub(crate) fn validate_managed_warm_continuation(
+        &self,
+        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
+        predecessor: &ManagedInspectionCommand,
+    ) -> Result<(), LeanWorkerError> {
+        if self.completed_warm_command() != Some(predecessor)
+            || predecessor.generation != expected.generation
+            || !matches!(self.state, WorkerSupervisorState::Idle { .. })
+            || !self.host_read_active
+        {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: "validate_managed_warm_continuation",
+            });
+        }
+        self.validate_managed_receiver(expected)
+    }
+
+    fn completed_warm_command(&self) -> Option<&ManagedInspectionCommand> {
+        let pin = self.generation_dispatch.as_ref()?;
+        if !pin.sealed
+            || !Arc::ptr_eq(&pin.owner, &self.request_scope)
+            || pin.generation != self.generation
+            || self.current_native_generation_id() != Some(pin.native_generation_id.as_str())
+        {
+            return None;
+        }
+        pin.warm_end.as_ref()
+    }
+
     pub(crate) fn prepare_managed_artifact_read(
         &mut self,
         config: &LeanWorkerSessionConfig,
@@ -293,13 +324,9 @@ impl LeanWorker {
     ) -> Result<ManagedWarmInspectionOutcome, LeanWorkerError> {
         const OPERATION: &str = "worker_inspect_declaration_managed_once";
         let warm = finish.as_ref().filter(|finish| finish.end.is_some());
-        let admitted = if let Some(pin) = &self.generation_dispatch {
-            warm.zip(pin.warm_end.as_ref()).is_some_and(|(next, prior)| {
-                pin.sealed
-                    && Arc::ptr_eq(&pin.owner, &self.request_scope)
-                    && pin.generation == self.generation
-                    && self.current_native_generation_id() == Some(pin.native_generation_id.as_str())
-                    && next.command.generation == prior.generation
+        let admitted = if self.generation_dispatch.is_some() {
+            warm.zip(self.completed_warm_command()).is_some_and(|(next, prior)| {
+                next.command.generation == prior.generation
                     && next.command.command > prior.command
                     && (next.command.attempt, next.command.stage) != (prior.attempt, prior.stage)
             })
