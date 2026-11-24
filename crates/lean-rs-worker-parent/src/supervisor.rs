@@ -45,6 +45,7 @@ const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const WORKER_EVENT_BUFFER_CAPACITY: usize = 64;
 const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const DEFAULT_RESTART_INTENSITY_LIMIT: u64 = 16;
+const SHARED_ARTIFACT_READS_ENV: &str = "LEAN_RS_WORKER_SHARED_ARTIFACT_READS";
 /// Reuse-hint capacity for an embedder that sets no `max_imports`. Mirrors the
 /// child's own `SESSION_POOL_DEFAULT_CAPACITY`, which is what such a child uses.
 const DEFAULT_REUSE_HINT_CAPACITY: usize = 4;
@@ -2059,22 +2060,35 @@ impl LeanWorker {
             // An ordinary deployment selects its own snapshot for this child.
             command.env_remove("LEAN_RS_PREPARED_HOST_ARTIFACTS");
         }
-        #[cfg(unix)]
-        if config.native_guardian_executable.is_none()
-            && !config
-                .env
-                .iter()
-                .any(|(key, _)| key == lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV)
-        {
-            let registry = lean_toolchain::native_guardian::registry_directory().map_err(|source| {
-                SpawnFailure::no_child(LeanWorkerError::Setup {
-                    message: format!("could not bind native ownership registry: {source}"),
-                })
-            })?;
-            command.env(lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV, registry);
-        }
         for (key, value) in &config.env {
             command.env(key, value);
+        }
+        #[cfg(unix)]
+        let shared_artifact_reads = config.shared_artifact_reads
+            || command
+                .get_envs()
+                .find(|(key, _)| *key == SHARED_ARTIFACT_READS_ENV)
+                .map_or_else(
+                    || std::env::var_os(SHARED_ARTIFACT_READS_ENV).is_some_and(|value| value == "1"),
+                    |(_, value)| value.is_some_and(|value| value == "1"),
+                );
+        #[cfg(unix)]
+        if config.native_guardian_executable.is_none() {
+            use lean_toolchain::native_guardian::{OWNERS_DIRECTORY_ENV, registry_directory};
+            let configured_owner = command.get_envs().find(|(key, _)| *key == OWNERS_DIRECTORY_ENV);
+            if shared_artifact_reads || configured_owner.is_none() {
+                let registry = registry_directory().map_err(|source| {
+                    SpawnFailure::no_child(LeanWorkerError::Setup {
+                        message: format!("could not bind native ownership registry: {source}"),
+                    })
+                })?;
+                if configured_owner.is_some_and(|(_, value)| value != Some(registry.as_os_str())) {
+                    return Err(SpawnFailure::no_child(LeanWorkerError::Setup {
+                        message: format!("{OWNERS_DIRECTORY_ENV} differs from the bound native ownership registry"),
+                    }));
+                }
+                command.env(OWNERS_DIRECTORY_ENV, registry);
+            }
         }
         lean_toolchain::shared_writer::configure_writer_executable(
             &mut command,
@@ -2103,7 +2117,7 @@ impl LeanWorker {
             command.env_remove("LEAN_RS_WORKER_APPLICATION_INPUT");
         }
         if config.shared_artifact_reads {
-            command.env("LEAN_RS_WORKER_SHARED_ARTIFACT_READS", "1");
+            command.env(SHARED_ARTIFACT_READS_ENV, "1");
             #[cfg(unix)]
             if config.native_guardian_executable.is_some()
                 && let Some(root) = &config.lifetime_socket_directory
@@ -2125,7 +2139,7 @@ impl LeanWorker {
                     message: "native guardian requires a durable lifetime directory".to_owned(),
                 }));
             }
-            if config.shared_artifact_reads {
+            if shared_artifact_reads {
                 let registry = lean_toolchain::native_guardian::registry_directory().map_err(|source| {
                     SpawnFailure::no_child(LeanWorkerError::Setup {
                         message: format!("could not bind native ownership registry: {source}"),
@@ -6189,6 +6203,60 @@ mod tests {
         let result = super::LeanWorker::spawn(&config);
         assert!(matches!(result, Err(LeanWorkerError::Setup { message })
             if message.starts_with("native loader environment override refused:")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unguarded_worker_requires_matching_shared_owner_directory() {
+        use super::SHARED_ARTIFACT_READS_ENV;
+        use lean_toolchain::native_guardian::{OWNERS_DIRECTORY_ENV, registry_directory};
+        use std::process::Command;
+
+        const INHERITED_CASE: &str = "LEAN_RS_TEST_INHERITED_SHARED_OWNER_DIRECTORY";
+        let registry = registry_directory().expect("bound native registry");
+        let other = registry.with_extension("different");
+        let conflicting = dummy_config().env(OWNERS_DIRECTORY_ENV, other.as_os_str());
+        let check_refused = |config: &LeanWorkerConfig| {
+            let error = super::LeanWorker::spawn(config).expect_err("conflicting registry must refuse startup");
+            assert!(
+                matches!(
+                    &error,
+                    LeanWorkerError::Setup { message }
+                        if message.contains(OWNERS_DIRECTORY_ENV) && message.contains("bound native ownership registry")
+                ),
+                "{error}"
+            );
+        };
+        if std::env::var_os(INHERITED_CASE).is_some() {
+            check_refused(&conflicting);
+            return;
+        }
+
+        let typed = conflicting.clone().shared_artifact_reads(true);
+        check_refused(&typed);
+        check_refused(&conflicting.clone().env(SHARED_ARTIFACT_READS_ENV, "1"));
+        let matching = typed.env(OWNERS_DIRECTORY_ENV, registry.as_os_str());
+        assert!(matches!(
+            super::LeanWorker::spawn(&matching),
+            Err(LeanWorkerError::Spawn { .. })
+        ));
+        let ordinary = conflicting.env(SHARED_ARTIFACT_READS_ENV, "0");
+        assert!(matches!(
+            super::LeanWorker::spawn(&ordinary),
+            Err(LeanWorkerError::Spawn { .. })
+        ));
+
+        let output = Command::new(std::env::current_exe().expect("parent test executable"))
+            .args([
+                "--exact",
+                "supervisor::tests::unguarded_worker_requires_matching_shared_owner_directory",
+                "--nocapture",
+            ])
+            .env(INHERITED_CASE, "1")
+            .env(SHARED_ARTIFACT_READS_ENV, "1")
+            .output()
+            .expect("run inherited shared-read environment case");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
     }
 
     #[cfg(unix)]

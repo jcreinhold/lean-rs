@@ -1,5 +1,5 @@
 use super::*;
-use lean_toolchain::native_guardian::guardian_deadline_ticks;
+use lean_toolchain::native_guardian::{OWNERS_DIRECTORY_ENV, guardian_deadline_ticks};
 use lean_toolchain::shared_writer::{SharedWriter, WriterDisposition, WriterFailure, WriterStagePermit};
 use std::os::unix::fs::PermissionsExt as _;
 use std::time::Duration;
@@ -57,6 +57,108 @@ fn conflicting_setup_markers_refuse_the_stage_before_command_dispatch() -> io::R
     let mut frame = String::new();
     assert_eq!(reader.read_line(&mut frame)?, 0, "{frame}");
     assert!(!marker.exists());
+    Ok(())
+}
+
+#[test]
+fn raw_writer_payload_preserves_the_owner_directory() -> io::Result<()> {
+    let fixture = StageFixture::new()?;
+    let mut child = start_storage(&fixture.project, &fixture.registry, &fixture.scratch, 1024 * 1024, true)?;
+    let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+    let ready = reply(&mut reader)?;
+    assert_eq!(field(&ready, "state"), "locked");
+
+    let marker = fixture.project.join("command-dispatched");
+    for override_value in [Value::Null, json!(fixture.project.join("other-owners"))] {
+        send(
+            &mut child,
+            &json!({"action":"run","command":["/usr/bin/touch",marker],"timeout":3,
+                "env":{(OWNERS_DIRECTORY_ENV):override_value}}),
+        )?;
+        let refused = reply(&mut reader)?;
+        assert_eq!(field(&refused, "state"), "stage_refused", "{refused}");
+        assert_eq!(field(&refused, "owner"), field(&ready, "owner"));
+        assert!(
+            field(&refused, "reason")
+                .as_str()
+                .expect("owner binding refusal")
+                .contains(OWNERS_DIRECTORY_ENV)
+        );
+        assert!(!marker.exists());
+    }
+
+    let expected = format!("{}\n", fixture.registry.display());
+    for env in [json!({}), json!({(OWNERS_DIRECTORY_ENV):fixture.registry})] {
+        send(
+            &mut child,
+            &json!({"action":"run","command":["/usr/bin/printenv",OWNERS_DIRECTORY_ENV],"timeout":3,"env":env}),
+        )?;
+        assert_eq!(field(&reply(&mut reader)?, "state"), "started");
+        let stopped = reply(&mut reader)?;
+        assert_eq!(field(&stopped, "state"), "stopped", "{stopped}");
+        assert_eq!(field(&stopped, "exit_code"), 0, "{stopped}");
+        assert_eq!(field(&stopped, "stdout").as_str(), Some(expected.as_str()));
+    }
+    send(&mut child, &json!({"action":"close"}))?;
+    assert!(child.wait()?.success());
+    assert!(fs::read_dir(&fixture.scratch)?.next().is_none());
+    Ok(())
+}
+
+#[test]
+fn sdk_writer_payload_preserves_the_owner_directory() -> io::Result<()> {
+    const FIXTURE: &str = "LEAN_RS_TEST_WRITER_PAYLOAD_OWNER_FIXTURE";
+    const TEST: &str = "stage_permit::sdk_writer_payload_preserves_the_owner_directory";
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let fixture = StageFixture::new()?;
+        let output = Command::new(std::env::current_exe()?)
+            .args(["--exact", TEST, "--nocapture"])
+            .env(FIXTURE, fixture.temp.path().canonicalize()?)
+            .env(OWNERS_DIRECTORY_ENV, &fixture.registry)
+            .env("TMPDIR", &fixture.scratch)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Ok(());
+    };
+    let base = Path::new(&base);
+    let project = base.join("demo");
+    let registry = base.join("owners");
+    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+    let timeout = Duration::from_secs(3);
+    let mut writer = SharedWriter::open(helper, &project, timeout)?;
+    let marker = project.join("command-dispatched");
+    for override_value in [None, Some(base.join("other-owners"))] {
+        let mut command = Command::new("/usr/bin/touch");
+        command.arg(&marker);
+        match override_value {
+            Some(path) => command.env(OWNERS_DIRECTORY_ENV, path),
+            None => command.env_remove(OWNERS_DIRECTORY_ENV),
+        };
+        let error = writer
+            .run(&command, timeout)
+            .expect_err("owner override must not dispatch");
+        let refused = WriterFailure::from_io(&error).expect("typed pre-delivery refusal");
+        assert_eq!(refused.disposition, WriterDisposition::NotStarted);
+        assert!(refused.detail.contains(OWNERS_DIRECTORY_ENV), "{error}");
+        assert!(!marker.exists());
+    }
+    for explicit in [false, true] {
+        let mut command = Command::new("/usr/bin/printenv");
+        command.arg(OWNERS_DIRECTORY_ENV);
+        if explicit {
+            command.env(OWNERS_DIRECTORY_ENV, &registry);
+        }
+        let output = writer.run(&command, timeout)?;
+        assert!(output.status.success());
+        assert_eq!(output.stdout, format!("{}\n", registry.display()).as_bytes());
+    }
+    writer.close(timeout)?;
+    assert!(fs::read_dir(base.join("scratch"))?.next().is_none());
     Ok(())
 }
 

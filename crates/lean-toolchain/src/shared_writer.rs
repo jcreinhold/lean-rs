@@ -1427,6 +1427,18 @@ impl SharedWriter {
             }
             let mut env = serde_json::Map::new();
             for (name, value) in command.get_envs() {
+                if name == crate::native_guardian::OWNERS_DIRECTORY_ENV {
+                    let registry = crate::native_guardian::registry_directory()?;
+                    if value != Some(registry.as_os_str()) {
+                        return Err(invalid(format!(
+                            "{} must match the bound native owner directory",
+                            crate::native_guardian::OWNERS_DIRECTORY_ENV
+                        )));
+                    }
+                    // The helper already inherits this setting. Keep it out of
+                    // stage JSON, including the exact module setup environment.
+                    continue;
+                }
                 env.insert(
                     text(name)?.to_owned(),
                     match value {

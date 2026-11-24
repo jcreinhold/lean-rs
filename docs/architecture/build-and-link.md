@@ -191,6 +191,10 @@ authoritative registry comes from `native_guardian::bind_registry_directory(&pat
 namespace to match that binding. Managed writer helpers receive the same path. The application and helper configuration
 contract is described under [native guardian ownership](worker-runtime.md#optional-native-guardian-ownership).
 
+The writer passes its bound owner directory to each payload so cooperating helpers spawned by the payload inspect the
+same namespace. A command may explicitly supply the matching owner setting. Removing or replacing it is refused
+before the writer releases the command.
+
 A sibling lock requires a stable parent. An unrelated workspace that replaces an ancestor Git checkout can invalidate
 nested project domains absent from its own graph; an independent project under a replaceable source-package root has the
 same constraint. Cross-workspace replacement authority is not established by this graph-local union and remains an

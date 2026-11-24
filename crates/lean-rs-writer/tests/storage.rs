@@ -636,6 +636,12 @@ fn charged_lake_setup_preserves_required_bytes_and_close() -> io::Result<()> {
         for marker in markers {
             env.insert((*marker).to_owned(), json!("1"));
         }
+        if !overflow && markers == [MODULE_SETUP_CAPTURE_ENV] {
+            env.insert(
+                lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV.to_owned(),
+                json!(registry),
+            );
+        }
         send(
             &mut child,
             &json!({"action":"run","cwd":project,"timeout":10,

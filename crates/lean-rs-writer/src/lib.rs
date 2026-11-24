@@ -13,6 +13,7 @@
 //! and cannot safely signal a surviving or late-forked descendant.
 
 use std::cell::Cell;
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, BufRead, IoSlice, Read, Seek, Write};
 use std::mem::MaybeUninit;
@@ -26,6 +27,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use lean_toolchain::native_guardian::{OWNERS_DIRECTORY_ENV, registry_directory};
 use lean_toolchain::process_group::OwnedCommandGroup;
 use lean_toolchain::shared_writer::{WriterStagePermit, WriterStageReady};
 use lean_toolchain::writer_demand::{ReadAdmission, WriterDemand};
@@ -835,6 +837,20 @@ fn code(status: ExitStatus) -> i32 {
         .unwrap_or_else(|| status.signal().unwrap_or(1).saturating_neg())
 }
 
+fn normalize_owner_directory(message: &mut Value, registry: &Path) -> io::Result<()> {
+    if let Some(value) = message
+        .get_mut("env")
+        .and_then(Value::as_object_mut)
+        .and_then(|env| env.remove(OWNERS_DIRECTORY_ENV))
+        && value.as_str().map(OsStr::new) != Some(registry.as_os_str())
+    {
+        return Err(invalid(format!(
+            "{OWNERS_DIRECTORY_ENV} must match the bound native owner directory"
+        )));
+    }
+    Ok(())
+}
+
 /// Execute only after the supervisor has synced actual group ownership.
 ///
 /// # Errors
@@ -845,7 +861,7 @@ pub fn run_exec() -> io::Result<()> {
     if bytes.len() as u64 > FRAME_BYTES || bytes.last() != Some(&b'\n') {
         return Err(invalid("writer launch handshake missing or oversized"));
     }
-    let message: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    let mut message: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
     let lock_path = Path::new(
         field(&message, "lock")
             .as_str()
@@ -872,6 +888,8 @@ pub fn run_exec() -> io::Result<()> {
             return Err(invalid("writer launch has no inherited lock custody"));
         }
     }
+    let registry = registry_directory()?;
+    normalize_owner_directory(&mut message, &registry)?;
     let arguments: Vec<String> =
         serde_json::from_value(field(&message, "command").clone()).map_err(io::Error::other)?;
     let (program, arguments) = arguments
@@ -881,7 +899,11 @@ pub fn run_exec() -> io::Result<()> {
         .as_str()
         .ok_or_else(|| invalid("writer root missing"))?;
     let mut command = Command::new(program);
-    command.args(arguments).current_dir(root).stdin(Stdio::null());
+    command
+        .args(arguments)
+        .current_dir(root)
+        .env(OWNERS_DIRECTORY_ENV, registry)
+        .stdin(Stdio::null());
     if let Some(cwd) = message.get("cwd").and_then(Value::as_str) {
         command.current_dir(cwd);
     }
@@ -1134,6 +1156,7 @@ fn execute_with_launcher(
     let mut command = Command::new(launcher);
     command
         .arg("writer-exec")
+        .env(OWNERS_DIRECTORY_ENV, registry_directory()?)
         .stdin(Stdio::piped())
         .stdout(child_stdout)
         .stderr(child_stderr);
@@ -1483,7 +1506,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         }
         send(&Value::Object(ready))?;
         while let Ok(message) = input.recv() {
-            let message = message?;
+            let mut message = message?;
             match field(&message, "action").as_str() {
                 Some(action @ ("stage_handoff" | "run" | "run_permitted")) => {
                     if permit_consumed || (action == "run_permitted" && (!first_stage || ready_identity.is_none())) {
@@ -1539,6 +1562,10 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                     }
                     if pending_handoff.is_some() {
                         return Err(invalid("command requires a staged handoff"));
+                    }
+                    if let Err(error) = normalize_owner_directory(&mut message, &registry_directory()?) {
+                        send(&json!({"state":"stage_refused","owner":record.owner,"reason":error.to_string()}))?;
+                        continue;
                     }
                     let setup =
                         module_setup::select(&message, &args.root, scratch.as_ref(), args.storage_request.as_ref())?;

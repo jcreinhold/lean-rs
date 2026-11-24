@@ -592,6 +592,9 @@ back to `lean-rs/native-generations` under the per-user local-data directory. On
 must agree. Protected native spawn requires the worker lifetime directory and the writer registry to agree. Cooperating
 readers and writers must share one namespace to see each other's records.
 
+For an unguarded worker using shared artifact reads, an explicit child environment value for the owner directory
+must match the SDK's bound namespace before the parent spawns the worker.
+
 When updating an existing application, close its current native work before switching executables, and bind the
 application's existing namespace explicitly. Keep that directory, its records, and the existing project lock inodes
 in place so the restarted application can use the original custody records.
