@@ -23,6 +23,7 @@ impl ArtifactReadScope {
         allow_wait: bool,
         guardian: Option<&mut GuardianHandle>,
         ipc_root: Option<&Path>,
+        planned: bool,
     ) -> io::Result<Self> {
         let guardian =
             guardian.ok_or_else(|| io::Error::other("actual native reads require independent guardian custody"))?;
@@ -44,6 +45,9 @@ impl ArtifactReadScope {
         let domains: Vec<_> = keyed.into_iter().map(|(_, root)| root).collect();
         if domains.is_empty() {
             return Err(io::Error::other("host has no shared artifact domains"));
+        }
+        if planned {
+            guardian.plan_reads(&domains, timeout.saturating_sub(started.elapsed()))?;
         }
         // This child has no request-local cancellation flag: the existing
         // parent lifeline and supervisor cancel its owned process group. Both

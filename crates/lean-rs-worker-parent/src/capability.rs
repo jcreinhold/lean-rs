@@ -1471,7 +1471,30 @@ impl LeanWorkerHostHandle {
         expires_ns: u64,
     ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
         let config = self.session_config.with_imports(imports);
-        let binding = self.worker.prepare_managed_artifact_read(&config, expires_ns)?;
+        let binding = self.worker.prepare_managed_artifact_read(&config, expires_ns, None)?;
+        self.managed_artifact_read = Some((config, expires_ns));
+        Ok(binding)
+    }
+
+    /// Protect the exact prepared artifact read with the original admission deadline.
+    /// Callers must separately consume the matching durable grant before inspection.
+    ///
+    /// # Errors
+    /// Refuses a different boot, unavailable guardian, expired deadline or unconfirmed plan.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn prepare_managed_artifact_read_bound(
+        &mut self,
+        imports: Vec<String>,
+        boot: &str,
+        attempt: [u8; 16],
+        stage: u64,
+        expires_ns: u64,
+    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
+        let config = self.session_config.with_imports(imports);
+        let binding = self
+            .worker
+            .prepare_managed_artifact_read(&config, expires_ns, Some((boot, attempt, stage)))?;
         self.managed_artifact_read = Some((config, expires_ns));
         Ok(binding)
     }

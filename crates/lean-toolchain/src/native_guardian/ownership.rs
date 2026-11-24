@@ -235,7 +235,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     let version = field(value, "version")
         .as_u64()
         .ok_or_else(|| invalid("native owner version missing"))?;
-    if !matches!(version, 1..=3)
+    if !matches!(version, 1..=4)
         || field(value, "scope").as_str() != Some(format!("inherited-process-group-v{version}").as_str())
         || !field(value, "generation_id").as_str().is_some_and(valid_nonce)
     {
@@ -253,6 +253,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
                     | "process"
                     | "guardian"
                     | "protected_domains"
+                    | "planned_read_domains"
                     | "capacity_slot"
                     | "recovery_claim"
                     | "original_worker_boot"
@@ -277,7 +278,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     let original_boot = value.get("original_worker_boot");
     let claim = value.get("recovery_claim");
     if let Some(drain) = value.get("guardian_drain")
-        && (version != 3
+        && (version < 3
             || phase != "running"
             || original_boot.is_none()
             || !matches!(drain.as_str(), Some("available" | "requested")))
@@ -294,7 +295,7 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     {
         return Err(invalid("invalid original guardian closure evidence"));
     }
-    if version == 3 {
+    if version >= 3 {
         if phase != "running" || (original_boot.is_none() && claim.is_none()) {
             return Err(invalid(
                 "private native owner must be running and carry recovery evidence",
@@ -307,7 +308,34 @@ pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
             recovery_claim(value)?;
         }
     } else if original_boot.is_some() || claim.is_some() {
-        return Err(invalid("native recovery evidence requires owner version 3"));
+        return Err(invalid("native recovery evidence requires owner version 3 or later"));
+    }
+    if version == 4 {
+        if original_boot.is_none()
+            || field(value, "protected_domains")
+                .as_array()
+                .is_none_or(|domains| !domains.is_empty())
+        {
+            return Err(invalid(
+                "planned native reads require boot-bound owner without acquired domains",
+            ));
+        }
+        let plans: Vec<super::PlannedReadDomain> =
+            serde_json::from_value(field(value, "planned_read_domains").clone()).map_err(io::Error::other)?;
+        if plans.is_empty()
+            || plans.len() > super::MAX_READ_DOMAINS
+            || !plans
+                .iter()
+                .zip(plans.iter().skip(1))
+                .all(|(a, b)| a.lock_path < b.lock_path)
+            || plans
+                .iter()
+                .any(|plan| !plan.project_root.is_absolute() || !plan.lock_path.is_absolute() || plan.inode == 0)
+        {
+            return Err(invalid("invalid planned native read domains"));
+        }
+    } else if value.get("planned_read_domains").is_some() {
+        return Err(invalid("planned native reads require owner version 4"));
     }
     if phase == "preparing" || phase == "preparing_closed" || phase == "dispatching" {
         if version != 2
@@ -511,6 +539,20 @@ pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<F
         .ok_or_else(|| invalid("owner registry missing"))?;
     validate_registry(root)?;
     lock_admission(root, deadline(timeout)?, false)
+}
+
+pub(super) fn try_lock_publication(record: &Path) -> io::Result<File> {
+    let root = record
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| invalid("owner registry missing"))?;
+    validate_registry(root)?;
+    let mutex = open_admission_at(&File::open(root)?, false)?;
+    mutex.try_lock().map_err(|error| match error {
+        std::fs::TryLockError::WouldBlock => busy("native publication lock is busy"),
+        std::fs::TryLockError::Error(error) => error,
+    })?;
+    Ok(mutex)
 }
 
 /// Exact original scope expected by a managed replacement requester.
@@ -1085,11 +1127,14 @@ pub fn claim_native_recovery(record: &Path, expected: &NativeProcessIdentity, ti
     }
     let claimant =
         NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native recoverer absent"))?;
+    let legacy = field(&value, "version") == 2;
     let owner = value
         .as_object_mut()
         .ok_or_else(|| invalid("native owner object missing"))?;
-    owner.insert("version".to_owned(), json!(3));
-    owner.insert("scope".to_owned(), json!("inherited-process-group-v3"));
+    if legacy {
+        owner.insert("version".to_owned(), json!(3));
+        owner.insert("scope".to_owned(), json!("inherited-process-group-v3"));
+    }
     owner.insert("recovery_claim".to_owned(), json!(RecoveryClaim { boot, claimant }));
     persist_recovery_owner(record, &value)
 }

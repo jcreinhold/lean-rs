@@ -162,6 +162,16 @@ pub struct NativeReadDomain {
     pub epoch: String,
 }
 
+/// A planned read lock identity, before any shared descriptor or epoch exists.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlannedReadDomain {
+    project_root: PathBuf,
+    lock_path: PathBuf,
+    device: u64,
+    inode: u64,
+}
+
 /// A close-only loan of a descriptor already acquired by `SharedReader`.
 pub struct GuardianReadLoan<'a> {
     pub domain: NativeReadDomain,
@@ -299,6 +309,54 @@ impl GuardianHandle {
             nonce: nonce.to_owned(),
             next_sequence: 0,
         })
+    }
+
+    /// Publish canonical read identities without taking any shared lock.
+    ///
+    /// # Errors
+    /// Refuses an unstable lock identity, an unarmed guardian or an uncertain ACK.
+    #[doc(hidden)]
+    pub fn plan_reads(&mut self, roots: &[PathBuf], timeout: Duration) -> io::Result<()> {
+        if roots.is_empty() || roots.len() > MAX_READ_DOMAINS {
+            return Err(invalid("native read plan exceeds domain bound"));
+        }
+        let until = deadline(timeout)?;
+        let plans = roots
+            .iter()
+            .map(|root| {
+                let lock_path = crate::shared_writer::project_lock_path(root)?;
+                // The planning handle is neither flocked nor loaned. Create the
+                // permanent inode just as a first ordinary reader would.
+                let descriptor = rustix::fs::open(
+                    &lock_path,
+                    rustix::fs::OFlags::RDWR
+                        | rustix::fs::OFlags::CREATE
+                        | rustix::fs::OFlags::NOFOLLOW
+                        | rustix::fs::OFlags::CLOEXEC
+                        | rustix::fs::OFlags::NONBLOCK,
+                    rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+                )?;
+                let file = File::from(descriptor);
+                crate::writer_lock::validate_artifact_lock(&file, &lock_path, None)?;
+                let metadata = file.metadata()?;
+                Ok(PlannedReadDomain {
+                    project_root: root.clone(),
+                    lock_path,
+                    device: metadata.dev(),
+                    inode: metadata.ino(),
+                })
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        write_frame(
+            &mut self.control,
+            &json!({"op":"plan_reads","nonce":self.nonce,"domains":plans}),
+            until,
+        )?;
+        let ack = read_frame(&mut self.control, until)?;
+        if ack != json!({"state":"reads_planned","nonce":self.nonce}) {
+            return Err(invalid("native read plan ACK differs"));
+        }
+        Ok(())
     }
 
     /// Transfer close-only custody and wait for its durable generation-bound ACK.
@@ -611,6 +669,7 @@ struct Guardian {
     record: Option<PathBuf>,
     next_sequence: u64,
     loans: Vec<(NativeReadDomain, File)>,
+    plans: Vec<PlannedReadDomain>,
     incoming: Incoming,
     bootstrap_identity: Option<(NativeProcessIdentity, NativeProcessIdentity)>,
     autonomous_expiry: bool,
@@ -756,10 +815,11 @@ impl Guardian {
             "nonce":self.nonce,"guardian_pid":std::process::id()}),
             until,
         )?;
+        let mut deadline_prepared = false;
         let mut last_recovery_poll = Instant::now();
         loop {
             if hard_deadline.expired()? {
-                self.autonomous_expiry = idle.is_some();
+                self.autonomous_expiry = idle.is_some() || deadline_prepared;
                 return Ok(());
             }
             // The server endpoint exists only in the server, never in payloads.
@@ -776,12 +836,13 @@ impl Guardian {
                         .as_mut()
                         .ok_or_else(|| invalid("native guardian parent missing"))?,
                     &self.nonce,
-                    !self.loans.is_empty(),
+                    !self.loans.is_empty() && (self.plans.is_empty() || self.plans.len() == self.loans.len()),
                 )?
             {
-                self.autonomous_expiry = idle.is_some() && hard_deadline.expired()?;
+                self.autonomous_expiry = (idle.is_some() || deadline_prepared) && hard_deadline.expired()?;
                 return Ok(());
             }
+            deadline_prepared |= hard_deadline.preparing();
             // An armed stage must not enter a synchronous registry read.
             // Its original deadline and lifeline remain the stop authority.
             if !hard_deadline.active()
@@ -801,17 +862,66 @@ impl Guardian {
                 }
             }
             if let Some((request, descriptors)) = self.incoming.poll(&self.control)? {
-                // Retain publishes files synchronously. No active stage may
-                // enter that path or wait for loan ACK backpressure.
-                if hard_deadline.armed() {
+                // Preparation may publish the plan before any read lock.
+                // Planned transfers add no registry write or ACK wait.
+                if hard_deadline.preparing() {
+                    if field(&request, "op") == "plan_reads" && descriptors.is_empty() {
+                        self.publish_read_plan(&request, &hard_deadline)?;
+                    } else if !self.plans.is_empty() {
+                        self.retain(&request, descriptors, Some(&hard_deadline))?;
+                    } else {
+                        return Err(invalid("managed read arrived before its plan"));
+                    }
+                } else if hard_deadline.armed() {
                     return Err(invalid("read loan after native deadline arm"));
+                } else {
+                    self.retain(&request, descriptors, None)?;
                 }
-                self.retain(&request, descriptors)?;
             }
             thread::sleep(POLL);
         }
     }
-    fn retain(&mut self, request: &Value, mut descriptors: Vec<OwnedFd>) -> io::Result<()> {
+    fn publish_read_plan(&mut self, request: &Value, hard_deadline: &deadlines::OwnerDeadline) -> io::Result<()> {
+        if field(request, "nonce") != self.nonce.as_str() || !self.plans.is_empty() || !self.loans.is_empty() {
+            return Err(invalid("native read plan binding differs"));
+        }
+        let plans: Vec<PlannedReadDomain> =
+            serde_json::from_value(field(request, "domains").clone()).map_err(io::Error::other)?;
+        let record = self
+            .record
+            .as_ref()
+            .ok_or_else(|| invalid("native owner record missing"))?;
+        let _lock = ownership::try_lock_publication(record)?;
+        let mut owner = read_owner(record)?;
+        if field(&owner, "version") != 3 || field(&owner, "generation_id") != self.nonce.as_str() {
+            return Err(invalid("native read plan owner differs"));
+        }
+        owner["version"] = json!(4);
+        owner["scope"] = json!("inherited-process-group-v4");
+        owner["planned_read_domains"] = serde_json::to_value(&plans).map_err(io::Error::other)?;
+        ownership::validate_owner_header(&owner)?;
+        persist_owner(record, &owner)?;
+        if hard_deadline.expired()? {
+            return Ok(());
+        }
+        self.plans = plans;
+        self.write_read_ack(&json!({"state":"reads_planned","nonce":self.nonce}))
+    }
+
+    fn write_read_ack(&mut self, value: &Value) -> io::Result<()> {
+        let bytes = frame(value)?;
+        if self.control.write(&bytes)? != bytes.len() {
+            return Err(invalid("partial native read ACK"));
+        }
+        Ok(())
+    }
+
+    fn retain(
+        &mut self,
+        request: &Value,
+        mut descriptors: Vec<OwnedFd>,
+        planned: Option<&deadlines::OwnerDeadline>,
+    ) -> io::Result<()> {
         if field(request, "op") != "retain"
             || field(request, "nonce") != self.nonce.as_str()
             || field(request, "sequence").as_u64() != Some(self.next_sequence)
@@ -827,7 +937,19 @@ impl Guardian {
                 .ok_or_else(|| invalid("native read descriptor missing"))?,
         );
         validate_domain(&domain, &file)?;
-        if let Some((previous, _)) = self
+        if planned.is_some() {
+            let expected = self
+                .plans
+                .get(self.loans.len())
+                .ok_or_else(|| invalid("native read exceeds plan"))?;
+            if domain.project_root != expected.project_root
+                || domain.lock_path != expected.lock_path
+                || (domain.device, domain.inode) != (expected.device, expected.inode)
+            {
+                return Err(invalid("native read descriptor differs from plan"));
+            }
+            self.loans.push((domain.clone(), file));
+        } else if let Some((previous, _)) = self
             .loans
             .iter()
             .find(|(previous, _)| previous.lock_path == domain.lock_path)
@@ -862,12 +984,15 @@ impl Guardian {
         self.next_sequence = sequence
             .checked_add(1)
             .ok_or_else(|| invalid("native sequence exhausted"))?;
-        write_frame(
-            &mut self.control,
-            &json!({"state":"retained","nonce":self.nonce,
-            "sequence":sequence,"domain":domain}),
-            deadline(Duration::from_secs(2))?,
-        )
+        let ack = json!({"state":"retained","nonce":self.nonce,"sequence":sequence,"domain":domain});
+        if let Some(original) = planned {
+            if original.expired()? {
+                return Ok(());
+            }
+            self.write_read_ack(&ack)
+        } else {
+            write_frame(&mut self.control, &ack, deadline(Duration::from_secs(2))?)
+        }
     }
     #[cfg(target_os = "macos")]
     fn publish_requested_zombie_closure(&self) -> io::Result<bool> {
@@ -1000,6 +1125,7 @@ pub fn run_guardian_cli() -> io::Result<()> {
         record: None,
         next_sequence: 0,
         loans: Vec::new(),
+        plans: Vec::new(),
         incoming: Incoming::default(),
         bootstrap_identity: None,
         autonomous_expiry: false,
@@ -1071,13 +1197,22 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
         if field(&value, "phase") == "dispatching" || version == Some(1) {
             return Ok(false);
         }
-        let domains: Vec<NativeReadDomain> =
-            serde_json::from_value(field(&value, "protected_domains").clone()).map_err(io::Error::other)?;
-        if domains.len() > MAX_READ_DOMAINS {
-            return Err(invalid("native owner domain union exceeds limit"));
-        }
-        // Only the matching recorded path can conflict. Do not reopen an
-        // unrelated guardian's project paths, which may already be gone.
+        let domains: Vec<PlannedReadDomain> = if version == Some(4) {
+            serde_json::from_value(field(&value, "planned_read_domains").clone()).map_err(io::Error::other)?
+        } else {
+            serde_json::from_value::<Vec<NativeReadDomain>>(field(&value, "protected_domains").clone())
+                .map_err(io::Error::other)?
+                .into_iter()
+                .map(|domain| PlannedReadDomain {
+                    project_root: domain.project_root,
+                    lock_path: domain.lock_path,
+                    device: domain.device,
+                    inode: domain.inode,
+                })
+                .collect()
+        };
+        // Match the path before checking identity. A planned domain fences a
+        // writer even before a descriptor was acquired or transferred.
         if let Some(domain) = domains.into_iter().find(|domain| domain.lock_path == lock_path) {
             if domain.project_root.canonicalize()? != domain.project_root
                 || crate::shared_writer::project_lock_path(&domain.project_root)? != domain.lock_path

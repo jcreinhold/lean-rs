@@ -575,6 +575,17 @@ impl OwnedChild {
     }
 
     #[cfg(unix)]
+    pub(crate) fn prepare_managed_request(
+        &mut self,
+        arm: &crate::crash_ownership::ManagedRequestDeadline,
+    ) -> io::Result<()> {
+        self.lifetime
+            .as_mut()
+            .ok_or_else(|| io::Error::other("managed worker lifetime lease missing"))?
+            .prepare_managed_request(arm)
+    }
+
+    #[cfg(unix)]
     pub(crate) fn arm_managed_request(
         &mut self,
         arm: &crate::crash_ownership::ManagedRequestDeadline,

@@ -93,6 +93,7 @@ impl LeanWorker {
         &mut self,
         config: &LeanWorkerSessionConfig,
         expires_ns: u64,
+        admitted: Option<(&str, [u8; 16], u64)>,
     ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
         const OPERATION: &str = "prepare_managed_artifact_read";
         if !self.config.shared_artifact_reads
@@ -102,21 +103,34 @@ impl LeanWorker {
             return Err(LeanWorkerError::ShutdownInProgress { operation: OPERATION });
         }
         let expected = self.managed_guardian_binding()?;
+        if admitted.is_some_and(|(boot, _, _)| !boot.eq_ignore_ascii_case(&expected.boot)) {
+            return Err(LeanWorkerError::Setup {
+                message: "managed preparation boot differs".to_owned(),
+            });
+        }
         let original = ManagedRequestDeadline {
-            attempt: [0; 16],
-            stage: 0,
+            attempt: admitted.map_or([0; 16], |(_, attempt, _)| attempt),
+            stage: admitted.map_or(0, |(_, _, stage)| stage),
             expires_ns,
         };
         let result = (|| {
             let token = managed_token(&original, None)?;
-            let response = self.managed_frame(
-                Request::PrepareHostRead {
-                    project_root: config.project_root_string(),
-                },
-                OPERATION,
-                &token,
-                expires_ns,
-            )?;
+            let project_root = config.project_root_string();
+            let request = if admitted.is_some() {
+                let child = self
+                    .child
+                    .as_mut()
+                    .ok_or(LeanWorkerError::ShutdownInProgress { operation: OPERATION })?;
+                child
+                    .prepare_managed_request(&original)
+                    .map_err(|error| LeanWorkerError::Setup {
+                        message: format!("managed guardian preparation refused: {error}"),
+                    })?;
+                Request::PrepareBoundHostRead { project_root }
+            } else {
+                Request::PrepareHostRead { project_root }
+            };
+            let response = self.managed_frame(request, OPERATION, &token, expires_ns)?;
             if !matches!(response, Response::HostReadPrepared) {
                 return Err(unexpected_response(OPERATION, &response));
             }

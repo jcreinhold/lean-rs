@@ -146,6 +146,10 @@ pub enum Request {
     PrepareHostRead {
         project_root: String,
     },
+    /// Prepare a read union only through an already deadline-bound guardian.
+    PrepareBoundHostRead {
+        project_root: String,
+    },
     LoadFixtureCapability {
         manifest_path: String,
     },

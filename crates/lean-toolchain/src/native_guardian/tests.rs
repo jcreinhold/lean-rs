@@ -200,7 +200,12 @@ impl Generation {
             guardian,
             root: root.to_path_buf(),
         };
-        wait_until(|| root.join("body-ready").exists());
+        let ready = if root.join("bound-preparation").exists() {
+            "plan-worker-ready"
+        } else {
+            "body-ready"
+        };
+        wait_until(|| root.join(ready).exists());
         generation
     }
     fn reap(&mut self) -> ExitStatus {
@@ -362,7 +367,15 @@ fn fixture_worker() {
     let project = root.join("project");
     let lock = crate::shared_writer::project_lock_path(&project).unwrap();
     let record = root.join("owners").join(format!("worker-{NONCE}")).join("owner.json");
-    let hold_alias = root.join("hold-read-alias").exists();
+    let planned = root.join("bound-preparation").exists();
+    if planned {
+        fs::write(root.join("plan-worker-ready"), b"ready").unwrap();
+        wait_until(|| root.join("begin-read-plan").exists());
+        guardian
+            .plan_reads(std::slice::from_ref(&project), Duration::from_secs(2))
+            .unwrap();
+    }
+    let hold_alias = root.join("hold-read-alias").exists() || planned;
     let mut read_alias = None;
     for sequence in 0..if hold_alias { 1 } else { 3 } {
         let file = OpenOptions::new()
@@ -392,7 +405,12 @@ fn fixture_worker() {
             .unwrap();
         // A returned ACK must already be observable in the sole durable record.
         let published = read_owner(&record).unwrap();
-        assert_eq!(field(&published, "protected_domains"), &json!([domain]));
+        if planned {
+            assert_eq!(field(&published, "version"), 4);
+            assert_eq!(field(&published, "protected_domains"), &json!([]));
+        } else {
+            assert_eq!(field(&published, "protected_domains"), &json!([domain]));
+        }
         fs::write(root.join(format!("ack-{sequence}")), b"durable").unwrap();
         if hold_alias {
             read_alias = Some(file.try_clone().unwrap());
@@ -674,6 +692,98 @@ fn live_preparing_generations_exhaust_the_finite_namespace_without_eviction() {
 }
 
 #[test]
+fn fixture_bound_preparation_broker() {
+    let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    if !root.join("bound-preparation").exists() {
+        return;
+    }
+    let mut generation = Generation::start(&root);
+    let worker = NativeProcessIdentity::capture(generation.worker.id()).unwrap().unwrap();
+    let expires_ns = u64::try_from((guardian_deadline_ticks().unwrap() + Duration::from_secs(2)).as_nanos()).unwrap();
+    let arm = json!({
+        "op": "prepare_hard_deadline", "protocol": PROTOCOL, "nonce": NONCE,
+        "attempt": ([7u8; 16]), "stage": 1, "expires_ns": expires_ns,
+    });
+    let parent = generation.parent.as_mut().unwrap();
+    let until = deadline(Duration::from_secs(1)).unwrap();
+    write_frame(parent, &arm, until).unwrap();
+    assert_eq!(
+        field(&read_frame(parent, until).unwrap(), "state"),
+        "hard_deadline_prepared"
+    );
+    fs::write(root.join("begin-read-plan"), b"go").unwrap();
+    wait_until(|| root.join("ack-0").exists());
+    fs::write(
+        root.join("broker-prepared"),
+        serde_json::to_vec(&(worker, &generation.guardian, expires_ns)).unwrap(),
+    )
+    .unwrap();
+    rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::STOP).unwrap();
+    let mut late = arm;
+    late["op"] = json!("arm_hard_deadline");
+    let until = deadline(Duration::from_millis(200)).unwrap();
+    assert!(
+        write_frame(parent, &late, until)
+            .and_then(|()| read_frame(parent, until))
+            .is_err()
+    );
+    generation.closed();
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn bound_read_deadline_drains_while_broker_is_frozen_before_dispatch() {
+    struct Broker(Child);
+    impl Drop for Broker {
+        fn drop(&mut self) {
+            if matches!(self.0.try_wait(), Ok(None)) {
+                let _stop = self.0.kill();
+                let _reap = self.0.wait();
+            }
+        }
+    }
+
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("bound-preparation"), b"prepare").unwrap();
+    let mut broker = Broker(
+        fixture_command(
+            &fixture.root,
+            "native_guardian::tests::fixture_bound_preparation_broker",
+        )
+        .spawn()
+        .unwrap(),
+    );
+    let pid = rustix::process::Pid::from_raw(i32::try_from(broker.0.id()).unwrap()).unwrap();
+    wait_until(|| {
+        rustix::process::waitpid(
+            Some(pid),
+            rustix::process::WaitOptions::UNTRACED | rustix::process::WaitOptions::NOHANG,
+        )
+        .unwrap()
+        .is_some_and(|(_, status)| status.stopped())
+    });
+    let (worker, guardian, expiry): (NativeProcessIdentity, NativeProcessIdentity, u64) =
+        serde_json::from_slice(&fs::read(fixture.root.join("broker-prepared")).unwrap()).unwrap();
+    let lock = OpenOptions::new().read(true).write(true).open(fixture.lock()).unwrap();
+    assert!(matches!(lock.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+    let expiry = Duration::from_nanos(expiry);
+    assert!(guardian_deadline_ticks().unwrap() < expiry);
+    wait_until_within(Duration::from_secs(3), || {
+        !worker.is_live().unwrap() && !guardian.is_live().unwrap()
+    });
+    assert!(guardian_deadline_ticks().unwrap() >= expiry);
+    lock.try_lock().unwrap();
+    let before = fixture.heartbeat();
+    thread::sleep(Duration::from_millis(30));
+    assert_eq!(fixture.heartbeat(), before);
+    assert!(broker.0.try_wait().unwrap().is_none());
+    rustix::process::kill_process(pid, rustix::process::Signal::CONT).unwrap();
+    assert!(broker.0.wait().unwrap().success());
+}
+
+#[test]
 fn pure_protocol_limits_reject_ambiguous_or_unbounded_control() {
     assert!(valid_nonce(NONCE));
     assert!(!valid_nonce("short"));
@@ -689,6 +799,7 @@ fn pure_protocol_limits_reject_ambiguous_or_unbounded_control() {
         record: None,
         next_sequence: 0,
         loans: Vec::new(),
+        plans: Vec::new(),
         incoming: Incoming::default(),
         bootstrap_identity: None,
         autonomous_expiry: false,
@@ -697,7 +808,8 @@ fn pure_protocol_limits_reject_ambiguous_or_unbounded_control() {
         guardian
             .retain(
                 &json!({"op":"retain","nonce":NONCE,"sequence":1,"domain":{}}),
-                Vec::new()
+                Vec::new(),
+                None,
             )
             .is_err()
     );

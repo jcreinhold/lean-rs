@@ -896,6 +896,16 @@ impl ParentLifetimeLease {
         native_guardian::validate_managed_guardian_scope(&self.record, expected)
     }
 
+    pub(crate) fn prepare_managed_request(&mut self, arm: &ManagedRequestDeadline) -> io::Result<()> {
+        self.deadline_exchange(
+            arm,
+            "prepare_hard_deadline",
+            "hard_deadline_prepared",
+            None,
+            Some(arm.expires_ns),
+        )
+    }
+
     pub(crate) fn arm_managed_request(&mut self, arm: &ManagedRequestDeadline, command: Option<u64>) -> io::Result<()> {
         let op = if command.is_some() {
             "arm_fenced_hard_deadline"

@@ -285,6 +285,59 @@ fn closed_native_domain_recovers_after_its_checkout_disappears() {
     assert!(!record.exists());
 }
 #[test]
+fn planned_read_fences_writer_without_descriptor_or_epoch() {
+    let fixture = Fixture::new();
+    let lock_path = fixture.lock();
+    fs::write(&lock_path, br#"{"owner":"before"}"#).unwrap();
+    let writer = fixture.exclusive();
+    let identity = writer.metadata().unwrap();
+    let identity = (identity.dev(), identity.ino());
+    assert!(protected_native_reads_stopped(&fixture.registry, &lock_path, identity).unwrap());
+
+    let record = reserve(&fixture, 1, &slot("actor", "main", 1)).unwrap();
+    let mut child = private_group();
+    running(&record, &child);
+    let mut owner = read_owner(&record).unwrap();
+    owner["version"] = json!(4);
+    owner["scope"] = json!("inherited-process-group-v4");
+    owner["original_worker_boot"] = json!(ownership::current_boot_session().unwrap());
+    owner["planned_read_domains"] = json!([PlannedReadDomain {
+        project_root: fixture.project.clone(),
+        lock_path: lock_path.clone(),
+        device: identity.0,
+        inode: identity.1,
+    }]);
+    persist_owner(&record, &owner).unwrap();
+
+    // An already admitted EX owner can still publish a new epoch on this inode.
+    // No SH descriptor was ever acquired, and the plan says nothing about epoch.
+    let mut writable = &writer;
+    writable.write_all(br#"{"owner":"after_"}"#).unwrap();
+    assert_eq!(fs::read(&lock_path).unwrap(), br#"{"owner":"after_"}"#);
+    drop(writer);
+    let contender = fixture.exclusive();
+    assert!(!protected_native_reads_stopped(&fixture.registry, &lock_path, identity).unwrap());
+    assert!(protected_native_reads_stopped(&fixture.registry, &fixture.root.join("disjoint"), identity).unwrap());
+    fs::rename(&lock_path, fixture.root.join("moved-lock")).unwrap();
+    fs::write(&lock_path, b"replacement").unwrap();
+    let replacement = fs::metadata(&lock_path).unwrap();
+    let replacement = (replacement.dev(), replacement.ino());
+    assert_ne!(replacement, identity);
+    assert!(protected_native_reads_stopped(&fixture.registry, &lock_path, replacement).is_err());
+    drop(contender);
+
+    stopped(&mut child);
+    assert!(protected_native_reads_stopped(&fixture.registry, &lock_path, replacement).unwrap());
+
+    let mut claimed_epoch = owner.clone();
+    claimed_epoch["planned_read_domains"][0]["epoch"] = json!("before");
+    assert!(ownership::validate_owner_header(&claimed_epoch).is_err());
+    owner["version"] = json!(3);
+    owner["scope"] = json!("inherited-process-group-v3");
+    assert!(ownership::validate_owner_header(&owner).is_err());
+}
+
+#[test]
 fn admission_mutex_obeys_the_original_budget_without_creating_a_record() {
     let fixture = Fixture::new();
     let lock = OpenOptions::new()

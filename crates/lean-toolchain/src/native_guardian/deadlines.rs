@@ -42,6 +42,8 @@ struct Arm {
 
 #[derive(Deserialize)]
 enum ArmOp {
+    #[serde(rename = "prepare_hard_deadline")]
+    Prepare,
     #[serde(rename = "arm_hard_deadline")]
     Hard,
     #[serde(rename = "arm_reader_hard_deadline")]
@@ -92,6 +94,10 @@ impl OwnerDeadline {
 
     pub(super) fn armed(&self) -> bool {
         self.arm.is_some()
+    }
+
+    pub(super) fn preparing(&self) -> bool {
+        self.arm.as_ref().is_some_and(|arm| matches!(arm.op, ArmOp::Prepare))
     }
 
     pub(super) fn active(&self) -> bool {
@@ -162,7 +168,11 @@ impl OwnerDeadline {
             }
             Err(error) => return Err(error),
         };
-        if self.arm.as_ref().is_some_and(|arm| arm.command.is_none()) {
+        if self
+            .arm
+            .as_ref()
+            .is_some_and(|arm| arm.command.is_none() && !matches!(arm.op, ArmOp::Prepare))
+        {
             return Err(invalid("native guardian deadline is already armed"));
         }
         if count > MAX_ARM_FRAME.saturating_sub(self.input.len()) {
@@ -233,29 +243,42 @@ impl OwnerDeadline {
             return Ok(false);
         }
         let arm: Arm = serde_json::from_slice(&input).map_err(io::Error::other)?;
-        if match arm.op {
-            ArmOp::Warm => self.arm.as_ref().map_or_else(
-                || arm.command != Some(1),
-                |previous| {
-                    !self.finished
-                        || !matches!(previous.op, ArmOp::Warm)
-                        || arm.command <= previous.command
-                        || (arm.attempt, arm.stage) == (previous.attempt, previous.stage)
-                },
-            ),
-            ArmOp::Fenced => self.armed() || arm.command != Some(1),
-            ArmOp::Hard | ArmOp::Reader => self.armed() || arm.command.is_some(),
-        } {
+        let prepared = self.arm.as_ref().filter(|_| self.preparing());
+        let can_dispatch = if let Some(prior) = prepared {
+            reads_retained
+                && arm.attempt == prior.attempt
+                && arm.stage == prior.stage
+                && arm.expires_ns == prior.expires_ns
+                && match arm.op {
+                    ArmOp::Hard => arm.command.is_none(),
+                    ArmOp::Fenced | ArmOp::Warm => arm.command == Some(1),
+                    ArmOp::Prepare | ArmOp::Reader => false,
+                }
+        } else {
+            match arm.op {
+                ArmOp::Warm => self.arm.as_ref().map_or_else(
+                    || arm.command == Some(1),
+                    |previous| {
+                        self.finished
+                            && matches!(previous.op, ArmOp::Warm)
+                            && arm.command > previous.command
+                            && (arm.attempt, arm.stage) != (previous.attempt, previous.stage)
+                    },
+                ),
+                ArmOp::Fenced => !self.armed() && arm.command == Some(1),
+                ArmOp::Reader => !self.armed() && arm.command.is_none() && reads_retained,
+                ArmOp::Hard | ArmOp::Prepare => !self.armed() && arm.command.is_none(),
+            }
+        };
+        if !can_dispatch {
             return Err(invalid("native guardian arm command differs"));
-        }
-        if matches!(arm.op, ArmOp::Reader) && !reads_retained {
-            return Err(invalid("managed reader arm requires retained read descriptors"));
         }
         if arm.protocol != PROTOCOL || arm.nonce != nonce {
             return Err(invalid("native guardian arm binding differs"));
         }
         let mut ack = json!({
-            "state": "hard_deadline_armed", "protocol": PROTOCOL, "nonce": nonce,
+            "state": if matches!(arm.op, ArmOp::Prepare) { "hard_deadline_prepared" } else { "hard_deadline_armed" },
+            "protocol": PROTOCOL, "nonce": nonce,
             "attempt": arm.attempt, "stage": arm.stage, "expires_ns": arm.expires_ns
         });
         if let Some(command) = arm.command {

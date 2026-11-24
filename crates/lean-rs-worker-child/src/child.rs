@@ -527,6 +527,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     | Request::Terminate
                     | Request::OpenHostSession { .. }
                     | Request::PrepareHostRead { .. }
+                    | Request::PrepareBoundHostRead { .. }
                     | Request::ReleaseHostRead
             )
         {
@@ -556,8 +557,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        if !matches!(&request, Request::PrepareHostRead { .. })
-            && let Some(state) = host_session.as_mut()
+        if !matches!(
+            &request,
+            Request::PrepareHostRead { .. } | Request::PrepareBoundHostRead { .. }
+        ) && let Some(state) = host_session.as_mut()
             && let Err(err) = state
                 .session
                 .configure_header_import_budget(session_import_bytes, header_budget)
@@ -565,7 +568,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             write_response(&writer, error_response(&err))?;
             continue;
         }
-        let (request, prepare_only) = if let Request::PrepareHostRead { project_root } = request {
+        let planned_read = matches!(&request, Request::PrepareBoundHostRead { .. });
+        let (request, prepare_only) = if let Request::PrepareHostRead { project_root }
+        | Request::PrepareBoundHostRead { project_root } = request
+        {
             (
                 Request::OpenHostSession {
                     project_root,
@@ -618,7 +624,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 write_response(&writer, response)?;
             }
-            Request::PrepareHostRead { .. } => {
+            Request::PrepareHostRead { .. } | Request::PrepareBoundHostRead { .. } => {
                 return Err(std::io::Error::other("untranslated read preparation request").into());
             }
             Request::OpenHostSession {
@@ -702,6 +708,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                                 allow_wait,
                                 guardian.as_mut(),
                                 artifact_ipc_root.as_deref(),
+                                planned_read,
                             )
                         });
                     let read = match read {
