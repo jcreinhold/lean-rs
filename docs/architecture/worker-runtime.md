@@ -583,12 +583,18 @@ and guardian disappear, no such signaling authority remains and surviving descen
 can proceed. macOS session pinning and group observation are covered by real-process fault tests; Linux observations
 have weaker atomicity and do not gain an identical platform guarantee from those tests.
 
-Managed MCP binds its ownership namespace through `registry_directory()`, whose lookup is read-only; only reservation
-creates it. An explicit `LEAN_RS_WORKER_OWNERS_DIRECTORY` selects that canonical private namespace; otherwise the
-per-user local-data default is used. The validated writer contract and every cooperating helper must carry the same
-binding. Protected native spawn refuses a lifetime directory different from the caller's resolved writer registry. An
-upstream embedder choosing a custom lifetime directory must likewise configure every cooperating managed writer to check
-that namespace. Registries in unrelated directories cannot discover each other's ownership automatically.
+An application selects its ownership namespace by calling
+`lean_toolchain::native_guardian::bind_registry_directory(&path)` before the process first uses it. Use the same path
+for the worker's `lifetime_directory` and pass it as `LEAN_RS_WORKER_OWNERS_DIRECTORY` to independently launched SDK
+helpers. The SDK passes the selected path to the helpers it launches. `registry_directory()` is read-only and falls
+back to `lean-rs/native-generations` under the per-user local-data directory. Only reservation creates the directory.
+`validate_registry_directory(&path)` checks a path without binding it. An explicit binding and an environment selection
+must agree. Protected native spawn requires the worker lifetime directory and the writer registry to agree. Cooperating
+readers and writers must share one namespace to see each other's records.
+
+When updating an existing application, close its current native work before switching executables, and bind the
+application's existing namespace explicitly. Keep that directory, its records, and the existing project lock inodes
+in place so the restarted application can use the original custody records.
 
 Public native startup returns `LeanWorkerNativeSpawnError`: `BeforeSpawn`
 means the SDK owns no child handle. This covers a refusal before a child exists and a

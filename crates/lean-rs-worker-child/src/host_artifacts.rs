@@ -13,7 +13,7 @@ use lean_rs_host::host::{
 use lean_rs_worker_protocol::protocol::HostSessionMode;
 use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
 use lean_toolchain::CapabilityManifest;
-use lean_toolchain::shared_writer::{SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots_with_domains};
+use lean_toolchain::shared_writer::{project_artifact_roots_with_domains, writer_executable_from_env};
 
 const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub(crate) const PREPARED_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
@@ -42,7 +42,7 @@ pub(crate) fn preparation_mode() -> Option<ExitCode> {
         } else {
             args.len() == 2
         };
-        if !valid_args || std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_none() {
+        if !valid_args || writer_executable_from_env()?.is_none() {
             return Err(
                 invalid("artifact preparation requires its sole mode flag and an explicit writer helper").into(),
             );

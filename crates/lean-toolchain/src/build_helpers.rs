@@ -912,6 +912,7 @@ impl LakeRunner for RealLakeRunner<'_> {
                 "Lake build cancelled",
             ));
         }
+        let configured_writer = crate::shared_writer::writer_executable_from_env()?;
         if let Some(writer) = &self.borrowed {
             if !writer.covers_project(&root)? {
                 return Err(std::io::Error::new(
@@ -919,15 +920,11 @@ impl LakeRunner for RealLakeRunner<'_> {
                     "borrowed writer does not cover this project",
                 ));
             }
-        } else if let Some(executable) = options
-            .writer_executable
-            .clone()
-            .or_else(|| env::var_os(crate::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).map(PathBuf::from))
-        {
+        } else if let Some(executable) = options.writer_executable.as_deref().or(configured_writer.as_deref()) {
             self.writer = Some(if self.immediate_admission {
-                crate::shared_writer::SharedWriter::open_immediately(&executable, &root, timeout, cancelled)?
+                crate::shared_writer::SharedWriter::open_immediately(executable, &root, timeout, cancelled)?
             } else {
-                crate::shared_writer::SharedWriter::open_cancellable(&executable, &root, timeout, cancelled)?
+                crate::shared_writer::SharedWriter::open_cancellable(executable, &root, timeout, cancelled)?
             });
         } else if options
             .private_bootstrap

@@ -210,11 +210,13 @@ pub const lean_toolchain::native_guardian::MAX_OWNER_RECORDS: usize
 pub const lean_toolchain::native_guardian::MAX_READ_DOMAINS: usize
 pub const lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV: &str
 pub const lean_toolchain::native_guardian::PROTOCOL: u32
+pub fn lean_toolchain::native_guardian::bind_registry_directory(&std::path::Path) -> std::io::error::Result<()>
 pub fn lean_toolchain::native_guardian::protected_native_reads_stopped(&std::path::Path, &std::path::Path, (u64, u64)) -> std::io::error::Result<bool>
 pub fn lean_toolchain::native_guardian::registry_directory() -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::native_guardian::reserve_owner_record(&std::path::Path, &str, core::time::Duration) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::native_guardian::reserve_owner_record_with_slot(&std::path::Path, &str, core::time::Duration, core::option::Option<&lean_toolchain::native_guardian::NativeCapacitySlot>) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::native_guardian::run_guardian_cli() -> std::io::error::Result<()>
+pub fn lean_toolchain::native_guardian::validate_registry_directory(&std::path::Path) -> std::io::error::Result<()>
 pub mod lean_toolchain::process_group
 pub struct lean_toolchain::process_group::MeasuredChild
 impl lean_toolchain::process_group::MeasuredChild
@@ -483,8 +485,12 @@ impl core::marker::Unpin for lean_toolchain::shared_writer::WriterStageReady
 impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterStageReady
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterStageReady
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterStageReady
+pub const lean_toolchain::shared_writer::LEGACY_MODULE_SETUP_CAPTURE_ENV: &str
 pub const lean_toolchain::shared_writer::MAX_WRITER_LOCK_LOANS: usize
+pub const lean_toolchain::shared_writer::MODULE_SETUP_CAPTURE_ENV: &str
 pub const lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV: &str
+pub const lean_toolchain::shared_writer::WRITER_HANDOFF_ENV: [&str; 4]
+pub fn lean_toolchain::shared_writer::configure_writer_executable(&mut std::process::Command, core::option::Option<&std::path::Path>) -> std::io::error::Result<()>
 pub fn lean_toolchain::shared_writer::inherited_writer_locks() -> std::io::error::Result<core::option::Option<alloc::vec::Vec<(std::path::PathBuf, std::fs::File)>>>
 pub fn lean_toolchain::shared_writer::inherited_writer_workspaces(&std::path::Path) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
 pub fn lean_toolchain::shared_writer::previous_writer_stopped(&std::fs::File) -> std::io::error::Result<bool>
@@ -493,6 +499,7 @@ pub fn lean_toolchain::shared_writer::project_artifact_roots(&std::path::Path) -
 pub fn lean_toolchain::shared_writer::project_artifact_roots_with_domains(&[std::path::PathBuf], &[std::path::PathBuf]) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
 pub fn lean_toolchain::shared_writer::project_lock_path(&std::path::Path) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::shared_writer::run_shared_writer(&std::path::Path, &std::path::Path, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
+pub fn lean_toolchain::shared_writer::writer_executable_from_env() -> std::io::error::Result<core::option::Option<std::path::PathBuf>>
 pub fn lean_toolchain::shared_writer::writer_lock_receipt(&[(std::path::PathBuf, std::fs::File)]) -> std::io::error::Result<serde_json::value::Value>
 pub mod lean_toolchain::writer_demand
 pub struct lean_toolchain::writer_demand::ReadAdmission

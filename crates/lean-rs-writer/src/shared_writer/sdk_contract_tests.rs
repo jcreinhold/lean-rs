@@ -28,7 +28,7 @@ mode = (root / 'mode').read_text()
 assets = root / 'assets'
 assets.mkdir(mode=0o700)
 owner = {'version': 1, 'pid': os.getpid(), 'session': os.getpid(), 'start': 'private-sdk-fixture'}
-loans = json.loads(os.environ['LEAN_HOST_MCP_WRITER_LOCK_LOANS'])
+loans = json.loads(os.environ['LEAN_RS_WRITER_LOCK_LOANS'])
 loans = [{key: loan[key] for key in ('path', 'device', 'inode')} for loan in loans]
 input = sys.stdin.buffer.raw
 

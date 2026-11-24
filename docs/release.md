@@ -45,12 +45,13 @@ uses the same credential through `cargo login`. Keep credential setup outside re
    Resolve the consumer lockfile against the published dependency and run the required release checks. A check that
    needs a hosted runner belongs on the final candidate, not on each intermediate SDK change.
 
-For example, from lean-host-mcp with an SDK checkout at `../lean-rs` and matching version pins:
+From a consumer checkout with the SDK at `../lean-rs`, set `consumer_package` and `ownership_test` to the
+package and integration test that exercise the changed operation:
 
 ```sh
 sdk=$(git -C ../lean-rs rev-parse --show-toplevel)
 cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'" metadata --format-version 1
-cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'" test -p lean-host-mcp --lib
+cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'" test -p "$consumer_package" --test "$ownership_test"
 ```
 
 This example patches one crate. When a change crosses the worker boundary, include each matching worker crate in

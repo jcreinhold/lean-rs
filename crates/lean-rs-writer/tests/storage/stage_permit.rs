@@ -36,6 +36,31 @@ impl StageFixture {
 }
 
 #[test]
+fn conflicting_setup_markers_refuse_the_stage_before_command_dispatch() -> io::Result<()> {
+    let fixture = StageFixture::new()?;
+    let mut child = start_storage(&fixture.project, &fixture.registry, &fixture.scratch, 1024 * 1024, true)?;
+    let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
+    let locked = reply(&mut reader)?;
+    assert_eq!(field(&locked, "state"), "locked");
+    let marker = fixture.project.join("command-dispatched");
+    send(
+        &mut child,
+        &json!({"action":"run","command":["/usr/bin/touch",marker],"timeout":3,
+            "env":{(MODULE_SETUP_CAPTURE_ENV):"1",(LEGACY_MODULE_SETUP_CAPTURE_ENV):"0"}}),
+    )?;
+    let output = child.wait_with_output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(stderr.contains("conflicting writer stage settings"), "{stderr}");
+    assert!(stderr.contains(MODULE_SETUP_CAPTURE_ENV), "{stderr}");
+    assert!(stderr.contains(LEGACY_MODULE_SETUP_CAPTURE_ENV), "{stderr}");
+    let mut frame = String::new();
+    assert_eq!(reader.read_line(&mut frame)?, 0, "{frame}");
+    assert!(!marker.exists());
+    Ok(())
+}
+
+#[test]
 fn writer_stage_permit_refuses_delayed_delivery_and_cannot_be_replayed() -> io::Result<()> {
     let fixture = StageFixture::new()?;
     for case in ["expired", "wrong_boot", "wrong_birth", "fresh"] {
@@ -175,7 +200,7 @@ fn permitted_sdk_writer_runs_real_lake_no_build() -> io::Result<()> {
         .arg(source)
         .env("LAKE_CACHE_DIR", writer.asset_dir())
         .env("LAKE_ARTIFACT_CACHE", "false")
-        .env("LEAN_HOST_MCP_CAPTURE_MODULE_SETUP", "1");
+        .env(MODULE_SETUP_CAPTURE_ENV, "1");
     let output = writer.run_permitted(&command, permit, &|| false)?;
     assert!(output.status.success(), "{output:?}");
     use sha2::{Digest as _, Sha256};

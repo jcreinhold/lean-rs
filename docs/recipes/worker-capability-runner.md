@@ -11,7 +11,7 @@ cargo run -p lean-rs-worker-child --example worker_capability_runner
 cargo run -p lean-rs-worker-child --example worker_streaming
 ```
 
-Fixture build helpers currently require a configured shared-writer helper through `LEAN_HOST_MCP_WRITER_EXECUTABLE`. The
+Fixture build helpers require a shared-writer helper configured through `LEAN_RS_WRITER_EXECUTABLE`. The
 fixture spans multiple package roots and cannot use a package-local bootstrap. These commands do not configure that
 helper themselves.
 

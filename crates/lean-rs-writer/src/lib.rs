@@ -98,7 +98,8 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
                 "command_only_storage_v1",
                 "command_only_handoff_v1",
                 "command_only_handoff_approval_v1",
-                "lake_module_setup_capture_v1"
+                "lake_module_setup_capture_v1",
+                "lake_module_setup_capture_env_v2"
             ]),
         );
     }
@@ -1338,7 +1339,7 @@ fn execute_with_launcher(
     }
 }
 
-/// Run the private supervisor entry without starting an MCP server or a daemon.
+/// Run one standalone writer supervisor.
 ///
 /// # Errors
 /// Returns admission, protocol, process-observation, or child-launch failures.
@@ -1346,6 +1347,7 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     if args.lock != lean_toolchain::shared_writer::project_lock_path(&args.root)? {
         return Err(invalid("writer lock differs from canonical project domain"));
     }
+    let workspaces = lean_toolchain::shared_writer::inherited_writer_workspaces(&args.root)?;
     let inherited = lean_toolchain::shared_writer::inherited_writer_locks()?;
     if inherited.is_none() || args.root.exists() {
         canonical(&args.root)?;
@@ -1368,7 +1370,6 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     if sid(None)? != std::process::id() {
         setsid()?;
     }
-    let workspaces = lean_toolchain::shared_writer::inherited_writer_workspaces(&args.root)?;
     if inherited.is_none()
         && let Some(request) = &args.storage_request
     {

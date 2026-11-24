@@ -8,7 +8,7 @@ mangling.
 
 Every build call acquires writer custody before cache inspection, including cache hits. Bind a shared-writer helper
 such as the standalone `lean-rs-writer` executable by canonical path
-with `.writer_executable(...)` or `LEAN_HOST_MCP_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap`
+with `.writer_executable(...)` or `LEAN_RS_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap`
 when its Lean root and all dependencies lie strictly below the owning Cargo package:
 
 ```rust
@@ -186,9 +186,10 @@ borrowed-loan adoption, and immediately before GO, writers also inspect the comm
 unresolved generation protecting the same canonical logical domain blocks admission even when its guardian died and the
 kernel lock became obtainable. A changed inode remains unresolved while that generation lives. Closed generations are
 checked before resolving old paths, so removal of a closed generation's domain does not permanently fence writers. The
-authoritative registry is supplied explicitly through `LEAN_RS_WORKER_OWNERS_DIRECTORY` or resolved to the shared
-default. Parent native startup requires its lifetime namespace to match that lookup; managed writer helpers inherit the
-same binding. Unsupported or aliased namespaces are refused rather than discovered by scanning unrelated locations.
+authoritative registry comes from `native_guardian::bind_registry_directory(&path)`,
+`LEAN_RS_WORKER_OWNERS_DIRECTORY`, or the SDK's per-user local-data default. Parent native startup requires its lifetime
+namespace to match that binding. Managed writer helpers receive the same path. The application and helper configuration
+contract is described under [native guardian ownership](worker-runtime.md#optional-native-guardian-ownership).
 
 A sibling lock requires a stable parent. An unrelated workspace that replaces an ancestor Git checkout can invalidate
 nested project domains absent from its own graph; an independent project under a replaceable source-package root has the
@@ -196,8 +197,9 @@ same constraint. Cross-workspace replacement authority is not established by thi
 unresolved safety limit.
 
 `CargoLeanCapability` acquires the configured helper before cache inspection and retains it through Lake, cache
-publication and `finish`'s capability manifest. Parent callers bind `.writer_executable(...)`; a worker may receive the
-same explicit binding from its launcher. `build_quiet_with_writer(writer, cancelled)` reuses an already-owned scope.
+publication and `finish`'s capability manifest. Parent callers bind `.writer_executable(...)`. Worker launchers can use
+`.shared_writer_executable(...)` on their child configuration. `build_quiet_with_writer(writer, cancelled)` reuses an
+already-owned scope.
 `probe_ready()` is a read-only alternative under caller-held SH custody: it checks the same build-cache key and exact
 expected capability manifest, including ABI exports, selected fingerprint and dependencies, without a runner, write or
 publication. A miss returns `None`; each independently prepared dependency also needs its own probe. This lets a warm
@@ -250,8 +252,7 @@ targets through the helper:
 The example opens the generic shim dylib globally, opens the downstream-style consumer dylib, calls an ordinary Lean
 export from Rust, and invokes a Lean callback loop through `LeanCallbackHandle`. It uses no `lean-rs-host` session API.
 
-The example requires a configured `LEAN_HOST_MCP_WRITER_EXECUTABLE`; it does not select a helper itself. With that
-prerequisite in place, run it against a cold cache and repeat to exercise the cache-hit path:
+Set `LEAN_RS_WRITER_EXECUTABLE`, run the example against a cold cache, and repeat to exercise the cache-hit path:
 
 ```sh
 cargo run -p lean-rs --example interop_callback
@@ -300,13 +301,28 @@ and successful custody-record update, the managed helper accepts only an explici
 The original command still has no usable result. EOF or any other frame retains the charge.
 
 The capability `lake_module_setup_capture_v1` stages the required stdout of the selected
-`lake --no-build --no-cache setup-file FILE` in charged scratch. Use the canonical project as cwd, its pinned
-Elan Lake executable, and exactly three command environment entries: `LEAN_HOST_MCP_CAPTURE_MODULE_SETUP=1`,
-`LAKE_CACHE_DIR` set to the locked asset directory, and `LAKE_ARTIFACT_CACHE=false`. Only a complete successful
+`lake --no-build --no-cache setup-file FILE` in charged scratch. Use the canonical project as cwd and its pinned
+Elan Lake executable. Set `LEAN_RS_CAPTURE_MODULE_SETUP=1`, `LAKE_CACHE_DIR` to the locked asset directory, and
+`LAKE_ARTIFACT_CACHE=false` as the three command environment entries. Only a complete successful
 command publishes `module-setup.json` and returns its lowercase SHA-256 as stdout. Required stdout is limited
 to the smaller of 16 MiB and the turn's byte budget. Stderr retains at most 64 KiB and continues draining.
 Read and verify the staged bytes under the same charge, then close the writer explicitly. A failed or lost close
 leaves settlement unconfirmed. Unmarked commands keep their ordinary output limits and result format.
+Select the SDK marker when `writer-lock-path ROOT --capabilities` advertises `lake_module_setup_capture_env_v2`.
+During the transition, a helper advertising only `lake_module_setup_capture_v1` uses the former marker.
+
+For one coordinated release, helpers accept the former names for the writer executable, inherited lock loans and
+workspaces, and module setup capture. The SDK forwards identical executable and handoff values under both names
+so existing helpers can still read them. Stage producers send the single marker selected by the helper's reported
+capabilities. If both names for a setting are present, their values must agree. A conflict reports both names and
+refuses the affected startup or command before execution.
+
+| SDK setting | Former name |
+| --- | --- |
+| `LEAN_RS_WRITER_EXECUTABLE` | `LEAN_HOST_MCP_WRITER_EXECUTABLE` |
+| `LEAN_RS_WRITER_LOCK_LOANS` | `LEAN_HOST_MCP_WRITER_LOCK_LOANS` |
+| `LEAN_RS_WRITER_WORKSPACES` | `LEAN_HOST_MCP_WRITER_WORKSPACES` |
+| `LEAN_RS_CAPTURE_MODULE_SETUP` | `LEAN_HOST_MCP_CAPTURE_MODULE_SETUP` |
 
 The managed writer records one turn ID on the full project-lock union and binds the exact scratch path, device
 and inode in the existing charge before exposing scratch or accepting work. The project locks precede the registry

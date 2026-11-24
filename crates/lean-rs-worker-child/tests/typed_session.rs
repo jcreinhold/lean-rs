@@ -231,7 +231,10 @@ fn checked_worker_config(q: &qualification_launch::Qualification) -> LeanWorkerC
         .checked_native_loader_environment()
         .env("LEAN_SYSROOT", q.sysroot.as_os_str())
         .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", prepared)
-        .env("LEAN_HOST_MCP_WRITER_EXECUTABLE", q.helper.as_os_str())
+        .env(
+            lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV,
+            q.helper.as_os_str(),
+        )
         .native_guardian(&q.helper)
         .lifetime_directory(&q.owners)
         .shared_artifact_reads(true)
@@ -3115,7 +3118,7 @@ mod disposable_clean {
         assert_eq!(q.fixture, root.join("app/lean"));
         assert_eq!(q.fixture.canonicalize()?, q.fixture);
         assert_eq!(q.sysroot, root.join("release"));
-        assert_eq!(q.helper, root.join("lean-host-mcp"));
+        assert_eq!(q.helper, root.join("lean-rs-writer"));
         assert_eq!(q.worker, root.join("target/debug/metadata-worker"));
         assert_eq!(q.owners, root.join("owners"));
         assert_eq!(

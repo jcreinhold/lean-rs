@@ -10,6 +10,7 @@ use std::io;
 use std::io::Read as _;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
@@ -102,17 +103,67 @@ impl NativeProcessIdentity {
         ))
     }
 }
-/// The one default native namespace shared by all cooperating managed writers.
+static REGISTRY_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+
+/// Bind the process to one caller-selected owner directory before native work.
+///
+/// A repeated binding of the same path is allowed. Every cooperating worker
+/// and writer must use this directory. Binding is read-only.
+///
 /// # Errors
-/// Returns unavailable local-data location or invalid directory identity.
+/// Rejects an invalid directory, a different explicit environment setting,
+/// or a different binding already fixed by this function or by lookup.
+pub fn bind_registry_directory(root: &Path) -> io::Result<()> {
+    if std::env::var_os(super::OWNERS_DIRECTORY_ENV).is_some_and(|value| value != root.as_os_str()) {
+        return Err(invalid(format!(
+            "native owner directory conflicts with {}",
+            super::OWNERS_DIRECTORY_ENV
+        )));
+    }
+    validate_registry_directory(root)?;
+    let bound = REGISTRY_DIRECTORY.get_or_init(|| root.to_path_buf());
+    if bound.as_os_str() != root.as_os_str() {
+        return Err(invalid(format!(
+            "native owner directory is already bound to {}",
+            bound.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Resolve the process's owner directory without creating it.
+///
+/// The first successful lookup fixes the process's binding. Without an explicit
+/// binding or environment selection, it uses the SDK's per-user data directory.
+///
+/// # Errors
+/// Returns an unavailable local-data location or invalid directory identity.
 pub fn registry_directory() -> io::Result<PathBuf> {
+    if let Some(root) = REGISTRY_DIRECTORY.get() {
+        validate_registry_directory(root)?;
+        return Ok(root.clone());
+    }
     let root = match std::env::var_os(super::OWNERS_DIRECTORY_ENV) {
         Some(root) => PathBuf::from(root),
         None => dirs::data_local_dir()
             .ok_or_else(|| io::Error::other("local data directory unavailable"))?
-            .join("lean-host-mcp")
+            .join("lean-rs")
             .join("native-generations"),
     };
+    validate_registry_directory(&root)?;
+    let bound = REGISTRY_DIRECTORY.get_or_init(|| root);
+    validate_registry_directory(bound)?;
+    Ok(bound.clone())
+}
+
+/// Check a caller-selected owner directory without binding or creating it.
+///
+/// For a prospective directory, the closest existing ancestor must be canonical.
+///
+/// # Errors
+/// Rejects an invalid or aliased path or an existing directory that is not private
+/// and owned by the current user.
+pub fn validate_registry_directory(root: &Path) -> io::Result<()> {
     if !root.is_absolute()
         || root.as_os_str().len() > 4096
         || root
@@ -124,8 +175,8 @@ pub fn registry_directory() -> io::Result<PathBuf> {
     // Lookup is read-only. Only reservation creates the namespace. For a fresh
     // namespace validate the existing ancestor, without resolving a guessed
     // helper path or permitting an aliased ownership scope.
-    match fs::symlink_metadata(&root) {
-        Ok(_) => validate_registry(&root)?,
+    match fs::symlink_metadata(root) {
+        Ok(_) => validate_registry(root)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let mut ancestor = root.parent().ok_or_else(|| invalid("native namespace parent absent"))?;
             loop {
@@ -147,7 +198,7 @@ pub fn registry_directory() -> io::Result<PathBuf> {
         }
         Err(error) => return Err(error),
     }
-    Ok(root)
+    Ok(())
 }
 pub(super) fn validate_registry(root: &Path) -> io::Result<()> {
     let metadata = fs::symlink_metadata(root)?;

@@ -1,10 +1,10 @@
 //! Command-specific required output, staged under the already admitted scratch descriptor.
 use super::{File, Path, Read as _, Value, Write as _, field, invalid, io, json, scratch::Scratch, storage::Request};
+use lean_toolchain::shared_writer::{LEGACY_MODULE_SETUP_CAPTURE_ENV, MODULE_SETUP_CAPTURE_ENV};
 use rustix::fs::{Mode, OFlags, open};
 use sha2::{Digest as _, Sha256};
 use std::path::PathBuf;
 
-const MARKER: &str = "LEAN_HOST_MCP_CAPTURE_MODULE_SETUP";
 const LIMIT: usize = 16 * 1024 * 1024;
 
 pub(super) struct Destination<'a> {
@@ -60,9 +60,18 @@ pub(super) fn select<'a>(
     request: Option<&Request>,
 ) -> io::Result<Option<Destination<'a>>> {
     let env = field(message, "env");
-    if env.get(MARKER).is_none() {
-        return Ok(None);
+    let marker = env.get(MODULE_SETUP_CAPTURE_ENV);
+    let legacy_marker = env.get(LEGACY_MODULE_SETUP_CAPTURE_ENV);
+    if let (Some(marker), Some(legacy_marker)) = (marker, legacy_marker)
+        && marker != legacy_marker
+    {
+        return Err(invalid(format!(
+            "conflicting writer stage settings {MODULE_SETUP_CAPTURE_ENV} and {LEGACY_MODULE_SETUP_CAPTURE_ENV}"
+        )));
     }
+    let Some(selected_marker) = marker.or(legacy_marker) else {
+        return Ok(None);
+    };
     let refused = || invalid("marked stage requires charged scratch and the selected Lake no-build setup-file command");
     let scratch = scratch.ok_or_else(refused)?;
     let request = request.ok_or_else(refused)?;
@@ -71,7 +80,15 @@ pub(super) fn select<'a>(
     let [program, no_build, no_cache, setup_file, file] = args.as_slice() else {
         return Err(refused());
     };
-    if env != &json!({(MARKER): "1", "LAKE_CACHE_DIR": assets, "LAKE_ARTIFACT_CACHE": "false"})
+    let expected_entries = if marker.is_some() && legacy_marker.is_some() {
+        4
+    } else {
+        3
+    };
+    if selected_marker != "1"
+        || env.as_object().is_none_or(|entries| entries.len() != expected_entries)
+        || env.get("LAKE_CACHE_DIR") != Some(&json!(assets))
+        || env.get("LAKE_ARTIFACT_CACHE").and_then(Value::as_str) != Some("false")
         || field(message, "cwd").as_str() != root.to_str()
         || no_build != "--no-build"
         || no_cache != "--no-cache"

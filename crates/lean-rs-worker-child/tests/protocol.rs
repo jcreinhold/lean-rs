@@ -94,6 +94,95 @@ fn health_check_succeeds() {
     assert!(status.success(), "worker should exit cleanly");
 }
 
+#[cfg(unix)]
+#[test]
+#[ignore = "requires the built SDK helper selected by LEAN_TOOLCHAIN_READER_TEST_HELPER"]
+fn standalone_worker_and_writer_use_the_typed_owner_directory() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig};
+    use lean_toolchain::native_guardian::{OWNERS_DIRECTORY_ENV, bind_registry_directory};
+    use lean_toolchain::shared_writer::SharedWriter;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let helper =
+        PathBuf::from(std::env::var_os("LEAN_TOOLCHAIN_READER_TEST_HELPER").expect("select the built lean-rs-writer"));
+    let scratch = tempfile::Builder::new()
+        .prefix("nc.")
+        .tempdir_in(workspace_root().join("target"))?;
+    let root = scratch.path().canonicalize()?;
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+    let registry = root.join("owners");
+    let project = root.join("project");
+    fs::create_dir(&project)?;
+    bind_registry_directory(&registry)?;
+    assert!(!registry.exists(), "binding creates no owner record");
+
+    let config = LeanWorkerConfig::new(worker_binary())
+        .lifetime_directory(&registry)
+        .lifetime_socket_directory(&root)
+        .native_guardian(&helper);
+    let mut worker = LeanWorker::spawn(&config)?;
+    worker.health()?;
+    let records = fs::read_dir(&registry)?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path().join("owner.json")))
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    let [record] = records.as_slice() else {
+        panic!("expected one healthy worker's owner record, got {records:?}");
+    };
+    let owner: serde_json::Value = serde_json::from_slice(&fs::read(record)?)?;
+    assert_eq!(owner.get("phase").and_then(serde_json::Value::as_str), Some("running"));
+
+    let timeout = Duration::from_secs(5);
+    let mut writer = SharedWriter::open(&helper, &project, timeout)?;
+    let mut command = Command::new("/usr/bin/printenv");
+    command.arg(OWNERS_DIRECTORY_ENV).current_dir(&project);
+    let output = writer.run(&command, timeout)?;
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout)?.trim(),
+        registry.to_str().expect("fixture path")
+    );
+    writer.close(timeout)?;
+    worker.try_shutdown()?;
+    Ok(())
+}
+
+#[test]
+fn conflicting_writer_executables_refuse_worker_startup() {
+    use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerError};
+    use lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV;
+
+    let legacy = "LEAN_HOST_MCP_WRITER_EXECUTABLE";
+    let output = Command::new(worker_binary())
+        .env(SHARED_WRITER_EXECUTABLE_ENV, "/current")
+        .env(legacy, "/former")
+        .output()
+        .expect("run worker startup");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty(), "worker began its handshake");
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostic.contains("conflicting")
+            && diagnostic.contains(SHARED_WRITER_EXECUTABLE_ENV)
+            && diagnostic.contains(legacy),
+        "{diagnostic}"
+    );
+
+    let config = LeanWorkerConfig::new(worker_binary())
+        .env(SHARED_WRITER_EXECUTABLE_ENV, "/current")
+        .env(legacy, "/former");
+    match LeanWorker::spawn(&config) {
+        Err(LeanWorkerError::Setup { message }) => {
+            assert!(message.contains("conflicting"), "{message}");
+            assert!(message.contains(SHARED_WRITER_EXECUTABLE_ENV), "{message}");
+            assert!(message.contains(legacy), "{message}");
+        }
+        Err(error) => panic!("expected startup configuration error, got {error}"),
+        Ok(_) => panic!("conflicting values started a worker"),
+    }
+}
+
 #[test]
 fn fixture_capability_loads_and_exported_call_succeeds() {
     let (fixture, binary) = scalar_fixture();

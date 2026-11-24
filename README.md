@@ -19,9 +19,8 @@ owns linking, object conversion, scheduling, diagnostics, and packaging.
 ## Start with a runnable project
 
 The [shipped-crate template](templates/shipped-lean-crate/) builds its Lean library from `build.rs` and calls it from
-Rust. It also includes an application-owned worker binary. Shared-source build helpers require a configured writer
-helper through `LEAN_HOST_MCP_WRITER_EXECUTABLE`; the in-tree template does not configure one itself. See the
-[build prerequisites](docs/recipes/ship-crate-with-lean.md) before running:
+Rust. It also includes an application-owned worker binary. Set `LEAN_RS_WRITER_EXECUTABLE` to configure the writer for
+shared-source builds. See the [build prerequisites](docs/recipes/ship-crate-with-lean.md) before running:
 
 ```sh
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml

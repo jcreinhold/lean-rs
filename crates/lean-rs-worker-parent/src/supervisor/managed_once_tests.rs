@@ -431,7 +431,10 @@ impl RealInput {
                 "LEAN_RS_PREPARED_HOST_ARTIFACTS",
                 serde_json::to_string(&self.prepared).expect("prepared descriptor"),
             )
-            .env("LEAN_HOST_MCP_WRITER_EXECUTABLE", &self.helper)
+            .env(
+                lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV,
+                &self.helper,
+            )
             .native_guardian(root.join("guardian"))
             .lifetime_directory(owners)
             .lifetime_socket_directory(&self.scratch);

@@ -429,7 +429,8 @@ pub(crate) fn ready_artifacts(
     if roots.iter().any(|root| !root.join(".lake").is_dir()) {
         return Ok(None);
     }
-    let helper = std::env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV)
+    let helper = lean_toolchain::shared_writer::writer_executable_from_env()
+        .map_err(artifact_error)?
         .ok_or_else(|| artifact_error(std::io::Error::other("ready probe requires configured artifact helper")))?;
     let started = Instant::now();
     // The complete pre-body admission owns one original budget. Contention
@@ -438,18 +439,13 @@ pub(crate) fn ready_artifacts(
     let remaining = Duration::from_secs(30).saturating_sub(started.elapsed());
     let mut readers = match ipc_root {
         Some(ipc_root) => lean_toolchain::shared_reader::SharedReadProxy::acquire_union_with_ipc_root(
-            Path::new(&helper),
+            &helper,
             &roots,
             remaining,
             &|| false,
             ipc_root,
         ),
-        None => lean_toolchain::shared_reader::SharedReadProxy::acquire_union(
-            Path::new(&helper),
-            &roots,
-            remaining,
-            &|| false,
-        ),
+        None => lean_toolchain::shared_reader::SharedReadProxy::acquire_union(&helper, &roots, remaining, &|| false),
     }
     .map_err(artifact_error)?;
     validate_ready_artifact_domains(&workspaces, &roots)?;

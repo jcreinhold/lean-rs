@@ -24,6 +24,8 @@ use rustix::io::{FdFlags, fcntl_setfd};
 use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags, recvmsg};
 use serde::Deserialize;
 
+use crate::native_guardian::{OWNERS_DIRECTORY_ENV, registry_directory};
+
 const MAX_FRAME: usize = 16 * 1024;
 const MAX_EPOCH: usize = 4096;
 const POLL: Duration = Duration::from_millis(2);
@@ -615,6 +617,7 @@ impl SharedReader {
             )
             .arg(directory.0.join("fd.sock"))
             .arg(&nonce)
+            .env(OWNERS_DIRECTORY_ENV, registry_directory()?)
             .stdin(Stdio::null())
             .stdout(Stdio::null());
         let mut helper = Helper::spawn(command)?;
@@ -960,6 +963,7 @@ impl SharedReadProxy {
             )
             .arg(&nonce)
             .arg(&fifo)
+            .env(OWNERS_DIRECTORY_ENV, registry_directory()?)
             .stdin(Stdio::null())
             .stdout(Stdio::piped());
         let mut helper = Helper::spawn(command)?;

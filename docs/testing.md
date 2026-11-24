@@ -131,11 +131,27 @@ the shell variable lets Cargo restore the configured value `1`.
 
 ## Worker fixture qualification
 
-Use the SDK-owned fixture for focused Lean 4.36 tests on macOS arm64 or Linux x86-64. It needs no
-`lean-host-mcp` writer. From the repository root, run the broken-import control:
+Use the SDK-owned fixture for focused Lean 4.36 tests on macOS arm64 or Linux x86-64.
+From the repository root, run the broken-import control:
 
 ```sh
 python3 scripts/qualify_metadata.py broken-import --emit-host-selection
+```
+
+For a cold Lake build through the standalone SDK writer, build `lean-rs-writer` and pass the canonical binary path
+and SHA-256 to the custody check. It builds private copies with the SDK name, the former name, and matching values
+under both names. It also checks that missing or conflicting settings stop before publishing artifacts.
+
+```sh
+python3 scripts/check_test_custody.py "$WRITER" "$WRITER_SHA256" --lake-fixture
+```
+
+The worker protocol integration test exercises the stock SDK worker and standalone writer under a single
+typed owner-directory binding. It uses the standalone executable for the worker's native guardian.
+
+```sh
+LEAN_TOOLCHAIN_READER_TEST_HELPER="$WRITER" cargo nextest run --locked -p lean-rs-worker-child \
+  --test protocol --run-ignored only -E 'test(=standalone_worker_and_writer_use_the_typed_owner_directory)'
 ```
 
 For stream or metadata changes, test the affected cases and one control. Set `SHIM_MANIFEST` to the

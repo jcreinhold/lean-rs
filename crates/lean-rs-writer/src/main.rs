@@ -19,6 +19,8 @@ enum Command {
     Reader(ReaderArgs),
     ReadProxy(ReadProxyArgs),
     #[command(hide = true)]
+    NativeGuardian,
+    #[command(hide = true)]
     WriterExec,
 }
 
@@ -126,6 +128,7 @@ fn main() -> ExitCode {
         Command::Writer(args) => ("writer", writer::run_cli(args)),
         Command::WriterLockPath(args) => ("writer-lock-path", writer::run_lock_path_cli(args)),
         Command::WriterStorage(command) => ("writer-storage", command.run()),
+        Command::NativeGuardian => ("native-guardian", lean_toolchain::native_guardian::run_guardian_cli()),
         Command::Reader(args) => ("reader", writer::run_reader(args)),
         Command::ReadProxy(args) => ("read-proxy", writer::run_read_proxy(args)),
         Command::WriterExec => ("writer-exec", writer::run_exec()),
@@ -136,9 +139,11 @@ fn main() -> ExitCode {
             eprintln!("lean-rs-writer {name}: {error}");
             match action {
                 Command::Reader(_) | Command::ReadProxy(_) => ExitCode::from(writer::reader_failure_exit_code(&error)),
-                Command::Writer(_) | Command::WriterLockPath(_) | Command::WriterStorage(_) | Command::WriterExec => {
-                    ExitCode::FAILURE
-                }
+                Command::Writer(_)
+                | Command::WriterLockPath(_)
+                | Command::WriterStorage(_)
+                | Command::NativeGuardian
+                | Command::WriterExec => ExitCode::FAILURE,
             }
         }
     }

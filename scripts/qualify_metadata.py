@@ -807,7 +807,7 @@ def build_environment(release, scratch):
 def environment(state, helper, release, deployment=None):
     env = build_environment(release, TARGET / "tmp")
     env.update(
-        LEAN_HOST_MCP_WRITER_EXECUTABLE=str(helper),
+        LEAN_RS_WRITER_EXECUTABLE=str(helper),
         D3_HELPER=str(helper),
         LEAN_RS_WORKER_OWNERS_DIRECTORY=str(state / "owners"),
     )

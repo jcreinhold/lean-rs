@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         project.clone(),
         sdk.join("crates/lean-rs-host/shims/lean-rs-host-shims"),
     ])?;
-    let helper = PathBuf::from(env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE").ok_or("missing writer")?);
+    let helper = lean_toolchain::shared_writer::writer_executable_from_env()?.ok_or("missing writer")?;
     let _guards = lean_toolchain::shared_reader::SharedReadProxy::acquire_union_with_ipc_root(
         &helper,
         &roots,
@@ -161,9 +161,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result<(), Box<dyn std::error::Error>> {
     use lean_toolchain::shared_writer::{
-        LocalArtifactRead, PrivateLakeBootstrap, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots,
+        LocalArtifactRead, PrivateLakeBootstrap, project_artifact_roots, writer_executable_from_env,
     };
-    if env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_some() || env::var_os("OUT_DIR").is_some() {
+    if writer_executable_from_env()?.is_some() || env::var_os("OUT_DIR").is_some() {
         return Err("scalar fixture requires its private builder and ordinary cache path".into());
     }
     let project = state.join("lean");
@@ -249,8 +249,8 @@ fn prepare_optional_whnf_shims(
     sysroot: &Path,
     key: &str,
 ) -> Result<lean_rs_host::host::LeanPreparedHostArtifacts, Box<dyn std::error::Error>> {
-    use lean_toolchain::shared_writer::{PrivateLakeBootstrap, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots};
-    if env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_some() || env::var_os("OUT_DIR").is_some() {
+    use lean_toolchain::shared_writer::{PrivateLakeBootstrap, project_artifact_roots, writer_executable_from_env};
+    if writer_executable_from_env()?.is_some() || env::var_os("OUT_DIR").is_some() {
         return Err("optional WHNF fixture requires its private bootstrap".into());
     }
     let metadata = fs::symlink_metadata(state)?;
@@ -523,7 +523,7 @@ fn prepare_broken_import(
     key: &str,
     profile: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).is_some() {
+    if lean_toolchain::shared_writer::writer_executable_from_env()?.is_some() {
         return Err("private broken-import fixture must not inherit a writer executable".into());
     }
     if profile == Some("--host-builder-transitive") {

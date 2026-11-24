@@ -148,8 +148,14 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.reviewed_writer(alias, approved)
         qualification.reviewed_writer(self.helper, approved)
-        self.assertFalse((self.state / "lean-host-mcp").exists())
+        self.assertFalse((self.state / self.helper.name).exists())
         self.launch.assert_not_called()
+
+    def test_reviewed_writer_environment_uses_sdk_setting(self):
+        with patch.object(qualification, "build_environment", return_value={}):
+            env = qualification.environment(self.state, self.helper, self.target)
+        self.assertEqual(env["LEAN_RS_WRITER_EXECUTABLE"], str(self.helper))
+        self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", env)
 
     def test_wrong_policy_refuses_before_readiness(self):
         self.record.write_text('{"typed_session": true, "verification": false}')
@@ -493,6 +499,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 command[:4],
                 ["/reviewed/gtimeout", "--signal=TERM", "--kill-after=15s", "8m"],
             )
+            self.assertNotIn("LEAN_RS_WRITER_EXECUTABLE", env)
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", env)
             self.assertNotIn("LEAN_RS_METADATA_AUDIT_PATH", env)
             self.assertTrue(check)
@@ -957,6 +964,7 @@ class MetadataQualificationTest(unittest.TestCase):
             self.assertEqual(
                 case_env["LEAN_RS_PROFILE_FIXTURE_SHA256"], "fixture-digest"
             )
+            self.assertNotIn("LEAN_RS_WRITER_EXECUTABLE", case_env)
             self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
             self.assertEqual(
@@ -1231,6 +1239,7 @@ class MetadataQualificationTest(unittest.TestCase):
         with (
             patch.dict(os.environ, env),
             patch.object(qualification, "STATE_LOCK", root.parent / ".ordinary.lock"),
+            patch.object(qualification, "prepare_workspace_template") as prepare,
             patch("subprocess.run") as run,
         ):
             bad = {**json.loads(selection), "package_identity": [owner.st_dev, owner.st_ino + 1]}
@@ -1243,12 +1252,16 @@ class MetadataQualificationTest(unittest.TestCase):
             marker.mkdir()
             with self.assertRaises(FileExistsError):
                 qualification.workspace_tests("all()")
+            prepare.assert_not_called()
             run.assert_not_called()
             marker.rmdir()
             run.return_value.returncode = 0
             qualification.workspace_tests("all()")
-            run.assert_called_with(
-                ["cargo", "nextest", "run", "--workspace", "--profile", "ci", "-E", "all()"], cwd=self.sdk
+            prepare.assert_called_once_with(root)
+            run.assert_called_once_with(
+                ["cargo", "nextest", "run", "--workspace", "--profile", "ci", "-E", "all()"],
+                cwd=self.sdk,
+                env={**os.environ, "LEAN_RS_TEST_PRIVATE_SHIPPED_TEMPLATE": "1"},
             )
         self.assertFalse(root.exists())
 

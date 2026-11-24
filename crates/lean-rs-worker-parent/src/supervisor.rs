@@ -279,6 +279,7 @@ pub const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(
 #[derive(Clone, Debug)]
 pub struct LeanWorkerConfig {
     pub(crate) application_launch_input: Option<String>,
+    pub(crate) shared_writer_executable: Option<PathBuf>,
     executable: PathBuf,
     process_tracker: LeanWorkerProcessTracker,
     current_dir: Option<PathBuf>,
@@ -309,6 +310,7 @@ impl LeanWorkerConfig {
         Self {
             executable: executable.into(),
             application_launch_input: None,
+            shared_writer_executable: None,
             process_tracker: LeanWorkerProcessTracker::new(),
             current_dir: None,
             check_loader_environment: false,
@@ -2057,9 +2059,32 @@ impl LeanWorker {
             // An ordinary deployment selects its own snapshot for this child.
             command.env_remove("LEAN_RS_PREPARED_HOST_ARTIFACTS");
         }
+        #[cfg(unix)]
+        if config.native_guardian_executable.is_none()
+            && !config
+                .env
+                .iter()
+                .any(|(key, _)| key == lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV)
+        {
+            let registry = lean_toolchain::native_guardian::registry_directory().map_err(|source| {
+                SpawnFailure::no_child(LeanWorkerError::Setup {
+                    message: format!("could not bind native ownership registry: {source}"),
+                })
+            })?;
+            command.env(lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV, registry);
+        }
         for (key, value) in &config.env {
             command.env(key, value);
         }
+        lean_toolchain::shared_writer::configure_writer_executable(
+            &mut command,
+            config.shared_writer_executable.as_deref(),
+        )
+        .map_err(|error| {
+            SpawnFailure::no_child(LeanWorkerError::Setup {
+                message: error.to_string(),
+            })
+        })?;
         // This private handoff cannot be inherited or supplied through `.env()`.
         // It is derived only from the reviewed lifeline root below.
         command.env_remove("LEAN_RS_WORKER_ARTIFACT_IPC_ROOT");
@@ -5923,7 +5948,7 @@ fn probe_fixture_manifest(fixture_root: &Path) -> Result<FixtureManifest, lean_t
 
     #[cfg(unix)]
     {
-        use lean_toolchain::shared_writer::{LocalArtifactRead, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots};
+        use lean_toolchain::shared_writer::{LocalArtifactRead, project_artifact_roots, writer_executable_from_env};
         let roots = project_artifact_roots(fixture_root).map_err(|error| failure(error.to_string()))?;
         let builder = || {
             lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
@@ -5959,7 +5984,10 @@ fn probe_fixture_manifest(fixture_root: &Path) -> Result<FixtureManifest, lean_t
             }
             Err(error) => return Err(failure(error.to_string())),
         }
-        if std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_none() {
+        if writer_executable_from_env()
+            .map_err(|error| failure(error.to_string()))?
+            .is_none()
+        {
             return Err(failure(
                 "fixture cache is not ready; a configured writer is required".into(),
             ));

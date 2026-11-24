@@ -1,43 +1,32 @@
 """Check the selected platform helper on private fixture roots before native SDK tests."""
 
 import argparse
+import fcntl
 import hashlib
 import os
 import shutil
 import subprocess
-import tempfile
+import time
 from pathlib import Path
 
+CHECKOUT = Path(__file__).resolve().parents[1]
+TARGET = CHECKOUT / "target"
+WRITER = "LEAN_RS_WRITER_EXECUTABLE"
+LEGACY_WRITER = "LEAN_HOST_MCP_WRITER_EXECUTABLE"
 
-def qualify_lake_fixture(helper: Path, owners: Path) -> None:
-    """Exercise the same shared target as the typed-session fixture on two cold roots."""
-    checkout = Path(__file__).resolve().parents[1]
-    fixture = checkout / "fixtures/lean"
+
+def qualify_lake_fixture(helper: Path, scratch: Path, env: dict[str, str]) -> None:
+    """Build cold SDK fixtures through the standalone writer's supported settings."""
+    fixture = CHECKOUT / "fixtures/lean"
     tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "."], cwd=fixture)
     inputs = [Path(os.fsdecode(name)) for name in tracked.split(b"\0") if name]
-    scratch = Path(tempfile.mkdtemp(prefix="lean-test-lake-")).resolve(strict=True)
-    print(f"Cold fixture copies: {scratch}", flush=True)
-    approved, refused = scratch / "approved", scratch / "refused"
-    for root in (approved, refused):
-        for relative in inputs:
-            dest = root / relative
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(fixture / relative, dest)
-        if (root / ".lake").exists():
-            raise ValueError(f"fixture already has Lake output: {root}")
-
-    env = dict(
-        os.environ,
-        LEAN_RS_WORKER_OWNERS_DIRECTORY=str(owners),
-        LEAN_NUM_THREADS="1",
-        CARGO_BUILD_JOBS="1",
-    )
+    env.update(LEAN_NUM_THREADS="1", CARGO_BUILD_JOBS="1")
     env.pop("OUT_DIR", None)  # Keep the SDK build cache inside each private fixture.
-    writer_var = "LEAN_HOST_MCP_WRITER_EXECUTABLE"
-    env.pop(writer_var, None)
+    env.pop(WRITER, None)
+    env.pop(LEGACY_WRITER, None)
     command = [
         "cargo",
-        "run",
+        "build",
         "--quiet",
         "--locked",
         "--offline",
@@ -46,24 +35,58 @@ def qualify_lake_fixture(helper: Path, owners: Path) -> None:
         "lean-rs-host",
         "--example",
         "lake_build_helper",
-        "--",
     ]
-    result = subprocess.run(
-        [*command, approved],
-        cwd=checkout,
-        env={**env, writer_var: str(helper)},
-        stdout=subprocess.PIPE,
-        text=True,
-        check=True,
+    subprocess.run(command, cwd=CHECKOUT, env=env, check=True)
+    executable = TARGET / "debug/examples/lake_build_helper"
+    approved = str(helper)
+    cases = (
+        ("sdk", {WRITER: approved}, ()),
+        ("former", {LEGACY_WRITER: approved}, ()),
+        ("matching", {WRITER: approved, LEGACY_WRITER: approved}, ()),
+        ("missing", {}, ("shared Lake writes require the configured writer helper",)),
+        (
+            "conflict",
+            {WRITER: approved, LEGACY_WRITER: str(scratch / "other-writer")},
+            (WRITER, LEGACY_WRITER),
+        ),
     )
+    for name, settings, rejection in cases:
+        root = scratch / name
+        for relative in inputs:
+            dest = root / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(fixture / relative, dest)
+        siblings = set(scratch.iterdir())
+        result = subprocess.run(
+            [executable, root], cwd=CHECKOUT, env={**env, **settings}, capture_output=True, text=True
+        )
+        if not rejection:
+            if result.returncode:
+                raise ValueError(f"{name} build failed with exit {result.returncode}: {result.stderr}")
+            verify_lake_outputs(root, result.stdout)
+            continue
+        if result.returncode == 0 or any(reason not in result.stderr for reason in rejection):
+            raise ValueError(f"expected {name} refusal, got exit {result.returncode}: {result.stderr}")
+        files = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+        if (
+            set(scratch.iterdir()) != siblings
+            or (root / ".lake").exists()
+            or files != set(inputs)
+            or any((root / path).read_bytes() != (fixture / path).read_bytes() for path in inputs)
+        ):
+            raise ValueError(f"{name} refusal changed the cold fixture or its lock domain: {root}")
+        print(f"Refused {name} writer setting before creating fixture output or a project lock.")
+
+
+def verify_lake_outputs(root: Path, output: str) -> None:
     libraries = [
         Path(line.removeprefix("dylib="))
-        for line in result.stdout.splitlines()
+        for line in output.splitlines()
         if line.startswith("dylib=")
     ]
     if len(libraries) != 1 or libraries[0].suffix not in (".so", ".dylib"):
         raise ValueError(f"expected one resolved fixture library, got {libraries}")
-    libdir = approved / ".lake/build/lib"
+    libdir = root / ".lake/build/lib"
     modules = libdir / "lean/LeanRsFixture"
     for artifact in (
         libraries[0],
@@ -79,41 +102,25 @@ def qualify_lake_fixture(helper: Path, owners: Path) -> None:
             raise ValueError(
                 f"expected nonempty fixture output under {libdir}: {artifact}"
             )
-        print(f"Published {artifact.relative_to(approved)}")
+        print(f"Published {root.name}/{artifact.relative_to(root)}")
 
-    result = subprocess.run(
-        [*command, refused],
-        cwd=checkout,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    missing = "could not acquire shared Lake writer: shared Lake writes require the configured writer helper"
-    if (
-        result.returncode == 0
-        or "LakeOutputUnresolved" not in result.stderr
-        or missing not in result.stderr
-    ):
-        raise ValueError(
-            f"expected missing-writer refusal, got exit {result.returncode}: {result.stderr}"
-        )
-    files = {path.relative_to(refused) for path in refused.rglob("*") if path.is_file()}
-    if (
-        (refused / ".lake").exists()
-        or files != set(inputs)
-        or any(
-            (refused / name).read_bytes() != (fixture / name).read_bytes()
-            for name in inputs
-        )
-    ):
-        raise ValueError(f"missing-writer attempt changed the cold fixture: {refused}")
-    print("Refused without a configured writer; no fixture output published.")
-    if any(entry.name != ".admission.lock" for entry in owners.iterdir()):
-        raise ValueError(
-            f"retained owner records in {owners}, fixture copies in {scratch}"
-        )
-    shutil.rmtree(scratch)
+
+def wait_for_writer_cleanup(scratch: Path, tmp: Path) -> None:
+    # Successful build replies confirm the Lake command stopped. The standalone
+    # writer still closes its scratch and lock descriptors after the caller exits.
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            for path in scratch.glob(".lean-rs-writer-*.lock"):
+                with path.open("r+b") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if not any(tmp.iterdir()):
+                return
+        except BlockingIOError:
+            pass
+        if time.monotonic() >= deadline:
+            raise ValueError(f"writer cleanup remains unconfirmed under {scratch}")
+        time.sleep(0.02)
 
 
 def main() -> None:
@@ -123,7 +130,7 @@ def main() -> None:
     parser.add_argument(
         "--lake-fixture",
         action="store_true",
-        help="build the checkout LeanRsFixture and check refusal without a writer",
+        help="qualify old and new settings for cold LeanRsFixture writes",
     )
     args = parser.parse_args()
     helper = args.helper
@@ -136,19 +143,34 @@ def main() -> None:
     with helper.open("rb") as source:
         if hashlib.file_digest(source, "sha256").hexdigest() != args.approved_sha256:
             parser.error("helper differs from the selected SHA-256")
-    # Both tests allocate their own new project roots. Their owner namespace
-    # therefore has no prior records or shared project consumers.
-    owners = Path(tempfile.mkdtemp(prefix="lean-test-owners-")).resolve(strict=True)
-    print(f"Private test owner registry: {owners}", flush=True)
-    if args.lake_fixture:
-        qualify_lake_fixture(helper, owners)
-        shutil.rmtree(owners)
-        return
+    TARGET.mkdir(exist_ok=True)
+    if TARGET.resolve(strict=True) != TARGET:
+        parser.error("workspace target must be canonical")
+    scratch = TARGET / "writer-custody-qualification"
+    # An unfinished run may still own these project domains. Refuse reuse.
+    scratch.mkdir(mode=0o700)
+    owners, tmp = scratch / "owners", scratch / "tmp"
+    owners.mkdir(mode=0o700)
+    tmp.mkdir(mode=0o700)
+    print(f"Private custody qualification: {scratch}", flush=True)
     env = dict(
         os.environ,
+        CARGO_TARGET_DIR=str(TARGET),
+        TMPDIR=str(tmp),
         LEAN_TOOLCHAIN_READER_TEST_HELPER=str(helper),
         LEAN_RS_WORKER_OWNERS_DIRECTORY=str(owners),
     )
+    if args.lake_fixture:
+        qualify_lake_fixture(helper, scratch, env)
+    else:
+        qualify_custody(env)
+    wait_for_writer_cleanup(scratch, tmp)
+    if any(entry.name != ".admission.lock" for entry in owners.iterdir()):
+        raise ValueError(f"native custody remains under {scratch}")
+    shutil.rmtree(scratch)
+
+
+def qualify_custody(env: dict[str, str]) -> None:
     for case in (
         "real_fifo_proxy_does_not_leak_custody_to_unrelated_spawn",
         "real_writer_runs_command_in_selected_project",
@@ -170,10 +192,10 @@ def main() -> None:
                 "-E",
                 f"test(=shared_reader::tests::{case})",
             ],
+            cwd=CHECKOUT,
             check=True,
             env=env,
         )
-    shutil.rmtree(owners)
 
 
 if __name__ == "__main__":

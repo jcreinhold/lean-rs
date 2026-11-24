@@ -2205,11 +2205,9 @@ fn spawn_checked_worker(
         .env("LEAN_SYSROOT", lean_sysroot.as_os_str())
         .shared_artifact_reads(worker_child.shared_artifact_reads);
     config.application_launch_input = worker_child.application_launch_input;
+    config.shared_writer_executable = worker_child.shared_writer_executable;
     if worker_child.check_loader_environment {
         config = config.checked_native_loader_environment();
-    }
-    if let Some(executable) = &worker_child.shared_writer_executable {
-        config = config.env("LEAN_HOST_MCP_WRITER_EXECUTABLE", executable.as_os_str());
     }
     if let Some(artifacts) = &worker_child.prepared_host_artifacts {
         let encoded = serde_json::to_string(artifacts).map_err(|error| LeanWorkerError::Setup {

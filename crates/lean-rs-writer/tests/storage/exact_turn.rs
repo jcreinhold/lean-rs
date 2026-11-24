@@ -99,10 +99,7 @@ fn exact_turn_checks_each_binding_and_settles_once() -> io::Result<()> {
         .arg(&primary)
         .args(["3", "--storage-request"])
         .arg(request.to_string())
-        .env(
-            "LEAN_HOST_MCP_WRITER_WORKSPACES",
-            json!([project, dependency]).to_string(),
-        )
+        .env("LEAN_RS_WRITER_WORKSPACES", json!([project, dependency]).to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;

@@ -24,10 +24,9 @@ imports and owns the request.
 (cd fixtures/lean && lake build)
 ```
 
-Shared-source build helpers also require a writer configured through `LEAN_HOST_MCP_WRITER_EXECUTABLE`; these examples
-do not configure one themselves. See the [shipping recipe](../../../docs/recipes/ship-crate-with-lean.md) for the build
-ownership requirements. Host Meta and elaboration services come from the bundled host shims, while the fixture supplies
-test declarations and expressions.
+Set `LEAN_RS_WRITER_EXECUTABLE` for shared-source builds. See the [shipping recipe](../../../docs/recipes/ship-crate-with-lean.md)
+for the build ownership requirements. Host Meta and elaboration services come from the bundled host shims, while the
+fixture supplies test declarations and expressions.
 
 The examples derive fixture paths from compile-time `env!("CARGO_MANIFEST_DIR")`. Setting that variable at runtime does
 not change the compiled path. Missing artifacts fail at the build, library-load, or capability-load step that needs

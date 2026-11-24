@@ -406,6 +406,7 @@ fn install_parent_death_signal() -> bool {
     reason = "the child owns stdin/stdout for the full protocol loop"
 )]
 fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
+    let writer_executable = lean_toolchain::shared_writer::writer_executable_from_env()?;
     #[cfg(unix)]
     let parent_socket = std::env::var_os("LEAN_RS_WORKER_PARENT_SOCKET").map(PathBuf::from);
     #[cfg(unix)]
@@ -698,11 +699,12 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if shared_reads && !uses_prepared_read {
                     let allow_wait = artifact_epochs.is_none();
-                    let read = std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE")
+                    let read = writer_executable
+                        .as_deref()
                         .ok_or_else(|| std::io::Error::other("shared artifact helper is not configured"))
                         .and_then(|helper| {
                             ArtifactReadScope::acquire(
-                                Path::new(&helper),
+                                helper,
                                 admission.as_ref().map_or(&[], SessionAdmission::roots),
                                 Duration::from_secs(30),
                                 allow_wait,

@@ -140,15 +140,17 @@ mod inputs;
 #[doc(hidden)]
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};
 mod ownership;
+#[cfg(test)]
+mod registry_tests;
 #[doc(hidden)]
 pub mod writer_storage;
 pub use ownership::{
     NativeCapacitySlot, NativeGuardianDrainBinding, NativeGuardianDrainStatus, NativeOwnerObservation,
-    NativeProcessIdentity, claim_native_recovery, collect_closed_owner_records, dispatch_owner_record,
-    observe_original_guardian_closure, observe_original_guardian_drain, publish_startup_owner, registry_directory,
-    request_bound_original_guardian_drain, request_original_guardian_drain, reserve_owner_record,
+    NativeProcessIdentity, bind_registry_directory, claim_native_recovery, collect_closed_owner_records,
+    dispatch_owner_record, observe_original_guardian_closure, observe_original_guardian_drain, publish_startup_owner,
+    registry_directory, request_bound_original_guardian_drain, request_original_guardian_drain, reserve_owner_record,
     reserve_owner_record_with_slot, retire_preparing_owner_record, retire_unspawned_owner_record,
-    submit_original_guardian_drain,
+    submit_original_guardian_drain, validate_registry_directory,
 };
 
 /// One actual shared lock and epoch protected by a native generation.
@@ -289,6 +291,7 @@ impl GuardianHandle {
             .env(WORKER_ENV, std::process::id().to_string())
             .env(SOCKET_ENV, socket)
             .env(NONCE_ENV, nonce)
+            .env(OWNERS_DIRECTORY_ENV, registry_directory()?)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -110,7 +110,10 @@ void *initialize_lean__rs__host__shims_LeanRsHostShims(unsigned char builtin) { 
     fn worker(&self, guardian: bool) -> LeanWorker {
         let config = LeanWorkerConfig::new(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
             .shared_artifact_reads(true)
-            .env("LEAN_HOST_MCP_WRITER_EXECUTABLE", &self.helper)
+            .env(
+                lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV,
+                &self.helper,
+            )
             .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &self.registry)
             .env(
                 "LEAN_RS_PREPARED_HOST_ARTIFACTS",

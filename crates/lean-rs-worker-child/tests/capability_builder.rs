@@ -433,7 +433,11 @@ fn checked_host_builder_selection(selection: &str, expected_case: Option<&str>) 
         write!(&mut actual, "{byte:02x}").expect("encode digest");
     }
     assert_eq!(actual, selected.worker_sha256, "selected worker changed");
-    assert!(std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE").is_none());
+    assert!(
+        lean_toolchain::shared_writer::writer_executable_from_env()
+            .expect("unambiguous writer configuration")
+            .is_none()
+    );
     assert!(std::env::var_os("LEAN_PATH").is_none());
     selected
 }
