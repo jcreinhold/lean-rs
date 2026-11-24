@@ -9,6 +9,11 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.16]
+
+- Managed callers can transfer exclusive lock custody to the Ready writer helper before dispatch. The helper exit
+  observation retains the original lock identities even when Ready fails, so callers can verify closure separately.
+
 ## [0.10.15]
 
 - Managed declaration inspections can reuse the same guarded Lean worker after the exact terminal reply, guardian
