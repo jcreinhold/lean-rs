@@ -317,6 +317,8 @@ fn permitted_writer_waits_for_exact_helper_exit_after_control_closes() -> io::Re
 
 #[test]
 fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    const REAL_FAILURE: &str = "LEAN_RS_TEST_REAL_WRITER_READY_FAILURE";
     const FIXTURE: &str = "LEAN_RS_TEST_WRITER_EXIT_OBSERVATION";
     let Some(base) = std::env::var_os(FIXTURE) else {
         let fixture = StageFixture::new()?;
@@ -328,6 +330,17 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
             .env(FIXTURE, fixture.temp.path().canonicalize()?)
             .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &fixture.registry)
             .env("TMPDIR", fixture.temp.path().canonicalize()?)
+            .status()?;
+        assert!(status.success());
+        let status = Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "stage_permit::writer_exit_observation_survives_failed_ready_and_close_timeout",
+            ])
+            .env(FIXTURE, fixture.temp.path().canonicalize()?)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &fixture.registry)
+            .env("TMPDIR", fixture.temp.path().join("missing-temp-directory"))
+            .env(REAL_FAILURE, "1")
             .status()?;
         assert!(status.success());
         return Ok(());
@@ -350,6 +363,46 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
         }
     };
 
+    let handoff = |helper: &Path, prepared_roots: &[std::path::PathBuf], observed: &mut Option<_>| {
+        SharedWriter::open_with_write_roots_handoff_observed(
+            helper,
+            &project,
+            prepared_roots,
+            timeout,
+            &|| false,
+            observed,
+        )
+    };
+    let check_identities =
+        |observed: &lean_toolchain::shared_writer::WriterExitObservation, roots: &[&Path]| -> io::Result<()> {
+            assert_eq!(observed.lock_identities().len(), roots.len());
+            for (identity, root) in observed.lock_identities().iter().zip(roots) {
+                let path = lean_toolchain::shared_writer::project_lock_path(root)?;
+                let meta = fs::metadata(&path)?;
+                assert_eq!(
+                    (&identity.path, identity.device, identity.inode),
+                    (&path, meta.dev(), meta.ino())
+                );
+            }
+            Ok(())
+        };
+    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+    if std::env::var_os(REAL_FAILURE).is_some() {
+        // The standalone helper fails before Ready when its asset directory
+        // cannot be created, after it inherited the actual lock union.
+        let extra = base.join("extra-workspace");
+        fs::create_dir(&extra)?;
+        assert!(handoff(helper, std::slice::from_ref(&extra), &mut observed).is_err());
+        let failed = observed.expect("real helper was spawned");
+        assert!(!wait(&failed).success());
+        check_identities(&failed, &[&project, &extra])?;
+        for identity in failed.lock_identities() {
+            let file = fs::OpenOptions::new().read(true).write(true).open(&identity.path)?;
+            file.try_lock().map_err(io::Error::other)?;
+        }
+        return Ok(());
+    }
+
     let broken = base.join("bad-ready");
     let release = base.join("release-bad-ready");
     fs::write(
@@ -357,13 +410,11 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
         "#!/bin/sh\nprintf '{}\\n'\nfor n in 1 2 3 4 5 6 7 8 9 10; do\n  [ ! -e \"$2/../release-bad-ready\" ] || exit 23\n  /bin/sleep 0.5\ndone\nexit 24\n",
     )?;
     fs::set_permissions(&broken, fs::Permissions::from_mode(0o700))?;
-    let handoff = |helper: &Path, observed: &mut Option<_>| {
-        SharedWriter::open_with_write_roots_handoff_observed(helper, &project, &[], timeout, &|| false, observed)
-    };
-    let error = handoff(&broken, &mut observed).err().expect("invalid Ready");
+    let error = handoff(&broken, &[], &mut observed).err().expect("invalid Ready");
     assert!(error.to_string().contains("ownership/lock-custody handshake failed"));
     let failed_ready = observed.take().expect("actual spawn observed");
     assert_eq!(failed_ready.status(), None);
+    check_identities(&failed_ready, &[&project])?;
     let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
     let contender = fs::OpenOptions::new().read(true).write(true).open(lock)?;
     assert!(matches!(contender.try_lock(), Err(fs::TryLockError::WouldBlock)));
@@ -372,10 +423,9 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
     assert_eq!(failed_ready.status().and_then(|status| status.code()), Some(23));
     contender.try_lock().map_err(io::Error::other)?;
     drop(contender);
-    assert!(handoff(&base.join("absent"), &mut observed).is_err());
+    assert!(handoff(&base.join("absent"), &[], &mut observed).is_err());
     assert!(observed.is_none());
 
-    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
     let writer = open(helper, &mut observed)?;
     let pid = rustix::process::Pid::from_raw(i32::try_from(writer.stage_ready()?.pid()).map_err(io::Error::other)?)
         .expect("exact disposable helper");
@@ -393,6 +443,7 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
     assert!(error.to_string().contains("writer close unconfirmed"));
     let pending = observed.expect("close retains the original spawn observation");
     assert_eq!(pending.status(), None);
+    check_identities(&pending, &[&project])?;
     drop(resume);
     assert!(wait(&pending).success());
     Ok(())

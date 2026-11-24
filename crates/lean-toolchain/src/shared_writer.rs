@@ -425,13 +425,21 @@ pub fn previous_writer_stopped(file: &File) -> io::Result<bool> {
     )?)
 }
 
+/// Identity taken from an acquired writer lock descriptor.
+#[cfg(unix)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct WriterLockIdentity {
+    pub path: PathBuf,
+    pub device: u64,
+    pub inode: u64,
+}
+
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
 struct LockLoan {
     fd: i32,
-    path: PathBuf,
-    device: u64,
-    inode: u64,
+    #[serde(flatten)]
+    identity: WriterLockIdentity,
 }
 
 /// Duplicate and validate startup lock loans without closing arbitrary inherited descriptors.
@@ -459,16 +467,16 @@ pub fn inherited_writer_locks() -> io::Result<Option<Vec<(PathBuf, File)>>> {
     }
     let mut result = Vec::new();
     let mut paths = std::collections::BTreeSet::new();
-    for loan in loans {
-        if !paths.insert(loan.path.clone()) {
+    for LockLoan { fd, identity } in loans {
+        if !paths.insert(identity.path.clone()) {
             return Err(invalid("writer loan domain is duplicated"));
         }
-        if loan.fd <= 2 {
+        if fd <= 2 {
             return Err(invalid("writer loan cannot name standard I/O"));
         }
         // SAFETY: fcntl accepts an integer, returns a fresh descriptor or -1,
         // and never closes the supplied possibly untrusted descriptor.
-        let duplicate = unsafe { libc::fcntl(loan.fd, libc::F_DUPFD_CLOEXEC, 3) };
+        let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
         if duplicate < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -482,29 +490,32 @@ pub fn inherited_writer_locks() -> io::Result<Option<Vec<(PathBuf, File)>>> {
             fs4::TryLockError::Error(error) => error,
         })?;
         let metadata = file.metadata()?;
-        let named = std::fs::symlink_metadata(&loan.path)?;
+        let named = std::fs::symlink_metadata(&identity.path)?;
         if !metadata.is_file()
             || metadata.nlink() != 1
             || !named.is_file()
-            || metadata.dev() != loan.device
-            || metadata.ino() != loan.inode
-            || (named.dev(), named.ino()) != (loan.device, loan.inode)
-            || loan
+            || metadata.dev() != identity.device
+            || metadata.ino() != identity.inode
+            || (named.dev(), named.ino()) != (identity.device, identity.inode)
+            || identity
                 .path
                 .parent()
                 .ok_or_else(|| invalid("writer loan has no parent"))?
                 .canonicalize()?
-                != loan.path.parent().ok_or_else(|| invalid("writer loan has no parent"))?
+                != identity
+                    .path
+                    .parent()
+                    .ok_or_else(|| invalid("writer loan has no parent"))?
             || !previous_writer_stopped(&file)?
             || !crate::native_guardian::protected_native_reads_stopped(
                 &crate::native_guardian::registry_directory()?,
-                &loan.path,
+                &identity.path,
                 (metadata.dev(), metadata.ino()),
             )?
         {
             return Err(invalid("writer loan identity or previous ownership is unresolved"));
         }
-        result.push((loan.path, file));
+        result.push((identity.path, file));
     }
     Ok(Some(result))
 }
@@ -583,7 +594,14 @@ fn send_until(
 /// Read-only observation of the one exact child exit reaped by the SDK.
 #[cfg(unix)]
 #[derive(Clone, Debug)]
-pub struct WriterExitObservation(std::sync::Arc<std::sync::OnceLock<std::process::ExitStatus>>);
+pub struct WriterExitObservation(std::sync::Arc<WriterExitState>);
+
+#[cfg(unix)]
+#[derive(Debug)]
+struct WriterExitState {
+    lock_identities: Vec<WriterLockIdentity>,
+    status: std::sync::OnceLock<std::process::ExitStatus>,
+}
 
 #[cfg(unix)]
 impl WriterExitObservation {
@@ -591,7 +609,14 @@ impl WriterExitObservation {
     /// not establish closure, and an unsuccessful status is not settlement.
     #[must_use]
     pub fn status(&self) -> Option<std::process::ExitStatus> {
-        self.0.get().copied()
+        self.0.status.get().copied()
+    }
+
+    /// Original identities in spawn receipt order, including after Ready failure.
+    /// These values retain no descriptors and do not establish resource closure.
+    #[must_use]
+    pub fn lock_identities(&self) -> &[WriterLockIdentity] {
+        &self.0.lock_identities
     }
 }
 
@@ -612,11 +637,15 @@ impl Helper {
     fn spawn(
         command: Command,
         fds: &[BorrowedFd<'_>],
+        lock_identities: Vec<WriterLockIdentity>,
         observed: Option<&mut Option<WriterExitObservation>>,
     ) -> io::Result<(Self, mpsc::Receiver<io::Result<Value>>)> {
-        let observation = observed
-            .as_ref()
-            .map(|_| WriterExitObservation(std::sync::Arc::default()));
+        let observation = observed.as_ref().map(|_| {
+            WriterExitObservation(std::sync::Arc::new(WriterExitState {
+                lock_identities,
+                status: std::sync::OnceLock::new(),
+            }))
+        });
         let reaper_observation = observation.clone();
         let (children, incoming) = mpsc::sync_channel::<Child>(1);
         let (sender, receiver) = mpsc::sync_channel(4);
@@ -657,7 +686,7 @@ impl Helper {
                 loop {
                     if let Ok(status) = child.wait() {
                         if let Some(observation) = &reaper_observation {
-                            let _ = observation.0.set(status);
+                            let _ = observation.0.status.set(status);
                         }
                         let _ = exited.send(status);
                         break;
@@ -1066,19 +1095,23 @@ impl SharedWriter {
             }
             let mut duplicates = Vec::new();
             let mut loans = Vec::new();
-            let mut expected = Vec::new();
+            let mut identities = Vec::new();
             for lock in locks {
                 let file = lock.file().try_clone()?;
                 let metadata = file.metadata()?;
-                loans.push(LockLoan {
-                    fd: file.as_raw_fd(),
+                let identity = WriterLockIdentity {
                     path: lock.path().to_path_buf(),
                     device: metadata.dev(),
                     inode: metadata.ino(),
+                };
+                loans.push(LockLoan {
+                    fd: file.as_raw_fd(),
+                    identity: identity.clone(),
                 });
-                expected.push(json!({"path":lock.path(),"device":metadata.dev(),"inode":metadata.ino()}));
+                identities.push(identity);
                 duplicates.push(file);
             }
+            let expected = serde_json::to_value(&identities)?;
             let primary = locks.first().ok_or_else(|| invalid("writer primary lock missing"))?;
             let mut command = Command::new(executable);
             command
@@ -1098,7 +1131,7 @@ impl SharedWriter {
                 command.arg("--storage-request").arg(request);
             }
             let fds: Vec<_> = duplicates.iter().map(AsFd::as_fd).collect();
-            let (helper, receiver) = Helper::spawn(command, &fds, observed)?;
+            let (helper, receiver) = Helper::spawn(command, &fds, identities, observed)?;
             let mut client = Self {
                 helper,
                 receiver,
@@ -1120,7 +1153,7 @@ impl SharedWriter {
                 || field(owner, "pid") != client.helper.id
                 || field(owner, "session") != field(owner, "pid")
                 || field(owner, "start").as_str().is_none_or(str::is_empty)
-                || field(&locked, "lock_loans") != &Value::Array(expected)
+                || field(&locked, "lock_loans") != &expected
             {
                 return Err(invalid("writer ownership/lock-custody handshake failed"));
             }
