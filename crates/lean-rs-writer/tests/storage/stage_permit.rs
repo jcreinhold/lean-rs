@@ -357,14 +357,22 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
         "#!/bin/sh\nprintf '{}\\n'\nfor n in 1 2 3 4 5 6 7 8 9 10; do\n  [ ! -e \"$2/../release-bad-ready\" ] || exit 23\n  /bin/sleep 0.5\ndone\nexit 24\n",
     )?;
     fs::set_permissions(&broken, fs::Permissions::from_mode(0o700))?;
-    let error = open(&broken, &mut observed).err().expect("invalid Ready");
+    let handoff = |helper: &Path, observed: &mut Option<_>| {
+        SharedWriter::open_with_write_roots_handoff_observed(helper, &project, &[], timeout, &|| false, observed)
+    };
+    let error = handoff(&broken, &mut observed).err().expect("invalid Ready");
     assert!(error.to_string().contains("ownership/lock-custody handshake failed"));
     let failed_ready = observed.take().expect("actual spawn observed");
     assert_eq!(failed_ready.status(), None);
+    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
+    let contender = fs::OpenOptions::new().read(true).write(true).open(lock)?;
+    assert!(matches!(contender.try_lock(), Err(fs::TryLockError::WouldBlock)));
     fs::write(release, [])?;
     assert_eq!(wait(&failed_ready).code(), Some(23));
     assert_eq!(failed_ready.status().and_then(|status| status.code()), Some(23));
-    assert!(open(&base.join("absent"), &mut observed).is_err());
+    contender.try_lock().map_err(io::Error::other)?;
+    drop(contender);
+    assert!(handoff(&base.join("absent"), &mut observed).is_err());
     assert!(observed.is_none());
 
     let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
@@ -387,5 +395,105 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
     assert_eq!(pending.status(), None);
     drop(resume);
     assert!(wait(&pending).success());
+    Ok(())
+}
+
+#[test]
+fn writer_handoff_leaves_no_caller_lock_alias() -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    const FIXTURE: &str = "LEAN_RS_TEST_WRITER_HANDOFF";
+    const TEST: &str = "stage_permit::writer_handoff_leaves_no_caller_lock_alias";
+    let command = || -> io::Result<Command> {
+        let mut command = Command::new(std::env::current_exe()?);
+        command.args(["--exact", TEST, "--nocapture"]);
+        Ok(command)
+    };
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let fixture = StageFixture::new()?;
+        let base = fixture.temp.path().canonicalize()?;
+        let status = command()?
+            .env(FIXTURE, &base)
+            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", &fixture.registry)
+            .env("TMPDIR", &base)
+            .status()?;
+        assert!(status.success());
+        return Ok(());
+    };
+    let project = Path::new(&base).join("demo");
+    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
+    let lock_identity = |metadata: &fs::Metadata| format!("{}:{}", metadata.dev(), metadata.ino());
+    if let Ok(expected) = std::env::var("LEAN_RS_TEST_WRITER_HANDOFF_INODE") {
+        let file = fs::OpenOptions::new().read(true).write(true).open(lock)?;
+        assert_eq!(lock_identity(&file.metadata()?), expected);
+        let result = file.try_lock();
+        if std::env::var_os("LEAN_RS_TEST_WRITER_HANDOFF_BLOCKED").is_some() {
+            assert!(matches!(result, Err(fs::TryLockError::WouldBlock)), "{result:?}");
+        } else {
+            result.map_err(io::Error::other)?;
+        }
+        return Ok(());
+    }
+    let helper = Path::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
+    let timeout = Duration::from_secs(5);
+    let mut observed = None;
+    let mut writer =
+        SharedWriter::open_with_write_roots_handoff_observed(helper, &project, &[], timeout, &|| false, &mut observed)?;
+    let identity = lock_identity(&fs::metadata(&lock)?);
+    let contender = |blocked| -> io::Result<()> {
+        let mut attempt = command()?;
+        attempt.env("LEAN_RS_TEST_WRITER_HANDOFF_INODE", &identity);
+        if blocked {
+            attempt.env("LEAN_RS_TEST_WRITER_HANDOFF_BLOCKED", "1");
+        }
+        assert!(attempt.status()?.success());
+        Ok(())
+    };
+    contender(true)?;
+    let ready = writer.stage_ready()?.clone();
+    let cutoff = expiry(Duration::from_secs(1))?;
+    let permit = WriterStagePermit::new(ready.clone(), ready.boot(), cutoff)?;
+    let marker = project.join("handoff-stage-entered");
+    let mut payload = Command::new("/bin/sh");
+    payload
+        .args(["-c", "touch \"$1\" && exec /bin/sleep 30", "handoff-stage"])
+        .arg(&marker);
+    let checked_during_payload = std::cell::Cell::new(false);
+    let expired = || {
+        if marker.is_file() && !checked_during_payload.replace(true) {
+            contender(true).expect("independent contender while the payload is active");
+        }
+        guardian_deadline_ticks().map_or(true, |ticks| ticks.as_nanos() >= u128::from(cutoff))
+    };
+    let failure = writer
+        .run_permitted(&payload, permit, &expired)
+        .expect_err("deadline stops payload");
+    let failure = WriterFailure::from_io(&failure).expect("exact command stop");
+    assert_eq!(failure.disposition, WriterDisposition::Stopped);
+    assert_eq!(
+        field(
+            failure.stop_receipt.as_ref().expect("owned closure"),
+            "owned_work_stopped"
+        ),
+        true
+    );
+
+    assert!(
+        checked_during_payload.get(),
+        "the real payload reached the contention check"
+    );
+
+    let observed = observed.expect("helper exit observation");
+    let until = std::time::Instant::now()
+        .checked_add(timeout)
+        .expect("bounded exit wait");
+    while observed.status().is_none() {
+        assert!(std::time::Instant::now() < until, "helper did not exit");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(observed.status().is_some_and(|status| status.success()));
+    // The original handle is still alive and has never called close or Drop.
+    contender(false)?;
+    assert_eq!(writer.project_root(), project);
+    writer.close(timeout)?;
     Ok(())
 }

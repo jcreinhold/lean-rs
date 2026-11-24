@@ -718,7 +718,7 @@ pub struct SharedWriter {
     stage: StageState,
     managed: bool,
     asset_dir: PathBuf,
-    _controller_locks: Vec<File>,
+    controller_locks: Vec<File>,
 }
 
 /// Boot-qualified identity of the exact helper holding Ready custody.
@@ -859,6 +859,7 @@ impl SharedWriter {
 
     /// Open with an observation slot that survives Ready failure or consuming close.
     /// The slot is cleared before admission and filled only for an actual spawn.
+    /// Caller aliases stay held for legacy shared metadata publication.
     ///
     /// # Errors
     /// Returns the same errors as [`Self::open_with_write_roots`]. An error
@@ -882,6 +883,34 @@ impl SharedWriter {
             cancelled,
             Some(observed),
         )
+    }
+
+    /// Transfer the entire exclusive lock union to the exact Ready helper.
+    ///
+    /// After success this handle retains no caller lock aliases. Use this entry point
+    /// only when the helper owns all writes. The existing open methods retain
+    /// caller custody for operations that publish their own shared metadata.
+    ///
+    /// # Errors
+    /// Refuses unavailable or mismatched Ready custody before dispatch.
+    /// A failure after spawn leaves the exact helper exit observation in
+    /// `observed`, including when Ready could not be confirmed.
+    pub fn open_with_write_roots_handoff_observed(
+        executable: &Path,
+        root: &Path,
+        prepared_roots: &[PathBuf],
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+        observed: &mut Option<WriterExitObservation>,
+    ) -> io::Result<Self> {
+        let mut writer =
+            Self::open_with_write_roots_observed(executable, root, prepared_roots, timeout, cancelled, observed)?;
+        writer
+            .stage_ready()
+            .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
+        // Close these aliases without unlocking the inherited descriptions.
+        writer.controller_locks.clear();
+        Ok(writer)
     }
 
     /// Open a writer with the standalone helper's v1 managed storage request.
@@ -1082,7 +1111,7 @@ impl SharedWriter {
                 stage: StageState::Ready,
                 managed: storage_request.is_some(),
                 asset_dir: PathBuf::new(),
-                _controller_locks: duplicates,
+                controller_locks: duplicates,
             };
             let locked = client.receive_until(deadline, cancelled)?;
             let owner = field(&locked, "owner");
