@@ -896,9 +896,15 @@ impl Guardian {
         if field(&owner, "version") != 3 || field(&owner, "generation_id") != self.nonce.as_str() {
             return Err(invalid("native read plan owner differs"));
         }
-        owner["version"] = json!(4);
-        owner["scope"] = json!("inherited-process-group-v4");
-        owner["planned_read_domains"] = serde_json::to_value(&plans).map_err(io::Error::other)?;
+        let fields = owner
+            .as_object_mut()
+            .ok_or_else(|| invalid("native owner record must be object"))?;
+        fields.insert("version".to_owned(), json!(4));
+        fields.insert("scope".to_owned(), json!("inherited-process-group-v4"));
+        fields.insert(
+            "planned_read_domains".to_owned(),
+            serde_json::to_value(&plans).map_err(io::Error::other)?,
+        );
         ownership::validate_owner_header(&owner)?;
         persist_owner(record, &owner)?;
         if hard_deadline.expired()? {
@@ -942,9 +948,11 @@ impl Guardian {
                 .plans
                 .get(self.loans.len())
                 .ok_or_else(|| invalid("native read exceeds plan"))?;
+            let received_identity = (domain.device, domain.inode);
+            let planned_identity = (expected.device, expected.inode);
             if domain.project_root != expected.project_root
                 || domain.lock_path != expected.lock_path
-                || (domain.device, domain.inode) != (expected.device, expected.inode)
+                || received_identity != planned_identity
             {
                 return Err(invalid("native read descriptor differs from plan"));
             }

@@ -266,12 +266,14 @@ impl OwnerDeadline {
                     },
                 ),
                 ArmOp::Fenced => !self.armed() && arm.command == Some(1),
-                ArmOp::Reader => !self.armed() && arm.command.is_none() && reads_retained,
-                ArmOp::Hard | ArmOp::Prepare => !self.armed() && arm.command.is_none(),
+                ArmOp::Reader | ArmOp::Hard | ArmOp::Prepare => !self.armed() && arm.command.is_none(),
             }
         };
         if !can_dispatch {
             return Err(invalid("native guardian arm command differs"));
+        }
+        if matches!(arm.op, ArmOp::Reader) && !reads_retained {
+            return Err(invalid("managed reader arm requires retained read descriptors"));
         }
         if arm.protocol != PROTOCOL || arm.nonce != nonce {
             return Err(invalid("native guardian arm binding differs"));

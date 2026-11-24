@@ -156,6 +156,8 @@ pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::import_profile:
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::imports: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::mode: lean_rs_worker_protocol::protocol::HostSessionMode
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::project_root: alloc::string::String
+pub lean_rs_worker_protocol::protocol::Request::PrepareBoundHostRead
+pub lean_rs_worker_protocol::protocol::Request::PrepareBoundHostRead::project_root: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::PrepareHostRead
 pub lean_rs_worker_protocol::protocol::Request::PrepareHostRead::project_root: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery
