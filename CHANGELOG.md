@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.10.17]
+
+- Applications can bind one native owner directory and pass it to cooperating workers, guardians, and writers.
+  Standalone SDK callers default to an SDK-owned directory. Workers and writer payloads refuse owner-directory
+  overrides that would split custody.
+- The standalone writer supports SDK-owned settings and can serve as the worker's guardian. Former settings
+  are accepted during the transition. Conflicting values are refused before startup or command dispatch.
+
 ## [0.10.16]
 
 - Managed callers can transfer exclusive lock custody to the Ready writer helper before dispatch. The helper exit
