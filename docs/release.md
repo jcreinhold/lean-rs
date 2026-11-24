@@ -31,6 +31,32 @@ verification job tests only the head.
 The repository must have a scoped crates.io publish token in the `CARGO_REGISTRY_TOKEN` Actions secret. Local publishing
 uses the same credential through `cargo login`. Keep credential setup outside release commits.
 
+## Test matched sources before pushing
+
+1. Use the current SDK checkout and run its own required checks with `scripts/prerelease.sh`. The SDK suite must not
+   depend on a downstream repo. For a coordinated change, also check the affected consumer using the exact local SDK
+   sources before pushing either repo. Test the real affected operation, not just Cargo resolution or compilation.
+2. In the consumer, use Cargo's command-line `--config` with a temporary `[patch.crates-io]` table. Point each affected
+   crate to its directory in the SDK checkout. The local version must satisfy the consumer's version requirement; if it
+   does not, temporarily align those pins and resolve the candidate lockfile. Confirm with `cargo metadata --format-version 1`
+   that the intended packages resolve to local manifests and that matched worker crates do not come from different SDK
+   versions. Do not commit local paths or a lockfile resolved against local packages.
+3. Once the agreed local acceptance checks pass, remove the overrides and publish one batch in dependency order.
+   Resolve the consumer lockfile against the published dependency and run the required release checks. A check that
+   needs a hosted runner belongs on the final candidate, not on each intermediate SDK change.
+
+For example, from lean-host-mcp with an SDK checkout at `../lean-rs` and matching version pins:
+
+```sh
+sdk=$(git -C ../lean-rs rev-parse --show-toplevel)
+cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'" metadata --format-version 1
+cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'" test -p lean-host-mcp --lib
+```
+
+This example patches one crate. When a change crosses the worker boundary, include each matching worker crate in
+the same override. Use the consumer's installed-worker test for changes to installation or process ownership.
+Review the consumer's manifest and lockfile for local changes before staging the release.
+
 ## Local fixture setup
 
 Run `scripts/prerelease.sh` from the checkout to build the existing Lake packages and run the local gates.

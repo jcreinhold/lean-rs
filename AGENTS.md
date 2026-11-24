@@ -38,6 +38,12 @@ Use nextest for runtime tests: cumulative Lean state can exhaust memory in a sha
 CI matrix and additional checks. Runtime gates use stable Rust on Linux and macOS; API and sanitizer jobs also use
 nightly.
 
+## Release rule
+
+Do not push or tag a cross-repo change until the agreed checks pass on the matched local sources. Do not publish an SDK
+version just to test a consumer. Use the [local release procedure](docs/release.md#test-matched-sources-before-pushing)
+to test the SDK and affected consumers, then ship one batch in dependency order.
+
 ## Local storage
 
 - Keep no local evidence or work output by default. If a release or maintainer decision needs a durable record, commit
