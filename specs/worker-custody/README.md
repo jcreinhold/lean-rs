@@ -1,7 +1,8 @@
 # Worker custody model
 
-This directory specifies one small `lean-rs` protocol: ownership of a native worker from launch reservation through
-physical cleanup. It does not specify host jobs, request results, databases, or downstream admission policy.
+This directory specifies one small `lean-rs` protocol: ownership of a native
+worker from launch reservation through physical cleanup. It does not specify
+host jobs, request results, databases, or downstream admission policy.
 
 `WorkerCustody.tla` separates four facts that callers must not conflate:
 
@@ -10,8 +11,9 @@ physical cleanup. It does not specify host jobs, request results, databases, or 
 3. one open-file description still holds the shared artifact lock;
 4. a writer has acquired the conflicting lock.
 
-The model is a finite design check. TLC does not prove the Rust code, the OS, or the assumptions below. The mapping and
-focused tests identify evidence that must accompany an implementation claim.
+The model is a finite design check. TLC does not prove the Rust code, the OS,
+or the assumptions below. The mapping and focused tests identify evidence that
+must accompany an implementation claim.
 
 The state is split by concern rather than by implementation object:
 
@@ -28,68 +30,88 @@ The state is split by concern rather than by implementation object:
 | `capacityReserved`, `capacityReturns` | resource accounting is distinct from process and lock state |
 | `writerAdmitted` | states the conflicting-admission safety outcome directly |
 
-Each transition represents one named boundary: reserve, spawn or spawn failure, guardian readiness, identity
-authentication, durable bootstrap identity, cleanup-lease adoption, durable Running publication, startup ACK, alias
-transfer, direct root exit, stop request, guardian loss and later detection, physical cleanup, authenticated absence
-observation, retirement, guardian close, explicit unlock, or writer acquisition. These boundaries preserve the distinct
-physical, observational and authority facts used by the checked counterexamples. The model deliberately omits request
-envelopes, command order, result persistence, pools of workers and database recovery.
+Each transition represents one named boundary: reserve, spawn or spawn failure,
+guardian readiness, identity authentication, durable bootstrap identity,
+cleanup-lease adoption, durable
+Running publication, startup ACK, alias transfer, direct
+root exit, stop request, guardian loss and later detection, physical cleanup,
+authenticated absence observation, retirement, guardian close, explicit unlock,
+or writer acquisition. These boundaries preserve the distinct physical,
+observational and authority facts used by the checked counterexamples. The
+model deliberately omits request envelopes, command order, result persistence,
+pools of workers and database recovery.
 
 ## Observable contract
 
 - Cleanup ownership and a capacity reservation exist before spawn.
 - Spawn failure releases the unused reservation.
-- Startup is admitted only after exact worker and guardian identities are authenticated, bootstrap recovery identity is
-  durably published, their cleanup lease is adopted by the tracker, Running is durably published, and the live
-  child/guardian receive ACK, in that order.
-- A failure or supervisor crash at any earlier cut retains the reservation until authenticated physical group and
-  guardian absence. The independent guardian is the bootstrap cleanup authority before lease adoption; without either
-  authority, progress is unresolved and remains fenced.
-- The durable Preparing reservation is not collectible merely because its supervisor died once spawn may have occurred.
-  Before Running, a surviving guardian or adopted owner must publish group closure; guardian absence is then
-  authenticated separately before retirement.
-- Losing the guardian is not closure. A responsive owner must observe that loss before it can request cleanup.
+- Startup is admitted only after exact worker and guardian identities are
+  authenticated, bootstrap recovery identity is durably published, their
+  cleanup lease is adopted by the tracker, Running is durably published, and
+  the live child/guardian receive ACK, in that order.
+- A failure or supervisor crash at any earlier cut retains the reservation
+  until authenticated physical group and guardian absence. The independent
+  guardian is the bootstrap cleanup authority before lease adoption; without
+  either authority, progress is unresolved and remains fenced.
+- The durable Preparing reservation is not collectible merely because its
+  supervisor died once spawn may have occurred. Before Running, a surviving
+  guardian or adopted owner must publish group closure; guardian absence is
+  then authenticated separately before retirement.
+- Losing the guardian is not closure. A responsive owner must observe that loss
+  before it can request cleanup.
 - Capacity returns at most once, and never while the worker group is present.
 - A writer is not admitted while protected worker execution remains possible.
 - An unknown observation stays fenced. It is not converted into absence.
-- Under fair cleanup, authentic observation, and retirement, a stopping worker eventually releases its capacity
-  reservation. This is conditional progress, not a scheduler or OS guarantee.
+- Under fair cleanup, authentic observation, and retirement, a stopping worker
+  eventually releases its capacity reservation. This is conditional progress,
+  not a scheduler or OS guarantee.
 
-The `historical_lock_only` mode deliberately admits a writer from lock state alone. TLC produces the expected
-counterexample after guardian loss: the guardian was the last descriptor alias, so its exit releases the lock while the
-worker group remains present. This is a model of the observed failure shape, not proof of its cause in any particular
-run.
+The `historical_lock_only` mode deliberately admits a writer from lock state
+alone. TLC produces the expected counterexample after guardian loss: the
+guardian was the last descriptor alias, so its exit releases the lock while the
+worker group remains present. This is a model of the observed failure shape,
+not proof of its cause in any particular run.
 
-The motivating disposable macOS experiment observed an exclusive lock on the same inode while the matching payload group
-still appeared present about 23 ms later. The controller then reported closed, 85 later samples were clean, and the
-final census found the processes absent. It did not identify the remaining group member, prove a live writer, observe a
-concurrent write, or establish an escaped descendant. The model preserves only the warranted counterexample: lock-based
-admission can precede authenticated group closure.
+The motivating disposable macOS experiment observed an exclusive lock on the
+same inode while the matching payload group still appeared present about 23 ms
+later. The controller then reported closed, 85 later samples were clean, and the
+final census found the processes absent. It did not identify the remaining
+group member, prove a live writer, observe a concurrent write, or establish an
+escaped descendant. The model preserves only the warranted counterexample:
+lock-based admission can precede authenticated group closure.
 
 ## OS and trust assumptions
 
 The checked good protocol assumes:
 
 - a private worker process group has no escaped or regrouped descendants;
-- group absence is reported only by an authenticated observer for the exact generation and process birth identity;
-- a live guardian detects exact supervisor death through its control channel or recorded birth identity and keeps its
-  session/group signaling authority;
-- at least one modeled cleanup authority remains responsive for conditional progress; simultaneous supervisor and
-  guardian loss may remain fenced until the group exits by itself;
-- after stopping begins, fair stop requests eventually remove the whole group; frozen or unkillable workers may remain
-  fenced forever;
-- a group may also exit naturally after all cleanup authorities disappear; passive recovery still requires persisted
-  authenticated identity or a durable bootstrap-closure receipt;
-- descriptor transfer, `dup`, `fork`, and `exec` preserve aliases to the same open-file description; closing the final
-  alias releases its `flock`;
-- an explicit `LOCK_UN` through any alias releases that open-file description's lock for all aliases;
-- managed worker code does not explicitly unlock or replace the protected descriptor behind the protocol's back;
-- the ownership registry and capacity counter serialize updates without torn or forged records.
+- group absence is reported only by an authenticated observer for the exact
+  generation and process birth identity;
+- a live guardian detects exact supervisor death through its control channel or
+  recorded birth identity and keeps its session/group signaling authority;
+- at least one modeled cleanup authority remains responsive for conditional
+  progress; simultaneous supervisor and guardian loss may remain fenced until
+  the group exits by itself;
+- after stopping begins, fair stop requests eventually remove the whole group;
+  frozen or unkillable workers may remain fenced forever;
+- a group may also exit naturally after all cleanup authorities disappear;
+  passive recovery still requires persisted authenticated identity or a durable
+  bootstrap-closure receipt;
+- descriptor transfer, `dup`, `fork`, and `exec` preserve aliases to the same
+  open-file description; closing the final alias releases its `flock`;
+- an explicit `LOCK_UN` through any alias releases that open-file description's
+  lock for all aliases;
+- managed worker code does not explicitly unlock or replace the protected
+  descriptor behind the protocol's back;
+- the ownership registry and capacity counter serialize updates without torn or
+  forged records.
 
-The last three are environmental obligations. The explicit-unlock negative mode combines an unlock with the historical
-lock-only admission rule; it shows that descriptor aliases do not preserve a lock after one alias unlocks it. The
-selected observation-based managed-writer rule still fences that state. An uncooperative external writer that ignores
-the registry can acquire the lock, so this is not a sandbox against adversarial native code.
+The last three are environmental obligations. The explicit-unlock negative
+mode combines an unlock with the historical lock-only admission rule; it shows
+that descriptor aliases do not preserve a lock after one alias unlocks it. The
+selected observation-based managed-writer rule still fences that state. An
+uncooperative external writer that ignores the registry can acquire the lock,
+so this is not a sandbox against adversarial native code.
 
 ## Mapping to current Rust
 
@@ -109,72 +131,91 @@ the registry can acquire the lock, so this is not a sandbox against adversarial 
 | shared lock aliases | `shared_reader`, `native_guardian::retain_reads`, child inherited reads | `durable_fd_union_ack_survives_abrupt_root_exit_and_fd_closing_descendant` observes retention after close; `explicit_unlock_releases_alias_lock_but_registry_fences_live_group` observes raw EX and a late write after unlock while the managed reader fence still refuses admission |
 | writer exclusion | `writer_lock` and shared-reader locks | same-inode contention tests; guardian-loss qualification exposed an early-admission trace |
 
-The ordinary group-absence path models the process tracker's custody-capacity return. The pinned terminal-leader path
-projects the registry's special stopped-parent admission rule. It tracks one retiring generation and a single successor
-reservation, with separate evidence for payload closure, original guardian closure, and the same-inode lock. A
-replacement cannot create the terminal-leader witness after both original owners are lost. Passive collection can still
-use authentic group absence. Physical closure and semantic request outcome remain separate.
+The ordinary group-absence path models the process tracker's custody-capacity
+return. The pinned terminal-leader path projects the registry's special
+stopped-parent admission rule. It tracks one retiring generation and a single
+successor reservation, with separate evidence for payload closure, original
+guardian closure, and the same-inode lock. A replacement cannot create the
+terminal-leader witness after both original owners are lost. Passive collection
+can still use authentic group absence. Physical closure and semantic request
+outcome remain separate.
 
-`"worker"` in `aliases` represents all payload-side aliases collectively, not one literal root-process descriptor.
-`GuardianReady` means the helper has sent its generation-bound HELLO and can drain the private group if ACK never
-arrives; artifact read transfer still occurs after startup and remains abstract here.
+`"worker"` in `aliases` represents all payload-side aliases collectively, not
+one literal root-process descriptor. `GuardianReady` means the helper has sent
+its generation-bound HELLO and can drain the private group if ACK never arrives;
+artifact read transfer still occurs after startup and remains abstract here.
 
-The earlier implementation had two distinct hazards. Preparing collection could use exact parent death as closure even
-though a pre-ACK child still existed. Separately, retained `run-before-running/receipt.json` on SDK `21cd9f5` observed
-early registry admission while the payload group remained present, followed by tracker release while the guardian
-remained live after a publication collision. Current code instead publishes `dispatching` before possible spawn,
-installs authenticated custody before fallible `bootstrap` publication, adopts before Running, and requires Running
-before ACK. The clean focused receipts at `/tmp/lean-sdk-clean-partial-394b6f9/receipt.json` and
-`/tmp/lean-sdk-clean-afterspawn-escalated-394b6f9/receipt.json` cover an isolated real ACK write loop under synthetic
-admission and retained `AfterSpawn` cleanup on one Darwin host. They do not cover supervisor loss at every transition,
-ECHILD at every cleanup path, escaped descendants, both cleanup authorities disappearing, Linux managed-group parity, or
-power loss. If both authorities disappear in pre-Running `dispatching` or `bootstrap` without a durable closure receipt,
-the reservation remains fenced; neither the code nor the model claims automatic recovery for that state. Persisted
-Running has a separate passive group-absence recovery rule.
+The earlier implementation had two distinct hazards. Preparing collection
+could use exact parent death as closure even though a pre-ACK child still
+existed. Separately, retained `run-before-running/receipt.json` on SDK
+`21cd9f5` observed early registry admission while the payload group remained
+present, followed by tracker release while the guardian remained live after a
+publication collision. Current code instead publishes `dispatching` before
+possible spawn, installs authenticated custody before fallible `bootstrap`
+publication, adopts before Running, and requires Running before ACK. The clean
+focused receipts at `/tmp/lean-sdk-clean-partial-394b6f9/receipt.json` and
+`/tmp/lean-sdk-clean-afterspawn-escalated-394b6f9/receipt.json` cover an
+isolated real ACK write loop under synthetic admission and retained
+`AfterSpawn` cleanup on one Darwin host. They do not cover supervisor loss at
+every transition, ECHILD at every cleanup path, escaped descendants, both
+cleanup authorities disappearing, Linux managed-group parity, or power loss.
+If both authorities disappear in pre-Running `dispatching` or `bootstrap`
+without a durable closure receipt, the reservation remains fenced; neither the
+code nor the model claims automatic recovery for that state. Persisted Running
+has a separate passive group-absence recovery rule.
 
 ## TLC checks
 
-The checked state space is intentionally small: one generation, one worker group, one guardian, and one shared open-file
-description.
+The checked state space is intentionally small: one generation, one worker
+group, one guardian, and one shared open-file description.
 
 ```sh
-python3 specs/worker-custody/check.py
+cd specs/worker-custody
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config Good.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config HistoricalLockOnly.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config StaleClosure.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config ExplicitUnlockLockOnly.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config DirectChildOnly.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config PublishBeforeAdopt.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config AckBeforeDurable.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config LoseAdoption.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config CollectPreparingOnParentDeath.cfg WorkerCustody.tla
 ```
-
-The runner checks every configuration against the outcome below and exits non-zero on any difference; CI runs it. It
-finds `java` on `PATH` or in `JAVA`, and `tla2tools.jar` in `TLA_TOOLS_JAR`. A pass means TLC found no counterexample
-within these bounds.
 
 Expected outcomes:
 
 - `Good.cfg`: all safety invariants and conditional progress pass;
 - `HistoricalLockOnly.cfg`: `WriterExclusion` fails after guardian loss;
-- `StaleClosure.cfg`: `NoEarlyCapacityReturn` fails when forged or stale absence is treated as authentic.
-- `ExplicitUnlockLockOnly.cfg`: `WriterExclusion` fails when explicit unlock is combined with the historical lock-only
-  admission rule.
-- `DirectChildOnly.cfg`: `BootstrapClosureIsSound` fails when direct-child exit is mistaken for authenticated bootstrap
-  group closure before lease adoption.
-- `PublishBeforeAdopt.cfg`: `AdoptionPrecedesRunning` fails if Running becomes durable before the cleanup lease is
-  installed.
-- `AckBeforeDurable.cfg`: `RunningPrecedesAck` fails if the child is released before durable Running publication.
-- `LoseAdoption.cfg`: `AdoptionPrecedesRunning` fails if a published generation can lose its installed cleanup
-  authority.
-- `CollectPreparingOnParentDeath.cfg`: `NoEarlyCapacityReturn` fails if parent death alone collects a pre-ACK
-  reservation while its group remains.
-- `ZombieReceiptBeforeCustodyClosed.cfg`: `ZombieAdmissionFenced` fails when a successor reserves the slot after
-  publication but before original guardian closure.
-- `ZombieWriterWithoutReceipt.cfg`: `ZombieAdmissionFenced` fails when the writer is admitted for a remaining numeric
-  group without a durable terminal-leader witness.
+- `StaleClosure.cfg`: `NoEarlyCapacityReturn` fails when forged or stale
+  absence is treated as authentic.
+- `ExplicitUnlockLockOnly.cfg`: `WriterExclusion` fails when explicit unlock is
+  combined with the historical lock-only admission rule.
+- `DirectChildOnly.cfg`: `BootstrapClosureIsSound` fails when direct-child exit
+  is mistaken for authenticated bootstrap group closure before lease adoption.
+- `PublishBeforeAdopt.cfg`: `AdoptionPrecedesRunning` fails if Running becomes
+  durable before the cleanup lease is installed.
+- `AckBeforeDurable.cfg`: `RunningPrecedesAck` fails if the child is released
+  before durable Running publication.
+- `LoseAdoption.cfg`: `AdoptionPrecedesRunning` fails if a published generation
+  can lose its installed cleanup authority.
+- `CollectPreparingOnParentDeath.cfg`: `NoEarlyCapacityReturn` fails if parent
+  death alone collects a pre-ACK reservation while its group remains.
+- `ZombieReceiptBeforeCustodyClosed.cfg`: `ZombieAdmissionFenced` fails when
+  a successor reserves the slot after publication but before original guardian closure.
+- `ZombieWriterWithoutReceipt.cfg`: `ZombieAdmissionFenced` fails when
+  the writer is admitted for a remaining numeric group without a durable
+  terminal-leader witness.
 
-The pinned terminal-leader model passed `Good.cfg` with 2,193 generated states and 701 distinct states. TLC rejected
-both pinned terminal-leader mutations.
+The pinned terminal-leader model passed `Good.cfg` with 2,193 generated states
+and 701 distinct states. TLC rejected both pinned terminal-leader mutations.
 
-Keep the failing configurations. They are executable statements of distinct trust boundaries, not passing qualification
-cases.
+Keep the failing configurations. They are executable statements of distinct trust
+boundaries, not passing qualification cases.
 
-With TLC 2.19, Java 21.0.13.0.3 and one worker, the checked good configuration generated 1,461 states and found 465
-distinct states. The negative configurations stop at their first expected counterexample, so their explored counts are
-not complete state-space sizes.
+With TLC 2.19, Java 21.0.13.0.3 and one worker, the checked good configuration
+generated 1,461 states and found 465 distinct states. The negative configurations
+stop at their first expected counterexample, so their explored counts are not
+complete state-space sizes.
 
 ## Composition boundary
 
@@ -185,34 +226,41 @@ The host may request a fresh worker and consume these outputs only:
 - closure certified, or closure unknown;
 - capacity returned once.
 
-The host must not infer closure from a free artifact lock, guardian death, controller death, a numeric PID, or missing
-status. End-to-end host properties must state their reliance on this interface; passing this model and a host model
+The host must not infer closure from a free artifact lock, guardian death,
+controller death, a numeric PID, or missing status. End-to-end host properties
+must state their reliance on this interface; passing this model and a host model
 separately is not a composition proof.
 
-Each main worker, preparation worker, or semantic companion is a separate instance of this custody contract. Multiple
-commands within one companion are host/worker-protocol semantics and stay outside this model. The host must keep a
-companion's capacity reserved when its command outcome is known but cleanup is not; the SDK reports those facts
-separately.
+Each main worker, preparation worker, or semantic companion is a separate
+instance of this custody contract. Multiple commands within one companion are
+host/worker-protocol semantics and stay outside this model. The host must keep a
+companion's capacity reserved when its command outcome is known but cleanup is
+not; the SDK reports those facts separately.
 
 ## Startup-error negative controls
 
-Two focused controls preserve the distinct failures observed by the one-use `before-running` experiment on runtime
-`5ff75ec` (SDK model revision `21cd9f5`):
+Two focused controls preserve the distinct failures observed by the one-use
+`before-running` experiment on runtime `5ff75ec` (SDK model revision `21cd9f5`):
 
-- `DropPreparingAfterPossibleSpawn.cfg` reaches authenticated HELLO before Running or lease adoption, then models
-  erroneous Preparing retirement after an accept error. `NoEarlyCapacityReturn` fails while payload and guardian are
-  present. The concrete cut was `owner.write` returning `AlreadyExists`, followed by `ParentLifetime::drop` retiring and
-  deleting the original Preparing record.
-- `DirectExitReturnsTrackerCapacity.cfg` reaches authenticated HELLO without adoption, then payload absence with a live
-  guardian. It models the unattached direct-child wait returning the tracker reservation.
+- `DropPreparingAfterPossibleSpawn.cfg` reaches authenticated HELLO before
+  Running or lease adoption, then models erroneous Preparing retirement after
+  an accept error. `NoEarlyCapacityReturn` fails while payload and guardian are
+  present. The concrete cut was `owner.write` returning `AlreadyExists`, followed
+  by `ParentLifetime::drop` retiring and deleting the original Preparing record.
+- `DirectExitReturnsTrackerCapacity.cfg` reaches authenticated HELLO without
+  adoption, then payload absence with a live guardian. It models the unattached
+  direct-child wait returning the tracker reservation.
   `GuardianPresentImpliesCapacity` fails even though the payload is absent.
 
-In the first control `capacityReserved` projects the durable registry reservation; in the second it projects the same
-in-memory tracker's custody reservation. These are separate configurations, not a model of two coupled counters. In
-particular, the tracker observation must not be inferred from registry admission, and the registry's guardian-only
-occupancy policy is not the payload-present failure. The good protocol is unchanged. Neither negative control simulates
-filesystem error delivery, kernel wait semantics, or proves their Rust implementation.
+In the first control `capacityReserved` projects the durable registry reservation;
+in the second it projects the same in-memory tracker's custody reservation. These
+are separate configurations, not a model of two coupled counters. In particular,
+the tracker observation must not be inferred from registry admission, and the
+registry's guardian-only occupancy policy is not the payload-present failure.
+The good protocol is unchanged. Neither negative control simulates filesystem
+error delivery, kernel wait semantics, or proves their Rust implementation.
 
-Run these controls with the same Java/TLC command above, substituting their `.cfg` names. Each must fail its named
-invariant with a reachable trace; a failed control is not successful runtime qualification. Preserve the failed
-experiment and its clean final census separately from these abstract traces.
+Run these controls with the same Java/TLC command above, substituting their
+`.cfg` names. Each must fail its named invariant with a reachable trace; a failed
+control is not successful runtime qualification. Preserve the failed experiment
+and its clean final census separately from these abstract traces.

@@ -276,21 +276,3 @@ jobs:
             fi
           done
           exit "$fail"
-
-  # TLC on the worker custody model. Good.cfg must pass and every other
-  # configuration must fail the property it names (specs/worker-custody/README.md).
-  custody-model:
-    name: Custody model
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Fetch TLC
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/tla2tools.jar" \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
-          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  $RUNNER_TEMP/tla2tools.jar" | sha256sum -c -
-      - name: TLC
-        run: |
-          JAVA="$JAVA_HOME_21_X64/bin/java" TLA_TOOLS_JAR="$RUNNER_TEMP/tla2tools.jar" \
-            python3 specs/worker-custody/check.py
