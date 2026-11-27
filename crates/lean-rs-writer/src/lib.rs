@@ -38,6 +38,8 @@ use rustix::process::{Pid, getpgrp, getsid, setsid};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub mod log;
+
 /// Version of the shared-writer CLI and ownership record.
 pub const PROTOCOL: u32 = 1;
 const FRAME_BYTES: u64 = 1024 * 1024;
@@ -959,7 +961,8 @@ fn barrier_closed(barrier: &rustix::fd::OwnedFd) -> io::Result<bool> {
 }
 
 // Two streams at this limit still fit the 1 MiB control frame even when
-// every byte needs JSON's longest six-byte escape. No log tempfile can grow.
+// every byte needs JSON's longest six-byte escape. A run with a log sends its
+// output to the log instead.
 const CAPTURE_BYTES: usize = 64 * 1024;
 
 struct Capture {
@@ -968,12 +971,18 @@ struct Capture {
     overflowed: bool,
 }
 
+/// A pipe whose ends close on exec, with a nonblocking read end.
+fn output_pipe() -> io::Result<(rustix::fd::OwnedFd, rustix::fd::OwnedFd)> {
+    let (read, write) = pipe()?;
+    fcntl_setfd(&read, FdFlags::CLOEXEC)?;
+    fcntl_setfd(&write, FdFlags::CLOEXEC)?;
+    fcntl_setfl(&read, fcntl_getfl(&read)? | OFlags::NONBLOCK)?;
+    Ok((read, write))
+}
+
 impl Capture {
     fn pipe() -> io::Result<(Self, Stdio)> {
-        let (read, write) = pipe()?;
-        fcntl_setfd(&read, FdFlags::CLOEXEC)?;
-        fcntl_setfd(&write, FdFlags::CLOEXEC)?;
-        fcntl_setfl(&read, fcntl_getfl(&read)? | OFlags::NONBLOCK)?;
+        let (read, write) = output_pipe()?;
         Ok((
             Self {
                 descriptor: read,
@@ -1019,16 +1028,61 @@ impl Capture {
     }
 }
 
-fn poll_output(stdout: &mut Capture, stderr: &mut Capture, read_error: &str, reason: &mut Option<String>) {
-    for capture in [stdout, stderr] {
-        match capture.read_available() {
-            Ok(true) => {
-                reason.get_or_insert_with(|| "writer captured output limit exceeded".to_owned());
+/// Where a stage's stdout and stderr go: two captures that the stopped frame
+/// carries, or one pipe into the caller's log.
+enum StageOutput {
+    Captured(Capture, Capture),
+    Logged(log::LogSink),
+}
+
+impl StageOutput {
+    /// The helper's side and the stage's stdout and stderr.
+    fn open(log: Option<log::CappedLog>) -> io::Result<(Self, Stdio, Stdio)> {
+        let Some(log) = log else {
+            let (stdout, child_stdout) = Capture::pipe()?;
+            let (stderr, child_stderr) = Capture::pipe()?;
+            return Ok((Self::Captured(stdout, stderr), child_stdout, child_stderr));
+        };
+        let (read, write) = output_pipe()?;
+        let stderr = write.try_clone()?;
+        Ok((
+            Self::Logged(log::LogSink::new(read, log)),
+            Stdio::from(write),
+            Stdio::from(stderr),
+        ))
+    }
+
+    /// Read what the stage has written. A capture over its limit stops the
+    /// stage; a log never does.
+    fn poll(&mut self, read_error: &str, reason: &mut Option<String>) {
+        match self {
+            Self::Captured(stdout, stderr) => {
+                for capture in [stdout, stderr] {
+                    match capture.read_available() {
+                        Ok(true) => {
+                            reason.get_or_insert_with(|| "writer captured output limit exceeded".to_owned());
+                        }
+                        Err(error) => {
+                            reason.get_or_insert_with(|| format!("{read_error}: {error}"));
+                        }
+                        Ok(false) => {}
+                    }
+                }
             }
-            Err(error) => {
-                reason.get_or_insert_with(|| format!("{read_error}: {error}"));
+            Self::Logged(sink) => {
+                if let Err(error) = sink.read_available() {
+                    reason.get_or_insert_with(|| format!("writer log failed: {error}"));
+                }
             }
-            Ok(false) => {}
+        }
+    }
+
+    /// The stdout and stderr a stopped frame carries. A logged stage's output
+    /// is in its log.
+    fn texts(&self) -> (String, String) {
+        match self {
+            Self::Captured(stdout, stderr) => (stdout.text(), stderr.text()),
+            Self::Logged(_) => (String::new(), String::new()),
         }
     }
 }
@@ -1090,21 +1144,33 @@ fn write_launch(
 
 const DESCENDANT_EXIT_GRACE: Duration = Duration::from_millis(100);
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "private lifecycle seam keeps actual process and lock custody testable"
-)]
+/// What a writer holds across its stages: the project, its lock files and the
+/// owner record each stage writes its process into.
+struct Custody<'a> {
+    root: &'a Path,
+    lock_path: &'a Path,
+    file: &'a mut File,
+    loans: &'a [File],
+    record: &'a Record,
+}
+
+/// Run one stage. Tests pass a fixture `launcher` to drive real process and
+/// lock custody.
 fn execute_with_launcher(
+    custody: Custody<'_>,
     message: &Value,
-    root: &Path,
-    lock_path: &Path,
-    file: &mut File,
-    loans: &[File],
-    record: &Record,
+    log: Option<log::CappedLog>,
     input: &Receiver<io::Result<Value>>,
     launcher: &Path,
     mut emit: impl FnMut(&Value) -> io::Result<()>,
 ) -> io::Result<bool> {
+    let Custody {
+        root,
+        lock_path,
+        file,
+        loans,
+        record,
+    } = custody;
     canonical(root)?;
     let timeout = duration(
         field(message, "timeout")
@@ -1115,8 +1181,7 @@ fn execute_with_launcher(
     let deadline = started
         .checked_add(timeout)
         .ok_or_else(|| invalid("writer timeout is too large"))?;
-    let (mut stdout, child_stdout) = Capture::pipe()?;
-    let (mut stderr, child_stderr) = Capture::pipe()?;
+    let (mut output, child_stdout, child_stderr) = StageOutput::open(log)?;
     let (barrier, inherited) = pipe()?;
     fcntl_setfd(&barrier, FdFlags::CLOEXEC)?;
     fcntl_setfl(&barrier, fcntl_getfl(&barrier)? | OFlags::NONBLOCK)?;
@@ -1193,7 +1258,7 @@ fn execute_with_launcher(
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
-        poll_output(&mut stdout, &mut stderr, "writer output read failed", &mut reason);
+        output.poll("writer output read failed", &mut reason);
         let status = match group.try_wait() {
             Ok(status) => status,
             Err(error) => {
@@ -1244,13 +1309,14 @@ fn execute_with_launcher(
                 if let Err(error) = &cleared {
                     reason.get_or_insert_with(|| format!("writer closed but ownership record cleanup failed: {error}"));
                 }
-                poll_output(&mut stdout, &mut stderr, "writer final output read failed", &mut reason);
+                output.poll("writer final output read failed", &mut reason);
                 let unavailable = reason.is_some() || group.intervened();
+                let (stdout, stderr) = output.texts();
                 // Physical closure is a distinct terminal fact even when the
                 // command's result is unusable. Never lose it behind the earlier
                 // provisional stopping frame or interpret exit zero as success.
                 let result = json!({"state":"stopped","exit_code":code(status),
-                    "stdout":stdout.text(),"stderr":stderr.text(),"process":process,
+                    "stdout":stdout,"stderr":stderr,"process":process,
                     "owner":record.owner,"owned_work_stopped":true,"cancelled":cancelled,
                     "intervened":unavailable,"result":if unavailable {"no_result"} else {"result"},
                     "reason":reason});
@@ -1374,21 +1440,23 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                             return Err(invalid("native artifact readers remain unresolved before GO"));
                         }
                     }
-                    if let Err(error) = normalize_owner_directory(&mut message, &registry_directory()?) {
-                        send(&json!({"state":"stage_refused","owner":record.owner,"reason":error.to_string()}))?;
-                        continue;
-                    }
-                    if !execute_with_launcher(
-                        &message,
-                        &args.root,
-                        &args.lock,
-                        &mut file,
-                        &loans,
-                        &record,
-                        &input,
-                        &std::env::current_exe()?,
-                        send,
-                    )? {
+                    let log = match normalize_owner_directory(&mut message, &registry_directory()?)
+                        .and_then(|()| log::take_log(&mut message))
+                    {
+                        Ok(log) => log,
+                        Err(error) => {
+                            send(&json!({"state":"stage_refused","owner":record.owner,"reason":error.to_string()}))?;
+                            continue;
+                        }
+                    };
+                    let custody = Custody {
+                        root: &args.root,
+                        lock_path: &args.lock,
+                        file: &mut file,
+                        loans: &loans,
+                        record: &record,
+                    };
+                    if !execute_with_launcher(custody, &message, log, &input, &std::env::current_exe()?, send)? {
                         // Ok(false) follows group and descriptor closure, the synced
                         // custody update, and delivery of stopped/no_result.
                         break;
@@ -1413,6 +1481,61 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_reports_first_overflow_then_keeps_draining_without_growing_prefix() {
+        let (read, write) = pipe().expect("test pipe");
+        fcntl_setfl(&read, fcntl_getfl(&read).expect("read flags") | OFlags::NONBLOCK).expect("nonblocking reader");
+        fcntl_setfl(&write, fcntl_getfl(&write).expect("write flags") | OFlags::NONBLOCK).expect("nonblocking writer");
+        let mut capture = Capture {
+            descriptor: read,
+            bytes: Vec::new(),
+            overflowed: false,
+        };
+        let chunk = [b'x'; 1024];
+        // Every poll must consume the next chunk even after overflow. A reader
+        // that only returns its overflow flag leaves these bytes in the pipe.
+        for index in 0..256_usize {
+            assert_eq!(rustix::io::write(&write, &chunk).expect("write chunk"), chunk.len());
+            assert_eq!(capture.read_available().expect("drain chunk"), index >= 64);
+            if index == 64 {
+                assert!(capture.overflowed, "the first excess chunk reports overflow at once");
+                assert_eq!(capture.bytes.len(), CAPTURE_BYTES);
+            }
+            // No queued chunk may survive because the overflow flag is already set.
+            let mut leftover = [0; 1];
+            assert_eq!(
+                rustix::io::read(&capture.descriptor, &mut leftover),
+                Err(rustix::io::Errno::AGAIN)
+            );
+            assert_eq!(
+                capture.bytes.len(),
+                index.saturating_add(1).saturating_mul(chunk.len()).min(CAPTURE_BYTES)
+            );
+        }
+        assert!(capture.bytes.iter().all(|byte| *byte == b'x'));
+        drop(write);
+        assert!(capture.read_available().expect("overflow remains visible at EOF"));
+    }
+
+    #[test]
+    fn capture_exact_limit_is_not_overflow() {
+        let (read, write) = pipe().expect("test pipe");
+        fcntl_setfl(&read, fcntl_getfl(&read).expect("read flags") | OFlags::NONBLOCK).expect("nonblocking reader");
+        let mut capture = Capture {
+            descriptor: read,
+            bytes: Vec::new(),
+            overflowed: false,
+        };
+        let chunk = [b'a'; 1024];
+        for _ in 0..64 {
+            assert_eq!(rustix::io::write(&write, &chunk).expect("write chunk"), chunk.len());
+            assert!(!capture.read_available().expect("drain exact prefix"));
+        }
+        drop(write);
+        assert!(!capture.read_available().expect("exact prefix EOF"));
+        assert_eq!(capture.bytes.len(), CAPTURE_BYTES);
+    }
 
     fn process_identity() -> ProcessIdentity {
         ProcessIdentity {

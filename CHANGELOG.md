@@ -40,6 +40,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   `writer-storage` commands.
 - A lock record or owner-registry entry left by a 0.10 storage turn now refuses writer admission instead of
   reading as a stopped writer.
+- A host binary can serve the writer's helper subcommands itself: flatten `lean_rs_writer::HelperCommand` into
+  its command line and call `HelperCommand::run`. `lean_rs_writer::use_helper_executable` names the helper for a
+  process that does not serve them, such as a test, and `lean_rs_writer::contract()` reports it.
+- A writer stage can send its stdout and stderr to a capped log file instead of the 64 KiB capture, whose overflow
+  stops the stage: set `LEAN_RS_WRITER_LOG` (an absolute path) and `LEAN_RS_WRITER_LOG_LIMIT` (bytes) on the
+  command. Past the cap the log gets one truncation line and the stage keeps running.
+  `lean_rs_writer::log::CappedLog` adds a caller's own lines under the same cap. A stage the helper refuses, such
+  as for bad log settings, now fails as `NotStarted` and leaves the writer open.
 - The import planner and Lake module discovery are gone; no consumer used them, and Lake owns the module graph.
   `lean-rs-worker-parent` loses `LeanWorkerImportPlanner`, `LeanWorkerImportPlanConfig`,
   `LeanWorkerPlanMetadataExpectation`, `LeanWorkerModuleWork`, `LeanWorkerPlannedBatch`,

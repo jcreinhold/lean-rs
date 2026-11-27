@@ -37,6 +37,12 @@ print('actual stdout', flush=True)
 print('actual stderr', file=sys.stderr, flush=True)
 if mode == 'clean':
     sys.exit(0)
+if mode == 'large':
+    sys.stdout.buffer.write(b'o' * 100000)
+    sys.stdout.flush()
+    sys.stderr.buffer.write(b'e' * 100000)
+    sys.stderr.flush()
+    sys.exit(0)
 if mode == 'flood':
     stream = 2 if os.fork() == 0 else 1
     os.write(stream, b'\0' * (1024 * 1024))
@@ -131,17 +137,24 @@ impl Fixture {
         input: &Receiver<io::Result<Value>>,
         emit: impl FnMut(&Value) -> io::Result<()>,
     ) -> io::Result<bool> {
-        execute_with_launcher(
-            message,
-            &self.root,
-            &self.lock_path,
-            &mut self.file,
-            &self.loans,
-            &self.record,
-            input,
-            &self.launcher,
-            emit,
-        )
+        self.run_logged(message, input, None, emit)
+    }
+
+    fn run_logged(
+        &mut self,
+        message: &Value,
+        input: &Receiver<io::Result<Value>>,
+        log: Option<log::CappedLog>,
+        emit: impl FnMut(&Value) -> io::Result<()>,
+    ) -> io::Result<bool> {
+        let custody = Custody {
+            root: &self.root,
+            lock_path: &self.lock_path,
+            file: &mut self.file,
+            loans: &self.loans,
+            record: &self.record,
+        };
+        execute_with_launcher(custody, message, log, input, &self.launcher, emit)
     }
 
     fn readonly_loan(&mut self) {
@@ -481,5 +494,38 @@ fn output_overflow_stops_scope_with_bounded_terminal_no_result() {
     assert!(terminal["stderr"].as_str().unwrap().len() <= CAPTURE_BYTES);
     assert!(serde_json::to_vec(terminal).unwrap().len() < FRAME_BYTES as usize);
     assert!(terminal["reason"].as_str().unwrap().contains("output limit"));
+    fixture.assert_closed(&frames);
+}
+
+#[test]
+fn logged_output_past_the_cap_finishes_with_one_truncation_line_and_no_kill() {
+    let mut fixture = Fixture::new("large");
+    let path = fixture.root.join("build.log");
+    // Twice the capture limit, under the 200 KB the stage prints.
+    let limit = 2 * CAPTURE_BYTES;
+    let log = log::CappedLog::open(&path, limit as u64).unwrap();
+    let (_sender, input) = mpsc::channel();
+    let mut frames = Vec::new();
+    assert!(
+        fixture
+            .run_logged(&message(3.0), &input, Some(log), |frame| {
+                frames.push(frame.clone());
+                Ok(())
+            })
+            .unwrap()
+    );
+    let stopped = frames.last().unwrap();
+    assert_eq!(stopped["state"], "stopped");
+    assert_eq!(stopped["result"], "result");
+    assert_eq!(stopped["intervened"], false);
+    assert_eq!(stopped["exit_code"], 0);
+    assert_eq!(stopped["stdout"], "");
+    assert_eq!(stopped["stderr"], "");
+    assert!(!frames.iter().any(|frame| frame["state"] == "still_running"));
+    let bytes = fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), limit + log::TRUNCATED.len());
+    assert!(bytes.starts_with(b"actual stdout\nactual stderr\nooo"));
+    assert!(bytes.ends_with(log::TRUNCATED));
+    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     fixture.assert_closed(&frames);
 }

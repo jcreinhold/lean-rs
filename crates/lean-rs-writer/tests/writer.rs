@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use lean_rs_writer::log::{LOG_ENV, LOG_LIMIT_ENV};
 use lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV;
 use lean_toolchain::shared_writer::{
     SharedWriter, WriterDisposition, WriterExitObservation, WriterFailure, project_lock_path,
@@ -215,6 +216,88 @@ fn sdk_writer_payload_preserves_the_owner_directory() -> io::Result<()> {
     }
     writer.close(timeout)?;
     assert!(fs::read_dir(base.join("scratch"))?.next().is_none());
+    Ok(())
+}
+
+#[test]
+fn sdk_writer_logs_large_output_and_survives_a_refused_log() -> io::Result<()> {
+    const TEST: &str = "sdk_writer_logs_large_output_and_survives_a_refused_log";
+    const FIXTURE: &str = "LEAN_RS_TEST_WRITER_LOG_FIXTURE";
+    const TRUNCATED: &[u8] = b"\n[lean-rs-writer: log limit reached; later output dropped]\n";
+    let Some(base) = std::env::var_os(FIXTURE) else {
+        let fixture = Fixture::new()?;
+        return rerun(
+            TEST,
+            &[
+                (FIXTURE, fixture.base()?.as_path()),
+                (OWNERS_DIRECTORY_ENV, fixture.registry.as_path()),
+                ("TMPDIR", fixture.scratch.as_path()),
+            ],
+        );
+    };
+    let base = Path::new(&base);
+    let project = base.join("demo");
+    let timeout = Duration::from_secs(3);
+    let mut writer = SharedWriter::open(Path::new(HELPER), &project, timeout)?;
+
+    // A log without its cap is refused before launch, and the writer stays open.
+    let marker = project.join("command-dispatched");
+    let mut command = Command::new("/usr/bin/touch");
+    command.arg(&marker).env(LOG_ENV, base.join("refused.log"));
+    let Err(error) = writer.run(&command, timeout) else {
+        return Err(io::Error::other("a log without a cap dispatched its command"));
+    };
+    let refused = WriterFailure::from_io(&error).ok_or_else(|| missing("typed refusal"))?;
+    assert_eq!(refused.disposition, WriterDisposition::NotStarted);
+    assert!(refused.detail.contains(LOG_LIMIT_ENV), "{error}");
+    assert!(!marker.exists());
+
+    // So is a log path the helper will not open.
+    let elsewhere = base.join("elsewhere.log");
+    fs::write(&elsewhere, [])?;
+    let link = base.join("link.log");
+    std::os::unix::fs::symlink(&elsewhere, &link)?;
+    let mut command = Command::new("/usr/bin/touch");
+    command.arg(&marker).env(LOG_ENV, &link).env(LOG_LIMIT_ENV, "100");
+    let Err(error) = writer.run(&command, timeout) else {
+        return Err(io::Error::other("a linked log dispatched its command"));
+    };
+    let refused = WriterFailure::from_io(&error).ok_or_else(|| missing("typed refusal"))?;
+    assert_eq!(refused.disposition, WriterDisposition::NotStarted);
+    assert!(!marker.exists());
+
+    // Output far past the 64 KiB capture limit goes to the log, which keeps
+    // its cap, and the stage still finishes with a result.
+    let log = base.join("build.log");
+    let mut command = Command::new("/bin/sh");
+    command
+        .args([
+            "-c",
+            "printf note; /usr/bin/head -c 200000 /dev/zero; /usr/bin/head -c 200000 /dev/zero >&2",
+        ])
+        .env(LOG_ENV, &log)
+        .env(LOG_LIMIT_ENV, "100000");
+    let output = writer.run(&command, timeout)?;
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    let bytes = fs::read(&log)?;
+    assert_eq!(bytes.len(), 100_000 + TRUNCATED.len());
+    assert!(bytes.starts_with(b"note\0"));
+    assert!(bytes.ends_with(TRUNCATED));
+
+    // The stage never sees the log settings.
+    let log = base.join("env.log");
+    let mut command = Command::new("/bin/sh");
+    command
+        .args([
+            "-c",
+            &format!("printf %s \"${{{LOG_ENV}-unset}} ${{{LOG_LIMIT_ENV}-unset}}\""),
+        ])
+        .env(LOG_ENV, &log)
+        .env(LOG_LIMIT_ENV, "100");
+    assert!(writer.run(&command, timeout)?.status.success());
+    assert_eq!(fs::read(&log)?, b"unset unset");
+    writer.close(timeout)?;
     Ok(())
 }
 

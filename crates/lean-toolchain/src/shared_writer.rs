@@ -1236,6 +1236,18 @@ impl SharedWriter {
                     }
                     process = Some(identity.clone());
                 }
+                Some("stage_refused") if process.is_none() && reason.is_none() => {
+                    // The helper refused this stage before it launched anything,
+                    // such as for bad log settings, and waits for the next action.
+                    self.sealed = false;
+                    return Err(failure(
+                        WriterDisposition::NotStarted,
+                        invalid(format!(
+                            "writer refused the stage: {}",
+                            field(&frame, "reason").as_str().unwrap_or("no reason given")
+                        )),
+                    ));
+                }
                 Some("still_running" | "unknown") => {
                     if reason.is_none() {
                         reason = Some(
