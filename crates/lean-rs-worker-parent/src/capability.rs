@@ -2220,7 +2220,7 @@ impl LeanWorkerChild {
     /// Bind a link-free independent guardian for this worker generation.
     ///
     /// Use the same ownership registry for the guardian and all managed
-    /// writers; MCP supplies the shared default registry explicitly.
+    /// writers.
     #[cfg(unix)]
     #[must_use]
     pub fn native_guardian(mut self, executable: impl Into<PathBuf>) -> Self {

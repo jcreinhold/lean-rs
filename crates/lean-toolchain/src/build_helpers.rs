@@ -2702,8 +2702,8 @@ mod tests {
             "LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"
         );
         assert_eq!(
-            capability_env_var("lean-dup_index"),
-            "LEAN_RS_CAPABILITY_LEAN_DUP_INDEX_DYLIB"
+            capability_env_var("demo-tool_index"),
+            "LEAN_RS_CAPABILITY_DEMO_TOOL_INDEX_DYLIB"
         );
     }
 
@@ -2714,8 +2714,8 @@ mod tests {
             "LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"
         );
         assert_eq!(
-            capability_manifest_env_var("lean-dup_index"),
-            "LEAN_RS_CAPABILITY_LEAN_DUP_INDEX_MANIFEST"
+            capability_manifest_env_var("demo-tool_index"),
+            "LEAN_RS_CAPABILITY_DEMO_TOOL_INDEX_MANIFEST"
         );
     }
 

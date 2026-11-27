@@ -3,7 +3,7 @@
 //! Run from the workspace root:
 //!
 //! ```sh
-//! cargo run -p lean-rs-worker --example worker_capability_runner
+//! cargo run -p lean-rs-worker-child --example worker_capability_runner
 //! ```
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::print_stdout)]
@@ -104,7 +104,7 @@ fn run_index(
     let Some(metadata) = summary.metadata.as_ref() else {
         return Err(format!("{label} terminal metadata was missing").into());
     };
-    if !metadata.ok || metadata.command != "index" || metadata.fixture != "lean-dup-shaped" {
+    if !metadata.ok || metadata.command != "index" || metadata.fixture != "worker-shape" {
         return Err(format!("{label} terminal metadata was not successful").into());
     }
     if metadata.rows != summary.total_rows {

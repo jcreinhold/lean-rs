@@ -772,7 +772,7 @@ mod tests {
                 "version":"1.2.0",
                 "packagesDir":".lake/packages",
                 "packages":[
-                    {"type":"git","name":"«lean-semantic-search»","subDir":"lean"},
+                    {"type":"git","name":"«demo-search»","subDir":"lean"},
                     {"type":"git","name":"shims","subDir":"crates/lean-rs/shims/lean-rs-interop-shims"}
                 ]
             }"#,
@@ -788,7 +788,7 @@ mod tests {
                         .canonical_root()
                         .join(".lake")
                         .join("packages")
-                        .join("lean-semantic-search")
+                        .join("demo-search")
                         .join("lean")
                 ),
                 olean_suffix(

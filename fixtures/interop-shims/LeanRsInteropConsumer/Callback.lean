@@ -186,11 +186,11 @@ def workerJsonCommandMalformed (_requestJson : String) : IO String :=
 
 @[export lean_rs_interop_consumer_worker_shape_metadata]
 def workerShapeMetadata (_requestJson : String) : IO String :=
-  pure "{\"commands\":[{\"name\":\"version\",\"version\":\"shape-1\"},{\"name\":\"doctor\",\"version\":\"shape-1\"},{\"name\":\"extract\",\"version\":\"shape-1\"},{\"name\":\"features\",\"version\":\"shape-1\"},{\"name\":\"index\",\"version\":\"shape-1\"},{\"name\":\"probe\",\"version\":\"shape-1\"}],\"capabilities\":[{\"name\":\"rows.json.raw\",\"version\":\"shape-1\"},{\"name\":\"diagnostics\",\"version\":\"shape-1\"},{\"name\":\"terminal-metadata\",\"version\":\"shape-1\"}],\"lean_version\":\"fixture-lean-4\",\"extra\":{\"fixture\":\"lean-dup-shaped\",\"schema\":\"generic\"}}"
+  pure "{\"commands\":[{\"name\":\"version\",\"version\":\"shape-1\"},{\"name\":\"doctor\",\"version\":\"shape-1\"},{\"name\":\"extract\",\"version\":\"shape-1\"},{\"name\":\"features\",\"version\":\"shape-1\"},{\"name\":\"index\",\"version\":\"shape-1\"},{\"name\":\"probe\",\"version\":\"shape-1\"}],\"capabilities\":[{\"name\":\"rows.json.raw\",\"version\":\"shape-1\"},{\"name\":\"diagnostics\",\"version\":\"shape-1\"},{\"name\":\"terminal-metadata\",\"version\":\"shape-1\"}],\"lean_version\":\"fixture-lean-4\",\"extra\":{\"fixture\":\"worker-shape\",\"schema\":\"generic\"}}"
 
 @[export lean_rs_interop_consumer_worker_shape_doctor]
 def workerShapeDoctor (_requestJson : String) : IO String :=
-  pure "{\"diagnostics\":[{\"severity\":\"pass\",\"code\":\"shape.lake\",\"message\":\"Lake target is available\",\"details\":{\"target\":\"LeanRsInteropConsumer\"}},{\"severity\":\"warning\",\"code\":\"shape.cache\",\"message\":\"cache policy is downstream-owned\",\"details\":{\"owner\":\"downstream\"}},{\"severity\":\"pass\",\"code\":\"shape.streams\",\"message\":\"streaming callbacks are available\",\"details\":{\"streams\":[\"declarations\",\"features\",\"probes\"]}}],\"metadata\":{\"fixture\":\"lean-dup-shaped\",\"ok\":true}}"
+  pure "{\"diagnostics\":[{\"severity\":\"pass\",\"code\":\"shape.lake\",\"message\":\"Lake target is available\",\"details\":{\"target\":\"LeanRsInteropConsumer\"}},{\"severity\":\"warning\",\"code\":\"shape.cache\",\"message\":\"cache policy is downstream-owned\",\"details\":{\"owner\":\"downstream\"}},{\"severity\":\"pass\",\"code\":\"shape.streams\",\"message\":\"streaming callbacks are available\",\"details\":{\"streams\":[\"declarations\",\"features\",\"probes\"]}}],\"metadata\":{\"fixture\":\"worker-shape\",\"ok\":true}}"
 
 @[export lean_rs_interop_consumer_worker_shape_version]
 def workerShapeVersion (_requestJson : String) : IO String :=
@@ -198,7 +198,7 @@ def workerShapeVersion (_requestJson : String) : IO String :=
 
 def workerShapeMetadataFor (command : String) (rows : Nat) : String :=
   Stream.metadata
-    ("{\"fixture\":\"lean-dup-shaped\",\"command\":" ++ Stream.jsonString command ++
+    ("{\"fixture\":\"worker-shape\",\"command\":" ++ Stream.jsonString command ++
       ",\"ok\":true,\"rows\":" ++ toString rows ++ "}")
 
 def workerShapeExtractRows (_ : Unit) : Array String :=

@@ -1,9 +1,9 @@
-//! Lean-dup-shaped worker capability probe.
+//! Worker capability probe over the shape fixture.
 //!
 //! Run from the workspace root:
 //!
 //! ```sh
-//! cargo run --release -p lean-rs-worker --example worker_capability_probe
+//! cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 //! ```
 
 #![allow(clippy::expect_used, clippy::print_stdout)]

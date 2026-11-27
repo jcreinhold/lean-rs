@@ -2922,8 +2922,7 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
         .expect("anonymous instance is catalogued")
         .declaration_name;
 
-    // Phase 2: verifying that name reaches the declaration, exactly what the
-    // kan-proofs field report could not do.
+    // Phase 2: verify that the generated name reaches the declaration.
     let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
     let caps = fixture::native_capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);

@@ -58,10 +58,11 @@ cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'
 ```
 
 This example patches one crate. When a change crosses the worker boundary, include each matching worker crate in the
-same override. Use the consumer's installed-worker test for changes to installation or process ownership. In
-lean-host-mcp, `LEAN_RS_CHECKOUT="$sdk" scripts/test-installed-stdio.sh --all-targets` builds the writer, shims, worker
-and host from this checkout, restores the host lockfile on exit, and fails if Cargo kept a registry SDK crate. Review
-the consumer's manifest and lockfile for local changes before staging the release.
+same override. Use the consumer's installed-worker test for changes to installation or process ownership. For example,
+lean-host-mcp is a separate consumer repository with such a test: in its checkout,
+`LEAN_RS_CHECKOUT="$sdk" scripts/test-installed-stdio.sh --all-targets` builds the writer, shims, worker and host from
+the SDK checkout, restores the host lockfile on exit, and fails if Cargo kept a registry SDK crate. Review the
+consumer's manifest and lockfile for local changes before staging the release.
 
 ## Local fixture setup
 

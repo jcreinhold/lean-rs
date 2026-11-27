@@ -154,7 +154,7 @@ generic fixture schemas; they are not reserved commands or a downstream parity c
 An explicit comparison command is optional:
 
 ```sh
-LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
+LEAN_RS_WORKER_COMPARE_COMMAND='my-tool --help' \
   cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 ```
 

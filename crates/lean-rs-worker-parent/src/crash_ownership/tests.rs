@@ -12,7 +12,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 fn directory() -> PathBuf {
     let path = PathBuf::from("/tmp").join(format!(
-        "proofs-lifeline-{}-{}",
+        "lean-rs-lifeline-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
