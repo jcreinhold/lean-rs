@@ -9,6 +9,11 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.11.0]
+
+Breaking: this release removes public items listed below and changes writer settings. Upgrade the worker
+parent, worker child, guardian and writer together.
+
 - A guarded worker that exits before it authenticates no longer leaves its owner record in `dispatching`, which
   fenced every later build and kept its capacity. Its parent closes the record once it reaps the child, and a
   guardian that never bound its record exits instead of retrying forever.
