@@ -23,8 +23,10 @@ verification job tests only the head.
 
    The Python check packages the crates, verifies crate/template contents, then builds docs from unpacked packages with
    `DOCS_RS=1` and Lean tools hidden from `PATH`.
-3. Move the unreleased changelog entries into `## [X.Y.Z]`. The heading must match tag `vX.Y.Z` exactly.
-4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`.
+3. Choose `X.Y.Z`: while the crates are 0.x, a breaking change bumps the minor version, anything else the patch
+   version. Move the unreleased changelog entries into `## [X.Y.Z]`. The heading must match tag `vX.Y.Z` exactly.
+4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`. A minor bump
+   also changes the `"0.Y"` dependency examples in `README.md` and the crate READMEs.
 5. Regenerate intentionally changed public API baselines using the pinned tools and procedure in
    [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` and
    `lean-rs-writer` are published outside that loop.
