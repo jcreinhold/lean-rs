@@ -367,7 +367,10 @@ fn writer_exit_observation_survives_failed_ready_and_close_timeout() -> io::Resu
     let broken = base.join("bad-ready");
     fs::write(
         &broken,
-        "#!/bin/sh\nprintf '{}\\n'\nfor n in 1 2 3 4 5 6 7 8 9 10; do\n  [ ! -e \"$2/../release-bad-ready\" ] || exit 23\n  /bin/sleep 0.5\ndone\nexit 24\n",
+        concat!(
+            "#!/bin/sh\nprintf '{}\\n'\nfor n in 1 2 3 4 5 6 7 8 9 10; do\n",
+            "  [ ! -e \"$2/../release-bad-ready\" ] || exit 23\n  /bin/sleep 0.5\ndone\nexit 24\n",
+        ),
     )?;
     fs::set_permissions(&broken, fs::Permissions::from_mode(0o700))?;
     let Err(error) = open(&broken, &[], &mut observed) else {

@@ -248,9 +248,9 @@ pub(super) fn validate_boot_uuid(boot: &str) -> io::Result<()> {
     }
 }
 
-/// The current kernel boot session, checked as a UUID. Tests use it to build
-/// owner records for this boot.
-#[cfg(test)]
+/// The current kernel boot session, checked as a UUID. The macOS guardian tests
+/// use it to build owner records for this boot.
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) fn current_boot_session() -> io::Result<String> {
     let boot = native::boot_session()?;
     validate_boot_uuid(&boot)?;
