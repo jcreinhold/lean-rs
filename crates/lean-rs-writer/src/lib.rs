@@ -29,7 +29,6 @@ use std::time::{Duration, Instant};
 
 use lean_toolchain::native_guardian::{OWNERS_DIRECTORY_ENV, registry_directory};
 use lean_toolchain::process_group::OwnedCommandGroup;
-use lean_toolchain::shared_writer::{WriterStagePermit, WriterStageReady};
 use lean_toolchain::writer_demand::{ReadAdmission, WriterDemand};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::io::{FdFlags, fcntl_setfd};
@@ -69,15 +68,12 @@ pub fn contract() -> io::Result<WriterContract> {
 #[derive(Debug, clap::Args)]
 pub struct WriterLockPathArgs {
     root: PathBuf,
-    /// Include opt-in capabilities without changing the default descriptor.
-    #[arg(long)]
-    capabilities: bool,
 }
 
 /// Emit one bounded project-lock descriptor without acquiring or creating a lock.
 ///
 /// This command only resolves an existing directory. It does not open a worker,
-/// evaluate Lake configuration, reserve capacity, or authorize a later command.
+/// evaluate Lake configuration, or authorize a later command.
 ///
 /// # Errors
 /// Returns filesystem, serialization, size-limit, or stdout errors.
@@ -87,24 +83,7 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
         return Err(invalid("existing project directory required"));
     }
     let lock_path = lean_toolchain::shared_writer::project_lock_path(&root)?;
-    let mut descriptor = serde_json::Map::from_iter([
-        ("protocol".to_owned(), json!(PROTOCOL)),
-        ("project_root".to_owned(), json!(root)),
-        ("lock_path".to_owned(), json!(lock_path)),
-    ]);
-    if args.capabilities {
-        descriptor.insert("handoff_max_bytes".to_owned(), json!(storage::MAX_HANDOFF_BYTES));
-        descriptor.insert(
-            "capabilities".to_owned(),
-            json!([
-                "command_only_storage_v1",
-                "command_only_handoff_v1",
-                "command_only_handoff_approval_v1",
-                "lake_module_setup_capture_v1",
-                "lake_module_setup_capture_env_v2"
-            ]),
-        );
-    }
+    let descriptor = json!({"protocol":PROTOCOL,"project_root":root,"lock_path":lock_path});
     let mut bytes = serde_json::to_vec(&descriptor).map_err(io::Error::other)?;
     bytes.push(b'\n');
     if bytes.len() as u64 > FRAME_BYTES {
@@ -118,9 +97,6 @@ pub fn run_lock_path_cli(args: &WriterLockPathArgs) -> io::Result<()> {
 /// Internal CLI entry: one supervisor lifetime can execute adjacent writer stages.
 #[derive(Debug, clap::Args)]
 pub struct WriterArgs {
-    /// Explicit managed full-turn storage request.
-    #[arg(long, value_parser = storage::Request::parse)]
-    storage_request: Option<storage::Request>,
     root: PathBuf,
     lock: PathBuf,
     admission: f64,
@@ -183,24 +159,6 @@ struct Record {
     // for Idle. A missing field cannot certify command closure.
     #[serde(deserialize_with = "Option::deserialize")]
     process: Option<ProcessIdentity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    storage_turn: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    command_phase: Option<CommandPhase>,
-    #[serde(
-        default,
-        deserialize_with = "storage::present_digest",
-        skip_serializing_if = "Option::is_none"
-    )]
-    scratch_identity: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum CommandPhase {
-    Idle,
-    Starting,
-    Running,
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -299,21 +257,12 @@ fn owner(file: &mut File) -> io::Result<Option<Record>> {
         return Ok(None);
     }
     let record: Record = serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
-    if let Some(phase) = record.command_phase
-        && (record.storage_turn.is_none() || (phase == CommandPhase::Running) != record.process.is_some())
-    {
-        return Err(invalid("writer command phase does not match its turn or process"));
-    }
     let identity = &record.owner;
     if record.version != PROTOCOL
         || identity.version != PROTOCOL
         || identity.pid == 0
         || identity.session != identity.pid
         || identity.start.is_empty()
-        || record
-            .storage_turn
-            .as_ref()
-            .is_some_and(|turn| turn.len() != 32 || !turn.bytes().all(|byte| byte.is_ascii_hexdigit()))
     {
         return Err(invalid("writer owner has no exact session identity"));
     }
@@ -921,9 +870,6 @@ pub fn run_exec() -> io::Result<()> {
             }
         }
     }
-    if let Some(permit) = stage_permit(&message)? {
-        permit.check(&stage_ready(&committed.owner)?)?;
-    }
     Err(command.exec())
 }
 
@@ -945,8 +891,6 @@ struct Capture {
     descriptor: rustix::fd::OwnedFd,
     bytes: Vec<u8>,
     overflowed: bool,
-    limit: usize,
-    eof: bool,
 }
 
 impl Capture {
@@ -960,8 +904,6 @@ impl Capture {
                 descriptor: read,
                 bytes: Vec::new(),
                 overflowed: false,
-                limit: CAPTURE_BYTES,
-                eof: false,
             },
             Stdio::from(write),
         ))
@@ -974,12 +916,9 @@ impl Capture {
         // existing owner requests stop and observes closure.
         for _ in 0..32 {
             match rustix::io::read(&self.descriptor, &mut buffer) {
-                Ok(0) => {
-                    self.eof = true;
-                    return Ok(self.overflowed);
-                }
+                Ok(0) => return Ok(self.overflowed),
                 Ok(count) => {
-                    let keep = count.min(self.limit.saturating_sub(self.bytes.len()));
+                    let keep = count.min(CAPTURE_BYTES.saturating_sub(self.bytes.len()));
                     self.bytes.extend_from_slice(
                         buffer
                             .get(..keep)
@@ -1005,29 +944,16 @@ impl Capture {
     }
 }
 
-fn poll_output(
-    stdout: &mut Capture,
-    stderr: &mut Capture,
-    module_setup: bool,
-    read_error: &str,
-    reason: &mut Option<String>,
-) {
-    for (capture, required) in [(stdout, true), (stderr, !module_setup)] {
+fn poll_output(stdout: &mut Capture, stderr: &mut Capture, read_error: &str, reason: &mut Option<String>) {
+    for capture in [stdout, stderr] {
         match capture.read_available() {
-            Ok(true) if required => {
-                reason.get_or_insert_with(|| {
-                    if module_setup {
-                        "Lake module setup exceeds capture or storage budget"
-                    } else {
-                        "writer captured output limit exceeded"
-                    }
-                    .to_owned()
-                });
+            Ok(true) => {
+                reason.get_or_insert_with(|| "writer captured output limit exceeded".to_owned());
             }
             Err(error) => {
                 reason.get_or_insert_with(|| format!("{read_error}: {error}"));
             }
-            Ok(_) => {}
+            Ok(false) => {}
         }
     }
 }
@@ -1087,23 +1013,6 @@ fn write_launch(
     Ok(())
 }
 
-fn stage_ready(owner: &Owner) -> io::Result<WriterStageReady> {
-    WriterStageReady::for_helper(owner.pid, owner.start.clone(), owner.session)
-}
-
-fn stage_permit(message: &Value) -> io::Result<Option<WriterStagePermit>> {
-    if field(message, "action") == "run_permitted" {
-        if message.get("timeout").is_some() {
-            return Err(invalid("writer stage permit cannot carry a relative timeout"));
-        }
-        return Ok(Some(serde_json::from_value(field(message, "permit").clone())?));
-    }
-    if message.get("permit").is_some() {
-        return Err(invalid("writer stage permit requires its dedicated action"));
-    }
-    Ok(None)
-}
-
 const DESCENDANT_EXIT_GRACE: Duration = Duration::from_millis(100);
 
 #[allow(
@@ -1119,35 +1028,20 @@ fn execute_with_launcher(
     record: &Record,
     input: &Receiver<io::Result<Value>>,
     launcher: &Path,
-    setup: Option<&module_setup::Destination<'_>>,
     mut emit: impl FnMut(&Value) -> io::Result<()>,
 ) -> io::Result<bool> {
     canonical(root)?;
-    let permit = stage_permit(message)?;
-    let permit_ready = permit.as_ref().map(|_| stage_ready(&record.owner)).transpose()?;
-    let timeout = match permit.as_ref().zip(permit_ready.as_ref()) {
-        Some((permit, ready)) => match permit.check(ready) {
-            Ok(timeout) => timeout,
-            Err(error) => {
-                emit(&json!({"state":"stage_refused","owner":record.owner,"reason":error.to_string()}))?;
-                return Ok(true);
-            }
-        },
-        None => duration(
-            field(message, "timeout")
-                .as_f64()
-                .ok_or_else(|| invalid("writer timeout required"))?,
-        )?,
-    };
+    let timeout = duration(
+        field(message, "timeout")
+            .as_f64()
+            .ok_or_else(|| invalid("writer timeout required"))?,
+    )?;
     let started = Instant::now();
     let deadline = started
         .checked_add(timeout)
         .ok_or_else(|| invalid("writer timeout is too large"))?;
     let (mut stdout, child_stdout) = Capture::pipe()?;
     let (mut stderr, child_stderr) = Capture::pipe()?;
-    if let Some(destination) = setup {
-        stdout.limit = destination.limit;
-    }
     let (barrier, inherited) = pipe()?;
     fcntl_setfd(&barrier, FdFlags::CLOEXEC)?;
     fcntl_setfl(&barrier, fcntl_getfl(&barrier)? | OFlags::NONBLOCK)?;
@@ -1160,19 +1054,6 @@ fn execute_with_launcher(
         .stdin(Stdio::piped())
         .stdout(child_stdout)
         .stderr(child_stderr);
-    if let Some(phase) = record.command_phase {
-        if phase != CommandPhase::Idle || record.storage_turn.is_none() || record.process.is_some() {
-            return Err(invalid("command-only writer must be idle before spawn"));
-        }
-        persist_all(
-            file,
-            loans,
-            &Record {
-                command_phase: Some(CommandPhase::Starting),
-                ..record.clone()
-            },
-        )?;
-    }
     let mut descriptors = vec![inherited.as_fd(), file.as_fd()];
     descriptors.extend(loans.iter().map(AsFd::as_fd));
     let mut group = OwnedCommandGroup::spawn_inheriting(command, &descriptors)?;
@@ -1197,7 +1078,6 @@ fn execute_with_launcher(
             loans,
             &Record {
                 process: process.clone(),
-                command_phase: record.command_phase.map(|_| CommandPhase::Running),
                 ..record.clone()
             },
         )?;
@@ -1238,13 +1118,7 @@ fn execute_with_launcher(
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
-        poll_output(
-            &mut stdout,
-            &mut stderr,
-            setup.is_some(),
-            "writer output read failed",
-            &mut reason,
-        );
+        poll_output(&mut stdout, &mut stderr, "writer output read failed", &mut reason);
         let status = match group.try_wait() {
             Ok(status) => status,
             Err(error) => {
@@ -1258,16 +1132,8 @@ fn execute_with_launcher(
                 reason.get_or_insert_with(|| "writer leader exited with surviving owned work".to_owned());
             }
         }
-        match permit.as_ref().zip(permit_ready.as_ref()) {
-            Some((permit, ready)) => {
-                if let Err(error) = permit.check(ready) {
-                    reason.get_or_insert_with(|| error.to_string());
-                }
-            }
-            None if started.elapsed() >= timeout => {
-                reason.get_or_insert_with(|| "writer deadline expired".to_owned());
-            }
-            None => {}
+        if started.elapsed() >= timeout {
+            reason.get_or_insert_with(|| "writer deadline expired".to_owned());
         }
         if let Some(why) = &reason {
             if !notified {
@@ -1303,53 +1169,13 @@ fn execute_with_launcher(
                 if let Err(error) = &cleared {
                     reason.get_or_insert_with(|| format!("writer closed but ownership record cleanup failed: {error}"));
                 }
-                poll_output(
-                    &mut stdout,
-                    &mut stderr,
-                    setup.is_some(),
-                    "writer final output read failed",
-                    &mut reason,
-                );
-                // With the group closed, drain buffered required bytes to EOF. An
-                // open empty pipe or an excess byte refuses publication.
-                while setup.is_some() && reason.is_none() && !stdout.eof {
-                    let before = stdout.bytes.len();
-                    poll_output(
-                        &mut stdout,
-                        &mut stderr,
-                        true,
-                        "writer final output read failed",
-                        &mut reason,
-                    );
-                    if stdout.bytes.len() == before {
-                        break;
-                    }
-                }
-                let captured_stdout = if let Some(destination) = setup {
-                    if !stdout.eof {
-                        reason.get_or_insert_with(|| "incomplete Lake module setup stdout".into());
-                    }
-                    if status.success() && reason.is_none() && !group.intervened() {
-                        match destination.publish(&stdout.bytes) {
-                            Ok(digest) => digest,
-                            Err(error) => {
-                                reason.get_or_insert_with(|| format!("could not stage Lake module setup: {error}"));
-                                String::new()
-                            }
-                        }
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    stdout.text()
-                };
-                let captured_stderr = stderr.text();
+                poll_output(&mut stdout, &mut stderr, "writer final output read failed", &mut reason);
                 let unavailable = reason.is_some() || group.intervened();
                 // Physical closure is a distinct terminal fact even when the
                 // command's result is unusable. Never lose it behind the earlier
                 // provisional stopping frame or interpret exit zero as success.
                 let result = json!({"state":"stopped","exit_code":code(status),
-                    "stdout":captured_stdout,"stderr":captured_stderr,"process":process,
+                    "stdout":stdout.text(),"stderr":stderr.text(),"process":process,
                     "owner":record.owner,"owned_work_stopped":true,"cancelled":cancelled,
                     "intervened":unavailable,"result":if unavailable {"no_result"} else {"result"},
                     "reason":reason});
@@ -1393,11 +1219,6 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     if sid(None)? != std::process::id() {
         setsid()?;
     }
-    if inherited.is_none()
-        && let Some(request) = &args.storage_request
-    {
-        request.recover_before_admission(&args.root, &args.lock, duration(args.admission)?)?;
-    }
     let input = control();
     let admission_closed = Cell::new(false);
     let cancelled = || {
@@ -1407,13 +1228,6 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
         admission_closed.get()
     };
     let borrowed = inherited.is_some();
-    let command_only = args
-        .storage_request
-        .as_ref()
-        .is_some_and(storage::Request::command_only);
-    if command_only && borrowed {
-        return Err(invalid("command-only storage cannot use caller-owned writer locks"));
-    }
     // This guard coordinates admission only. Artifact EX aliases and process
     // fences still prevent readers after helper death or uncertain cleanup.
     let (locks, _demand) = if let Some(locks) = inherited {
@@ -1434,21 +1248,12 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     } else {
         Value::Null
     };
-    let admission = duration(args.admission)?;
-    let managed = args
-        .storage_request
-        .as_ref()
-        .map(|r| r.reserve(&args.root, &locks, admission))
-        .transpose()?;
-    if managed.is_none() {
-        lean_toolchain::native_guardian::writer_storage::ensure_no_writer_storage_charge(&locks, admission)?;
-    }
     let paths: Vec<_> = locks.iter().map(|(path, _)| path.clone()).collect();
     let mut files = locks.into_iter().map(|(_, file)| file);
     let mut file = files.next().ok_or_else(|| invalid("writer primary loan missing"))?;
     let loans: Vec<_> = files.collect();
     let current = std::process::id();
-    let mut record = Record {
+    let record = Record {
         version: PROTOCOL,
         owner: Owner {
             version: PROTOCOL,
@@ -1457,67 +1262,19 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
             session: current,
         },
         process: None,
-        storage_turn: managed.as_ref().map(|(_, charge)| charge.turn().to_owned()),
-        command_phase: command_only.then_some(CommandPhase::Idle),
-        scratch_identity: None,
     };
     persist_all(&mut file, &loans, &record)?;
-    let mut pending_handoff = args.storage_request.as_ref().filter(|r| r.requires_handoff());
-    let (scratch_parent, mut charge) = managed.unzip();
-    let scratch = match (&scratch_parent, &mut charge) {
-        (Some(parent), Some(charge)) => {
-            let scratch = parent.create(charge.turn())?;
-            let binding = scratch.binding()?;
-            if pending_handoff.is_some() {
-                // Publish the writer-created identity on every original lock
-                // before this charge becomes recoverable or scratch is exposed.
-                record.scratch_identity = Some(charge.scratch_identity(&binding)?);
-                persist_all(&mut file, &loans, &record)?;
-            }
-            charge.bind_scratch_for_turn(binding, command_only, admission)?;
-            Some(scratch)
-        }
-        _ => None,
-    };
-    let asset_dir = match &scratch {
-        Some(scratch) => scratch.verified_path()?,
-        None => tempfile::Builder::new()
-            .prefix("lean-writer-assets-")
-            .tempdir()?
-            .keep()
-            .canonicalize()?,
-    };
-    let ready_identity = stage_ready(&record.owner).ok();
-    let mut first_stage = true;
-    let mut permit_consumed = false;
-    let mut confirmed_close = false;
+    let asset_dir = tempfile::Builder::new()
+        .prefix("lean-writer-assets-")
+        .tempdir()?
+        .keep()
+        .canonicalize()?;
     let result = (|| -> io::Result<()> {
-        let mut ready = serde_json::Map::from_iter([
-            ("state".to_owned(), json!("locked")),
-            ("owner".to_owned(), json!(record.owner)),
-            ("lock_loans".to_owned(), receipt),
-            ("asset_dir".to_owned(), json!(asset_dir)),
-        ]);
-        if let Some(identity) = &ready_identity {
-            ready.insert("stage_ready".to_owned(), json!(identity));
-        }
-        if let Some(handoff) = charge.as_ref().and_then(|c| c.handoff_receipt()) {
-            ready.insert("handoff".to_owned(), handoff);
-        }
-        send(&Value::Object(ready))?;
+        send(&json!({"state":"locked","owner":record.owner,"lock_loans":receipt,"asset_dir":asset_dir}))?;
         while let Ok(message) = input.recv() {
             let mut message = message?;
             match field(&message, "action").as_str() {
-                Some(action @ ("stage_handoff" | "run" | "run_permitted")) => {
-                    if permit_consumed || (action == "run_permitted" && (!first_stage || ready_identity.is_none())) {
-                        send(&json!({"state":"stage_refused","owner":record.owner,
-                            "reason":"writer stage permit is not available"}))?;
-                        continue;
-                    }
-                    if action != "stage_handoff" {
-                        first_stage = false;
-                        permit_consumed = action == "run_permitted";
-                    }
+                Some("run") => {
                     // Re-derive the declared graph immediately before this stage.
                     // Unknown or expanded graphs never release a command body.
                     for required in workspace_domains(&workspaces)? {
@@ -1542,33 +1299,10 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                             return Err(invalid("native artifact readers remain unresolved before GO"));
                         }
                     }
-                    if let Some(scratch) = &scratch {
-                        scratch.verified_path()?;
-                        if let Some(request) = &args.storage_request {
-                            request.verify()?;
-                        }
-                    }
-                    if action == "stage_handoff" {
-                        let turn = record
-                            .storage_turn
-                            .as_deref()
-                            .ok_or_else(|| invalid("no storage turn"))?;
-                        let request = pending_handoff
-                            .take()
-                            .ok_or_else(|| invalid("unexpected or duplicate stage"))?;
-                        let scratch = scratch.as_ref().ok_or_else(|| invalid("missing handoff scratch"))?;
-                        send(&request.stage_handoff(&message, turn, scratch)?)?;
-                        continue;
-                    }
-                    if pending_handoff.is_some() {
-                        return Err(invalid("command requires a staged handoff"));
-                    }
                     if let Err(error) = normalize_owner_directory(&mut message, &registry_directory()?) {
                         send(&json!({"state":"stage_refused","owner":record.owner,"reason":error.to_string()}))?;
                         continue;
                     }
-                    let setup =
-                        module_setup::select(&message, &args.root, scratch.as_ref(), args.storage_request.as_ref())?;
                     if !execute_with_launcher(
                         &message,
                         &args.root,
@@ -1578,24 +1312,14 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
                         &record,
                         &input,
                         &std::env::current_exe()?,
-                        setup.as_ref(),
                         send,
                     )? {
                         // Ok(false) follows group and descriptor closure, the synced
-                        // custody update, and delivery of stopped/no_result. A managed
-                        // caller may still finish its writes and explicitly settle.
-                        if scratch.is_some() {
-                            confirmed_close =
-                                matches!(input.recv(), Ok(Ok(frame)) if frame == json!({"action":"close"}));
-                        }
+                        // custody update, and delivery of stopped/no_result.
                         break;
                     }
                 }
-                Some("close") => {
-                    confirmed_close = true;
-                    break;
-                }
-                Some("cancel") => break,
+                Some("close" | "cancel") => break,
                 _ => return Err(invalid("unsupported writer action")),
             }
         }
@@ -1603,24 +1327,8 @@ pub fn run_cli(args: &WriterArgs) -> io::Result<()> {
     })();
     // execute retains custody after every launch until actual group closure.
     // Idle or pre-GO failures have no command that could still need these inputs.
-    if let Some(scratch) = scratch {
-        let certainty = result.and_then(|()| {
-            if confirmed_close {
-                Ok(())
-            } else {
-                Err(invalid("turn closure unconfirmed"))
-            }
-        });
-        // Preserve the first error; dropping the charge retains the reservation.
-        certainty.map_err(|error| io::Error::new(error.kind(), format!("writer storage charge retained: {error}")))?;
-        let mut charge = charge.ok_or_else(|| invalid("missing writer storage admission"))?;
-        charge.begin_command_only_scratch_cleanup(admission)?;
-        scratch.remove()?;
-        charge.settle_after_cleanup(&file, Ok(()), admission)
-    } else {
-        let cleanup = fs::remove_dir_all(&asset_dir);
-        result.and(cleanup)
-    }
+    let cleanup = fs::remove_dir_all(&asset_dir);
+    result.and(cleanup)
 }
 
 #[cfg(test)]
@@ -1695,32 +1403,3 @@ mod lifecycle_tests;
 #[cfg(all(test, unix))]
 #[path = "shared_writer/sdk_contract_tests.rs"]
 mod sdk_contract_tests;
-
-mod module_setup;
-mod scratch;
-mod storage;
-
-/// Inspect one existing storage turn in the independently selected registry.
-///
-/// The JSON report contains the reservation when readable and either the
-/// current eligibility or the reason closure cannot be established. A
-/// preview never marks cleanup and never authorizes a subsequent settlement.
-#[must_use]
-pub fn inspect_writer_storage_turn(
-    registry: &lean_toolchain::native_guardian::writer_storage::StorageRoot,
-    turn: &str,
-) -> Value {
-    storage::exact_turn(registry, turn, false).0
-}
-
-/// Recheck and settle one exact Idle command-only turn.
-///
-/// The old work result remains unknown. Returns the same JSON report as inspection with a success
-/// flag indicating that this call actually completed settlement.
-#[must_use]
-pub fn recover_idle_writer_storage_turn(
-    registry: &lean_toolchain::native_guardian::writer_storage::StorageRoot,
-    turn: &str,
-) -> (Value, bool) {
-    storage::exact_turn(registry, turn, true)
-}

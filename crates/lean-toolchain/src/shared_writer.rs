@@ -32,8 +32,6 @@ const LOCK_LOANS_ENV: &str = "LEAN_RS_WRITER_LOCK_LOANS";
 const WORKSPACES_ENV: &str = "LEAN_RS_WRITER_WORKSPACES";
 /// Reserved handoff keys to clear from commands outside a writer launch.
 pub const WRITER_HANDOFF_ENV: [&str; 2] = [LOCK_LOANS_ENV, WORKSPACES_ENV];
-/// Marker in a writer stage's command environment for capturing Lake module setup output.
-pub const MODULE_SETUP_CAPTURE_ENV: &str = "LEAN_RS_CAPTURE_MODULE_SETUP";
 const MAX_FRAME: u64 = 1024 * 1024;
 /// Maximum close-only project and source-entry lock descriptions in one helper.
 pub const MAX_WRITER_LOCK_LOANS: usize = 64;
@@ -411,6 +409,15 @@ pub fn previous_writer_stopped(file: &File) -> io::Result<bool> {
         return Ok(true);
     }
     let record: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    // A field this reader does not know, such as a 0.10 storage turn, may hold
+    // a stage that is about to start. It never proves the writer stopped.
+    if record.as_object().is_none_or(|fields| {
+        fields
+            .keys()
+            .any(|key| !matches!(key.as_str(), "version" | "owner" | "process"))
+    }) {
+        return Err(invalid("writer ownership record has unknown fields"));
+    }
     let owner = field(&record, "owner");
     let owner_pid = field(owner, "pid")
         .as_u64()
@@ -426,17 +433,6 @@ pub fn previous_writer_stopped(file: &File) -> io::Result<bool> {
     let process = record
         .get("process")
         .ok_or_else(|| invalid("writer ownership record omits process disposition"))?;
-    if let Some(phase) = record.get("command_phase") {
-        let turn = field(&record, "storage_turn").as_str();
-        if !turn.is_some_and(|turn| turn.len() == 32 && turn.bytes().all(|byte| byte.is_ascii_hexdigit())) {
-            return Err(invalid("writer command phase has no exact turn"));
-        }
-        match (phase.as_str(), process.is_null()) {
-            (Some("starting"), true) => return Ok(false),
-            (Some("idle"), true) | (Some("running"), false) => {}
-            _ => return Err(invalid("writer command phase and process differ")),
-        }
-    }
     if process.is_null() {
         return Ok(true);
     }
@@ -758,111 +754,33 @@ impl Drop for Helper {
     }
 }
 
-#[cfg(unix)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StageState {
-    Ready,
-    Unconfirmed,
-    CloseOnly,
-}
-
 /// One helper lifetime, retained across commands and caller-owned metadata writes.
 #[cfg(unix)]
 pub struct SharedWriter {
     helper: Helper,
     receiver: mpsc::Receiver<io::Result<Value>>,
     owner: Value,
-    stage_ready: Option<WriterStageReady>,
-    permitted_attempt: bool,
     root: PathBuf,
     write_roots: Vec<PathBuf>,
     workspaces: Vec<PathBuf>,
-    stage: StageState,
-    managed: bool,
+    /// Set from a stage's delivery until its confirmed result. A stage that
+    /// ends without one leaves it set: the lifetime then runs no other command
+    /// and cannot confirm cleanup.
+    sealed: bool,
     asset_dir: PathBuf,
-    controller_locks: Vec<File>,
+    /// The caller's own descriptors for the held locks. They keep every domain
+    /// locked until this writer drops, so the caller's metadata writes after a
+    /// stage stay covered even if the helper dies first.
+    _controller_locks: Vec<File>,
 }
 
-/// Boot-qualified identity of the exact helper holding Ready custody.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WriterStageReady {
-    version: u32,
-    pid: u32,
-    start: String,
-    session: u32,
-    boot: String,
-}
-
-impl WriterStageReady {
-    /// Private wire constructor for the standalone helper's authenticated Ready receipt.
-    #[doc(hidden)]
-    pub fn for_helper(pid: u32, start: String, session: u32) -> io::Result<Self> {
-        Ok(Self {
-            version: 1,
-            pid,
-            start,
-            session,
-            boot: crate::native_guardian::writer_boot_session()?,
-        })
-    }
-
-    /// Actual helper process identifier.
-    pub fn pid(&self) -> u32 {
-        self.pid
-    }
-
-    /// Exact process birth identity on this platform.
-    pub fn start(&self) -> &str {
-        &self.start
-    }
-
-    /// Exact private session identifier.
-    pub fn session(&self) -> u32 {
-        self.session
-    }
-
-    /// Kernel boot identity qualifying the deadline and process birth.
-    pub fn boot(&self) -> &str {
-        &self.boot
-    }
-}
-
-/// One stage on an exact Ready helper with an immutable suspend-inclusive expiry.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WriterStagePermit {
-    ready: WriterStageReady,
-    expires_ns: u64,
-}
-
-impl WriterStagePermit {
-    /// Bind the original job boot and expiry in nanoseconds on the guardian boot clock.
-    ///
-    /// # Errors
-    /// Refuses a Ready helper from another boot or an already expired stage.
-    pub fn new(ready: WriterStageReady, admission_boot: &str, expires_ns: u64) -> io::Result<Self> {
-        if !ready.boot.eq_ignore_ascii_case(admission_boot) {
-            return Err(invalid("writer permit admission belongs to another boot"));
-        }
-        let permit = Self { ready, expires_ns };
-        permit.check(&permit.ready)?;
-        Ok(permit)
-    }
-
-    /// Private standalone-helper check, also used in the blocked exec wrapper.
-    #[doc(hidden)]
-    pub fn check(&self, ready: &WriterStageReady) -> io::Result<Duration> {
-        if self.ready != *ready {
-            return Err(invalid("writer permit differs from exact Ready helper"));
-        }
-        let budget =
-            Duration::from_nanos(self.expires_ns).saturating_sub(crate::native_guardian::guardian_deadline_ticks()?);
-        if budget.is_zero() {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "writer stage permit expired"));
-        }
-        Ok(budget)
-    }
+/// The lock custody one helper inherits: the held locks, the declared
+/// workspaces, and the artifact roots those locks must cover.
+#[cfg(unix)]
+struct Custody<'a> {
+    locks: &'a [&'a WriterLock],
+    workspaces: &'a [PathBuf],
+    roots: &'a [PathBuf],
 }
 
 #[cfg(unix)]
@@ -907,21 +825,11 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
-        Self::open_with_admission_timeout(
-            executable,
-            root,
-            prepared_roots,
-            timeout,
-            timeout,
-            None,
-            cancelled,
-            None,
-        )
+        Self::open_with_admission_timeout(executable, root, prepared_roots, timeout, timeout, cancelled, None)
     }
 
     /// Open with an observation slot that survives Ready failure or consuming close.
     /// The slot is cleared before admission and filled only for an actual spawn.
-    /// Caller aliases stay held for legacy shared metadata publication.
     ///
     /// # Errors
     /// Returns the same errors as [`Self::open_with_write_roots`]. An error
@@ -941,69 +849,8 @@ impl SharedWriter {
             prepared_roots,
             timeout,
             timeout,
-            None,
             cancelled,
             Some(observed),
-        )
-    }
-
-    /// Transfer the entire exclusive lock union to the exact Ready helper.
-    ///
-    /// After success this handle retains no caller lock aliases. Use this entry point
-    /// only when the helper owns all writes. The existing open methods retain
-    /// caller custody for operations that publish their own shared metadata.
-    ///
-    /// # Errors
-    /// Refuses unavailable or mismatched Ready custody before dispatch.
-    /// A failure after spawn leaves the exact helper exit observation in
-    /// `observed`, including when Ready could not be confirmed.
-    pub fn open_with_write_roots_handoff_observed(
-        executable: &Path,
-        root: &Path,
-        prepared_roots: &[PathBuf],
-        timeout: Duration,
-        cancelled: &(impl Fn() -> bool + ?Sized),
-        observed: &mut Option<WriterExitObservation>,
-    ) -> io::Result<Self> {
-        let mut writer =
-            Self::open_with_write_roots_observed(executable, root, prepared_roots, timeout, cancelled, observed)?;
-        writer
-            .stage_ready()
-            .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
-        // Close these aliases without unlocking the inherited descriptions.
-        writer.controller_locks.clear();
-        Ok(writer)
-    }
-
-    /// Open a writer with the standalone helper's v1 managed storage request.
-    /// Pass the complete reviewed JSON, including cache roots even for no-build commands.
-    /// Keep the returned writer through all caller writes, then call [`Self::close`].
-    ///
-    /// # Errors
-    /// Returns request-size, lock, admission, launch or handshake errors before dispatch.
-    pub fn open_with_storage_request(
-        executable: &Path,
-        root: &Path,
-        prepared_roots: &[PathBuf],
-        storage_request: &str,
-        timeout: Duration,
-        cancelled: &(impl Fn() -> bool + ?Sized),
-    ) -> io::Result<Self> {
-        if storage_request.len() > 16 * 1024 {
-            return Err(failure(
-                WriterDisposition::NotStarted,
-                invalid("oversized writer storage request"),
-            ));
-        }
-        Self::open_with_admission_timeout(
-            executable,
-            root,
-            prepared_roots,
-            timeout,
-            timeout,
-            Some(storage_request),
-            cancelled,
-            None,
         )
     }
 
@@ -1013,20 +860,15 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Self> {
-        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, None, cancelled, None)
+        Self::open_with_admission_timeout(executable, root, &[], timeout, Duration::ZERO, cancelled, None)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one private path preserves the exact spawn observation"
-    )]
     fn open_with_admission_timeout(
         executable: &Path,
         root: &Path,
         prepared_roots: &[PathBuf],
         timeout: Duration,
         lock_timeout: Duration,
-        storage_request: Option<&str>,
         cancelled: &(impl Fn() -> bool + ?Sized),
         observed: Option<&mut Option<WriterExitObservation>>,
     ) -> io::Result<Self> {
@@ -1045,14 +887,16 @@ impl SharedWriter {
             }
             let (guards, roots) = WriterLock::acquire_projects(&root, &workspaces, lock_timeout, cancelled)?;
             let references: Vec<_> = guards.iter().collect();
-            Self::open_with_locks_and_workspaces(
+            let custody = Custody {
+                locks: &references,
+                workspaces: &workspaces,
+                roots: &roots,
+            };
+            Self::open_with_custody(
                 executable,
                 &root,
-                &references,
-                &workspaces,
-                &roots,
+                &custody,
                 timeout.saturating_sub(started.elapsed()),
-                storage_request,
                 cancelled,
                 observed,
             )
@@ -1069,34 +913,29 @@ impl SharedWriter {
     ) -> io::Result<Self> {
         let workspaces = vec![root.to_path_buf()];
         let roots = crate::write_domains::workspace_union(root, &workspaces)?;
-        Self::open_with_locks_and_workspaces(
-            executable,
-            root,
+        let custody = Custody {
             locks,
-            &workspaces,
-            &roots,
-            timeout,
-            None,
-            cancelled,
-            None,
-        )
+            workspaces: &workspaces,
+            roots: &roots,
+        };
+        Self::open_with_custody(executable, root, &custody, timeout, cancelled, None)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one private handoff binds locks and their workspace graph before ACK"
-    )]
-    fn open_with_locks_and_workspaces(
+    /// Hand the held locks and their workspace graph to a new helper, and
+    /// return once it acknowledges them.
+    fn open_with_custody(
         executable: &Path,
         root: &Path,
-        locks: &[&WriterLock],
-        workspaces: &[PathBuf],
-        roots: &[PathBuf],
+        custody: &Custody<'_>,
         timeout: Duration,
-        storage_request: Option<&str>,
         cancelled: &(impl Fn() -> bool + ?Sized),
         observed: Option<&mut Option<WriterExitObservation>>,
     ) -> io::Result<Self> {
+        let Custody {
+            locks,
+            workspaces,
+            roots,
+        } = *custody;
         (|| {
             let deadline = Instant::now()
                 .checked_add(timeout)
@@ -1163,24 +1002,18 @@ impl SharedWriter {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
-            if let Some(request) = storage_request {
-                command.arg("--storage-request").arg(request);
-            }
             let fds: Vec<_> = duplicates.iter().map(AsFd::as_fd).collect();
             let (helper, receiver) = Helper::spawn(command, &fds, identities, observed)?;
             let mut client = Self {
                 helper,
                 receiver,
                 owner: Value::Null,
-                stage_ready: None,
-                permitted_attempt: false,
                 root: root.to_path_buf(),
                 write_roots: roots.to_vec(),
                 workspaces: workspaces.to_vec(),
-                stage: StageState::Ready,
-                managed: storage_request.is_some(),
+                sealed: false,
                 asset_dir: PathBuf::new(),
-                controller_locks: duplicates,
+                _controller_locks: duplicates,
             };
             let locked = client.receive_until(deadline, cancelled)?;
             let owner = field(&locked, "owner");
@@ -1201,18 +1034,6 @@ impl SharedWriter {
                 return Err(invalid("writer asset custody has no canonical private directory"));
             }
             client.asset_dir = asset_dir;
-            if let Some(ready) = locked.get("stage_ready") {
-                let ready: WriterStageReady = serde_json::from_value(ready.clone())?;
-                if ready.version != 1
-                    || owner["pid"] != ready.pid
-                    || owner["start"] != ready.start
-                    || owner["session"] != ready.session
-                    || ready.boot != crate::native_guardian::writer_boot_session()?
-                {
-                    return Err(invalid("writer stage readiness differs from exact helper"));
-                }
-                client.stage_ready = Some(ready);
-            }
             client.owner = owner.clone();
             Ok(client)
         })()
@@ -1277,52 +1098,6 @@ impl SharedWriter {
         }
     }
 
-    /// Inspect the exact Ready helper before admitting its one permitted stage.
-    ///
-    /// # Errors
-    /// Refuses a legacy helper, a sealed scope, or a previously spent permit.
-    pub fn stage_ready(&self) -> io::Result<&WriterStageReady> {
-        self.stage_ready
-            .as_ref()
-            .filter(|_| self.stage == StageState::Ready)
-            .ok_or_else(|| invalid("writer stage readiness is unavailable"))
-    }
-
-    /// Run the one permitted stage with the original boot-clock expiry.
-    ///
-    /// An attempt seals further execution before local validation. A refusal
-    /// before delivery leaves the writer available for explicit close.
-    ///
-    /// # Errors
-    /// Returns pre-delivery refusal or the existing cancellation and retirement evidence.
-    pub fn run_permitted(
-        &mut self,
-        command: &Command,
-        permit: WriterStagePermit,
-        cancelled: &(impl Fn() -> bool + ?Sized),
-    ) -> io::Result<Output> {
-        if self.stage != StageState::Ready {
-            return Err(failure(
-                WriterDisposition::NotStarted,
-                invalid("writer scope is sealed; no replay"),
-            ));
-        }
-        self.stage = StageState::CloseOnly;
-        let ready = self.stage_ready.take().ok_or_else(|| {
-            failure(
-                WriterDisposition::NotStarted,
-                invalid("writer stage readiness is unavailable"),
-            )
-        })?;
-        self.permitted_attempt = true;
-        let budget = permit
-            .check(&ready)
-            .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
-        let permit =
-            serde_json::to_value(permit).map_err(|error| failure(WriterDisposition::NotStarted, error.into()))?;
-        self.run_inner(command, budget, Some(&permit), cancelled)
-    }
-
     /// Run once and retain the helper lock for later stages and metadata writes.
     ///
     /// # Errors
@@ -1344,24 +1119,8 @@ impl SharedWriter {
         timeout: Duration,
         cancelled: &(impl Fn() -> bool + ?Sized),
     ) -> io::Result<Output> {
-        self.stage_ready = None;
-        self.run_inner(command, timeout, None, cancelled)
-    }
-
-    fn run_inner(
-        &mut self,
-        command: &Command,
-        timeout: Duration,
-        permit: Option<&Value>,
-        cancelled: &(impl Fn() -> bool + ?Sized),
-    ) -> io::Result<Output> {
         use std::os::unix::process::ExitStatusExt;
-        let expected = if permit.is_some() {
-            StageState::CloseOnly
-        } else {
-            StageState::Ready
-        };
-        if self.stage != expected {
+        if self.sealed {
             return Err(failure(
                 WriterDisposition::Unknown,
                 invalid("writer scope is sealed; no replay"),
@@ -1398,7 +1157,7 @@ impl SharedWriter {
                         )));
                     }
                     // The helper already inherits this setting. Keep it out of
-                    // stage JSON, including the exact module setup environment.
+                    // the stage JSON.
                     continue;
                 }
                 env.insert(
@@ -1410,16 +1169,12 @@ impl SharedWriter {
                 );
             }
             let cwd = command.get_current_dir().unwrap_or(&self.root);
-            let request = if let Some(permit) = permit {
-                json!({"action":"run_permitted","command":args,"cwd":cwd,"env":env,"permit":permit})
-            } else {
-                json!({"action":"run","command":args,"cwd":cwd,"env":env,"timeout":timeout.as_secs_f64()})
-            };
+            let request = json!({"action":"run","command":args,"cwd":cwd,"env":env,"timeout":timeout.as_secs_f64()});
             Ok((command_deadline, reply_deadline, request))
         })()
         .map_err(|error| failure(WriterDisposition::NotStarted, error))?;
         let (command_deadline, reply_deadline, request) = prepared;
-        self.stage = StageState::Unconfirmed;
+        self.sealed = true;
         let delivery = self
             .helper
             .input
@@ -1470,13 +1225,6 @@ impl SharedWriter {
                 ));
             }
             match field(&frame, "state").as_str() {
-                Some("stage_refused") if permit.is_some() && process.is_none() && reason.is_none() => {
-                    self.stage = StageState::CloseOnly;
-                    return Err(failure(
-                        WriterDisposition::NotStarted,
-                        invalid(field(&frame, "reason").as_str().unwrap_or("writer stage refused")),
-                    ));
-                }
                 Some("started") if process.is_none() => {
                     let identity = field(&frame, "process");
                     if !valid_process(identity, &self.owner) {
@@ -1497,16 +1245,7 @@ impl SharedWriter {
                                 .to_owned(),
                         );
                     }
-                    // The identified managed helper already owns the stop. Keep
-                    // control available solely for a later verified terminal and close.
-                    // Unknown replies and ambiguous launch delivery still seal via EOF.
-                    if !(self.managed
-                        && field(&frame, "state") == "still_running"
-                        && field(&frame, "result") == "no_result"
-                        && process.as_ref() == Some(field(&frame, "process")))
-                    {
-                        self.cancel();
-                    }
+                    self.cancel();
                 }
                 Some("stopped") => {
                     // H can close a setup failure before sending Started. One
@@ -1531,17 +1270,6 @@ impl SharedWriter {
                         || field(&frame, "intervened") != false
                         || field(&frame, "result") != "result"
                     {
-                        if self.managed
-                            && self.helper.input.is_some()
-                            && field(&frame, "result") == "no_result"
-                            && field(&frame, "intervened") == true
-                            && field(&frame, "cancelled").is_boolean()
-                        {
-                            self.stage = StageState::CloseOnly;
-                            if reason.is_none() {
-                                reason = field(&frame, "reason").as_str().map(str::to_owned);
-                            }
-                        }
                         return Err(stopped_failure(
                             &io::Error::new(
                                 io::ErrorKind::Interrupted,
@@ -1577,11 +1305,7 @@ impl SharedWriter {
                         })
                     })()
                     .map_err(|error| stopped_failure(&error, &frame))?;
-                    self.stage = if permit.is_some() {
-                        StageState::CloseOnly
-                    } else {
-                        StageState::Ready
-                    };
+                    self.sealed = false;
                     return Ok(output);
                 }
                 _ => {
@@ -1597,33 +1321,24 @@ impl SharedWriter {
 
     /// Finish caller writes and confirm settlement by observing the exact helper exit.
     /// The command result remains independently available to the caller. Dropping
-    /// a managed writer without an explicit close leaves settlement unconfirmed.
+    /// the writer without an explicit close leaves settlement unconfirmed.
     ///
     /// # Errors
-    /// A timeout or unsuccessful exact helper exit leaves cleanup unconfirmed.
-    /// For a permitted attempt, the helper can complete cleanup after control
-    /// closes. Its successful exit remains observable through the original child
-    /// waiter. Legacy turns still require successful explicit close delivery.
-    /// Do not replay a command on this basis.
+    /// A sealed writer, a failed close delivery, a timeout, or an unsuccessful
+    /// exact helper exit leaves cleanup unconfirmed. Do not replay a command on
+    /// this basis.
     pub fn close(mut self, timeout: Duration) -> io::Result<()> {
         let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or_else(|| invalid("writer close deadline overflow"))?;
-        if self.stage == StageState::Unconfirmed && !self.permitted_attempt {
+        if self.sealed {
             return Err(invalid("sealed writer cannot confirm cleanup"));
         }
-        let delivery = self
-            .helper
+        self.helper
             .input
             .take()
             .ok_or_else(|| invalid("writer control closed"))
-            .and_then(|mut input| send_until(&mut input, &json!({"action":"close"}), deadline, &|| false));
-        // On the permit-capable standalone helper, successful exit is possible
-        // only after owned command and descriptor closure and successful cleanup.
-        // Preserve legacy explicit settlement and never treat pipe state as proof.
-        if !self.permitted_attempt {
-            delivery?;
-        }
+            .and_then(|mut input| send_until(&mut input, &json!({"action":"close"}), deadline, &|| false))?;
         let status = self
             .helper
             .exit

@@ -248,30 +248,13 @@ pub(super) fn validate_boot_uuid(boot: &str) -> io::Result<()> {
     }
 }
 
+/// The current kernel boot session, checked as a UUID. Tests use it to build
+/// owner records for this boot.
+#[cfg(test)]
 pub(crate) fn current_boot_session() -> io::Result<String> {
     let boot = native::boot_session()?;
     validate_boot_uuid(&boot)?;
     Ok(boot)
-}
-
-/// Capture the local installation and kernel boot directly at admission. These
-/// identify the observing host; neither one describes where delegated work ran.
-pub(super) fn writer_origin() -> io::Result<(String, String)> {
-    use sha2::{Digest as _, Sha256};
-    let boot = current_boot_session()?;
-    let machine = native::machine_identity()?;
-    if machine.iter().all(|byte| *byte == 0) {
-        return Err(invalid("local machine identity unavailable"));
-    }
-    let mut hash = Sha256::new();
-    hash.update(b"lean-rs-writer-origin-v1\0");
-    hash.update(machine);
-    use std::fmt::Write as _;
-    let mut host = String::with_capacity(64);
-    for byte in hash.finalize() {
-        write!(host, "{byte:02x}").map_err(io::Error::other)?;
-    }
-    Ok((host, boot.to_ascii_lowercase()))
 }
 
 fn recovery_claim(value: &Value) -> io::Result<RecoveryClaim> {
@@ -1293,7 +1276,11 @@ fn collect_unpublished(directory: &Path) -> io::Result<()> {
         .and_then(|name| name.strip_prefix("worker-"))
         .is_some_and(valid_nonce)
     {
-        return Err(invalid("unrecognized unpublished native directory"));
+        // This also refuses a 0.10 `.writer-storage-v1` charge directory.
+        return Err(invalid(format!(
+            "unrecognized native registry directory {}",
+            directory.display()
+        )));
     }
     if drain_slot::exists(&File::open(directory)?)? {
         return Err(busy("ownerless guardian drain slot is unresolved"));
@@ -1462,7 +1449,7 @@ fn collect_records_locked(root: &Path, until: std::time::Instant) -> io::Result<
             return Err(expired());
         }
         let entry = entry?;
-        if entry.file_name() == ".admission.lock" || super::writer_storage::is_charge_directory(&entry)? {
+        if entry.file_name() == ".admission.lock" {
             continue;
         }
         seen = seen
@@ -1599,9 +1586,6 @@ pub(super) fn check_drained_locked(root: &Path, until: std::time::Instant) -> io
     if !occupied.is_empty() {
         return Err(busy("native generation custody remains open"));
     }
-    if super::writer_storage::charges_remain(root)? {
-        return Err(busy("writer storage custody remains open"));
-    }
     Ok(())
 }
 /// Reserve bounded generation and actor capacity under the same admission lock.
@@ -1686,41 +1670,6 @@ mod native {
     #[cfg(not(target_os = "linux"))]
     use super::invalid;
     use super::io;
-    #[cfg(target_os = "macos")]
-    pub(super) fn machine_identity() -> io::Result<Vec<u8>> {
-        let mut uuid = [0; 16];
-        let timeout = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 100_000_000,
-        };
-        // SAFETY: gethostuuid writes one 16-byte UUID into valid local storage
-        // and reads the initialized timeout only during this synchronous call.
-        if unsafe { libc::gethostuuid(uuid.as_mut_ptr(), &raw const timeout) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(uuid.to_vec())
-    }
-    #[cfg(target_os = "linux")]
-    pub(super) fn machine_identity() -> io::Result<Vec<u8>> {
-        use std::io::Read as _;
-        use std::os::unix::fs::MetadataExt as _;
-        let file = std::fs::File::open("/etc/machine-id")?;
-        let meta = file.metadata()?;
-        if !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
-            return Err(super::invalid("untrusted local machine identity"));
-        }
-        let mut value = String::new();
-        file.take(34).read_to_string(&mut value)?;
-        let id = value.strip_suffix('\n').unwrap_or(&value);
-        if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) || id.bytes().all(|b| b == b'0') {
-            return Err(super::invalid("invalid local machine identity"));
-        }
-        Ok(id.to_ascii_lowercase().into_bytes())
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    pub(super) fn machine_identity() -> io::Result<Vec<u8>> {
-        Err(invalid("local machine identity unavailable"))
-    }
     #[cfg(target_os = "linux")]
     use super::{PathBuf, read_process};
     #[cfg(target_os = "macos")]

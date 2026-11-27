@@ -29,6 +29,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   `PrepareBoundHostRead` and `InspectDeclarationFenced` requests, and the `HostReadPrepared` and
   `DeclarationInspectionFinished` responses. Use `LeanWorkerHostHandle::inspect_declaration_with_imports` or
   `LeanWorkerSession::inspect_declaration`.
+- The writer's storage turns, stage permits, module-setup capture and source handoff are gone; no consumer used
+  them. This removes `SharedWriter::{open_with_storage_request, open_with_write_roots_handoff_observed,
+  stage_ready, run_permitted}`, `WriterStageReady`, `WriterStagePermit`, `MODULE_SETUP_CAPTURE_ENV`, the
+  `native_guardian::writer_storage` module, `lean_rs_writer::{inspect_writer_storage_turn,
+  recover_idle_writer_storage_turn}`, and the helper's `--storage-request`, `writer-lock-path --capabilities` and
+  `writer-storage` commands.
+- A lock record or owner-registry entry left by a 0.10 storage turn now refuses writer admission instead of
+  reading as a stopped writer.
 
 ## [0.10.17]
 

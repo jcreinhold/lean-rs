@@ -65,9 +65,6 @@ mod deadlines;
 pub fn guardian_deadline_ticks() -> io::Result<Duration> {
     deadlines::boot_ticks()
 }
-pub(crate) fn writer_boot_session() -> io::Result<String> {
-    ownership::current_boot_session()
-}
 
 mod drain_slot;
 /// Validate immutable Running ownership before an admitted request uses its
@@ -142,8 +139,6 @@ pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation
 mod ownership;
 #[cfg(test)]
 mod registry_tests;
-#[doc(hidden)]
-pub mod writer_storage;
 pub use ownership::{
     NativeCapacitySlot, NativeGuardianDrainBinding, NativeGuardianDrainStatus, NativeOwnerObservation,
     NativeProcessIdentity, bind_registry_directory, claim_native_recovery, close_unacknowledged_owner_record,
@@ -1242,8 +1237,7 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
     let mut count = 0_usize;
     for entry in entries {
         let entry = entry?;
-        let name = entry.file_name();
-        if name == ".admission.lock" || writer_storage::is_charge_directory(&entry)? {
+        if entry.file_name() == ".admission.lock" {
             continue;
         }
         count = count

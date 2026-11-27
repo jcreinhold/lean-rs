@@ -95,9 +95,6 @@ impl Fixture {
             version: PROTOCOL,
             owner,
             process: None,
-            storage_turn: None,
-            command_phase: None,
-            scratch_identity: None,
         };
         persist(&mut file, &record).unwrap();
         persist(&mut loan, &record).unwrap();
@@ -143,7 +140,6 @@ impl Fixture {
             &self.record,
             input,
             &self.launcher,
-            None,
             emit,
         )
     }
@@ -486,137 +482,4 @@ fn output_overflow_stops_scope_with_bounded_terminal_no_result() {
     assert!(serde_json::to_vec(terminal).unwrap().len() < FRAME_BYTES as usize);
     assert!(terminal["reason"].as_str().unwrap().contains("output limit"));
     fixture.assert_closed(&frames);
-}
-
-#[test]
-fn command_only_starts_each_launch_only_after_full_union_publication() {
-    let mut fixture = Fixture::new("clean");
-    fixture.record.storage_turn = Some("0123456789abcdef0123456789abcdef".into());
-    fixture.record.command_phase = Some(CommandPhase::Idle);
-    let (_sender, input) = mpsc::channel();
-    let mut started = 0;
-    for _ in 0..2 {
-        let paths = [fixture.lock_path.clone(), fixture.loan_path.clone()];
-        assert!(
-            fixture
-                .run(&message(3.0), &input, |frame| {
-                    if frame["state"] == "started" {
-                        started += 1;
-                        for path in &paths {
-                            let record: Record = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-                            assert_eq!(record.command_phase, Some(CommandPhase::Running));
-                            assert_eq!(
-                                record.process.unwrap().pid,
-                                frame["process"]["pid"].as_u64().unwrap() as u32
-                            );
-                        }
-                    }
-                    Ok(())
-                })
-                .unwrap()
-        );
-        for path in [&fixture.lock_path, &fixture.loan_path] {
-            let record: Record = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-            assert_eq!(record.command_phase, Some(CommandPhase::Idle));
-            assert!(record.process.is_none());
-        }
-    }
-    assert_eq!(started, 2);
-    fixture.readonly_loan();
-    assert!(fixture.run(&message(3.0), &input, |_| Ok(())).is_err());
-    assert_eq!(
-        fixture.launch_count(),
-        2,
-        "partial Starting publication spawned another child"
-    );
-    let primary: Record = serde_json::from_reader(File::open(&fixture.lock_path).unwrap()).unwrap();
-    let secondary: Record = serde_json::from_reader(File::open(&fixture.loan_path).unwrap()).unwrap();
-    assert_eq!(primary.command_phase, Some(CommandPhase::Starting));
-    assert_eq!(secondary.command_phase, Some(CommandPhase::Idle));
-}
-
-#[test]
-fn committed_writer_exec_refuses_expiry_before_payload_entry() -> io::Result<()> {
-    const CHILD: &str = "LEAN_RS_TEST_COMMITTED_EXPIRED_EXEC";
-    const TEST: &str = "lifecycle_tests::committed_writer_exec_refuses_expiry_before_payload_entry";
-    match std::env::var(CHILD).as_deref() {
-        Ok("wrapper") => {
-            let error = run_exec().expect_err("expired wrapper must return without exec");
-            assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
-            assert_eq!(error.to_string(), "writer stage permit expired");
-            return Ok(());
-        }
-        Ok("owner") => {
-            setsid()?;
-        }
-        _ => {
-            let status = Command::new(std::env::current_exe()?)
-                .args(["--exact", TEST, "--nocapture"])
-                .env(CHILD, "owner")
-                .status()?;
-            assert!(status.success());
-            return Ok(());
-        }
-    }
-
-    let mut fixture = Fixture::new("clean");
-    let mut command = Command::new(std::env::current_exe()?);
-    command
-        .args(["--exact", TEST])
-        .env(CHILD, "wrapper")
-        .stdin(Stdio::piped());
-    // Release the production wrapper entry directly, so the owner's ordinary
-    // watchdog cannot prevent the wrapper itself from observing the expired GO.
-    let (barrier, inherited) = pipe()?;
-    fcntl_setfd(&barrier, FdFlags::CLOEXEC)?;
-    fcntl_setfl(&barrier, fcntl_getfl(&barrier)? | OFlags::NONBLOCK)?;
-    let mut group = OwnedCommandGroup::spawn_inheriting(command, &[inherited.as_fd(), fixture.file.as_fd()])?;
-    drop(inherited);
-    let mut input = group.take_stdin().expect("blocked wrapper input");
-
-    let mut committed = fixture.record.clone();
-    committed.process = Some(ProcessIdentity {
-        pid: group.id(),
-        start: birth(group.id())?,
-        process_group: group.id(),
-        session: committed.owner.session,
-        start_new_session: false,
-    });
-    persist_all(&mut fixture.file, &fixture.loans, &committed)?;
-    let ready = stage_ready(&committed.owner)?;
-    let cutoff = lean_toolchain::native_guardian::guardian_deadline_ticks()?.saturating_add(Duration::from_millis(200));
-    let expires_ns = u64::try_from(cutoff.as_nanos()).map_err(io::Error::other)?;
-    let permit = WriterStagePermit::new(ready.clone(), ready.boot(), expires_ns)?;
-    assert!(group.try_wait()?.is_none(), "committed wrapper still awaits GO");
-    assert!(!barrier_closed(&barrier)?, "wrapper retains its barrier before GO");
-    while lean_toolchain::native_guardian::guardian_deadline_ticks()? < cutoff {
-        thread::sleep(POLL);
-    }
-
-    let marker = fixture.root.join("payload-entry");
-    writeln!(
-        input,
-        "{}",
-        json!({
-            "action":"run_permitted", "root":fixture.root, "lock":fixture.lock_path,
-            "command":["/usr/bin/touch", marker], "permit":permit,
-        })
-    )?;
-    drop(input);
-
-    let started = Instant::now();
-    let status = loop {
-        if let Some(status) = group.try_wait()? {
-            break status;
-        }
-        if started.elapsed() > LIMIT {
-            group.request_stop()?;
-        }
-        thread::sleep(POLL);
-    };
-    assert!(!group.intervened(), "wrapper must refuse on its own");
-    assert!(status.success(), "exact wrapper expiry assertion failed");
-    assert!(barrier_closed(&barrier)?);
-    assert!(!marker.exists());
-    Ok(())
 }
