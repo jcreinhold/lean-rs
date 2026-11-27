@@ -139,8 +139,8 @@ python3 scripts/qualify_metadata.py broken-import --emit-host-selection
 ```
 
 For a cold Lake build through the standalone SDK writer, build `lean-rs-writer` and pass the canonical binary path
-and SHA-256 to the custody check. It builds private copies with the SDK name, the former name, and matching values
-under both names. It also checks that missing or conflicting settings stop before publishing artifacts.
+and SHA-256 to the custody check. It builds a private copy with `LEAN_RS_WRITER_EXECUTABLE` set and checks that a
+copy without it stops before publishing artifacts.
 
 ```sh
 python3 scripts/check_test_custody.py "$WRITER" "$WRITER_SHA256" --lake-fixture

@@ -18,6 +18,9 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - `lean-rs-host` compiles in its shim sources. `prepare_host_artifacts_in(DEST)`, and the worker's
   `--lean-rs-prepare-host-artifacts DEST`, write them into a new directory and build them there, so an installer
   can give a worker its own copy without reading the Cargo source cache or pinning the shim files' hashes.
+- The writer reads and sets only its `LEAN_RS_*` settings. The former `LEAN_HOST_MCP_WRITER_EXECUTABLE`,
+  `LEAN_HOST_MCP_WRITER_LOCK_LOANS`, `LEAN_HOST_MCP_WRITER_WORKSPACES` and `LEAN_HOST_MCP_CAPTURE_MODULE_SETUP`
+  names are gone, with `LEGACY_MODULE_SETUP_CAPTURE_ENV`. `WRITER_HANDOFF_ENV` now holds two names.
 
 ## [0.10.17]
 

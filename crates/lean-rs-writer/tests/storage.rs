@@ -9,7 +9,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
 
-use lean_toolchain::shared_writer::{LEGACY_MODULE_SETUP_CAPTURE_ENV, MODULE_SETUP_CAPTURE_ENV};
+use lean_toolchain::shared_writer::MODULE_SETUP_CAPTURE_ENV;
 use serde_json::{Value, json};
 
 fn root(role: &str, path: &Path) -> Value {
@@ -86,40 +86,6 @@ fn reply(reader: &mut BufReader<ChildStdout>) -> io::Result<Value> {
 
 fn send(child: &mut Child, frame: &Value) -> io::Result<()> {
     writeln!(child.stdin.as_mut().expect("writer control"), "{frame}")
-}
-
-#[test]
-fn conflicting_handoff_settings_refuse_before_lock_admission() -> io::Result<()> {
-    let tmp = tempfile::tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))?;
-    let project = tmp.path().canonicalize()?.join("project");
-    fs::create_dir(&project)?;
-    let lock = lean_toolchain::shared_writer::project_lock_path(&project)?;
-    let names = lean_toolchain::shared_writer::WRITER_HANDOFF_ENV;
-    let [loans, former_loans, workspaces, former_workspaces] = names;
-    for [current, former] in [[loans, former_loans], [workspaces, former_workspaces]] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lean-rs-writer"));
-        command.arg("writer").arg(&project).arg(&lock).arg("3");
-        for name in names {
-            command.env_remove(name);
-        }
-        let output = command
-            .env(current, "[]")
-            .env(former, "[1]")
-            .env(
-                "LEAN_RS_WORKER_OWNERS_DIRECTORY",
-                tmp.path().canonicalize()?.join("owners"),
-            )
-            .output()?;
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(!output.status.success(), "{output:?}");
-        assert!(output.stdout.is_empty());
-        assert!(
-            error.contains("conflicting") && error.contains(current) && error.contains(former),
-            "{error}"
-        );
-        assert!(!lock.exists());
-    }
-    Ok(())
 }
 
 #[test]
@@ -615,13 +581,7 @@ fn charged_lake_setup_preserves_required_bytes_and_close() -> io::Result<()> {
         project.join("lakefile.toml"),
         format!("name = \"demo\"\n[[lean_lib]]\nname = \"Demo\"\nleanOptions = {{ fixture = \"{option}\" }}\n"),
     )?;
-    let marker_cases: [(&[&str], bool); 4] = [
-        (&[MODULE_SETUP_CAPTURE_ENV], false),
-        (&[LEGACY_MODULE_SETUP_CAPTURE_ENV], false),
-        (&[MODULE_SETUP_CAPTURE_ENV, LEGACY_MODULE_SETUP_CAPTURE_ENV], false),
-        (&[MODULE_SETUP_CAPTURE_ENV], true),
-    ];
-    for (markers, overflow) in marker_cases {
+    for overflow in [false, true] {
         let budget = if overflow { 64 * 1024 } else { 1024 * 1024 };
         let mut child = start_storage(&project, &registry, &scratch, budget, overflow)?;
         let mut reader = BufReader::new(child.stdout.take().expect("writer replies"));
@@ -632,11 +592,9 @@ fn charged_lake_setup_preserves_required_bytes_and_close() -> io::Result<()> {
         let mut env = serde_json::Map::from_iter([
             ("LAKE_CACHE_DIR".to_owned(), json!(assets)),
             ("LAKE_ARTIFACT_CACHE".to_owned(), json!("false")),
+            (MODULE_SETUP_CAPTURE_ENV.to_owned(), json!("1")),
         ]);
-        for marker in markers {
-            env.insert((*marker).to_owned(), json!("1"));
-        }
-        if !overflow && markers == [MODULE_SETUP_CAPTURE_ENV] {
+        if !overflow {
             env.insert(
                 lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV.to_owned(),
                 json!(registry),

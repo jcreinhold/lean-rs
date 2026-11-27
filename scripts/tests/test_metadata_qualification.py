@@ -155,7 +155,6 @@ class MetadataQualificationTest(unittest.TestCase):
         with patch.object(qualification, "build_environment", return_value={}):
             env = qualification.environment(self.state, self.helper, self.target)
         self.assertEqual(env["LEAN_RS_WRITER_EXECUTABLE"], str(self.helper))
-        self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", env)
 
     def test_wrong_policy_refuses_before_readiness(self):
         self.record.write_text('{"typed_session": true, "verification": false}')
@@ -500,7 +499,6 @@ class MetadataQualificationTest(unittest.TestCase):
                 ["/reviewed/gtimeout", "--signal=TERM", "--kill-after=15s", "8m"],
             )
             self.assertNotIn("LEAN_RS_WRITER_EXECUTABLE", env)
-            self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", env)
             self.assertNotIn("LEAN_RS_METADATA_AUDIT_PATH", env)
             self.assertTrue(check)
         command, cwd, env, _ = seen[-1]
@@ -965,7 +963,6 @@ class MetadataQualificationTest(unittest.TestCase):
                 case_env["LEAN_RS_PROFILE_FIXTURE_SHA256"], "fixture-digest"
             )
             self.assertNotIn("LEAN_RS_WRITER_EXECUTABLE", case_env)
-            self.assertNotIn("LEAN_HOST_MCP_WRITER_EXECUTABLE", case_env)
             self.assertEqual(case_env["LEAN_RS_TEST_AUDIT_WORKER_START"], "1")
             self.assertEqual(
                 case_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"],

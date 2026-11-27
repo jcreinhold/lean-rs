@@ -312,21 +312,6 @@ command publishes `module-setup.json` and returns its lowercase SHA-256 as stdou
 to the smaller of 16 MiB and the turn's byte budget. Stderr retains at most 64 KiB and continues draining.
 Read and verify the staged bytes under the same charge, then close the writer explicitly. A failed or lost close
 leaves settlement unconfirmed. Unmarked commands keep their ordinary output limits and result format.
-Select the SDK marker when `writer-lock-path ROOT --capabilities` advertises `lake_module_setup_capture_env_v2`.
-During the transition, a helper advertising only `lake_module_setup_capture_v1` uses the former marker.
-
-For one coordinated release, helpers accept the former names for the writer executable, inherited lock loans and
-workspaces, and module setup capture. The SDK forwards identical executable and handoff values under both names
-so existing helpers can still read them. Stage producers send the single marker selected by the helper's reported
-capabilities. If both names for a setting are present, their values must agree. A conflict reports both names and
-refuses the affected startup or command before execution.
-
-| SDK setting | Former name |
-| --- | --- |
-| `LEAN_RS_WRITER_EXECUTABLE` | `LEAN_HOST_MCP_WRITER_EXECUTABLE` |
-| `LEAN_RS_WRITER_LOCK_LOANS` | `LEAN_HOST_MCP_WRITER_LOCK_LOANS` |
-| `LEAN_RS_WRITER_WORKSPACES` | `LEAN_HOST_MCP_WRITER_WORKSPACES` |
-| `LEAN_RS_CAPTURE_MODULE_SETUP` | `LEAN_HOST_MCP_CAPTURE_MODULE_SETUP` |
 
 The managed writer records one turn ID on the full project-lock union and binds the exact scratch path, device
 and inode in the existing charge before exposing scratch or accepting work. The project locks precede the registry

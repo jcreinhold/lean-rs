@@ -5,7 +5,7 @@
 //! scope; descendants must retain that group. A lost result is separate from stop
 //! evidence, and an unknown scope never authorizes another command.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
@@ -28,76 +28,40 @@ use crate::writer_lock::WriterLock;
 
 /// Environment setting for the shared artifact helper executable.
 pub const SHARED_WRITER_EXECUTABLE_ENV: &str = "LEAN_RS_WRITER_EXECUTABLE";
-const LEGACY_EXECUTABLE_ENV: &str = "LEAN_HOST_MCP_WRITER_EXECUTABLE";
 const LOCK_LOANS_ENV: &str = "LEAN_RS_WRITER_LOCK_LOANS";
-const LEGACY_LOCK_LOANS_ENV: &str = "LEAN_HOST_MCP_WRITER_LOCK_LOANS";
 const WORKSPACES_ENV: &str = "LEAN_RS_WRITER_WORKSPACES";
-const LEGACY_WORKSPACES_ENV: &str = "LEAN_HOST_MCP_WRITER_WORKSPACES";
 /// Reserved handoff keys to clear from commands outside a writer launch.
-pub const WRITER_HANDOFF_ENV: [&str; 4] = [
-    LOCK_LOANS_ENV,
-    LEGACY_LOCK_LOANS_ENV,
-    WORKSPACES_ENV,
-    LEGACY_WORKSPACES_ENV,
-];
+pub const WRITER_HANDOFF_ENV: [&str; 2] = [LOCK_LOANS_ENV, WORKSPACES_ENV];
 /// Marker in a writer stage's command environment for capturing Lake module setup output.
 pub const MODULE_SETUP_CAPTURE_ENV: &str = "LEAN_RS_CAPTURE_MODULE_SETUP";
-/// Former stage marker for helpers that advertise only the original capture capability.
-pub const LEGACY_MODULE_SETUP_CAPTURE_ENV: &str = "LEAN_HOST_MCP_CAPTURE_MODULE_SETUP";
 const MAX_FRAME: u64 = 1024 * 1024;
 /// Maximum close-only project and source-entry lock descriptions in one helper.
 pub const MAX_WRITER_LOCK_LOANS: usize = 64;
 
-fn transition_value(
-    current: &str,
-    former: &str,
-    lookup: impl Fn(&str) -> Option<OsString>,
-) -> io::Result<Option<OsString>> {
-    let value = lookup(current);
-    let former_value = lookup(former);
-    if let (Some(value), Some(former_value)) = (&value, &former_value)
-        && value != former_value
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("conflicting {current} and {former} values"),
-        ));
-    }
-    Ok(value.or(former_value))
-}
-
-/// Resolve the writer executable from the environment, including its former name.
+/// Read the writer executable from [`SHARED_WRITER_EXECUTABLE_ENV`].
 ///
 /// # Errors
-/// Returns an error when both names are set to different values.
+/// None at present. The `Result` keeps one error path for callers.
 pub fn writer_executable_from_env() -> io::Result<Option<PathBuf>> {
-    transition_value(SHARED_WRITER_EXECUTABLE_ENV, LEGACY_EXECUTABLE_ENV, |name| {
-        std::env::var_os(name)
-    })
-    .map(|value| value.map(PathBuf::from))
+    Ok(std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).map(PathBuf::from))
 }
 
 /// Forward a typed writer executable or the inherited selection to a helper.
 ///
-/// During the transition, forward matching values under both names so former
-/// workers can read the same explicit selection. Command overrides are honored.
+/// The command's own setting wins over the process environment.
 ///
 /// # Errors
-/// Returns an error when the effective environment names disagree, even when an
-/// explicit executable is supplied.
+/// None at present. The `Result` keeps one error path for callers.
 pub fn configure_writer_executable(command: &mut Command, executable: Option<&Path>) -> io::Result<()> {
-    let inherited = transition_value(
-        SHARED_WRITER_EXECUTABLE_ENV,
-        LEGACY_EXECUTABLE_ENV,
-        |name| match command.get_envs().find(|(key, _)| *key == OsStr::new(name)) {
-            Some((_, value)) => value.map(OsStr::to_os_string),
-            None => std::env::var_os(name),
-        },
-    )?;
+    let inherited = match command
+        .get_envs()
+        .find(|(key, _)| *key == OsStr::new(SHARED_WRITER_EXECUTABLE_ENV))
+    {
+        Some((_, value)) => value.map(OsStr::to_os_string),
+        None => std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV),
+    };
     if let Some(value) = executable.map(Path::as_os_str).or(inherited.as_deref()) {
-        command
-            .env(SHARED_WRITER_EXECUTABLE_ENV, value)
-            .env(LEGACY_EXECUTABLE_ENV, value);
+        command.env(SHARED_WRITER_EXECUTABLE_ENV, value);
     }
     Ok(())
 }
@@ -149,7 +113,7 @@ pub fn project_artifact_roots_with_domains(
 /// # Errors
 /// Rejects noncanonical, duplicate, oversized, or missing-primary workspace lists.
 pub fn inherited_writer_workspaces(primary: &Path) -> io::Result<Vec<PathBuf>> {
-    let Some(encoded) = transition_value(WORKSPACES_ENV, LEGACY_WORKSPACES_ENV, |name| std::env::var_os(name))? else {
+    let Some(encoded) = std::env::var_os(WORKSPACES_ENV) else {
         return Ok(vec![canonical_project_root(primary)?]);
     };
     let roots: Vec<PathBuf> = serde_json::from_str(
@@ -525,7 +489,7 @@ struct LockLoan {
     reason = "fcntl duplicates an integer descriptor into a fresh owned File; original descriptors are never closed"
 )]
 pub fn inherited_writer_locks() -> io::Result<Option<Vec<(PathBuf, File)>>> {
-    let Some(encoded) = transition_value(LOCK_LOANS_ENV, LEGACY_LOCK_LOANS_ENV, |name| std::env::var_os(name))? else {
+    let Some(encoded) = std::env::var_os(LOCK_LOANS_ENV) else {
         return Ok(None);
     };
     let loans: Vec<LockLoan> =
@@ -1191,9 +1155,7 @@ impl SharedWriter {
                 .arg(primary.path())
                 .arg(timeout.as_secs_f64().to_string())
                 .env(LOCK_LOANS_ENV, &encoded_loans)
-                .env(LEGACY_LOCK_LOANS_ENV, &encoded_loans)
                 .env(WORKSPACES_ENV, &encoded_workspaces)
-                .env(LEGACY_WORKSPACES_ENV, &encoded_workspaces)
                 .env(
                     crate::native_guardian::OWNERS_DIRECTORY_ENV,
                     crate::native_guardian::registry_directory()?,
@@ -1446,15 +1408,6 @@ impl SharedWriter {
                         None => Value::Null,
                     },
                 );
-            }
-            if let (Some(current), Some(former)) = (
-                env.get(MODULE_SETUP_CAPTURE_ENV),
-                env.get(LEGACY_MODULE_SETUP_CAPTURE_ENV),
-            ) && current != former
-            {
-                return Err(invalid(format!(
-                    "conflicting {MODULE_SETUP_CAPTURE_ENV} and {LEGACY_MODULE_SETUP_CAPTURE_ENV} values"
-                )));
             }
             let cwd = command.get_current_dir().unwrap_or(&self.root);
             let request = if let Some(permit) = permit {

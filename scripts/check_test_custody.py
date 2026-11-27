@@ -12,18 +12,16 @@ from pathlib import Path
 CHECKOUT = Path(__file__).resolve().parents[1]
 TARGET = CHECKOUT / "target"
 WRITER = "LEAN_RS_WRITER_EXECUTABLE"
-LEGACY_WRITER = "LEAN_HOST_MCP_WRITER_EXECUTABLE"
 
 
 def qualify_lake_fixture(helper: Path, scratch: Path, env: dict[str, str]) -> None:
-    """Build cold SDK fixtures through the standalone writer's supported settings."""
+    """Build a cold SDK fixture through the standalone writer, and refuse one without it."""
     fixture = CHECKOUT / "fixtures/lean"
     tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "."], cwd=fixture)
     inputs = [Path(os.fsdecode(name)) for name in tracked.split(b"\0") if name]
     env.update(LEAN_NUM_THREADS="1", CARGO_BUILD_JOBS="1")
     env.pop("OUT_DIR", None)  # Keep the SDK build cache inside each private fixture.
     env.pop(WRITER, None)
-    env.pop(LEGACY_WRITER, None)
     command = [
         "cargo",
         "build",
@@ -41,14 +39,7 @@ def qualify_lake_fixture(helper: Path, scratch: Path, env: dict[str, str]) -> No
     approved = str(helper)
     cases = (
         ("sdk", {WRITER: approved}, ()),
-        ("former", {LEGACY_WRITER: approved}, ()),
-        ("matching", {WRITER: approved, LEGACY_WRITER: approved}, ()),
         ("missing", {}, ("shared Lake writes require the configured writer helper",)),
-        (
-            "conflict",
-            {WRITER: approved, LEGACY_WRITER: str(scratch / "other-writer")},
-            (WRITER, LEGACY_WRITER),
-        ),
     )
     for name, settings, rejection in cases:
         root = scratch / name
@@ -130,7 +121,7 @@ def main() -> None:
     parser.add_argument(
         "--lake-fixture",
         action="store_true",
-        help="qualify old and new settings for cold LeanRsFixture writes",
+        help="qualify the writer setting for cold LeanRsFixture writes",
     )
     args = parser.parse_args()
     helper = args.helper

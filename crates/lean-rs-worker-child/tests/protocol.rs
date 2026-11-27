@@ -149,41 +149,6 @@ fn standalone_worker_and_writer_use_the_typed_owner_directory() -> Result<(), Bo
 }
 
 #[test]
-fn conflicting_writer_executables_refuse_worker_startup() {
-    use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerError};
-    use lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV;
-
-    let legacy = "LEAN_HOST_MCP_WRITER_EXECUTABLE";
-    let output = Command::new(worker_binary())
-        .env(SHARED_WRITER_EXECUTABLE_ENV, "/current")
-        .env(legacy, "/former")
-        .output()
-        .expect("run worker startup");
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty(), "worker began its handshake");
-    let diagnostic = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        diagnostic.contains("conflicting")
-            && diagnostic.contains(SHARED_WRITER_EXECUTABLE_ENV)
-            && diagnostic.contains(legacy),
-        "{diagnostic}"
-    );
-
-    let config = LeanWorkerConfig::new(worker_binary())
-        .env(SHARED_WRITER_EXECUTABLE_ENV, "/current")
-        .env(legacy, "/former");
-    match LeanWorker::spawn(&config) {
-        Err(LeanWorkerError::Setup { message }) => {
-            assert!(message.contains("conflicting"), "{message}");
-            assert!(message.contains(SHARED_WRITER_EXECUTABLE_ENV), "{message}");
-            assert!(message.contains(legacy), "{message}");
-        }
-        Err(error) => panic!("expected startup configuration error, got {error}"),
-        Ok(_) => panic!("conflicting values started a worker"),
-    }
-}
-
-#[test]
 fn fixture_capability_loads_and_exported_call_succeeds() {
     let (fixture, binary) = scalar_fixture();
     let mut worker = WorkerProcess::spawn(&binary).expect("worker starts");

@@ -67,7 +67,7 @@ impl OwnedChild {
         let mut child = if let Some(file) = loan {
             let metadata = file.metadata().expect("loan identity");
             command.env(
-                "LEAN_HOST_MCP_WRITER_LOCK_LOANS",
+                "LEAN_RS_WRITER_LOCK_LOANS",
                 serde_json::json!([{
                     "fd":file.as_raw_fd(), "path":path, "device":metadata.dev(), "inode":metadata.ino()
                 }])
