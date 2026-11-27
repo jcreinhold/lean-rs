@@ -94,18 +94,27 @@ private def severityOfMessage : MessageSeverity → Severity
   | .warning     => .warning
   | .error       => .error
 
+/-- The messages `lean` and `lake build` print: Lean drops the ones it marks
+    silent, such as a formatter plugin's records, from every output but the
+    language server's. -/
+def dropSilent (log : MessageLog) : MessageLog :=
+  { log with
+    reported := log.reported.filter (!·.isSilent)
+    unreported := log.unreported.filter (!·.isSilent) }
+
 /-- Walk a `MessageLog`, converting each entry into a `Diagnostic` and
     bounding the running byte sum at `byteLimit`. Always emits at least
     one diagnostic if any are present so callers always see *some*
     failure context; subsequent diagnostics stop being collected once
-    the cumulative body bytes meet the limit. -/
+    the cumulative body bytes meet the limit. Silent messages are dropped,
+    as `lean` drops them. -/
 def serializeMessages
     (msgs : MessageLog) (byteLimit : USize) (fallbackLabel : String)
     : BaseIO (Array Diagnostic × Truncation) := do
   let mut out : Array Diagnostic := #[]
   let mut bytes : USize := 0
   let mut trunc : Truncation := .complete
-  for m in msgs.toArray do
+  for m in (dropSilent msgs).toArray do
     if out.size > 0 && bytes >= byteLimit then
       trunc := .truncated
       break
