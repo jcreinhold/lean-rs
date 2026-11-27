@@ -45,7 +45,7 @@ The tour opens an import session, elaborates a term, kernel-checks it, runs a bu
 
 ## Choose a crate
 
-All published crates share the workspace version; dependency examples use `"0.11"` for the 0.11.x series.
+All published crates share the workspace version; dependency examples use `"0.12"` for the 0.12.x series.
 
 | Job | Crate |
 | --- | --- |

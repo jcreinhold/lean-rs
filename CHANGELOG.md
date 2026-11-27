@@ -9,6 +9,10 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.12.0]
+
+Breaking: upgrade the worker parent and worker child together.
+
 ### Removed
 
 - The cross-process artifact protocol: shared reader locks, writer demand, the native guardian, owner records, capacity
