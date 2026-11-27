@@ -1026,12 +1026,7 @@ impl LeanWorkerHostHandleBuilder {
         if !session_config.imports().is_empty() {
             let _session = worker.open_session(&session_config, None, None)?;
         }
-        Ok(LeanWorkerHostHandle {
-            worker,
-            session_config,
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
-            managed_artifact_read: None,
-        })
+        Ok(LeanWorkerHostHandle { worker, session_config })
     }
 }
 
@@ -1423,282 +1418,9 @@ impl LeanWorkerCapability {
 pub struct LeanWorkerHostHandle {
     worker: LeanWorker,
     session_config: LeanWorkerSessionConfig,
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    managed_artifact_read: Option<(LeanWorkerSessionConfig, u64)>,
 }
 
 impl LeanWorkerHostHandle {
-    /// Observe the exact guarded generation currently owned by this handle.
-    /// The trusted adapter uses this identity when binding its durable grant.
-    ///
-    /// # Errors
-    /// Refuses an unavailable or unguarded generation.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    pub fn managed_guardian_binding(
-        &self,
-    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
-        self.worker.managed_guardian_binding()
-    }
-
-    /// Check the exact still-held warm generation and its sealed predecessor.
-    ///
-    /// This observation does not consume admission or permit dispatch. Pass
-    /// a separately consumed successor grant to the managed warm operation.
-    ///
-    /// # Errors
-    /// Refuses a missing or mismatched completion, binding or live custody.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    pub fn validate_managed_warm_continuation(
-        &self,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        predecessor: &lean_rs_worker_protocol::protocol::ManagedInspectionCommand,
-    ) -> Result<(), LeanWorkerError> {
-        self.worker.validate_managed_warm_continuation(expected, predecessor)
-    }
-
-    /// Prepare the exact shared read union without importing or initializing Lean
-    /// project code. The returned binding is for durable admission on this handle.
-    ///
-    /// # Errors
-    /// Refuses an unavailable owner, expired preparation budget or lock failure.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    pub fn prepare_managed_artifact_read(
-        &mut self,
-        imports: Vec<String>,
-        expires_ns: u64,
-    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
-        let config = self.session_config.with_imports(imports);
-        let binding = self.worker.prepare_managed_artifact_read(&config, expires_ns, None)?;
-        self.managed_artifact_read = Some((config, expires_ns));
-        Ok(binding)
-    }
-
-    /// Protect the exact prepared artifact read with the original admission deadline.
-    /// Callers must separately consume the matching durable grant before inspection.
-    ///
-    /// # Errors
-    /// Refuses a different boot, unavailable guardian, expired deadline or unconfirmed plan.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    pub fn prepare_managed_artifact_read_bound(
-        &mut self,
-        imports: Vec<String>,
-        boot: &str,
-        attempt: [u8; 16],
-        stage: u64,
-        expires_ns: u64,
-    ) -> Result<lean_toolchain::native_guardian::NativeGuardianDrainBinding, LeanWorkerError> {
-        let config = self.session_config.with_imports(imports);
-        let binding = self
-            .worker
-            .prepare_managed_artifact_read(&config, expires_ns, Some((boot, attempt, stage)))?;
-        self.managed_artifact_read = Some((config, expires_ns));
-        Ok(binding)
-    }
-
-    /// Spend the trusted adapter's admitted declaration request on the
-    /// already-open session of this exact handle. The operation does not open
-    /// a session or replace the worker. The original absolute boot-clock
-    /// deadline is unchanged. The result and retirement are reported separately.
-    ///
-    /// # Errors
-    /// Refuses an unavailable session or mismatched generation. The operation
-    /// requires the exact guardian ACK before writing any request bytes.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    pub fn inspect_admitted_declaration_once(
-        &mut self,
-        request: LeanWorkerDeclarationInspectionRequest,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        attempt: [u8; 16],
-        stage: u64,
-        expires_ns: u64,
-    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
-        self.worker
-            .inspect_admitted_declaration_once(request, expected, attempt, stage, expires_ns)
-    }
-
-    /// Run the admitted session open and declaration request using the exact
-    /// prepared read union and the one original hard deadline.
-    ///
-    /// # Errors
-    /// Refuses missing or mismatched storage preparation or receiver identity.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    pub fn inspect_admitted_declaration_with_imports_once(
-        &mut self,
-        imports: &[String],
-        request: LeanWorkerDeclarationInspectionRequest,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        attempt: [u8; 16],
-        stage: u64,
-        expires_ns: u64,
-    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
-        self.inspect_admitted_declaration_with_imports_once_cancellable(
-            imports, request, expected, attempt, stage, expires_ns, None,
-        )
-    }
-
-    /// Run the exact consumed declaration attempt with optional caller cancellation.
-    ///
-    /// Cancellation applies to the original owned receiver only. It cannot
-    /// extend the hard deadline or establish a retirement receipt.
-    ///
-    /// # Errors
-    /// Refuses missing or mismatched artifact preparation or receiver identity.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "preserve the exact grant fields and optional cancellation at this boundary"
-    )]
-    pub fn inspect_admitted_declaration_with_imports_once_cancellable(
-        &mut self,
-        imports: &[String],
-        request: LeanWorkerDeclarationInspectionRequest,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        attempt: [u8; 16],
-        stage: u64,
-        expires_ns: u64,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
-        self.inspect_admitted_declaration_with_imports_terminal(
-            imports,
-            request,
-            expected,
-            attempt,
-            stage,
-            expires_ns,
-            cancellation,
-            None,
-        )
-    }
-
-    /// Run one admitted inspection and require a receiver-emitted terminal fence.
-    /// The trusted caller must durably save the result in `save` before the
-    /// guardian is asked to finish. The generation retires even on success.
-    ///
-    /// # Errors
-    /// Refuses mismatched preparation or an unmatched receiver response.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    #[allow(clippy::too_many_arguments, reason = "exact admitted inspection fields")]
-    pub fn inspect_admitted_declaration_with_imports_fenced_once(
-        &mut self,
-        imports: &[String],
-        request: LeanWorkerDeclarationInspectionRequest,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        attempt: [u8; 16],
-        stage: u64,
-        expires_ns: u64,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        mut save: impl FnMut(&crate::LeanWorkerDeclarationInspectionResult) -> Result<(), LeanWorkerError>,
-    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
-        self.inspect_admitted_declaration_with_imports_terminal(
-            imports,
-            request,
-            expected,
-            attempt,
-            stage,
-            expires_ns,
-            cancellation,
-            Some(&mut save),
-        )
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[allow(clippy::too_many_arguments, reason = "exact admitted inspection fields")]
-    fn inspect_admitted_declaration_with_imports_terminal(
-        &mut self,
-        imports: &[String],
-        request: LeanWorkerDeclarationInspectionRequest,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        attempt: [u8; 16],
-        stage: u64,
-        expires_ns: u64,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        save: Option<crate::supervisor::SaveManagedInspection<'_>>,
-    ) -> Result<crate::ManagedInspectionOutcome, LeanWorkerError> {
-        let (config, original_expiry) = self
-            .managed_artifact_read
-            .as_ref()
-            .ok_or_else(|| LeanWorkerError::Setup {
-                message: "managed inspection requires its prepared artifact loan".to_owned(),
-            })?;
-        if *original_expiry != expires_ns || config.imports() != imports {
-            return Err(LeanWorkerError::Setup {
-                message: "managed artifact preparation differs from the admitted request".to_owned(),
-            });
-        }
-        self.worker.inspect_admitted_prepared_declaration_once(
-            request,
-            expected,
-            &crate::crash_ownership::ManagedRequestDeadline {
-                attempt,
-                stage,
-                expires_ns,
-            },
-            config,
-            cancellation,
-            save,
-        )
-    }
-
-    /// Execute a separately consumed grant on this prepared managed generation.
-    ///
-    /// The caller must durably save the terminal result in `save` and record
-    /// the completed attempt in `end`. The latter is called only after the
-    /// original guardian has acknowledged the exact finish.
-    ///
-    /// # Errors
-    /// Refuses a mismatched grant, unavailable generation or different imports.
-    /// After dispatch, an uncertain transition seals and retires the generation.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[doc(hidden)]
-    #[allow(clippy::too_many_arguments, reason = "exact grant and durable callbacks")]
-    pub fn inspect_admitted_declaration_warm(
-        &mut self,
-        imports: &[String],
-        request: LeanWorkerDeclarationInspectionRequest,
-        expected: &lean_toolchain::native_guardian::NativeGuardianDrainBinding,
-        command: lean_rs_worker_protocol::protocol::ManagedInspectionCommand,
-        expires_ns: u64,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        mut save: impl FnMut(&crate::LeanWorkerDeclarationInspectionResult) -> Result<(), LeanWorkerError>,
-        mut end: impl FnMut() -> Result<(), LeanWorkerError>,
-    ) -> Result<crate::ManagedWarmInspectionOutcome, LeanWorkerError> {
-        let (config, original_expiry) = self
-            .managed_artifact_read
-            .as_ref()
-            .ok_or_else(|| LeanWorkerError::Setup {
-                message: "managed inspection requires its prepared artifact loan".to_owned(),
-            })?;
-        if (command.command == 1 && *original_expiry != expires_ns) || config.imports() != imports {
-            return Err(LeanWorkerError::Setup {
-                message: "managed artifact preparation differs from the admitted request".to_owned(),
-            });
-        }
-        self.worker.inspect_admitted_prepared_declaration_warm(
-            request,
-            expected,
-            &crate::crash_ownership::ManagedRequestDeadline {
-                attempt: command.attempt,
-                stage: command.stage,
-                expires_ns,
-            },
-            config,
-            cancellation,
-            crate::supervisor::ManagedFinish {
-                command,
-                save: &mut save,
-                end: Some(&mut end),
-            },
-        )
-    }
-
     /// Open a worker session for this host handle.
     ///
     /// The builder does not open one, so the first call here is also where a
@@ -1717,12 +1439,6 @@ impl LeanWorkerHostHandle {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        if self.managed_artifact_read.is_some() {
-            return Err(LeanWorkerError::ShutdownInProgress {
-                operation: "open_worker_session",
-            });
-        }
         self.worker.open_session(&self.session_config, cancellation, progress)
     }
 
@@ -1741,12 +1457,6 @@ impl LeanWorkerHostHandle {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        if self.managed_artifact_read.is_some() {
-            return Err(LeanWorkerError::ShutdownInProgress {
-                operation: "open_worker_session",
-            });
-        }
         let config = self.session_config.with_imports(imports);
         self.worker.open_session(&config, cancellation, progress)
     }
@@ -2233,13 +1943,6 @@ fn spawn_checked_worker(
         config = config.native_guardian(executable);
     }
     #[cfg(unix)]
-    if let Some(seconds) = worker_child.managed_warm_idle_seconds {
-        config = config.env(
-            lean_toolchain::native_guardian::WARM_IDLE_TIMEOUT_ENV,
-            seconds.to_string(),
-        );
-    }
-    #[cfg(unix)]
     if let Some(slot) = &worker_child.native_capacity_slot {
         config = config.native_capacity_slot(slot.key.clone(), slot.scope.clone(), slot.limit);
     }
@@ -2382,8 +2085,6 @@ pub struct LeanWorkerChild {
     #[cfg(unix)]
     native_guardian_executable: Option<PathBuf>,
     #[cfg(unix)]
-    managed_warm_idle_seconds: Option<u64>,
-    #[cfg(unix)]
     native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
 }
 
@@ -2416,8 +2117,6 @@ impl LeanWorkerChild {
             #[cfg(unix)]
             native_guardian_executable: None,
             #[cfg(unix)]
-            managed_warm_idle_seconds: None,
-            #[cfg(unix)]
             native_capacity_slot: None,
         }
     }
@@ -2441,8 +2140,6 @@ impl LeanWorkerChild {
             lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
-            #[cfg(unix)]
-            managed_warm_idle_seconds: None,
             #[cfg(unix)]
             native_capacity_slot: None,
         }
@@ -2473,8 +2170,6 @@ impl LeanWorkerChild {
             lifetime_socket_directory: None,
             #[cfg(unix)]
             native_guardian_executable: None,
-            #[cfg(unix)]
-            managed_warm_idle_seconds: None,
             #[cfg(unix)]
             native_capacity_slot: None,
         }
@@ -2585,17 +2280,6 @@ impl LeanWorkerChild {
     #[must_use]
     pub fn shared_artifact_reads(mut self, required: bool) -> Self {
         self.shared_artifact_reads = required;
-        self
-    }
-
-    /// Enable independent guardian idle retirement for a managed warm child.
-    /// Pass the broker's resolved idle seconds. Zero selects the 30-second
-    /// finite managed default.
-    #[cfg(unix)]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn managed_warm_idle_seconds(mut self, seconds: u64) -> Self {
-        self.managed_warm_idle_seconds = Some(seconds);
         self
     }
 

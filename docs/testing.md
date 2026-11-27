@@ -82,8 +82,8 @@ A failed Docker connection can prevent cleanup; inspect Docker Desktop before re
 
 The optional package selector allows only `lean-rs-abi`, `lean-rs-worker-protocol` and `lean-rs-worker-parent`;
 `--test`, `--lib` and `--filter` choose a bounded libtest run, not arbitrary Cargo arguments. Check the reported
-selected test count: a mistyped filter can select zero tests. These runs do not cover native Lean loading,
-writer helpers or managed-reader behavior, and do not replace broad nextest or Linux release gates.
+selected test count: a mistyped filter can select zero tests. These runs do not cover native Lean loading or
+writer helpers, and do not replace broad nextest or Linux release gates.
 The default command passed all five startup tests on x86-64 Docker Desktop, including cleanup after a failed
 startup handshake. This local command does not use GitHub Actions.
 

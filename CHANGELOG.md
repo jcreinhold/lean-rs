@@ -21,6 +21,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - The writer reads and sets only its `LEAN_RS_*` settings. The former `LEAN_HOST_MCP_WRITER_EXECUTABLE`,
   `LEAN_HOST_MCP_WRITER_LOCK_LOANS`, `LEAN_HOST_MCP_WRITER_WORKSPACES` and `LEAN_HOST_MCP_CAPTURE_MODULE_SETUP`
   names are gone, with `LEGACY_MODULE_SETUP_CAPTURE_ENV`. `WRITER_HANDOFF_ENV` now holds two names.
+- The managed one-shot and warm declaration inspection is gone. `LeanWorkerHostHandle` loses
+  `prepare_managed_artifact_read*`, `inspect_admitted_declaration*`, `validate_managed_warm_continuation` and
+  `managed_guardian_binding`; `LeanWorkerNativeScopeLease` loses `managed_guardian_binding` and
+  `arm_admitted_reader_deadline`; `LeanWorkerChild::managed_warm_idle_seconds`, `ManagedInspectionOutcome` and
+  `ManagedWarmInspectionOutcome` are gone. The protocol drops `ManagedInspectionCommand`, the `PrepareHostRead`,
+  `PrepareBoundHostRead` and `InspectDeclarationFenced` requests, and the `HostReadPrepared` and
+  `DeclarationInspectionFinished` responses. Use `LeanWorkerHostHandle::inspect_declaration_with_imports` or
+  `LeanWorkerSession::inspect_declaration`.
 
 ## [0.10.17]
 

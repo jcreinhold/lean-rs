@@ -13,7 +13,6 @@ pub(crate) struct Pipe<T> {
     inner: T,
     pub(crate) stopped: Arc<AtomicBool>,
     pub(crate) deadline: Option<Instant>,
-    pub(crate) managed_expiry_ns: Option<u64>,
     pub(crate) cancellation: Option<LeanWorkerCancellationToken>,
 }
 
@@ -37,7 +36,6 @@ impl<T: AsRawFd> Pipe<T> {
             inner,
             stopped: Arc::new(AtomicBool::new(false)),
             deadline: None,
-            managed_expiry_ns: None,
             cancellation: None,
         })
     }
@@ -45,14 +43,6 @@ impl<T: AsRawFd> Pipe<T> {
 
 impl<T> Pipe<T> {
     fn check(&self) -> io::Result<()> {
-        if let Some(expires_ns) = self.managed_expiry_ns
-            && lean_toolchain::native_guardian::guardian_deadline_ticks()? >= Duration::from_nanos(expires_ns)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "managed request deadline elapsed",
-            ));
-        }
         if self.stopped.load(Ordering::Acquire)
             || self
                 .cancellation

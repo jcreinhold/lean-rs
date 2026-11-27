@@ -122,16 +122,6 @@ pub enum Message {
     FatalExit(FatalExit),
 }
 
-/// Exact identity of a managed inspection on one authenticated receiver.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedInspectionCommand {
-    pub generation: String,
-    pub attempt: [u8; 16],
-    pub stage: u64,
-    pub command: u64,
-}
-
 /// Parent-issued worker request body.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -142,14 +132,6 @@ pub enum Request {
     HostRuntimeMetadata,
     /// Close this child's read aliases after a known terminal host operation.
     ReleaseHostRead,
-    /// Collect and retain the shims-only artifact union without opening Lean.
-    PrepareHostRead {
-        project_root: String,
-    },
-    /// Prepare a read union only through an already deadline-bound guardian.
-    PrepareBoundHostRead {
-        project_root: String,
-    },
     LoadFixtureCapability {
         manifest_path: String,
     },
@@ -228,11 +210,6 @@ pub enum Request {
     InspectDeclaration {
         request: LeanWorkerDeclarationInspectionRequest,
     },
-    /// Execute a managed inspection and identify its terminal response.
-    InspectDeclarationFenced {
-        command: ManagedInspectionCommand,
-        request: LeanWorkerDeclarationInspectionRequest,
-    },
     AttemptProof {
         request: LeanWorkerProofAttemptRequest,
         options: LeanWorkerElabOptions,
@@ -304,8 +281,6 @@ pub enum Response {
     HostArtifactEpochChanged,
     /// The child closed its read aliases without issuing an explicit unlock.
     HostReadReleased,
-    /// The exact prepared read union is retained for the next session open.
-    HostReadPrepared,
     HealthOk,
     /// Actual checked bindings and toolchain facts of the current host session.
     HostRuntimeMetadata {
@@ -387,11 +362,6 @@ pub enum Response {
     },
     DeclarationInspection {
         result: LeanWorkerDeclarationInspectionResult,
-    },
-    /// This receiver returned from the named managed inspection.
-    DeclarationInspectionFinished {
-        command: ManagedInspectionCommand,
-        result: Box<LeanWorkerDeclarationInspectionResult>,
     },
     ProofAttempt {
         result: LeanWorkerProofAttemptResult,

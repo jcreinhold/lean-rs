@@ -1738,8 +1738,6 @@ struct GenerationDispatchRestriction {
     native_generation_id: String,
     generation: WorkerGeneration,
     sealed: bool,
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    warm_end: Option<lean_rs_worker_protocol::protocol::ManagedInspectionCommand>,
 }
 
 #[cfg(test)]
@@ -1911,8 +1909,6 @@ impl LeanWorker {
             native_generation_id: native_generation_id.to_owned(),
             generation: self.generation,
             sealed: false,
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
-            warm_end: None,
         });
         Ok(binding)
     }
@@ -4036,7 +4032,7 @@ impl LeanWorker {
         if self.generation_dispatch.is_some() && !cleanup {
             self.check_request_cancelled(operation, cancellation)?;
         }
-        let result = self.write_request_bounded_inner(request, operation, cancellation, timeout, None);
+        let result = self.write_request_bounded_inner(request, operation, cancellation, timeout);
         self.seal_dispatch_error(result)
     }
 
@@ -4046,7 +4042,6 @@ impl LeanWorker {
         operation: &'static str,
         cancellation: Option<&LeanWorkerCancellationToken>,
         timeout: Duration,
-        managed_expiry_ns: Option<u64>,
     ) -> Result<(), LeanWorkerError> {
         // Keep the authoritative check beside the actual frame write, even if
         // another internal caller later reuses this bounded writer.
@@ -4067,7 +4062,6 @@ impl LeanWorker {
         let timeout = frame_timeout(started, timeout, deadline);
         stdin.get_mut().deadline = started.checked_add(timeout);
         stdin.get_mut().cancellation = cancellation.cloned();
-        stdin.get_mut().managed_expiry_ns = managed_expiry_ns;
         let (result, entered) = if let Some((in_flight, next)) = planned {
             let release = matches!(&request, Request::ReleaseHostRead);
             // Completed frames have flushed the buffer. The pipe checks the
@@ -4093,7 +4087,6 @@ impl LeanWorker {
         };
         stdin.get_mut().deadline = None;
         stdin.get_mut().cancellation = None;
-        stdin.get_mut().managed_expiry_ns = None;
         let cancelled = cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled);
         match result {
             Ok(()) => {
@@ -7733,11 +7726,3 @@ time.sleep(60)";
 #[cfg(all(test, unix))]
 #[path = "supervisor/dispatch_pin_tests.rs"]
 mod dispatch_pin_tests;
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-#[path = "supervisor/managed_once.rs"]
-mod managed_once;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub(crate) use managed_once::{ManagedFinish, SaveManagedInspection};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use managed_once::{ManagedInspectionOutcome, ManagedWarmInspectionOutcome};

@@ -27,8 +27,7 @@ capability artifacts must agree on the supported toolchain. See the [interop rel
 | macOS | GitHub Actions `macos-latest`, `aarch64-apple-darwin` |
 
 Windows, BSD, embedded, and WASM targets are unsupported. Adding a platform requires an explicit compatibility decision
-and CI coverage. The opt-in managed native-reader completion check currently requires the macOS process-group census;
-Linux qualification for that mode remains open, as recorded in the [0.10.0 changelog](https://github.com/jcreinhold/lean-rs/blob/main/CHANGELOG.md#0100).
+and CI coverage.
 
 ## CI coverage
 

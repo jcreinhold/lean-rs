@@ -300,10 +300,6 @@ fn native_worker_fixture_entry() {
         Duration::from_secs(3),
     )
     .unwrap();
-    if std::env::var_os("LEAN_NATIVE_READ_DEADLINE_FIXTURE").is_some() {
-        guarded_release::run_reader_after_go(Path::new(&root), &mut guardian);
-        return;
-    }
     #[cfg(target_os = "macos")]
     startup_traces::run_lean_body(Path::new(&root), &mut guardian);
     if std::env::var_os("LEAN_NATIVE_GUARDIAN_FAILURE_ROOT").is_some() {

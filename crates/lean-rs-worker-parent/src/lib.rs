@@ -51,9 +51,6 @@ pub use session::{
     LeanWorkerRuntimeMetadata, LeanWorkerSession, LeanWorkerSessionConfig, LeanWorkerStreamSummary,
     LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-#[doc(hidden)]
-pub use supervisor::{ManagedInspectionOutcome, ManagedWarmInspectionOutcome};
 /// Replace a child's environment with a checked snapshot of the parent environment,
 /// including the command's explicit additions and removals.
 ///

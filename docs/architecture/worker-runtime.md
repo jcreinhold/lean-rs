@@ -490,13 +490,6 @@ The plan carries no writer epoch. An already admitted writer can still advance t
 the reader acquires SH. New writers check the plan even when EX succeeds, and a replacement inode fails closed
 until exact native closure. Readers that only understand versions 1 through 3 refuse this format.
 
-Deadline-bound preparation acknowledges the original attempt, stage, and boot-clock expiry before requesting the
-read plan. The guardian durably publishes the plan before it permits SH acquisition. It takes the admission mutex
-once without waiting, and it adds no registry write or socket ACK wait after SH acquisition. On the managed route
-the caller must consume the separate durable grant before the guardian can acknowledge the matching dispatch arm.
-A stall in local filesystem metadata or process observation can delay observation of expiry. The durable plan write
-can also stall, but then SH acquisition on this route has not begun.
-
 Payload closure and record collection are separate. A Running v2 record stays until the whole payload group is absent
 and the exact guardian is no longer live: that guardian can retain SH descriptors after its payload has stopped.
 The bounded admission collector uses this same predicate under `.admission.lock`. Explicit fixture cleanup can invoke
