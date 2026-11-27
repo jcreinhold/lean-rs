@@ -12,7 +12,7 @@ provide the reading order.
 | Change supported Lean versions, ABI checks, or protocol compatibility | [Compatibility](compatibility.md) |
 | Initialize Lean, attach a thread, or embed in async code | [Concurrency](concurrency.md) |
 | Add a callback payload or package a generic Lean/C helper | [Callbacks and interop shims](callbacks.md) |
-| Build a Lake target, reuse artifacts, or acquire writer custody | [Build and link](build-and-link.md) |
+| Build a Lake target or reuse artifacts | [Build and link](build-and-link.md) |
 | Load manifests, dependency libraries, or packaged capabilities | [Loading](loading.md) |
 
 ## Standard host services
@@ -29,11 +29,11 @@ provide the reading order.
 | Change | Read |
 | --- | --- |
 | Choose isolation, classify fatal failures, or reset Lean memory | [Worker processes](worker-processes.md) |
-| Expose host operations, loaded metadata, or artifact read custody over IPC | [Worker sessions](worker-sessions.md) |
+| Expose host operations, loaded metadata, or prepared host artifacts over IPC | [Worker sessions](worker-sessions.md) |
 | Configure a downstream command and its import workspace | [Worker capabilities](worker-capabilities.md) |
 | Deliver live rows, apply backpressure, or change framing | [Worker streaming](worker-streaming.md) |
 | Reuse workers, admit leases, or report pool statistics | [Worker pool](worker-pool.md) |
-| Change generations, cleanup ownership, capacity, or restart semantics | [Worker runtime](worker-runtime.md) |
+| Change generations, cleanup ownership, capacity, parent death, or restart semantics | [Worker runtime](worker-runtime.md) |
 
 The worker runtime is the lifecycle contract. The session, build, and loading pages own their boundary-specific details;
 link to those contracts when extending a feature instead of copying them into a second design note.

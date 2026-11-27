@@ -3,7 +3,6 @@ use lean_rs::{
     LeanRuntime,
     module::{LeanLibraryBundle, LeanLibraryDependency},
 };
-use lean_toolchain::shared_reader::SharedReader;
 use std::{
     io,
     path::{Path, PathBuf},
@@ -14,7 +13,6 @@ mod inputs;
 struct CallbackImages {
     consumer: PathBuf,
     interop: PathBuf,
-    _readers: Vec<SharedReader>,
     #[cfg(all(test, unix))]
     _private_images: Vec<std::fs::File>,
 }
@@ -28,16 +26,9 @@ impl CallbackImages {
             option_env!("LEAN_RS_TEST_CALLBACK_PRIVATE_JOB"),
             std::env::var_os("LEAN_RS_TEST_CALLBACK_PRIVATE_JOB").as_deref(),
         )?;
-        #[cfg(not(all(test, unix)))]
-        let private_job = false;
         // The trusted job builds both projects serially, then keeps them unchanged
         // until tests exit. Open files are not locks against same-user writers.
-        let readers = if private_job {
-            inputs::check_prefix()?;
-            Vec::new()
-        } else {
-            inputs::hold(&[interop.clone(), consumer.clone()])?
-        };
+        inputs::check_prefix()?;
         fn image(root: &Path, new: &str, old: &str) -> io::Result<PathBuf> {
             let dir = root.join(".lake/build/lib");
             let ext = std::env::consts::DLL_EXTENSION;
@@ -107,7 +98,6 @@ impl CallbackImages {
         Ok(Self {
             interop: interop_image,
             consumer: consumer_image,
-            _readers: readers,
             #[cfg(all(test, unix))]
             _private_images: private_images,
         })

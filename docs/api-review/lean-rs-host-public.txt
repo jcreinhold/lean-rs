@@ -2202,7 +2202,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationT
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
-pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::artifact_roots(&self) -> &[std::path::PathBuf]
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::bracketed_import_query(&self, &lean_rs::module::trusted::TrustedBracketedImports<'lean, '_>, lean_rs_host::LeanBracketedImportRequest, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanBracketedImportResult>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts, lean_rs::module::trusted::LoadedHostArtifacts<'lean>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared_capability(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts, lean_rs::module::trusted::LoadedHostArtifacts<'lean>, (lean_rs::module::library::LeanLibrary<'lean>, lean_toolchain::loader::LeanModuleInitializer), &str, &str) -> lean_rs::error::LeanResult<Self>
@@ -2338,8 +2337,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportStats
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportStats
 pub struct lean_rs_host::host::LeanPreparedHostArtifacts
 impl lean_rs_host::host::LeanPreparedHostArtifacts
-pub fn lean_rs_host::host::LeanPreparedHostArtifacts::artifact_roots(&self) -> &[std::path::PathBuf]
-pub fn lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(std::path::PathBuf, alloc::string::String, alloc::vec::Vec<std::path::PathBuf>, alloc::vec::Vec<std::path::PathBuf>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(std::path::PathBuf, alloc::string::String, alloc::vec::Vec<std::path::PathBuf>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::host::LeanPreparedHostArtifacts::manifest_json(&self) -> &str
 pub fn lean_rs_host::host::LeanPreparedHostArtifacts::manifest_path(&self) -> &std::path::Path
 pub fn lean_rs_host::host::LeanPreparedHostArtifacts::shim_search_paths(&self) -> &[std::path::PathBuf]
@@ -3475,7 +3473,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationT
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
-pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::artifact_roots(&self) -> &[std::path::PathBuf]
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::bracketed_import_query(&self, &lean_rs::module::trusted::TrustedBracketedImports<'lean, '_>, lean_rs_host::LeanBracketedImportRequest, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanBracketedImportResult>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts, lean_rs::module::trusted::LoadedHostArtifacts<'lean>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared_capability(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts, lean_rs::module::trusted::LoadedHostArtifacts<'lean>, (lean_rs::module::library::LeanLibrary<'lean>, lean_toolchain::loader::LeanModuleInitializer), &str, &str) -> lean_rs::error::LeanResult<Self>

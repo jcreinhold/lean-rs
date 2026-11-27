@@ -11,9 +11,6 @@ use std::path::{Path, PathBuf};
 pub(super) struct Qualification {
     pub(super) worker: PathBuf,
     worker_sha256: String,
-    pub(super) helper: PathBuf,
-    helper_sha256: String,
-    pub(super) owners: PathBuf,
     pub(super) sysroot: PathBuf,
     #[serde(alias = "manifest")]
     pub(super) fixture: PathBuf,
@@ -38,6 +35,5 @@ pub(super) fn checked(selection: &str) -> Qualification {
         "fixture qualification requires the selected loader and import environment"
     );
     check_executable(&q.worker, &q.worker_sha256);
-    check_executable(&q.helper, &q.helper_sha256);
     q
 }

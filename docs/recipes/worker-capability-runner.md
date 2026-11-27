@@ -11,10 +11,6 @@ cargo run -p lean-rs-worker-child --example worker_capability_runner
 cargo run -p lean-rs-worker-child --example worker_streaming
 ```
 
-Fixture build helpers require a shared-writer helper configured through `LEAN_RS_WRITER_EXECUTABLE`. The
-fixture spans multiple package roots and cannot use a package-local bootstrap. These commands do not configure that
-helper themselves.
-
 ## Open a capability
 
 The builder names the Lake project, package, shared target, imports, and trusted export signatures:

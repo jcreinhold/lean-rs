@@ -6,18 +6,12 @@ mangling.
 
 ## Build Script Contract
 
-Every build call acquires writer custody before cache inspection, including cache hits. Bind a shared-writer helper such
-as the standalone `lean-rs-writer` executable by canonical path with `.writer_executable(...)` or
-`LEAN_RS_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap` when its Lean root and all dependencies
-lie strictly below the owning Cargo package:
+A build script names the Lake project root and target:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
-    let lean_root = owner.join("lean");
-    let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
+    let lean_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?).join("lean");
     lean_toolchain::CargoLeanCapability::new(&lean_root, "MyCapability")
-        .private_bootstrap(bootstrap)
         .package("my_app")
         .module("MyCapability")
         .build()?;
@@ -37,15 +31,13 @@ It runs `lake build MyCapability:shared`, resolves Lake's supported dylib naming
 artifact manifest, and returns `BuiltLeanCapability` for build scripts that want to inspect the result. The manifest is
 the canonical runtime handoff for shipped crates; the direct dylib path remains a lower-level compatibility path.
 
-For a dependency outside the Cargo owner, use the configured writer rather than a package-local bootstrap. Record
-separately built dependency libraries in the artifact manifest. Hosts selecting their own Lean toolchain can also pass
-the matching sysroot:
+Record separately built dependency libraries in the artifact manifest. Hosts selecting their own Lean toolchain can also
+pass the matching sysroot:
 
 ```rust,ignore
 use lean_toolchain::LeanLibraryDependency;
 
 lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
-    .writer_executable(configured_writer)
     .package("my_app")
     .module("MyCapability")
     .dependency(
@@ -103,144 +95,29 @@ The version 2 cache key covers the Lake project and its bounded declared depende
 Before cache publication the complete source input fingerprint must still equal the pre-build fingerprint. A changed
 input set refuses publication rather than stamping new source identity onto an artifact built from older inputs. Each
 streamed file and traversed directory must also retain its observation while the fingerprint is taken. This is bounded
-workspace observation, not an immutable filesystem snapshot or protection against arbitrary external I/O. The writer
-normalizes the standard `.lake` output directory before its initial source observation. Lake may rebuild dependency
-outputs during a successful command; their final content trace is saved for later cache checks. Earlier cache versions
-miss once and rebuild through ordinary writer custody.
+workspace observation, not an immutable filesystem snapshot or protection against arbitrary external I/O. The build
+creates each package's `.lake` directory before its initial source observation. Lake may rebuild dependency outputs
+during a successful command; their final content trace is saved for later cache checks. Earlier cache versions miss once
+and rebuild.
 
 A hit is accepted only when the cache key matches and the expected dylib exists. Cache write, manifest, traversal, and
 output-resolution failures are `LinkDiagnostics::LakeOutputUnresolved`.
 
 After the target succeeds, `CargoLeanCapability` checks each dependency library before publishing the capability
-manifest. A separately built dependency that is still missing yields `LakeOutputUnresolved` with its path. Under shared
-reader custody, `probe_ready()` reports a cache miss for the missing file. Release reader custody before building the
-missing dependency and refreshing the capability.
+manifest. A separately built dependency that is still missing yields `LakeOutputUnresolved` with its path, and
+`probe_ready()` reports a cache miss for it. Build the missing dependency, then refresh the capability.
 
-## Writer Custody
+## Concurrent Builds
 
-`shared_writer::project_lock_path(root)` resolves one sibling lock outside the entire project root. It canonicalizes
-existing aliases, or the existing parent plus one final basename for a package that has not been materialized. Replacing
-`.lake` or that package root therefore preserves its coordination domain. Removing or renaming the parent requires the
-same writer authority; a live lock file must never be unlinked.
+`CargoLeanCapability` runs Lake directly and takes no lock on the project. Cargo serializes builds that share a target
+directory, but nothing in the SDK stops two processes from building one Lake project at once, or from rebuilding it while
+a worker reads its outputs. The process that owns the checkout orders its builds and reads, for example one server per
+checkout with an in-memory readers–writer turn.
 
-`shared_writer::project_artifact_roots(root)` is the common bounded reader/writer graph resolver. It uses the primary
-Lake manifest's flattened workspace map, including inherited dependencies, and canonicalizes at most 32 artifact roots.
-Dependency manifests validate membership in that map; Git packages are not guessed under each dependency's own
-`.lake/packages`. Missing or unsupported metadata, nondefault Lake metadata directories, nonempty package overrides,
-copied dependencies and Git layouts whose cleanup could unlink a nested domain in the declared graph are refused before
-GO. A plain non-Lake fixture or proven zero-dependency payload needs only its primary domain. The immutable Lean sysroot
-is a separate provider, outside these managed Lake domains.
-
-Before any project EX attempt, managed writers announce compatible shared demand on stable sibling files for their
-complete physical-domain union. Source publication announces only its project domain, never a cache-entry lock. Readers
-briefly take exclusive admission gates before nonblocking artifact SH acquisition and release all gates before any
-artifact wait. A writer-demand observation refuses a partial reader before its body rather than waiting while an earlier
-SH remains held. Another transient reader gate permits bounded retry; a narrow release/probe race can conservatively
-refuse a fresh reader. Neither demand nor its disappearance is evidence that any actual writer or native child stopped.
-The configured helper retains its own compatible demand through writer cleanup; artifact EX aliases and the existing
-process fences remain authoritative after helper or caller loss. Demand files are private, close-only kernel locks and
-are never unlinked as recovery. Embedders retaining warm readers must fence matching new admissions and retire those
-readers only after their admitted calls finish.
-
-Whole-domain readers use `SharedReader::acquire_union` or `SharedReadProxy::acquire_union` before any body. The complete
-canonical input union stays fixed; acquisition sorts lock paths but returns guards in input order. A complete short gate
-preflight closes before helpers are spawned. Only opted-in normal helper exit 75, observed before any transfer or
-readiness bytes, permits another admission round. The descriptor path rechecks its listener after reap; the proxy path
-requires empty output and actual helper exit. Ordinary helper, transport, descriptor, identity and cleanup errors remain
-hard, with bounded stage/status/stderr diagnostics. Every tentative descriptor closes first; partial proxies all receive
-EOF and their actual helper exits are confirmed before waiting. One absolute deadline and cancellation predicate cover
-all rounds. The helper waits out another reader's gate itself and exits 75 only for writer demand, a held artifact
-lock, or a live previous writer. A warm owner retaining earlier guardian custody uses `try_acquire_union`, which
-retries only another reader's gate, and must retire that generation on other typed contention rather than wait on
-its own old locks. No metadata, import, initializer, guardian
-acknowledgement or target body is replayed by these admission loops.
-
-Writers try all project locks in globally sorted path order. Each pass independently opens each candidate, tries EX, and
-checks prior writer/native ownership once. Contention or an explicit false ownership check closes the candidate and
-every earlier ungranted artifact guard before any wait. Other errors propagate. The complete union's compatible writer
-demand stays held across these retries; cancellation and the original time budget bound waiting. Zero timeout still
-permits one immediate pass. Retrying never runs a command or turns an unknown outcome into success.
-
-An initial **unlocked** file handle pins each target's original inode across retry passes. It is never flocked, cloned
-or lent, and its descriptor closes on exec; every EX attempt opens a separate description without creating a
-replacement. Admission compares the anchor, candidate and named inode before and after ownership checks. Anchors remain
-for domains present across a graph refresh; removed domains close their anchors, matching the existing changed-graph
-restart policy. This is distinct from keeping an ungranted EX lock. A caller may still own a separate cache-entry lock
-during project admission.
-
-Writers revalidate the graph under the complete granted set and retry a changed graph only before launch within the
-original admission budget, announcing the new complete union before another EX attempt. Returned loans name the primary
-project first. Releasing retry candidates does not let ordinary readers bypass writer demand or grant permission to read
-artifacts still in use; a recovery reader requires a separate reviewed path.
-
-The helper validates every borrowed domain before ACK and rechecks graph coverage and inode identity before each GO.
-Loan order still names the primary project first, with up to 64 project/source-entry descriptions.
-`open_with_write_roots` also binds independently runnable prepared workspaces. `project_artifact_root_union` validates
-their combined graph; `write_roots` exposes the held domains and `covers_project` checks the current graph of a
-registered borrowed-build workspace. Commands must keep outputs inside those declared domains or helper-owned assets.
-Arbitrary configuration I/O is not sandboxed. After EX acquisition, borrowed-loan adoption, and immediately before GO,
-writers also inspect the common native ownership registry. An unresolved generation protecting the same canonical
-logical domain blocks admission even when its guardian died and the kernel lock became obtainable. A changed inode
-remains unresolved while that generation lives. Closed generations are checked before resolving old paths, so removal of
-a closed generation's domain does not permanently fence writers. The authoritative registry comes from
-`native_guardian::bind_registry_directory(&path)`, `LEAN_RS_WORKER_OWNERS_DIRECTORY`, or the SDK's per-user local-data
-default. Parent native startup requires its lifetime namespace to match that binding. Managed writer helpers receive the
-same path. The application and helper configuration contract is described under
-[native guardian ownership](worker-runtime.md#optional-native-guardian-ownership).
-
-The writer passes its bound owner directory to each payload so cooperating helpers spawned by the payload inspect the
-same namespace. A command may explicitly supply the matching owner setting. The client refuses a command that removes or
-replaces it before delivery, and the helper refuses such a stage before launch with `stage_refused`. Either way the run
-fails as `NotStarted` and the writer stays open for another stage.
-
-A sibling lock requires a stable parent. An unrelated workspace that replaces an ancestor Git checkout can invalidate
-nested project domains absent from its own graph; an independent project under a replaceable source-package root has the
-same constraint. Cross-workspace replacement authority is not established by this graph-local union and remains an
-unresolved safety limit.
-
-`CargoLeanCapability` acquires the configured helper before cache inspection and retains it through Lake, cache
-publication and `finish`'s capability manifest. Parent callers bind `.writer_executable(...)`. Worker launchers can use
-`.shared_writer_executable(...)` on their child configuration. `build_quiet_with_writer(writer, cancelled)` reuses an
-already-owned scope. A host binary can serve the helper subcommands itself through `lean_rs_writer::HelperCommand`; see
-the [`lean-rs-writer` README](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-writer/README.md).
-`probe_ready()` is a read-only alternative under caller-held SH custody: it checks the same build-cache key and exact
-expected capability manifest, including ABI exports, selected fingerprint and dependencies, without a runner, write or
-publication. A miss returns `None`; each independently prepared dependency also needs its own probe. This lets a warm
-actor load valid bundled artifacts while another live generation retains its shared read union. Generated
-zero-dependency packages use `with_materialized_source_package_with_writer`: preflight the effective payload, acquire
-the external entry and stable project locks, loan duplicated descriptions to one helper, await validated custody, then
-materialize, build and publish. Caller copies remain close-only through local writes, including if the helper exits
-unexpectedly. Every loan records actual command ownership before GO and is cleared only after confirmed closure. The
-lexical callback API remains available; it does not independently establish descendant or controller-crash custody.
-
-The helper owns its private input workspace. Cancellation, timeout and transport loss seal the scope and request
-cleanup; callers wait only through bounded cleanup slack. On macOS the helper keeps its direct group leader unreaped
-until the atomic kernel group census and inherited barrier establish closure, then reaps it. Managed commands must
-retain their private PGID. The Linux backend is weaker: after leader reap it passively observes group absence and cannot
-safely signal surviving descendants. Failed cleanup retains custody. Helper failure permits passive admission checks
-only, never signaling from persisted numbers; a reused recorded group can conservatively delay admission.
-
-Each lock file holds one owner record: `version`, the helper's `owner` identity, and `process`, the running stage's
-process group or `null` between stages. Readers and writers read an empty or torn record, or a `null` process, as a
-stopped writer, and a recorded group as stopped only once the kernel reports the group gone. A record with any other
-field, such as one a 0.10 storage turn left, refuses admission rather than reading as stopped.
-
-`WriterFailure` preserves `NotStarted`, `Stopped`, or `Unknown` independently of proof/result bytes. Confirmed stop with
-unusable output carries the actual terminal receipt; it never becomes a successful `Output`. `LakeWriterFailure`
-preserves this typed cause through build diagnostics. An observer created before helper launch drains replies without
-blocking on a discarded recipient and retains the helper's `Child` until reaped. This adds no recovery queue or daemon.
-
-Each stage's stdout and stderr go to a 64 KiB capture that the stopped frame carries, which keeps every frame under 1
-MiB. Output past that stops the stage with no result. A command that sets `LEAN_RS_WRITER_LOG` (an absolute path) and
-`LEAN_RS_WRITER_LOG_LIMIT` (bytes) sends both streams to that file instead. The helper removes both settings from the
-stage's environment and opens the file before launch, refusing the stage for a symbolic link or a file that is not
-regular. It appends output up to the cap, writes one truncation line, and keeps draining the pipe, so output never stops
-the stage. The stopped frame then carries empty output.
-
-A typed `PrivateLakeBootstrap` is a separate Cargo bootstrap exception for bundled outputs below their Rust package. It
-uses controller-held locks over its declared package-local dependency union and direct `Command::output`; it does not
-gain the runtime helper's crash or process-tree guarantees. Ordinary unbound roots are rejected. Uncoordinated external
-Lake commands remain outside this advisory protocol.
+`probe_ready()` checks the build-cache key and the exact expected capability manifest, including ABI exports, selected
+fingerprint and dependencies, without running Lake or writing anything. A miss returns `None`; each separately prepared
+dependency needs its own probe. `with_materialized_source_package` holds an exclusive lock on one source-cache entry
+while it installs the payload and runs the caller's build, because several build scripts can share one cache root.
 
 ## Diagnostics
 
@@ -249,7 +126,6 @@ The helper path reports typed failures:
 - `MissingLean`, `MissingHeader`, `MissingLib`, `UnsupportedToolchain`, and `VersionMismatch` from Lean toolchain
   discovery.
 - `LakeUnavailable` when the `lake` executable cannot be started.
-- `LakeWriterFailure` when owned writer admission, execution or cleanup fails, preserving its execution evidence.
 - `LakeTargetMissing` when the target is not declared as a `lean_lib`.
 - `LakeBuildFailed` when `lake build <target>:shared` exits unsuccessfully.
 - `LakeOutputUnresolved` when the manifest, cache, source scan, or expected dylib path cannot be resolved.
@@ -267,7 +143,7 @@ builds two Lake targets through the helper:
 The example opens the generic shim dylib globally, opens the downstream-style consumer dylib, calls an ordinary Lean
 export from Rust, and invokes a Lean callback loop through `LeanCallbackHandle`. It uses no `lean-rs-host` session API.
 
-Set `LEAN_RS_WRITER_EXECUTABLE`, run the example against a cold cache, and repeat to exercise the cache-hit path:
+Run the example against a cold cache, and repeat to exercise the cache-hit path:
 
 ```sh
 cargo run -p lean-rs --example interop_callback

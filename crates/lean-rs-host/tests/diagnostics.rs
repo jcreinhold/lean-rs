@@ -75,7 +75,7 @@ fn module_init_code_on_missing_dylib() {
     let missing = host.project_library_path("lean_rs_fixture", "DefinitelyMissingLib");
     assert!(!missing.exists());
     #[allow(unsafe_code, reason = "fixed missing image under retained fixture custody")]
-    // SAFETY: this fixed path is absent in the qualified fixture root, held against writers.
+    // SAFETY: this fixed path is absent in the qualified fixture root, which this job owns.
     let err = unsafe { LeanLibrary::open(runtime(), Path::new(&missing)) }.expect_err("missing library");
     assert_eq!(err.code(), LeanDiagnosticCode::ModuleInit, "got {err:?}");
 }

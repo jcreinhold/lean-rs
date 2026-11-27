@@ -489,7 +489,7 @@ fn load_capabilities_missing_dylib_is_load_error() {
     let missing = host.project_library_path("does_not_exist", "NoSuchLib");
     assert!(!missing.exists());
     #[allow(unsafe_code, reason = "absent path under retained fixture custody")]
-    // SAFETY: this missing fixture image cannot be created by a cooperating writer during the held loan.
+    // SAFETY: this test job owns the fixture, and nothing creates this missing image while it runs.
     let err = unsafe { lean_rs::module::LeanLibrary::open(runtime(), missing) }.expect_err("missing dylib must fail");
     match err {
         LeanError::Host(failure) => {

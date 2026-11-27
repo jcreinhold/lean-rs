@@ -1,5 +1,4 @@
 #![cfg(feature = "admitted")]
-use lean_toolchain::shared_writer::project_lock_path;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -9,7 +8,6 @@ use std::{
     io::{self, Read, Write},
     os::unix::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
-    time::{Duration, Instant},
 };
 
 pub const MODULE_SYNTAX_IMPORTS: [&str; 3] = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
@@ -174,11 +172,9 @@ pub struct Record {
     pub shim_manifest: PathBuf,
     pub shim_json: String,
     pub shim_paths: Vec<PathBuf>,
-    pub shim_roots: Vec<PathBuf>,
     pub interop_image: PathBuf,
     pub host_image: PathBuf,
     pub project: PathBuf,
-    pub roots: Vec<PathBuf>,
     pub import_roots: Vec<PathBuf>,
     pub ordered_directory_ids: Vec<(u64, u64)>,
     pub sysroot: PathBuf,
@@ -229,15 +225,11 @@ impl Record {
         );
         serde_json::from_slice(&bytes).expect("parse build-selected fixture record")
     }
-    pub fn helper() -> PathBuf {
-        PathBuf::from(option_env!("D3_HELPER").expect("ordinary deployment requires its selected helper"))
-    }
     pub fn descriptor(&self) -> lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts {
         serde_json::from_value(serde_json::json!({
             "protocol": 2,
             "shim_manifest_path": self.shim_manifest,
             "shim_manifest_json": self.shim_json,
-            "artifact_roots": self.shim_roots,
             "shim_search_paths": self.shim_paths,
         }))
         .unwrap()
@@ -504,52 +496,14 @@ pub fn audit(event: &str) {
     f.write_all(line.as_bytes()).unwrap();
     f.unlock().unwrap();
 }
+/// The selected deployment record, kept with every library loaded from it.
+///
+/// The qualifier builds the deployment before any worker starts and runs no
+/// build while its workers run, so `verify` checks the sealed files once per worker.
 pub struct Held {
     pub record: Record,
-    _locks: Vec<fs::File>,
 }
 impl Held {
-    pub fn acquire(record: Record) -> R<Self> {
-        let mut locks = record
-            .roots
-            .iter()
-            .map(|r| project_lock_path(r))
-            .collect::<R<Vec<_>>>()?;
-        locks.sort();
-        let started = Instant::now();
-        let admission = loop {
-            match lean_toolchain::writer_demand::ReadAdmission::try_acquire(&locks) {
-                // On transient reader contention, try_acquire has already dropped our partial gates.
-                Err(error)
-                    if error.kind() == io::ErrorKind::WouldBlock && started.elapsed() < Duration::from_secs(1) =>
-                {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                result => break result?.ok_or_else(|| err("competing writer"))?,
-            }
-        };
-        let mut held = vec![];
-        for p in locks {
-            require(p.canonicalize()? == p, "aliased custody domain")?;
-            let f = fs::File::open(&p)?;
-            f.try_lock_shared().map_err(io::Error::from)?;
-            let a = f.metadata()?;
-            let b = fs::symlink_metadata(p)?;
-            require(
-                b.is_file() && a.nlink() == 1 && (a.dev(), a.ino()) == (b.dev(), b.ino()),
-                "changed lock identity",
-            )?;
-            if record.broken_import || record.typed_session || record.scalar_entry {
-                require(
-                    lean_toolchain::shared_writer::previous_writer_stopped(&f)?,
-                    "prior writer remains active",
-                )?;
-            }
-            held.push(f);
-        }
-        drop(admission);
-        Ok(Self { record, _locks: held })
-    }
     pub fn check_interop_visibility(&self, loaded: bool) -> R<()> {
         // SAFETY: the symbol literal is NUL-terminated. This only inspects dyld's
         // default scope. No foreign function is invoked. The process pins every
@@ -579,7 +533,7 @@ impl Held {
         Ok(())
     }
     // For the WHNF fixture, corroborate the exact mapped shim and fixture
-    // after ordinary loader admission. The sealed read union is still held.
+    // after ordinary loader admission.
     pub fn check_optional_whnf_images(&self) -> R<()> {
         require(self.record.optional_whnf, "wrong optional WHNF deployment")?;
         let images = mapped_images()?;
@@ -709,8 +663,8 @@ impl Held {
         for path in d.files.keys() {
             if !checked.contains(path) {
                 // Only module/library-tree payload checks move to the ordinary run's
-                // bookends. Path, file identity, native images and fixture bytes are
-                // still verified under each process's existing custody.
+                // bookends. Each process still verifies path, file identity, native
+                // images and fixture bytes.
                 let installed_payload = path.starts_with(&libs)
                     && path.file_name().is_some_and(|name| {
                         let name = name.as_bytes();

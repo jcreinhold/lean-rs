@@ -33,9 +33,9 @@ Manifest-backed `exported` checks the requested Rust ABI against trusted signatu
 classification and symbol presence, then creates the typed handle. The manifest is cooperative build metadata, not
 protection against malicious libraries or substituted native code.
 
-`LeanCapability::from_manifest_snapshot` consumes captured bytes without rereading the manifest path. Artifact custody
-must span loading and initializers; a storage descriptor alone is not evidence of the loaded ABI. Guarded worker
-sessions apply the [read-custody protocol](worker-sessions.md#shared-artifact-read-custody).
+`LeanCapability::from_manifest_snapshot` consumes captured bytes without rereading the manifest path. The application
+keeps the artifacts unchanged through loading and initializers; a storage descriptor alone is not evidence of the
+loaded ABI. Worker sessions follow [Prepared host artifacts](worker-sessions.md#prepared-host-artifacts).
 
 `LeanCapabilityPreflight` and `LeanRuntimePreflight` expose doctor-style checks. `LeanLibrary::open`,
 `LeanLibrary::open_globally`, direct dylib descriptors, and unchecked exports remain advanced paths whose callers take
@@ -65,7 +65,7 @@ inside an initializer that calls another directly.
 
 Repeated pins of the same live loader handle share one retained mapping. Distinct pinned images and failed initializer
 addresses have no automatic limit or eviction. Process exit releases them. A pin keeps code and data addressable.
-The application separately owns artifact custody, including stable inputs for deferred imports and the time between
+The application separately keeps artifacts stable, including inputs for deferred imports and the time between
 verification and loading. A foreign unwind or abort has no in-process recovery guarantee.
 
 ## Worker bootstrap

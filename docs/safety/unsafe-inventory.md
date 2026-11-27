@@ -264,23 +264,19 @@ through `Obj`'s `LeanAbi` implementation.
 ## Native process and descriptor boundaries
 
 These APIs do not call raw Lean symbols. They use narrow platform FFI for process identity, private process groups,
-accounting, and descriptor custody. This is an additional unsafe surface beyond the Lean object bridge.
+accounting, and inherited descriptors. This is an additional unsafe surface beyond the Lean object bridge.
 
 | File | Precondition | Invariant |
 | --- | --- | --- |
 | `lean-toolchain/src/process_group.rs` | The owner retains its actual child and group identity until closure; inherited descriptor borrows outlive spawn. | `pre_exec` only performs async-signal-safe descriptor operations. macOS `waitid(WNOWAIT)` observes without reaping; fixed-size libproc buffers are checked. Signals target the still-owned private group. Passive stored-ID observations grant no signal authority. |
 | `lean-toolchain/src/process_group/measured_child.rs` | `MeasuredChild` exclusively owns the actual unreaped child. | `wait4` output is read only after a terminal result for that exact PID; status/accounting have one reaping owner. |
 | `lean-toolchain/src/inherited_pipe.rs` | Supplied private pipe descriptor exceeds standard I/O. | Numeric `fcntl` rejects invalid descriptors, preserves existing descriptor flags, and creates one unique CLOEXEC duplicate; shape/access/nonblocking checks precede use. |
-| `lean-toolchain/src/shared_writer.rs` | Inherited loan metadata and stable lock identity validate. | A successful `fcntl` creates one uniquely owned duplicate without closing the supplied descriptor; file/device/inode and lock checks establish the accepted loan. |
-| `lean-toolchain/src/native_guardian.rs` | The live guardian pins the worker session and remains outside the payload group. | Scalar scope queries validate each signal target; control descriptor adoption owns only a successful duplicate. |
-| `lean-toolchain/src/native_guardian/ownership.rs` | A valid PID and adequately sized native output storage. | Kernel process snapshots validate returned size and identity; scalar SID/PGID observations retain no pointers and send no signals. |
 | `lean-rs-worker-parent/src/pipe.rs` | The parent owns the pipe end throughout both calls. | `fcntl` preserves flags while enabling nonblocking I/O on that end. |
 | `lean-rs-worker-parent/src/supervisor.rs` | Writable POD output buffers for macOS CPU accounting. | `proc_pidinfo` size and Mach timebase are checked before deriving milliseconds; failure yields unavailable accounting. |
-| `lean-rs-worker-child/src/parent_watchdog.rs` | Fresh bootstrap before Lean starts. | `setsid` failure prevents runtime work; legacy lifeline EOF/error exits only the current process with `_exit`. Guardian cleanup has its separate ownership protocol. |
+| `lean-rs-worker-child/src/parent_watchdog.rs` | The descriptor named by `LEAN_RS_WORKER_PARENT_LIFELINE` arrived with exec, exceeds standard I/O, and no other handle in this process owns it. | `F_GETFL` shows the descriptor open before `from_raw_fd` adopts it, and `ManuallyDrop` leaves a refused descriptor open. `F_SETFD` changes only its close-on-exec flag. `_exit` ends only this process and runs no destructors, so it never waits on a thread inside Lean. |
 | `lean-rs-worker-child/src/child.rs` | Platform startup code acts only on the current process. | Signal handlers use async-signal-safe writes/exits; signal structures are initialized before installation; resource/core-dump and Linux parent-death settings affect this child. |
 
-Test-only process-control opt-outs occur in native-guardian, measured-child, crash-ownership, and parent-watchdog
-regressions. Synthetic object/layout tests and the fuzz entry points have separate input-generation obligations; they do
+Test-only process-control opt-outs occur in the measured-child, worker protocol and worker shutdown regressions. Synthetic object/layout tests and the fuzz entry points have separate input-generation obligations; they do
 not expand the production API. Inspect their local safety comments when changing a harness.
 
 ## Sanitizer and leak-check coverage

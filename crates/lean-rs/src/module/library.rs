@@ -528,13 +528,13 @@ fn is_data_section(kind: SectionKind) -> bool {
 #[allow(
     unsafe_code,
     clippy::expect_used,
-    reason = "reopen the exact pinned test image under held fixture custody"
+    reason = "reopen the exact pinned test image that this test job owns"
 )]
 fn reopening_pinned_image_does_not_retain_additional_wrappers() {
     let first = crate::fixed_test_library();
     first.pin_for_process();
     for _ in 0..8 {
-        // SAFETY: this is the same approved path under the retained fixture reader,
+        // SAFETY: this is the same approved path, which the test job keeps unchanged,
         // on the same initialized runtime with a permanent reference to its image.
         let reopened = unsafe { LeanLibrary::open(first.runtime, first.path()) }.expect("reopen held fixture");
         assert_eq!(reopened.loader_identity, first.loader_identity);

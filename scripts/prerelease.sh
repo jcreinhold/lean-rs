@@ -435,8 +435,8 @@ check_head_consistency() {
 
 run_gate "Toolchain head consistency" check_head_consistency
 
-# Only this explicit job-owned test mode bypasses fixture readers. Run no
-# competing build/clean process against these roots until this script exits.
+# This job owns the fixture roots for the run. Run no competing build or
+# clean against them until this script exits.
 if [[ "$LEAN_VERSION" == "4.36.0" ]]; then
 	for dir in "${FIXTURE_ROOTS[@]}"; do
 		mode=$(python3 -c 'import os,sys; print(format(os.stat(sys.argv[1]).st_mode & 0o7777, "o"))' "$dir")
@@ -548,27 +548,6 @@ run_nextest() (
 	local env_args=(env RUST_BACKTRACE=0)
 	if [[ "$OS_KIND" == "Linux" ]]; then
 		env_args+=("LD_PRELOAD=libgcc_s.so.1")
-	elif [[ -z "${LEAN_RS_TEST_IPC_BASE:-}" ]]; then
-		# Reuse the outer target for an export directly below it. The shared
-		# reader and recovery fixtures both add their own socket name suffixes.
-		local ipc_parent ipc_base
-		ipc_parent=$(dirname "$REPO_ROOT")
-		if [[ "$(basename "$ipc_parent")" != target ]]; then
-			ipc_parent="$REPO_ROOT/target"
-		fi
-		mkdir -p "$ipc_parent" || return
-		ipc_parent=$(cd "$ipc_parent" && pwd -P) || return
-		ipc_base=$(mktemp -d "$ipc_parent/i.XXXXXX") || return
-		trap '
-			status=$?
-			if ! rmdir "$ipc_base"; then
-				log_err "could not remove private Nextest IPC base: $ipc_base"
-				status=1
-			fi
-			exit "$status"
-		' EXIT
-		env_args+=("LEAN_RS_TEST_IPC_BASE=$ipc_base")
-		log_step "Using private Nextest IPC base $ipc_base"
 	fi
 	if [[ -f /.dockerenv ]]; then
 		env_args+=("NEXTEST_TEST_THREADS=1")

@@ -153,7 +153,7 @@ impl WorkerProcess {
     pub fn load_fixture_capability(&mut self, fixture_root: &Path) -> Result<(), WorkerHarnessError> {
         let manifest = fixture_capability_manifest(fixture_root)?;
         self.send_request(Request::LoadFixtureCapability {
-            manifest_path: path_string(&manifest.path),
+            manifest_path: path_string(&manifest),
         })?;
         match self.read_response()? {
             Response::CapabilityLoaded => Ok(()),
@@ -171,7 +171,7 @@ impl WorkerProcess {
     pub fn call_fixture_mul(&mut self, fixture_root: &Path, lhs: u64, rhs: u64) -> Result<u64, WorkerHarnessError> {
         let manifest = fixture_capability_manifest(fixture_root)?;
         self.send_request(Request::CallFixtureMul {
-            manifest_path: path_string(&manifest.path),
+            manifest_path: path_string(&manifest),
             lhs,
             rhs,
         })?;
@@ -208,7 +208,7 @@ impl WorkerProcess {
     pub fn trigger_lean_panic(mut self, fixture_root: &Path) -> Result<WorkerFatalExit, WorkerHarnessError> {
         let manifest = fixture_capability_manifest(fixture_root)?;
         self.send_request(Request::TriggerLeanPanic {
-            manifest_path: path_string(&manifest.path),
+            manifest_path: path_string(&manifest),
         })?;
         match read_frame(&mut self.stdout, self.max_frame_bytes) {
             Ok(frame) => match frame.message {
@@ -411,68 +411,24 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-struct FixtureManifest {
-    path: PathBuf,
-    #[cfg(unix)]
-    _read: lean_toolchain::shared_writer::LocalArtifactRead,
-}
-
-fn fixture_capability_manifest(fixture_root: &Path) -> Result<FixtureManifest, WorkerHarnessError> {
-    let failure = |reason: String| WorkerHarnessError::CapabilityBuild(format!("{}: {reason}", fixture_root.display()));
-    #[cfg(not(unix))]
-    return Err(failure("fixture read custody is unsupported on this platform".into()));
-
-    #[cfg(unix)]
-    {
-        use lean_toolchain::shared_writer::{LocalArtifactRead, SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots};
-        let roots = project_artifact_roots(fixture_root).map_err(|error| failure(error.to_string()))?;
-        let builder = || {
-            lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
-                .package("lean_rs_fixture")
-                .module("LeanRsFixture")
-                .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
-                .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
-        };
-        let ready = || -> std::io::Result<Option<FixtureManifest>> {
-            let read = LocalArtifactRead::try_acquire(&roots)?;
-            if project_artifact_roots(fixture_root)? != roots {
-                return Err(std::io::Error::other(
-                    "fixture artifact roots changed under read custody",
-                ));
-            }
-            let built = builder().probe_ready_strict().map_err(std::io::Error::other)?;
-            read.validate()?;
-            Ok(built.map(|built| FixtureManifest {
-                path: built.manifest_path().to_path_buf(),
-                _read: read,
-            }))
-        };
-        match ready() {
-            Ok(Some(manifest)) => return Ok(manifest),
-            Ok(None) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                // A new project may not yet have locks. A lost lock beside
-                // an SDK cache is not cold; refuse instead of repairing it.
-                match std::fs::symlink_metadata(fixture_root.join(".lake/lean-rs-build-cache")) {
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    _ => return Err(failure(error.to_string())),
-                }
-            }
-            Err(error) => return Err(failure(error.to_string())),
-        }
-        if std::env::var_os(SHARED_WRITER_EXECUTABLE_ENV).is_none() {
-            return Err(failure(
-                "fixture cache is not ready; a configured writer is required".into(),
-            ));
-        }
-        // No reader is held while the existing writer builds a cold fixture.
-        drop(
-            builder()
-                .build_quiet()
-                .map_err(|diagnostic| WorkerHarnessError::CapabilityBuild(diagnostic.to_string()))?,
-        );
-        ready()
-            .map_err(|error| failure(error.to_string()))?
-            .ok_or_else(|| failure("fixture cache is not ready after the writer returned".into()))
-    }
+/// Return the fixture capability's manifest path, building it only on a cache miss.
+///
+/// A build rewrites the manifest even when nothing changed, and a sealed test
+/// deployment checks the manifest's file identity, so a ready cache is only probed.
+fn fixture_capability_manifest(fixture_root: &Path) -> Result<PathBuf, WorkerHarnessError> {
+    let builder = || {
+        lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
+            .package("lean_rs_fixture")
+            .module("LeanRsFixture")
+            .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
+            .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
+    };
+    let failure = |diagnostic: lean_toolchain::LinkDiagnostics| {
+        WorkerHarnessError::CapabilityBuild(format!("{}: {diagnostic}", fixture_root.display()))
+    };
+    let built = match builder().probe_ready_strict().map_err(failure)? {
+        Some(built) => built,
+        None => builder().build_quiet().map_err(failure)?,
+    };
+    Ok(built.manifest_path().to_path_buf())
 }

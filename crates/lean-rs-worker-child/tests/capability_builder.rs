@@ -433,11 +433,6 @@ fn checked_host_builder_selection(selection: &str, expected_case: Option<&str>) 
         write!(&mut actual, "{byte:02x}").expect("encode digest");
     }
     assert_eq!(actual, selected.worker_sha256, "selected worker changed");
-    assert!(
-        lean_toolchain::shared_writer::writer_executable_from_env()
-            .expect("unambiguous writer configuration")
-            .is_none()
-    );
     assert!(std::env::var_os("LEAN_PATH").is_none());
     selected
 }
@@ -1311,68 +1306,39 @@ mod qualified_pool {
         LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerHostRuntimeExpectation, LeanWorkerPool,
         LeanWorkerPoolConfig, LeanWorkerProcessTracker, metadata_qualification,
     };
-    use lean_toolchain::native_guardian::{NativeOwnerObservation, NativeProcessIdentity};
-    use std::{
-        collections::BTreeSet,
-        error::Error,
-        fs,
-        path::{Path, PathBuf},
-        time::Duration,
-    };
+    use std::{error::Error, fs, path::Path, time::Duration};
 
     type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-    fn generations(owners: &Path) -> Result<BTreeSet<String>> {
-        Ok(fs::read_dir(owners)?
-            .collect::<std::io::Result<Vec<_>>>()?
-            .into_iter()
-            .filter_map(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .filter(|name| name.starts_with("worker-"))
-                    .map(str::to_owned)
-            })
-            .collect())
-    }
+    /// What the fixture worker logs from its start through a checked typed import.
+    const AUTHORIZATION: [&str; 6] = [
+        "worker-started",
+        "verified-deployment",
+        "authorize-fixed-metadata-builder_opens_worker_capability_and_validates_metadata",
+        "authorize-host-load",
+        "verified-global-interop-initializer",
+        "authorize-checked-typed-import",
+    ];
 
-    fn check_authorization(path: &Path, offset: usize, pid: u32, portable: bool) -> Result<usize> {
+    /// Check that one worker logged the whole authorization trace after
+    /// `offset`, and return its pid and the new log length.
+    fn check_authorization(path: &Path, offset: usize) -> Result<(u32, usize)> {
         let bytes = fs::read(path)?;
         let suffix = bytes.get(offset..).ok_or("authorization log shrank")?;
+        let mut pid = None;
         let mut events = Vec::new();
         for line in std::str::from_utf8(suffix)?.lines() {
             let (worker, event) = line.split_once(' ').ok_or("invalid authorization event")?;
+            let worker = worker.parse::<u32>()?;
             assert_eq!(
-                worker.parse::<u32>()?,
-                pid,
-                "authorization belongs to a different generation"
+                *pid.get_or_insert(worker),
+                worker,
+                "one launch logged events from two workers"
             );
             events.push(event);
         }
-        if portable {
-            assert_eq!(
-                events,
-                [
-                    "worker-started",
-                    "verified-deployment",
-                    "authorize-fixed-metadata-builder_opens_worker_capability_and_validates_metadata",
-                    "authorize-host-load",
-                    "verified-global-interop-initializer",
-                    "authorize-checked-typed-import",
-                ]
-            );
-        } else {
-            assert_eq!(events.len(), 5, "reviewed worker authorization trace differs");
-        }
-        Ok(bytes.len())
-    }
-
-    fn owner_identities(owners: &Path, generation: &str) -> Result<(NativeProcessIdentity, NativeProcessIdentity)> {
-        let owner: serde_json::Value = serde_json::from_slice(&fs::read(owners.join(generation).join("owner.json"))?)?;
-        Ok((
-            serde_json::from_value(owner.get("process").ok_or("missing worker process identity")?.clone())?,
-            serde_json::from_value(owner.get("guardian").ok_or("missing worker guardian identity")?.clone())?,
-        ))
+        assert_eq!(events, AUTHORIZATION, "worker authorization trace differs");
+        Ok((pid.ok_or("the launch logged no events")?, bytes.len()))
     }
 
     fn builder(tracker: &LeanWorkerProcessTracker) -> LeanWorkerCapabilityBuilder {
@@ -1384,74 +1350,28 @@ mod qualified_pool {
     }
 
     #[test]
-    fn portable_guardian_entry() {
-        if std::env::var_os("LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD").is_some() {
-            lean_toolchain::native_guardian::run_guardian_cli().expect("run portable fixture guardian");
-        }
-    }
-
-    #[test]
-    #[ignore = "named qualified metadata deployment and checked two-launch authorization required"]
+    #[ignore = "named SDK fixture deployment and its two-launch authorization log required"]
     fn failed_validator_releases_pool_slot_before_fresh_key() -> Result<()> {
-        let ordinary = super::ordinary_typed_selection::ordinary_stream_selection();
-        let (owners, events, guardian) = if let Some(selected) = ordinary {
-            use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
-
-            let state = selected
-                .json_manifest
-                .parent()
-                .ok_or("missing portable fixture state")?;
-            let owners = state.join("owners");
-            fs::DirBuilder::new().mode(0o700).create(&owners)?;
-            let guardian = state.join("guardian.sh");
-            let executable = std::env::current_exe()?;
-            let quoted = executable
-                .to_str()
-                .ok_or("guardian executable path is not UTF-8")?
-                .replace('\'', "'\\''");
-            fs::write(
-                &guardian,
-                format!("#!/bin/sh\nexec '{quoted}' --exact qualified_pool::portable_guardian_entry --nocapture\n"),
-            )?;
-            fs::set_permissions(&guardian, fs::Permissions::from_mode(0o700))?;
-            (owners, state.join("app/native-events.log"), Some(guardian))
-        } else {
-            let selection: serde_json::Value = serde_json::from_str(
-                option_env!("LEAN_RS_TEST_QUALIFIED_METADATA").ok_or("missing checked metadata deployment")?,
-            )?;
-            let owners = PathBuf::from(
-                selection
-                    .get("owners")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or("missing ownership registry")?,
-            );
-            let events = owners
-                .parent()
-                .ok_or("ownership registry has no deployment root")?
-                .join("app/native-events.log");
-            (owners, events, None)
-        };
-        assert_eq!(owners.canonicalize()?, owners);
+        let selected =
+            super::ordinary_typed_selection::ordinary_stream_selection().ok_or("missing ordinary stream deployment")?;
+        let events = selected
+            .json_manifest
+            .parent()
+            .ok_or("missing fixture state")?
+            .join("app/native-events.log");
         let open = |tracker: &LeanWorkerProcessTracker| {
-            let base = builder(tracker);
-            if let (Some(selected), Some(guardian)) = (ordinary, guardian.as_ref()) {
-                base.worker_child(
+            builder(tracker)
+                .worker_child(
                     lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&selected.worker, &selected.sysroot)
-                        .checked_native_loader_environment()
-                        .native_guardian(guardian)
-                        .lifetime_directory(&owners),
+                        .checked_native_loader_environment(),
                 )
                 .require_host_runtime(LeanWorkerHostRuntimeExpectation::default())
-            } else {
-                base
-            }
         };
         let events_before = match fs::read(&events) {
             Ok(bytes) => bytes.len(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(error) => return Err(error.into()),
         };
-        let before = generations(&owners)?;
         let tracker = LeanWorkerProcessTracker::new();
         let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
 
@@ -1471,21 +1391,9 @@ mod qualified_pool {
         assert_eq!(
             tracker.active_processes(),
             0,
-            "failed cold open retained process custody"
+            "failed cold open left its worker unreaped"
         );
-        let after_failure = generations(&owners)?;
-        let failed: Vec<_> = after_failure.difference(&before).collect();
-        let [failed] = failed.as_slice() else {
-            return Err("first key must launch exactly one owned generation".into());
-        };
-        let (process, guardian) = owner_identities(&owners, failed)?;
-        assert_eq!(
-            process.observe()?,
-            NativeOwnerObservation::Absent,
-            "failed worker identity remained present"
-        );
-        assert!(!guardian.is_live()?, "failed worker guardian remained live");
-        let events_after_failure = check_authorization(&events, events_before, process.pid, ordinary.is_some())?;
+        let (failed, events_after_failure) = check_authorization(&events, events_before)?;
 
         {
             let lease = pool.acquire_lease(open(&tracker))?;
@@ -1501,20 +1409,8 @@ mod qualified_pool {
             0,
             "successful fresh key did not close on pool drop"
         );
-        let after_success = generations(&owners)?;
-        let succeeded: Vec<_> = after_success.difference(&after_failure).collect();
-        let [succeeded] = succeeded.as_slice() else {
-            return Err("fresh key must launch exactly one new owned generation".into());
-        };
-        assert_ne!(failed, succeeded, "closure records reused a generation identity");
-        let (process, guardian) = owner_identities(&owners, succeeded)?;
-        assert_eq!(
-            process.observe()?,
-            NativeOwnerObservation::Absent,
-            "successful worker identity remained present after pool drop"
-        );
-        assert!(!guardian.is_live()?, "successful worker guardian remained live");
-        check_authorization(&events, events_after_failure, process.pid, ordinary.is_some())?;
+        let (succeeded, _) = check_authorization(&events, events_after_failure)?;
+        assert_ne!(failed, succeeded, "fresh key reused the failed worker");
         Ok(())
     }
 }

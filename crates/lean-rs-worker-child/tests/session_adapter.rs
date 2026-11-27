@@ -52,7 +52,6 @@ fn worker_config() -> LeanWorkerConfig {
 #[test]
 fn ordinary_worker_refuses_invalid_prepared_shims_before_handshake() {
     let result = Command::new(worker_binary())
-        .env_remove("LEAN_RS_WORKER_SHARED_ARTIFACT_READS")
         .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", "{}")
         .output()
         .expect("run the ordinary worker");

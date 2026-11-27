@@ -3,8 +3,7 @@
 
 Run after the existing Lake builds, with all three roots mode 0700. The caller
 owns this checkout and keeps it and the selected toolchain unchanged until its
-Rust tests exit. This is trusted job ownership, not a same-user writer lock.
-No shell code is emitted. A failed selection emits no environment variables.
+Rust tests exit. No shell code is emitted. A failed selection emits no environment variables.
 """
 
 import hashlib
@@ -57,7 +56,6 @@ def select(relative, library):
 
 
 # Compile-time selection and runtime marker both belong to this job.
-# This is exclusive job ownership, not managed-reader or hostile-writer protection.
 scalar = select("fixtures/lean", "liblean__rs__fixture_LeanRsFixture")
 interop = select(
     "crates/lean-rs/shims/lean-rs-interop-shims",

@@ -14,7 +14,6 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-fs4 = { workspace = true }
 lean-rs-abi = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,10 +21,8 @@ sha2 = { workspace = true }
 toml = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-dirs = "6"
 libc = "0.2"
-nix = { version = "0.26.4", default-features = false, features = ["fs"] }
-rustix = { version = "1.1.6", features = ["fs", "net", "process"] }
+rustix = { version = "1.1.6", features = ["fs", "process"] }
 
 [build-dependencies]
 # `lean-rs-abi` is purely static (no build script, no Lean link), so depending

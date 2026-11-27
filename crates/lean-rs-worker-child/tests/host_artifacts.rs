@@ -4,16 +4,14 @@
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
 
 #[test]
-#[ignore = "requires the built SDK helper selected by LEAN_TOOLCHAIN_READER_TEST_HELPER"]
+#[ignore = "builds both shim packages from source with Lake; run it by name"]
 fn prepare_writes_and_builds_the_shims_in_a_new_directory() -> Result<(), Box<dyn std::error::Error>> {
-    let helper =
-        PathBuf::from(std::env::var_os("LEAN_TOOLCHAIN_READER_TEST_HELPER").ok_or("select the built lean-rs-writer")?);
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -28,8 +26,6 @@ fn prepare_writes_and_builds_the_shims_in_a_new_directory() -> Result<(), Box<dy
         Command::new(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
             .arg("--lean-rs-prepare-host-artifacts")
             .arg(&destination)
-            .env(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV, &helper)
-            .env("LEAN_RS_WORKER_OWNERS_DIRECTORY", root.join("owners"))
             .output()
     };
 
@@ -46,14 +42,6 @@ fn prepare_writes_and_builds_the_shims_in_a_new_directory() -> Result<(), Box<dy
         Path::new(&descriptor.shim_manifest_path).starts_with(&host),
         "{}",
         descriptor.shim_manifest_path
-    );
-    assert!(
-        descriptor
-            .artifact_roots
-            .iter()
-            .all(|root| Path::new(root).starts_with(&destination)),
-        "{:?}",
-        descriptor.artifact_roots
     );
     let [first, second] = descriptor.shim_search_paths.as_slice() else {
         return Err(format!(

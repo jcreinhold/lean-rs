@@ -1818,8 +1818,8 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntimePreflight
 pub struct lean_rs::module::LoadedHostArtifacts<'lean>
 impl<'lean> lean_rs::module::LoadedHostArtifacts<'lean>
 pub fn lean_rs::module::LoadedHostArtifacts<'lean>::host(&self) -> &lean_rs::module::TrustedHostCapability<'lean>
-pub unsafe fn lean_rs::module::LoadedHostArtifacts<'lean>::load(&'lean lean_rs::LeanRuntime, std::path::PathBuf, alloc::vec::Vec<u8>, alloc::vec::Vec<std::path::PathBuf>, alloc::vec::Vec<std::path::PathBuf>, impl core::marker::Sized + 'lean) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::module::LoadedHostArtifacts<'lean>::matches_snapshot(&self, &std::path::Path, &[u8], &[std::path::PathBuf], &[std::path::PathBuf]) -> bool
+pub unsafe fn lean_rs::module::LoadedHostArtifacts<'lean>::load(&'lean lean_rs::LeanRuntime, std::path::PathBuf, alloc::vec::Vec<u8>, alloc::vec::Vec<std::path::PathBuf>, impl core::marker::Sized + 'lean) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::module::LoadedHostArtifacts<'lean>::matches_snapshot(&self, &std::path::Path, &[u8], &[std::path::PathBuf]) -> bool
 impl<'lean> core::marker::Freeze for lean_rs::module::LoadedHostArtifacts<'lean>
 impl<'lean> !core::marker::Send for lean_rs::module::LoadedHostArtifacts<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::module::LoadedHostArtifacts<'lean>

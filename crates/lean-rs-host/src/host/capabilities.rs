@@ -66,11 +66,10 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// Manifest-backed bundled host shim capability. Session construction
     /// resolves typed bindings from this checked surface.
     shim_capability: LoadedHostArtifacts<'lean>,
-    // Prepared before any project read custody. Import and body paths only
-    // read these locations; they must never run a nested Lake writer.
+    // Prepared before the first import. Import and body paths only read
+    // these locations; they never run Lake.
     shim_search_paths: Vec<PathBuf>,
     keyed_project_search_paths: Option<Vec<PathBuf>>,
-    artifact_roots: Vec<PathBuf>,
 }
 
 impl fmt::Debug for LeanCapabilities<'_, '_> {
@@ -84,7 +83,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the project artifact roots cannot be resolved.
+    /// Returns an error if `shim_capability` was not loaded from `prepared`.
     pub fn from_prepared(
         host: &'h LeanHost<'lean>,
         prepared: &LeanPreparedHostArtifacts,
@@ -93,17 +92,12 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         if !shim_capability.matches_snapshot(
             prepared.manifest_path(),
             prepared.manifest_json().as_bytes(),
-            prepared.artifact_roots(),
             prepared.shim_search_paths(),
         ) {
             return Err(lean_rs::__host_internals::host_module_init(
                 "prepared host artifacts differ from the snapshot admitted by the native loader",
             ));
         }
-        let mut artifact_roots = host.project().artifact_roots()?;
-        artifact_roots.extend(prepared.artifact_roots.iter().cloned());
-        artifact_roots.sort();
-        artifact_roots.dedup();
         let keyed_project_search_paths = prepared
             .project_generated_output_key
             .as_deref()
@@ -114,7 +108,6 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
             shim_capability,
             shim_search_paths: prepared.shim_search_paths.clone(),
             keyed_project_search_paths,
-            artifact_roots,
         })
     }
 
@@ -246,15 +239,6 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         self.host
     }
 
-    /// Shared output domains prepared with this loaded capability.
-    ///
-    /// A worker holds read custody over these roots during imports and body
-    /// operations. These paths name storage domains, not loaded ABI evidence.
-    #[must_use]
-    pub fn artifact_roots(&self) -> &[PathBuf] {
-        &self.artifact_roots
-    }
-
     /// Bundled import locations prepared during capability construction.
     pub(crate) fn shim_search_paths(&self) -> &[PathBuf] {
         &self.shim_search_paths
@@ -278,30 +262,28 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
 
 /// Runtime-free storage metadata for a prepared bundled host capability.
 ///
-/// A snapshot is not evidence that a runtime loaded these artifacts. Retain
-/// cooperating reader custody across validation, dynamic loading, all module
+/// A snapshot is not evidence that a runtime loaded these artifacts. Nothing
+/// may rebuild them across validation, dynamic loading, all module
 /// initializers and the lifetime of the native worker generation.
 #[derive(Clone, Debug)]
 pub struct LeanPreparedHostArtifacts {
     manifest_path: PathBuf,
     manifest_json: String,
-    artifact_roots: Vec<PathBuf>,
     shim_search_paths: Vec<PathBuf>,
     generated_output_key: Option<String>,
     project_generated_output_key: Option<String>,
 }
 
 impl LeanPreparedHostArtifacts {
-    /// Bind an exact UTF-8 snapshot and its independently admitted storage domains.
+    /// Bind an exact UTF-8 manifest snapshot and its two shim import paths.
     ///
     /// This performs no build, dynamic loading or module initialization.
     ///
     /// # Errors
-    /// Returns malformed snapshot or invalid/unbounded canonical-domain errors.
+    /// Returns malformed snapshot or noncanonical search-path errors.
     pub fn from_snapshot(
         manifest_path: PathBuf,
         manifest_json: String,
-        artifact_roots: Vec<PathBuf>,
         shim_search_paths: Vec<PathBuf>,
     ) -> LeanResult<Self> {
         let manifest = lean_toolchain::CapabilityManifest::from_bytes(&manifest_path, manifest_json.as_bytes())
@@ -309,16 +291,7 @@ impl LeanPreparedHostArtifacts {
         if manifest_json.len() > 64 * 1024
             || manifest.package != crate::host::lake::SHIM_PACKAGE_NAME
             || manifest.module != crate::host::lake::SHIM_LIB_NAME
-            || artifact_roots.is_empty()
-            || artifact_roots.len() > 32
             || shim_search_paths.len() != 2
-            || artifact_roots
-                .iter()
-                .zip(artifact_roots.iter().skip(1))
-                .any(|(left, right)| left >= right)
-            || artifact_roots
-                .iter()
-                .any(|root| !root.is_absolute() || root.canonicalize().ok().as_ref() != Some(root))
             || shim_search_paths
                 .iter()
                 .any(|path| !path.is_absolute() || path.canonicalize().ok().as_ref() != Some(path))
@@ -331,7 +304,6 @@ impl LeanPreparedHostArtifacts {
         Ok(Self {
             manifest_path,
             manifest_json,
-            artifact_roots,
             shim_search_paths,
             generated_output_key,
             project_generated_output_key: None,
@@ -347,11 +319,6 @@ impl LeanPreparedHostArtifacts {
     #[must_use]
     pub fn manifest_json(&self) -> &str {
         &self.manifest_json
-    }
-    /// Canonical cooperating output domains, sorted and deduplicated.
-    #[must_use]
-    pub fn artifact_roots(&self) -> &[PathBuf] {
-        &self.artifact_roots
     }
     /// Ready import paths for the interop and host shim packages.
     #[must_use]
@@ -458,7 +425,7 @@ fn valid_generated_output_component(key: &str) -> bool {
 /// Prepare the bundled host capability without initializing any Lean runtime.
 ///
 /// # Errors
-/// Returns the configured writer, build, publication or snapshot validation failure.
+/// Returns the build, publication or snapshot validation failure.
 pub fn prepare_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
     prepare_host_artifacts_for_output(None)
 }
@@ -468,12 +435,10 @@ pub fn prepare_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
 /// [`prepare_host_artifacts`] builds the shims where Cargo unpacked this crate.
 /// An installer calls this instead to give a worker its own copy, which does
 /// not change when the Cargo cache does. The sources are the ones this build
-/// links against. `destination` must not exist; its parent must. The writer
-/// helper named by `LEAN_RS_WRITER_EXECUTABLE` runs Lake.
+/// links against. `destination` must not exist; its parent must.
 ///
 /// # Errors
-/// Returns an existing `destination`, a missing writer helper, or a write,
-/// build or snapshot failure.
+/// Returns an existing `destination`, or a write, build or snapshot failure.
 #[cfg(unix)]
 pub fn prepare_host_artifacts_in(destination: &std::path::Path) -> LeanResult<LeanPreparedHostArtifacts> {
     let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
@@ -483,7 +448,7 @@ pub fn prepare_host_artifacts_in(destination: &std::path::Path) -> LeanResult<Le
 /// Prepare the bundled host capability in one validated generated-output slot.
 ///
 /// # Errors
-/// Returns an invalid output key, writer, build, publication or snapshot validation failure.
+/// Returns an invalid output key, build, publication or snapshot validation failure.
 #[doc(hidden)]
 pub fn prepare_host_artifacts_for_generated_output(
     generated_output_key: &str,
@@ -497,65 +462,25 @@ fn prepare_host_artifacts_for_output(generated_output_key: Option<&str>) -> Lean
     crate::host::lake::prepared_artifacts(&built, selection.key())
 }
 
-/// Inspect existing bundled outputs under shared custody without a writer or runtime.
+/// Inspect existing bundled outputs without building them or starting a runtime.
 ///
 /// # Errors
-/// Returns reader admission or invalid metadata errors. A cold/stale cache is `None`.
-#[cfg(unix)]
+/// Returns invalid metadata errors. A cold or stale cache is `None`.
 pub fn ready_host_artifacts() -> LeanResult<Option<LeanPreparedHostArtifacts>> {
     let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
-    crate::host::lake::ready_artifacts(host_shim_export_signatures(), None, &selection)
+    crate::host::lake::ready_artifacts(host_shim_export_signatures(), &selection)
 }
 
-/// Inspect existing bundled outputs using one explicit private IPC root.
+/// Inspect one validated generated-output slot without building it.
 ///
 /// # Errors
-/// Returns reader admission or invalid metadata errors. A cold/stale cache is `None`.
-#[cfg(unix)]
+/// Returns an invalid output key or metadata error. A cold or stale cache is `None`.
 #[doc(hidden)]
-pub fn ready_host_artifacts_with_ipc_root(ipc_root: &std::path::Path) -> LeanResult<Option<LeanPreparedHostArtifacts>> {
-    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
-    crate::host::lake::ready_artifacts(host_shim_export_signatures(), Some(ipc_root), &selection)
-}
-
-/// Inspect one validated generated-output slot using one explicit private IPC root.
-///
-/// # Errors
-/// Returns an invalid output key, reader admission or metadata error. A cold/stale cache is `None`.
-#[cfg(unix)]
-#[doc(hidden)]
-pub fn ready_host_artifacts_for_generated_output_with_ipc_root(
+pub fn ready_host_artifacts_for_generated_output(
     generated_output_key: &str,
-    ipc_root: &std::path::Path,
 ) -> LeanResult<Option<LeanPreparedHostArtifacts>> {
     let selection = crate::host::lake::ShimOutputSelection::resolve(Some(generated_output_key))?;
-    crate::host::lake::ready_artifacts(host_shim_export_signatures(), Some(ipc_root), &selection)
-}
-
-/// Capture ready bundled outputs under local read locks. This is not load authority.
-///
-/// # Errors
-/// Refuses busy writers or invalid coordination state. No writer runs here.
-#[cfg(unix)]
-#[doc(hidden)]
-pub fn ready_host_artifacts_locally() -> LeanResult<Option<LeanPreparedHostArtifacts>> {
-    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
-    crate::host::lake::ready_artifacts_locally(host_shim_export_signatures(), &selection)
-}
-
-/// Prepare the default bundled output without waiting for writer admission.
-///
-/// # Errors
-/// Returns busy admission, helper, build or snapshot errors.
-#[doc(hidden)]
-pub fn prepare_host_artifacts_without_lock_wait() -> LeanResult<LeanPreparedHostArtifacts> {
-    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
-    let built = crate::host::lake::LakeProject::shim_capability_with_admission(
-        host_shim_export_signatures(),
-        &selection,
-        true,
-    )?;
-    crate::host::lake::prepared_artifacts(&built, selection.key())
+    crate::host::lake::ready_artifacts(host_shim_export_signatures(), &selection)
 }
 
 pub(super) fn reject_same_process_cargo_test_session_import() -> LeanResult<()> {

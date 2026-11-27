@@ -39,184 +39,6 @@ impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::manifest_validatio
 pub fn lean_toolchain::manifest_validation::check_fingerprint(&lean_toolchain::manifest_validation::CapabilityManifest, &mut alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>)
 pub fn lean_toolchain::manifest_validation::check_staleness(&std::path::Path, &lean_toolchain::manifest_validation::CapabilityManifest, &mut alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>)
 pub fn lean_toolchain::manifest_validation::check_static(&std::path::Path) -> lean_toolchain::LeanLoaderReport
-pub mod lean_toolchain::native_guardian
-pub enum lean_toolchain::native_guardian::NativeGuardianDrainStatus
-pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Accepted
-pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Empty
-pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Pending
-pub lean_toolchain::native_guardian::NativeGuardianDrainStatus::Refused
-impl core::clone::Clone for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-pub fn lean_toolchain::native_guardian::NativeGuardianDrainStatus::clone(&self) -> lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::cmp::Eq for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-pub fn lean_toolchain::native_guardian::NativeGuardianDrainStatus::eq(&self, &lean_toolchain::native_guardian::NativeGuardianDrainStatus) -> bool
-impl core::fmt::Debug for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-pub fn lean_toolchain::native_guardian::NativeGuardianDrainStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::marker::Freeze for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::marker::Send for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::marker::Sync for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::marker::Unpin for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainStatus
-pub enum lean_toolchain::native_guardian::NativeOwnerObservation
-pub lean_toolchain::native_guardian::NativeOwnerObservation::Absent
-pub lean_toolchain::native_guardian::NativeOwnerObservation::Present
-pub lean_toolchain::native_guardian::NativeOwnerObservation::Unresolved
-impl core::clone::Clone for lean_toolchain::native_guardian::NativeOwnerObservation
-pub fn lean_toolchain::native_guardian::NativeOwnerObservation::clone(&self) -> lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::cmp::Eq for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeOwnerObservation
-pub fn lean_toolchain::native_guardian::NativeOwnerObservation::eq(&self, &lean_toolchain::native_guardian::NativeOwnerObservation) -> bool
-impl core::fmt::Debug for lean_toolchain::native_guardian::NativeOwnerObservation
-pub fn lean_toolchain::native_guardian::NativeOwnerObservation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::marker::Freeze for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::marker::Send for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::marker::Sync for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::marker::Unpin for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeOwnerObservation
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeOwnerObservation
-pub struct lean_toolchain::native_guardian::GuardianHandle
-impl lean_toolchain::native_guardian::GuardianHandle
-pub fn lean_toolchain::native_guardian::GuardianHandle::retain_reads(&mut self, &[lean_toolchain::native_guardian::GuardianReadLoan<'_>], core::time::Duration) -> std::io::error::Result<()>
-pub fn lean_toolchain::native_guardian::GuardianHandle::spawn(&std::path::Path, &std::path::Path, &str, core::time::Duration) -> std::io::error::Result<Self>
-impl core::ops::drop::Drop for lean_toolchain::native_guardian::GuardianHandle
-pub fn lean_toolchain::native_guardian::GuardianHandle::drop(&mut self)
-impl core::marker::Freeze for lean_toolchain::native_guardian::GuardianHandle
-impl core::marker::Send for lean_toolchain::native_guardian::GuardianHandle
-impl core::marker::Sync for lean_toolchain::native_guardian::GuardianHandle
-impl core::marker::Unpin for lean_toolchain::native_guardian::GuardianHandle
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::GuardianHandle
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::GuardianHandle
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::GuardianHandle
-pub struct lean_toolchain::native_guardian::GuardianReadLoan<'a>
-pub lean_toolchain::native_guardian::GuardianReadLoan::descriptor: std::os::fd::owned::BorrowedFd<'a>
-pub lean_toolchain::native_guardian::GuardianReadLoan::domain: lean_toolchain::native_guardian::NativeReadDomain
-impl<'a> core::marker::Freeze for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-impl<'a> core::marker::Send for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-impl<'a> core::marker::Sync for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-impl<'a> core::marker::Unpin for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-impl<'a> core::marker::UnsafeUnpin for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-impl<'a> core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-impl<'a> core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::GuardianReadLoan<'a>
-pub struct lean_toolchain::native_guardian::NativeCapacitySlot
-pub lean_toolchain::native_guardian::NativeCapacitySlot::key: alloc::string::String
-pub lean_toolchain::native_guardian::NativeCapacitySlot::limit: usize
-pub lean_toolchain::native_guardian::NativeCapacitySlot::scope: alloc::string::String
-impl core::clone::Clone for lean_toolchain::native_guardian::NativeCapacitySlot
-pub fn lean_toolchain::native_guardian::NativeCapacitySlot::clone(&self) -> lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::cmp::Eq for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeCapacitySlot
-pub fn lean_toolchain::native_guardian::NativeCapacitySlot::eq(&self, &lean_toolchain::native_guardian::NativeCapacitySlot) -> bool
-impl core::fmt::Debug for lean_toolchain::native_guardian::NativeCapacitySlot
-pub fn lean_toolchain::native_guardian::NativeCapacitySlot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeCapacitySlot
-impl serde_core::ser::Serialize for lean_toolchain::native_guardian::NativeCapacitySlot
-pub fn lean_toolchain::native_guardian::NativeCapacitySlot::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::native_guardian::NativeCapacitySlot
-pub fn lean_toolchain::native_guardian::NativeCapacitySlot::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::marker::Send for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::marker::Sync for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::marker::Unpin for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeCapacitySlot
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeCapacitySlot
-pub struct lean_toolchain::native_guardian::NativeGuardianDrainBinding
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::boot: alloc::string::String
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::generation: alloc::string::String
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::guardian: lean_toolchain::native_guardian::NativeProcessIdentity
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::parent: lean_toolchain::native_guardian::NativeProcessIdentity
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::registry_device: u64
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::registry_inode: u64
-pub lean_toolchain::native_guardian::NativeGuardianDrainBinding::worker: lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::clone::Clone for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-pub fn lean_toolchain::native_guardian::NativeGuardianDrainBinding::clone(&self) -> lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::cmp::Eq for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-pub fn lean_toolchain::native_guardian::NativeGuardianDrainBinding::eq(&self, &lean_toolchain::native_guardian::NativeGuardianDrainBinding) -> bool
-impl core::fmt::Debug for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-pub fn lean_toolchain::native_guardian::NativeGuardianDrainBinding::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::marker::Freeze for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::marker::Send for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::marker::Sync for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::marker::Unpin for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeGuardianDrainBinding
-pub struct lean_toolchain::native_guardian::NativeProcessIdentity
-pub lean_toolchain::native_guardian::NativeProcessIdentity::pid: u32
-pub lean_toolchain::native_guardian::NativeProcessIdentity::process_group: u32
-pub lean_toolchain::native_guardian::NativeProcessIdentity::session: u32
-pub lean_toolchain::native_guardian::NativeProcessIdentity::start: alloc::string::String
-pub lean_toolchain::native_guardian::NativeProcessIdentity::version: u32
-impl lean_toolchain::native_guardian::NativeProcessIdentity
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::capture(u32) -> std::io::error::Result<core::option::Option<Self>>
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::is_live(&self) -> std::io::error::Result<bool>
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::observe(&self) -> std::io::error::Result<lean_toolchain::native_guardian::NativeOwnerObservation>
-impl core::clone::Clone for lean_toolchain::native_guardian::NativeProcessIdentity
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::clone(&self) -> lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::cmp::Eq for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeProcessIdentity
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::eq(&self, &lean_toolchain::native_guardian::NativeProcessIdentity) -> bool
-impl core::fmt::Debug for lean_toolchain::native_guardian::NativeProcessIdentity
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeProcessIdentity
-impl serde_core::ser::Serialize for lean_toolchain::native_guardian::NativeProcessIdentity
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::native_guardian::NativeProcessIdentity
-pub fn lean_toolchain::native_guardian::NativeProcessIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::marker::Send for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::marker::Sync for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::marker::Unpin for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeProcessIdentity
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeProcessIdentity
-pub struct lean_toolchain::native_guardian::NativeReadDomain
-pub lean_toolchain::native_guardian::NativeReadDomain::device: u64
-pub lean_toolchain::native_guardian::NativeReadDomain::epoch: alloc::string::String
-pub lean_toolchain::native_guardian::NativeReadDomain::inode: u64
-pub lean_toolchain::native_guardian::NativeReadDomain::lock_path: std::path::PathBuf
-pub lean_toolchain::native_guardian::NativeReadDomain::project_root: std::path::PathBuf
-impl core::clone::Clone for lean_toolchain::native_guardian::NativeReadDomain
-pub fn lean_toolchain::native_guardian::NativeReadDomain::clone(&self) -> lean_toolchain::native_guardian::NativeReadDomain
-impl core::cmp::Eq for lean_toolchain::native_guardian::NativeReadDomain
-impl core::cmp::PartialEq for lean_toolchain::native_guardian::NativeReadDomain
-pub fn lean_toolchain::native_guardian::NativeReadDomain::eq(&self, &lean_toolchain::native_guardian::NativeReadDomain) -> bool
-impl core::fmt::Debug for lean_toolchain::native_guardian::NativeReadDomain
-pub fn lean_toolchain::native_guardian::NativeReadDomain::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::native_guardian::NativeReadDomain
-impl serde_core::ser::Serialize for lean_toolchain::native_guardian::NativeReadDomain
-pub fn lean_toolchain::native_guardian::NativeReadDomain::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::native_guardian::NativeReadDomain
-pub fn lean_toolchain::native_guardian::NativeReadDomain::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_toolchain::native_guardian::NativeReadDomain
-impl core::marker::Send for lean_toolchain::native_guardian::NativeReadDomain
-impl core::marker::Sync for lean_toolchain::native_guardian::NativeReadDomain
-impl core::marker::Unpin for lean_toolchain::native_guardian::NativeReadDomain
-impl core::marker::UnsafeUnpin for lean_toolchain::native_guardian::NativeReadDomain
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::native_guardian::NativeReadDomain
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::native_guardian::NativeReadDomain
-pub const lean_toolchain::native_guardian::DRAIN_SLOT_ENV: &str
-pub const lean_toolchain::native_guardian::EXECUTABLE_ENV: &str
-pub const lean_toolchain::native_guardian::MAX_OWNER_BYTES: usize
-pub const lean_toolchain::native_guardian::MAX_OWNER_RECORDS: usize
-pub const lean_toolchain::native_guardian::MAX_READ_DOMAINS: usize
-pub const lean_toolchain::native_guardian::OWNERS_DIRECTORY_ENV: &str
-pub const lean_toolchain::native_guardian::PROTOCOL: u32
-pub fn lean_toolchain::native_guardian::bind_registry_directory(&std::path::Path) -> std::io::error::Result<()>
-pub fn lean_toolchain::native_guardian::protected_native_reads_stopped(&std::path::Path, &std::path::Path, (u64, u64)) -> std::io::error::Result<bool>
-pub fn lean_toolchain::native_guardian::registry_directory() -> std::io::error::Result<std::path::PathBuf>
-pub fn lean_toolchain::native_guardian::reserve_owner_record(&std::path::Path, &str, core::time::Duration) -> std::io::error::Result<std::path::PathBuf>
-pub fn lean_toolchain::native_guardian::reserve_owner_record_with_slot(&std::path::Path, &str, core::time::Duration, core::option::Option<&lean_toolchain::native_guardian::NativeCapacitySlot>) -> std::io::error::Result<std::path::PathBuf>
-pub fn lean_toolchain::native_guardian::run_guardian_cli() -> std::io::error::Result<()>
-pub fn lean_toolchain::native_guardian::validate_registry_directory(&std::path::Path) -> std::io::error::Result<()>
 pub mod lean_toolchain::process_group
 pub struct lean_toolchain::process_group::MeasuredChild
 impl lean_toolchain::process_group::MeasuredChild
@@ -238,7 +60,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::MeasuredChild
 pub struct lean_toolchain::process_group::OwnedCommandGroup
 impl lean_toolchain::process_group::OwnedCommandGroup
-pub fn lean_toolchain::process_group::OwnedCommandGroup::adopt_private_session(std::process::Child, &lean_toolchain::native_guardian::NativeProcessIdentity) -> core::result::Result<Self, (std::io::error::Error, std::process::Child)>
 pub fn lean_toolchain::process_group::OwnedCommandGroup::cleanup_pending(&self) -> bool
 pub fn lean_toolchain::process_group::OwnedCommandGroup::id(&self) -> u32
 pub fn lean_toolchain::process_group::OwnedCommandGroup::intervened(&self) -> bool
@@ -281,204 +102,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::WaitedChildUsage
 pub fn lean_toolchain::process_group::current_group_is_singleton() -> std::io::error::Result<bool>
 pub fn lean_toolchain::process_group::group_present(u32) -> std::io::error::Result<bool>
-pub mod lean_toolchain::shared_reader
-pub struct lean_toolchain::shared_reader::SharedReadProxy
-impl lean_toolchain::shared_reader::SharedReadProxy
-pub fn lean_toolchain::shared_reader::SharedReadProxy::acquire(&std::path::Path, &std::path::Path, core::time::Duration) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_reader::SharedReadProxy::acquire_union(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<alloc::vec::Vec<Self>>
-pub fn lean_toolchain::shared_reader::SharedReadProxy::acquire_union_with_ipc_root(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized, &std::path::Path) -> std::io::error::Result<alloc::vec::Vec<Self>>
-pub fn lean_toolchain::shared_reader::SharedReadProxy::epoch(&self) -> &str
-pub fn lean_toolchain::shared_reader::SharedReadProxy::validate(&mut self) -> std::io::error::Result<()>
-impl core::ops::drop::Drop for lean_toolchain::shared_reader::SharedReadProxy
-pub fn lean_toolchain::shared_reader::SharedReadProxy::drop(&mut self)
-impl core::marker::Freeze for lean_toolchain::shared_reader::SharedReadProxy
-impl core::marker::Send for lean_toolchain::shared_reader::SharedReadProxy
-impl core::marker::Sync for lean_toolchain::shared_reader::SharedReadProxy
-impl core::marker::Unpin for lean_toolchain::shared_reader::SharedReadProxy
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_reader::SharedReadProxy
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_reader::SharedReadProxy
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_reader::SharedReadProxy
-pub struct lean_toolchain::shared_reader::SharedReader
-impl lean_toolchain::shared_reader::SharedReader
-pub fn lean_toolchain::shared_reader::SharedReader::acquire(&std::path::Path, &std::path::Path, core::time::Duration) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_reader::SharedReader::acquire_union(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<alloc::vec::Vec<Self>>
-pub fn lean_toolchain::shared_reader::SharedReader::acquire_union_with_ipc_root(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized, &std::path::Path) -> std::io::error::Result<alloc::vec::Vec<Self>>
-pub fn lean_toolchain::shared_reader::SharedReader::epoch(&self) -> &str
-pub fn lean_toolchain::shared_reader::SharedReader::guardian_loan(&self, &std::path::Path) -> std::io::error::Result<lean_toolchain::native_guardian::GuardianReadLoan<'_>>
-pub fn lean_toolchain::shared_reader::SharedReader::inherit_by_body_children(&self) -> std::io::error::Result<()>
-pub fn lean_toolchain::shared_reader::SharedReader::try_acquire_union(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<alloc::vec::Vec<Self>>
-pub fn lean_toolchain::shared_reader::SharedReader::try_acquire_union_with_ipc_root(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized, &std::path::Path) -> std::io::error::Result<alloc::vec::Vec<Self>>
-impl core::fmt::Debug for lean_toolchain::shared_reader::SharedReader
-pub fn lean_toolchain::shared_reader::SharedReader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_toolchain::shared_reader::SharedReader
-impl core::marker::Send for lean_toolchain::shared_reader::SharedReader
-impl core::marker::Sync for lean_toolchain::shared_reader::SharedReader
-impl core::marker::Unpin for lean_toolchain::shared_reader::SharedReader
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_reader::SharedReader
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_reader::SharedReader
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_reader::SharedReader
-pub fn lean_toolchain::shared_reader::is_admission_contention(&std::io::error::Error) -> bool
-pub mod lean_toolchain::shared_writer
-pub enum lean_toolchain::shared_writer::WriterDisposition
-pub lean_toolchain::shared_writer::WriterDisposition::NotStarted
-pub lean_toolchain::shared_writer::WriterDisposition::Stopped
-pub lean_toolchain::shared_writer::WriterDisposition::Unknown
-impl core::clone::Clone for lean_toolchain::shared_writer::WriterDisposition
-pub fn lean_toolchain::shared_writer::WriterDisposition::clone(&self) -> lean_toolchain::shared_writer::WriterDisposition
-impl core::cmp::Eq for lean_toolchain::shared_writer::WriterDisposition
-impl core::cmp::PartialEq for lean_toolchain::shared_writer::WriterDisposition
-pub fn lean_toolchain::shared_writer::WriterDisposition::eq(&self, &lean_toolchain::shared_writer::WriterDisposition) -> bool
-impl core::fmt::Debug for lean_toolchain::shared_writer::WriterDisposition
-pub fn lean_toolchain::shared_writer::WriterDisposition::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_toolchain::shared_writer::WriterDisposition
-impl core::marker::StructuralPartialEq for lean_toolchain::shared_writer::WriterDisposition
-impl core::marker::Freeze for lean_toolchain::shared_writer::WriterDisposition
-impl core::marker::Send for lean_toolchain::shared_writer::WriterDisposition
-impl core::marker::Sync for lean_toolchain::shared_writer::WriterDisposition
-impl core::marker::Unpin for lean_toolchain::shared_writer::WriterDisposition
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterDisposition
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterDisposition
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterDisposition
-pub struct lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl lean_toolchain::shared_writer::PrivateLakeBootstrap
-pub fn lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&std::path::Path, &std::path::Path) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_writer::PrivateLakeBootstrap::project_root(&self) -> &std::path::Path
-impl core::clone::Clone for lean_toolchain::shared_writer::PrivateLakeBootstrap
-pub fn lean_toolchain::shared_writer::PrivateLakeBootstrap::clone(&self) -> lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::cmp::Eq for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::cmp::PartialEq for lean_toolchain::shared_writer::PrivateLakeBootstrap
-pub fn lean_toolchain::shared_writer::PrivateLakeBootstrap::eq(&self, &lean_toolchain::shared_writer::PrivateLakeBootstrap) -> bool
-impl core::fmt::Debug for lean_toolchain::shared_writer::PrivateLakeBootstrap
-pub fn lean_toolchain::shared_writer::PrivateLakeBootstrap::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::marker::Freeze for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::marker::Send for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::marker::Sync for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::marker::Unpin for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::PrivateLakeBootstrap
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::PrivateLakeBootstrap
-pub struct lean_toolchain::shared_writer::SharedWriter
-impl lean_toolchain::shared_writer::SharedWriter
-pub fn lean_toolchain::shared_writer::SharedWriter::asset_dir(&self) -> &std::path::Path
-pub fn lean_toolchain::shared_writer::SharedWriter::close(self, core::time::Duration) -> std::io::error::Result<()>
-pub fn lean_toolchain::shared_writer::SharedWriter::covers_project(&self, &std::path::Path) -> std::io::error::Result<bool>
-pub fn lean_toolchain::shared_writer::SharedWriter::open(&std::path::Path, &std::path::Path, core::time::Duration) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_writer::SharedWriter::open_cancellable(&std::path::Path, &std::path::Path, core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_writer::SharedWriter::open_with_write_roots(&std::path::Path, &std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_writer::SharedWriter::open_with_write_roots_observed(&std::path::Path, &std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized, &mut core::option::Option<lean_toolchain::shared_writer::WriterExitObservation>) -> std::io::error::Result<Self>
-pub fn lean_toolchain::shared_writer::SharedWriter::project_root(&self) -> &std::path::Path
-pub fn lean_toolchain::shared_writer::SharedWriter::run(&mut self, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
-pub fn lean_toolchain::shared_writer::SharedWriter::run_cancellable(&mut self, &std::process::Command, core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<std::process::Output>
-pub fn lean_toolchain::shared_writer::SharedWriter::write_roots(&self) -> &[std::path::PathBuf]
-impl core::marker::Freeze for lean_toolchain::shared_writer::SharedWriter
-impl core::marker::Send for lean_toolchain::shared_writer::SharedWriter
-impl !core::marker::Sync for lean_toolchain::shared_writer::SharedWriter
-impl core::marker::Unpin for lean_toolchain::shared_writer::SharedWriter
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::SharedWriter
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::SharedWriter
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::SharedWriter
-pub struct lean_toolchain::shared_writer::WriterExitObservation(_)
-impl lean_toolchain::shared_writer::WriterExitObservation
-pub fn lean_toolchain::shared_writer::WriterExitObservation::lock_identities(&self) -> &[lean_toolchain::shared_writer::WriterLockIdentity]
-pub fn lean_toolchain::shared_writer::WriterExitObservation::status(&self) -> core::option::Option<std::process::ExitStatus>
-impl core::clone::Clone for lean_toolchain::shared_writer::WriterExitObservation
-pub fn lean_toolchain::shared_writer::WriterExitObservation::clone(&self) -> lean_toolchain::shared_writer::WriterExitObservation
-impl core::fmt::Debug for lean_toolchain::shared_writer::WriterExitObservation
-pub fn lean_toolchain::shared_writer::WriterExitObservation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_toolchain::shared_writer::WriterExitObservation
-impl core::marker::Send for lean_toolchain::shared_writer::WriterExitObservation
-impl core::marker::Sync for lean_toolchain::shared_writer::WriterExitObservation
-impl core::marker::Unpin for lean_toolchain::shared_writer::WriterExitObservation
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterExitObservation
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterExitObservation
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterExitObservation
-pub struct lean_toolchain::shared_writer::WriterFailure
-pub lean_toolchain::shared_writer::WriterFailure::detail: alloc::string::String
-pub lean_toolchain::shared_writer::WriterFailure::disposition: lean_toolchain::shared_writer::WriterDisposition
-pub lean_toolchain::shared_writer::WriterFailure::stop_receipt: core::option::Option<serde_json::value::Value>
-impl lean_toolchain::shared_writer::WriterFailure
-pub fn lean_toolchain::shared_writer::WriterFailure::from_io(&std::io::error::Error) -> core::option::Option<&Self>
-impl core::clone::Clone for lean_toolchain::shared_writer::WriterFailure
-pub fn lean_toolchain::shared_writer::WriterFailure::clone(&self) -> lean_toolchain::shared_writer::WriterFailure
-impl core::cmp::Eq for lean_toolchain::shared_writer::WriterFailure
-impl core::cmp::PartialEq for lean_toolchain::shared_writer::WriterFailure
-pub fn lean_toolchain::shared_writer::WriterFailure::eq(&self, &lean_toolchain::shared_writer::WriterFailure) -> bool
-impl core::error::Error for lean_toolchain::shared_writer::WriterFailure
-impl core::fmt::Debug for lean_toolchain::shared_writer::WriterFailure
-pub fn lean_toolchain::shared_writer::WriterFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_toolchain::shared_writer::WriterFailure
-pub fn lean_toolchain::shared_writer::WriterFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::shared_writer::WriterFailure
-impl core::marker::Freeze for lean_toolchain::shared_writer::WriterFailure
-impl core::marker::Send for lean_toolchain::shared_writer::WriterFailure
-impl core::marker::Sync for lean_toolchain::shared_writer::WriterFailure
-impl core::marker::Unpin for lean_toolchain::shared_writer::WriterFailure
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterFailure
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterFailure
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterFailure
-pub struct lean_toolchain::shared_writer::WriterLockIdentity
-pub lean_toolchain::shared_writer::WriterLockIdentity::device: u64
-pub lean_toolchain::shared_writer::WriterLockIdentity::inode: u64
-pub lean_toolchain::shared_writer::WriterLockIdentity::path: std::path::PathBuf
-impl core::clone::Clone for lean_toolchain::shared_writer::WriterLockIdentity
-pub fn lean_toolchain::shared_writer::WriterLockIdentity::clone(&self) -> lean_toolchain::shared_writer::WriterLockIdentity
-impl core::cmp::Eq for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::cmp::PartialEq for lean_toolchain::shared_writer::WriterLockIdentity
-pub fn lean_toolchain::shared_writer::WriterLockIdentity::eq(&self, &lean_toolchain::shared_writer::WriterLockIdentity) -> bool
-impl core::fmt::Debug for lean_toolchain::shared_writer::WriterLockIdentity
-pub fn lean_toolchain::shared_writer::WriterLockIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_toolchain::shared_writer::WriterLockIdentity
-impl serde_core::ser::Serialize for lean_toolchain::shared_writer::WriterLockIdentity
-pub fn lean_toolchain::shared_writer::WriterLockIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::shared_writer::WriterLockIdentity
-pub fn lean_toolchain::shared_writer::WriterLockIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::marker::Send for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::marker::Sync for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::marker::Unpin for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::marker::UnsafeUnpin for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_writer::WriterLockIdentity
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_writer::WriterLockIdentity
-pub const lean_toolchain::shared_writer::MAX_WRITER_LOCK_LOANS: usize
-pub const lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV: &str
-pub const lean_toolchain::shared_writer::WRITER_HANDOFF_ENV: [&str; 2]
-pub fn lean_toolchain::shared_writer::configure_writer_executable(&mut std::process::Command, core::option::Option<&std::path::Path>) -> std::io::error::Result<()>
-pub fn lean_toolchain::shared_writer::inherited_writer_locks() -> std::io::error::Result<core::option::Option<alloc::vec::Vec<(std::path::PathBuf, std::fs::File)>>>
-pub fn lean_toolchain::shared_writer::inherited_writer_workspaces(&std::path::Path) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
-pub fn lean_toolchain::shared_writer::previous_writer_stopped(&std::fs::File) -> std::io::error::Result<bool>
-pub fn lean_toolchain::shared_writer::project_artifact_root_union(&[std::path::PathBuf]) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
-pub fn lean_toolchain::shared_writer::project_artifact_roots(&std::path::Path) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
-pub fn lean_toolchain::shared_writer::project_artifact_roots_with_domains(&[std::path::PathBuf], &[std::path::PathBuf]) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
-pub fn lean_toolchain::shared_writer::project_lock_path(&std::path::Path) -> std::io::error::Result<std::path::PathBuf>
-pub fn lean_toolchain::shared_writer::run_shared_writer(&std::path::Path, &std::path::Path, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
-pub fn lean_toolchain::shared_writer::writer_executable_from_env() -> std::io::error::Result<core::option::Option<std::path::PathBuf>>
-pub fn lean_toolchain::shared_writer::writer_lock_receipt(&[(std::path::PathBuf, std::fs::File)]) -> std::io::error::Result<serde_json::value::Value>
-pub mod lean_toolchain::writer_demand
-pub struct lean_toolchain::writer_demand::ReadAdmission
-impl lean_toolchain::writer_demand::ReadAdmission
-pub fn lean_toolchain::writer_demand::ReadAdmission::try_acquire(&[std::path::PathBuf]) -> std::io::error::Result<core::option::Option<Self>>
-impl core::fmt::Debug for lean_toolchain::writer_demand::ReadAdmission
-pub fn lean_toolchain::writer_demand::ReadAdmission::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_toolchain::writer_demand::ReadAdmission
-impl core::marker::Send for lean_toolchain::writer_demand::ReadAdmission
-impl core::marker::Sync for lean_toolchain::writer_demand::ReadAdmission
-impl core::marker::Unpin for lean_toolchain::writer_demand::ReadAdmission
-impl core::marker::UnsafeUnpin for lean_toolchain::writer_demand::ReadAdmission
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::writer_demand::ReadAdmission
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::writer_demand::ReadAdmission
-pub struct lean_toolchain::writer_demand::WriterDemand
-impl lean_toolchain::writer_demand::WriterDemand
-pub fn lean_toolchain::writer_demand::WriterDemand::announce(&[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
-impl core::fmt::Debug for lean_toolchain::writer_demand::WriterDemand
-pub fn lean_toolchain::writer_demand::WriterDemand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_toolchain::writer_demand::WriterDemand
-impl core::marker::Send for lean_toolchain::writer_demand::WriterDemand
-impl core::marker::Sync for lean_toolchain::writer_demand::WriterDemand
-impl core::marker::Unpin for lean_toolchain::writer_demand::WriterDemand
-impl core::marker::UnsafeUnpin for lean_toolchain::writer_demand::WriterDemand
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::writer_demand::WriterDemand
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::writer_demand::WriterDemand
+pub fn lean_toolchain::process_group::spawn_inheriting(std::process::Command, &[std::os::fd::owned::BorrowedFd<'_>]) -> std::io::error::Result<std::process::Child>
 pub enum lean_toolchain::BuiltCapabilityArtifact
 pub lean_toolchain::BuiltCapabilityArtifact::Dylib
 pub lean_toolchain::BuiltCapabilityArtifact::Manifest
@@ -767,10 +391,6 @@ pub lean_toolchain::LinkDiagnostics::LakeUnavailable
 pub lean_toolchain::LinkDiagnostics::LakeUnavailable::detail: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::LakeUnavailable::project_root: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::LakeUnavailable::target_name: alloc::string::String
-pub lean_toolchain::LinkDiagnostics::LakeWriterFailure
-pub lean_toolchain::LinkDiagnostics::LakeWriterFailure::failure: alloc::boxed::Box<lean_toolchain::shared_writer::WriterFailure>
-pub lean_toolchain::LinkDiagnostics::LakeWriterFailure::project_root: std::path::PathBuf
-pub lean_toolchain::LinkDiagnostics::LakeWriterFailure::target_name: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::MissingHeader
 pub lean_toolchain::LinkDiagnostics::MissingHeader::path: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::MissingLean
@@ -785,7 +405,6 @@ pub lean_toolchain::LinkDiagnostics::VersionMismatch
 pub lean_toolchain::LinkDiagnostics::VersionMismatch::actual: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::VersionMismatch::expected: alloc::string::String
 impl core::error::Error for lean_toolchain::LinkDiagnostics
-pub fn lean_toolchain::LinkDiagnostics::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for lean_toolchain::LinkDiagnostics
 pub fn lean_toolchain::LinkDiagnostics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for lean_toolchain::LinkDiagnostics
@@ -897,8 +516,6 @@ pub struct lean_toolchain::CargoLeanCapability
 impl lean_toolchain::CargoLeanCapability
 pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::CargoLeanCapability::build_quiet_with_lock_wait(self, core::time::Duration, impl core::ops::function::Fn() -> bool) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::CargoLeanCapability::build_quiet_with_writer(self, &mut lean_toolchain::shared_writer::SharedWriter, impl core::ops::function::Fn() -> bool) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::dependency(self, lean_toolchain::LeanLibraryDependency) -> Self
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::export_signature(self, lean_toolchain::LeanExportSignature) -> Self
@@ -909,9 +526,7 @@ pub fn lean_toolchain::CargoLeanCapability::manifest_env_var(self, impl core::co
 pub fn lean_toolchain::CargoLeanCapability::module(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::package(self, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_toolchain::CargoLeanCapability::private_bootstrap(self, lean_toolchain::shared_writer::PrivateLakeBootstrap) -> Self
 pub fn lean_toolchain::CargoLeanCapability::probe_ready(&self) -> core::result::Result<core::option::Option<lean_toolchain::BuiltLeanCapability>, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::CargoLeanCapability::writer_executable(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 impl core::clone::Clone for lean_toolchain::CargoLeanCapability
 pub fn lean_toolchain::CargoLeanCapability::clone(&self) -> lean_toolchain::CargoLeanCapability
 impl core::fmt::Debug for lean_toolchain::CargoLeanCapability
@@ -1305,7 +920,6 @@ pub const lean_toolchain::VERSION: &str
 pub fn lean_toolchain::bound_loader_text(alloc::string::String) -> alloc::string::String
 pub fn lean_toolchain::build_lake_target(&std::path::Path, &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::build_lake_target_quiet(&std::path::Path, &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::build_private_lake_target_quiet(lean_toolchain::shared_writer::PrivateLakeBootstrap, &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::capability_env_var(&str) -> alloc::string::String
 pub fn lean_toolchain::capability_manifest_env_var(&str) -> alloc::string::String
 pub fn lean_toolchain::discover_toolchain(&lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
@@ -1317,4 +931,3 @@ pub fn lean_toolchain::materialize_source_package(&lean_toolchain::SourcePackage
 pub fn lean_toolchain::olean_candidate(&[std::path::PathBuf], &str, impl core::ops::function::FnMut(&std::path::Path) -> std::io::error::Result<std::fs::Metadata>) -> core::result::Result<core::option::Option<std::path::PathBuf>, lean_toolchain::LeanModuleDiscoveryDiagnostic>
 pub fn lean_toolchain::required_symbols() -> &'static [&'static str]
 pub fn lean_toolchain::with_materialized_source_package<T, E>(&lean_toolchain::SourcePackageMaterializationRequest, core::time::Duration, impl core::ops::function::Fn() -> bool, impl core::ops::function::FnOnce(lean_toolchain::MaterializedSourcePackage) -> core::result::Result<T, E>) -> core::result::Result<T, E> where E: core::convert::From<lean_toolchain::SourcePackageError>
-pub fn lean_toolchain::with_materialized_source_package_with_writer<T, E>(&lean_toolchain::SourcePackageMaterializationRequest, &std::path::Path, core::time::Duration, impl core::ops::function::Fn() -> bool, impl core::ops::function::FnOnce(lean_toolchain::MaterializedSourcePackage, &mut lean_toolchain::shared_writer::SharedWriter) -> core::result::Result<T, E>) -> core::result::Result<T, E> where E: core::convert::From<lean_toolchain::SourcePackageError>

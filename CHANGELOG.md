@@ -9,6 +9,32 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Removed
+
+- The cross-process artifact protocol: shared reader locks, writer demand, the native guardian, owner records, capacity
+  slots and read custody in the child. One server now owns each Lake checkout and orders its builds and checks in
+  memory, so no other process needs these locks.
+- The `lean-rs-writer` crate, with its capped build log and `LEAN_RS_WRITER_*` settings. `CargoLeanCapability` runs Lake
+  directly; its writer, bootstrap and lock-wait methods are gone, with `LinkDiagnostics::LakeWriterFailure`.
+- `lean-toolchain` loses `native_guardian`, `shared_reader`, `shared_writer` and `writer_demand`.
+  `lean-rs-worker-parent` loses the native scope, owner-record and guardian types, the `native_guardian`,
+  `lifetime_directory`, `lifetime_socket_directory`, `native_capacity_slot`, `shared_artifact_reads` and
+  `shared_writer_executable` builders, `release_host_read` and `scope_closed_without_status`.
+- The worker child no longer reads `LEAN_RS_WORKER_PARENT_SOCKET`, `LEAN_RS_WORKER_PARENT_NONCE`,
+  `LEAN_RS_WORKER_ARTIFACT_IPC_ROOT`, `LEAN_RS_WORKER_SHARED_ARTIFACT_READS`, `LEAN_RS_WORKER_OWNERS_DIRECTORY` or the
+  guardian variables.
+
+### Changed
+
+- Worker protocol 13 → 14. `ReleaseHostRead` and `HostReadReleased` are gone, and the host artifact descriptor and
+  runtime metadata lose `artifact_roots`, `artifact_read_epochs` and `effective_import_roots`.
+- `LeanPreparedHostArtifacts::from_snapshot`, `LoadedHostArtifacts::load` and `LoadedHostArtifacts::matches_snapshot`
+  take no artifact roots, and `LeanCapabilities::artifact_roots` is gone.
+- `--lean-rs-ready-host-artifacts` takes no argument and `--lean-rs-ready-host-artifacts-generated` takes only `KEY`.
+- A Unix worker child holds the read end of a pipe named by `LEAN_RS_WORKER_PARENT_LIFELINE` and exits with status 125
+  when its parent dies, even inside a Lean call. Each child runs in its own process group and inherits the descriptors
+  its parent leaves open without `FD_CLOEXEC`. `process_group::spawn_inheriting` is now public.
+
 ## [0.11.1]
 
 - A warm worker no longer restarts when another reader holds its brief admission gate. One-pass admission,

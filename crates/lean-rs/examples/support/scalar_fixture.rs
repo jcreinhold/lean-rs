@@ -1,17 +1,15 @@
 //! Admission for the repository's scalar, String and Array String profiling fixture.
 use lean_rs::{LeanRuntime, module::LeanLibrary};
-use lean_toolchain::shared_reader::SharedReader;
 use std::{
     io,
     path::{Path, PathBuf},
 };
 #[path = "fixture_inputs.rs"]
 mod inputs;
-/// The trusted profiling launcher pins the actual runtime, its dependencies and
-/// the reader helper before exec and keeps its toolchain stable through exit.
+/// The trusted profiling launcher pins the actual runtime and its dependencies
+/// before exec and keeps its toolchain and the fixture stable through exit.
 pub(super) struct ScalarFixture {
     image: PathBuf,
-    _readers: Vec<SharedReader>,
     #[cfg(all(test, unix))]
     _private_image: Option<std::fs::File>,
 }
@@ -64,11 +62,9 @@ impl ScalarFixture {
         }
         // Private jobs run build then tests serially and retain the directory until exit.
         // This is trusted job ownership, not a lock against arbitrary same-user writes.
-        let readers = if private_job {
-            Vec::new()
-        } else {
-            inputs::hold(std::slice::from_ref(&root))?
-        };
+        if !private_job {
+            inputs::check_prefix()?;
+        }
         let lib = root.join(".lake/build/lib");
         let ext = std::env::consts::DLL_EXTENSION;
         let modern = lib.join(format!("liblean__rs__fixture_LeanRsFixture.{ext}"));
@@ -102,7 +98,6 @@ impl ScalarFixture {
         };
         Ok(Self {
             image,
-            _readers: readers,
             #[cfg(all(test, unix))]
             _private_image: private_image,
         })
@@ -126,8 +121,8 @@ impl ScalarFixture {
             reason = "the profiling launcher and retained fixture admission cover this exact image"
         )]
         // SAFETY: the approved hash identifies the controlled fixture and its initializer.
-        // The launcher pins its runtime closure. Readers or exclusive private-job ownership
-        // cover the image until process exit; the retained file alone is not a writer lock.
+        // The launcher pins its runtime closure and rebuilds nothing until process exit;
+        // the retained file alone does not stop a rebuild.
         unsafe {
             LeanLibrary::open(runtime, &self.image)
         }

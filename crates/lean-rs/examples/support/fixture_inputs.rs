@@ -1,11 +1,6 @@
 //! Private input checks for exclusively provisioned fixture processes.
-use lean_toolchain::shared_reader::SharedReader;
 use sha2::{Digest, Sha256};
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{fs, io, path::Path};
 pub(super) fn check_digest(path: &Path, approved: Option<&str>) -> io::Result<()> {
     let expected =
         approved.ok_or_else(|| io::Error::other("compile this profiling target with its reviewed fixture digests"))?;
@@ -35,18 +30,6 @@ pub(super) fn check_prefix() -> io::Result<()> {
         ));
     }
     Ok(())
-}
-
-pub(super) fn hold(roots: &[PathBuf]) -> io::Result<Vec<SharedReader>> {
-    check_prefix()?;
-    let helper = Path::new(
-        option_env!("LEAN_RS_PROFILE_READER").ok_or_else(|| io::Error::other("missing reviewed reader helper"))?,
-    );
-    if helper.canonicalize()? != helper {
-        return Err(io::Error::other("noncanonical helper"));
-    }
-    check_digest(helper, option_env!("LEAN_RS_PROFILE_READER_SHA256"))?;
-    SharedReader::acquire_union(helper, roots, Duration::from_secs(30), &|| false)
 }
 
 /// Check the same open file that we retain; never infer stability from a path alone.
@@ -108,7 +91,7 @@ pub(super) fn open_selected(path: &Path, device: u64, inode: u64, expected: &str
 fn selected_input_rejects_missing_changed_and_wrong_identity() -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt as _;
     use std::os::unix::fs::MetadataExt as _;
-    struct Scratch(PathBuf);
+    struct Scratch(std::path::PathBuf);
     impl Drop for Scratch {
         fn drop(&mut self) {
             let _removed = fs::remove_dir_all(&self.0);

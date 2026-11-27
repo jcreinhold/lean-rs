@@ -12,15 +12,17 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use crate::writer_lock::{DEFAULT_LOCK_TIMEOUT, WriterLock};
 
 use serde::{Deserialize, Serialize};
 
 const CACHE_SCHEMA_VERSION: u32 = 1;
 const SIDECAR_FILE_NAME: &str = "source-package.json";
+const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(120);
+const LOCK_POLL: Duration = Duration::from_millis(20);
 
 /// Request to materialize a package-owned Lean source payload.
 ///
@@ -191,11 +193,11 @@ pub fn materialize_source_package(
     with_materialized_source_package(input, DEFAULT_LOCK_TIMEOUT, || false, Ok)
 }
 
-/// Retain the external source-entry lock through a build/publication callback.
+/// Hold the cache entry lock through a build or publication callback.
 ///
-/// Lock contention is bounded and cancellable; an already-running callback must
-/// establish its own command lifetime. Cache removal needs the same authority.
-/// This lexical variant alone does not retain custody after controller death.
+/// Waiting for the lock ends after `lock_timeout` or when `cancelled` returns
+/// true. A callback that has started must bound its own commands. Code that
+/// removes cache entries must hold the same lock.
 ///
 /// # Errors
 /// Returns materialization/acquisition errors converted by `E::from`, or the callback error.
@@ -208,128 +210,21 @@ pub fn with_materialized_source_package<T, E>(
 where
     E: From<SourcePackageError>,
 {
-    let started = Instant::now();
     validate_request(input).map_err(E::from)?;
     let cache = source_cache(input).map_err(E::from)?;
     let entry = cache
         .lock_entry(&input.toolchain_label, lock_timeout, &cancelled)
         .map_err(E::from)?;
     let root = cache.entry_root(&input.toolchain_label);
-    let project = lock_project(&root, lock_timeout.saturating_sub(started.elapsed()), &cancelled).map_err(E::from)?;
     let package = cache
         .ensure_materialized_locked(input, SourcePackageProvenance::new(input))
         .map_err(E::from)?;
-    drop(project); // Callback builds acquire the same stable project domain themselves.
     if cancelled() {
         return Err(E::from(cancelled_source(&root)));
     }
     let result = use_package(package);
     drop(entry);
     result
-}
-
-/// Own materialization, Lake work, and publication in one process-bound writer.
-///
-/// Both stable guards are acquired before the helper acknowledges their shared
-/// open-file descriptions. No package mutation precedes that acknowledgement.
-/// The callback must build with its supplied writer, avoiding nested helpers.
-/// Caller copies stay close-only through local publication; the helper retains
-/// its copies and private inputs through unresolved command cleanup.
-///
-/// # Errors
-/// Returns lock, custody, materialization, cancellation, or callback errors.
-#[cfg(unix)]
-pub fn with_materialized_source_package_with_writer<T, E>(
-    input: &SourcePackageMaterializationRequest,
-    executable: &Path,
-    lock_timeout: Duration,
-    cancelled: impl Fn() -> bool,
-    use_package: impl FnOnce(MaterializedSourcePackage, &mut crate::shared_writer::SharedWriter) -> Result<T, E>,
-) -> Result<T, E>
-where
-    E: From<SourcePackageError>,
-{
-    let started = Instant::now();
-    validate_request(input).map_err(E::from)?;
-    validate_owned_payload_dependencies(input).map_err(E::from)?;
-    let cache = source_cache(input).map_err(E::from)?;
-    let entry = cache
-        .lock_entry(&input.toolchain_label, lock_timeout, &cancelled)
-        .map_err(E::from)?;
-    let root = cache.entry_root(&input.toolchain_label);
-    let project = lock_project(&root, lock_timeout.saturating_sub(started.elapsed()), &cancelled).map_err(E::from)?;
-    let mut writer = crate::shared_writer::SharedWriter::open_with_locks(
-        executable,
-        &root,
-        &[&project, &entry],
-        lock_timeout.saturating_sub(started.elapsed()),
-        &cancelled,
-    )
-    .map_err(|source| {
-        E::from(SourcePackageError::Io {
-            action: "acknowledge source package writer custody",
-            path: root.clone(),
-            source,
-        })
-    })?;
-    if cancelled() {
-        return Err(E::from(cancelled_source(&root)));
-    }
-    let package = cache
-        .ensure_materialized_locked(input, SourcePackageProvenance::new(input))
-        .map_err(E::from)?;
-    if cancelled() {
-        return Err(E::from(cancelled_source(&root)));
-    }
-    let result = use_package(package, &mut writer);
-    drop(writer);
-    drop(project);
-    drop(entry);
-    result
-}
-
-#[cfg(unix)]
-fn validate_owned_payload_dependencies(input: &SourcePackageMaterializationRequest) -> Result<(), SourcePackageError> {
-    let path = Path::new("lake-manifest.json");
-    let generated = input
-        .generated_files
-        .iter()
-        .rev()
-        .find(|file| file.relative_path == path);
-    let bytes = if let Some(generated) = generated {
-        generated.contents.clone()
-    } else {
-        use std::io::Read as _;
-        let mut bytes = Vec::new();
-        fs::File::open(input.source_root.join(path))
-            .and_then(|file| file.take(256 * 1024 + 1).read_to_end(&mut bytes))
-            .map_err(|source| SourcePackageError::Io {
-                action: "preflight owned source dependencies",
-                path: input.source_root.join(path),
-                source,
-            })?;
-        bytes
-    };
-    if bytes.len() > 256 * 1024 {
-        return Err(SourcePackageError::InvalidPayload(
-            "owned source manifest is oversized".to_owned(),
-        ));
-    }
-    let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(|source| SourcePackageError::Json {
-        action: "preflight owned source dependencies",
-        path: input.source_root.join(path),
-        source,
-    })?;
-    if !manifest
-        .get("packages")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(Vec::is_empty)
-    {
-        return Err(SourcePackageError::InvalidPayload(
-            "prospective owned source materialization requires a proven zero-dependency payload".to_owned(),
-        ));
-    }
-    Ok(())
 }
 
 fn source_cache(input: &SourcePackageMaterializationRequest) -> Result<SourcePackageCache, SourcePackageError> {
@@ -347,31 +242,54 @@ fn source_cache(input: &SourcePackageMaterializationRequest) -> Result<SourcePac
     Ok(cache)
 }
 
-fn lock_project(
-    root: &Path,
-    timeout: Duration,
-    cancelled: &impl Fn() -> bool,
-) -> Result<WriterLock, SourcePackageError> {
-    let path = crate::shared_writer::project_lock_path(root).map_err(|source| SourcePackageError::Io {
-        action: "resolve source package writer domain",
-        path: root.to_path_buf(),
-        source,
-    })?;
-    WriterLock::acquire_project(&path, timeout, cancelled).map_err(|source| SourcePackageError::Io {
-        action: "lock source package writer domain",
-        path,
-        source,
-    })
-}
-
 fn cancelled_source(root: &Path) -> SourcePackageError {
     SourcePackageError::Io {
         action: "continue source package transaction",
         path: root.to_path_buf(),
-        source: crate::shared_writer::failure(
-            crate::shared_writer::WriterDisposition::NotStarted,
-            std::io::Error::new(std::io::ErrorKind::Interrupted, "source package transaction cancelled"),
-        ),
+        source: cancelled_error(),
+    }
+}
+
+fn cancelled_error() -> io::Error {
+    io::Error::new(io::ErrorKind::Interrupted, "source package transaction cancelled")
+}
+
+/// An exclusive lock on one cache entry, released on drop.
+///
+/// The cache root belongs to the caller and several build scripts or
+/// processes may share it, so two of them must not install, replace or build
+/// the same entry at once.
+struct EntryLock {
+    _file: fs::File,
+}
+
+impl EntryLock {
+    fn acquire(path: &Path, timeout: Duration, cancelled: &impl Fn() -> bool) -> io::Result<Self> {
+        let started = Instant::now();
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        loop {
+            if cancelled() {
+                return Err(cancelled_error());
+            }
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(fs::TryLockError::WouldBlock) => {}
+                Err(fs::TryLockError::Error(error)) => return Err(error),
+            }
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "source package cache entry lock timed out",
+                ));
+            }
+            thread::sleep(remaining.min(LOCK_POLL));
+        }
     }
 }
 
@@ -401,11 +319,11 @@ impl SourcePackageCache {
         toolchain_label: &str,
         timeout: Duration,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<WriterLock, SourcePackageError> {
+    ) -> Result<EntryLock, SourcePackageError> {
         let digest_root = self.digest_root();
         create_dir_all(&digest_root, "create source package cache digest directory")?;
         let path = digest_root.join(format!("{}.lock", sanitize_toolchain_label(toolchain_label)));
-        WriterLock::acquire(&path, timeout, cancelled).map_err(|source| SourcePackageError::Io {
+        EntryLock::acquire(&path, timeout, cancelled).map_err(|source| SourcePackageError::Io {
             action: "lock source package cache entry",
             path,
             source,
@@ -1099,58 +1017,51 @@ mod tests {
         );
         Ok(())
     }
-    #[cfg(unix)]
     #[test]
-    fn legacy_materialization_waits_for_a_recorded_live_group_then_recovers() -> Result<(), String> {
-        let source = source_root("legacy-live-writer")?;
-        let cache = temp_root("legacy-live-cache")?;
-        let mut input = request(source, cache, "legacy-live-digest");
-        let package = materialize_source_package(&input).map_err(|error| error.to_string())?;
-        let marker = package.project_root.join("active-writer-marker");
-        fs::write(&marker, b"must survive").map_err(|error| error.to_string())?;
-        let mut command = std::process::Command::new("/bin/sleep");
-        command.arg("60");
-        let mut group = crate::process_group::OwnedCommandGroup::spawn(command).map_err(|error| error.to_string())?;
-        let checked = (|| -> Result<(), String> {
-            let domain = input.cache_root.join(&input.source_digest).join(format!(
-                "{}.lock",
-                super::sanitize_toolchain_label(&input.toolchain_label)
+    fn a_held_entry_lock_bounds_the_wait_and_cancellation_stops_it() -> Result<(), String> {
+        let source = source_root("held-entry")?;
+        let cache = temp_root("cache-held-entry")?;
+        let input = request(source, cache, "digest-held-entry");
+        let held = super::with_materialized_source_package(
+            &input,
+            std::time::Duration::from_secs(5),
+            || false,
+            |package| {
+                // A second open file description contends for the same lock.
+                let blocked = super::with_materialized_source_package(
+                    &input,
+                    std::time::Duration::from_millis(30),
+                    || false,
+                    Ok::<_, SourcePackageError>,
+                );
+                Ok::<_, SourcePackageError>((blocked, package))
+            },
+        );
+        let (blocked, package) = held.map_err(|error| error.to_string())?;
+        let timed_out = matches!(
+            &blocked,
+            Err(SourcePackageError::Io { source, .. }) if source.kind() == std::io::ErrorKind::TimedOut
+        );
+        if !timed_out {
+            return Err(format!(
+                "a held entry lock did not time out the second caller: {blocked:?}"
             ));
-            let record = serde_json::json!({"version":1,
-                "owner":{"version":1,"pid":100,"session":100,"start":"previous-helper"},
-                "process":{"pid":group.id(),"process_group":group.id(),"session":100,"start":"held-owned-child","start_new_session":false}});
-            fs::write(&domain, format!("{record}\n")).map_err(|error| error.to_string())?;
-            input.crate_version = "changed-while-old-writer-lives".to_owned();
-            let blocked = super::with_materialized_source_package(
-                &input,
-                std::time::Duration::from_millis(30),
-                || false,
-                Ok::<_, super::SourcePackageError>,
-            );
-            if !matches!(blocked, Err(super::SourcePackageError::Io { source, .. }) if source.kind() == std::io::ErrorKind::TimedOut)
-            {
-                return Err("legacy materialization did not wait for its recorded prior writer".to_owned());
-            }
-            if !marker.is_file() {
-                return Err("legacy materialization replaced live inputs".to_owned());
-            }
-            Ok(())
-        })();
-        group.request_stop().map_err(|error| error.to_string())?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            if group.try_wait().map_err(|error| error.to_string())?.is_some() {
-                break;
-            }
-            if std::time::Instant::now() >= deadline {
-                return Err("owned fixture group did not close".to_owned());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        checked?;
-        materialize_source_package(&input).map_err(|error| error.to_string())?;
-        if marker.exists() {
-            return Err("confirmed prior exit did not permit rematerialization".to_owned());
+        if !package.project_root.join("Test/Extra.lean").is_file() {
+            return Err("the held entry lost its files".to_owned());
+        }
+        let cancelled = super::with_materialized_source_package(
+            &input,
+            std::time::Duration::from_secs(5),
+            || true,
+            Ok::<_, SourcePackageError>,
+        );
+        let interrupted = matches!(
+            &cancelled,
+            Err(SourcePackageError::Io { source, .. }) if source.kind() == std::io::ErrorKind::Interrupted
+        );
+        if !interrupted {
+            return Err(format!("cancellation did not stop materialization: {cancelled:?}"));
         }
         Ok(())
     }

@@ -26,11 +26,12 @@ const MANIFEST: &str = env!("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANIFEST");
 const BYTES: &[u8] = include_bytes!(env!("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANIFEST"));
 impl WorkerAuthority for Demo {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
-        if path != Path::new(MANIFEST) {
+        let manifest = Path::new(MANIFEST);
+        if path != manifest {
             return Err(lean_rs::error::host_internal("outside the build-selected ShipLeanDemo deployment: manifest selection"));
         }
-        let readers = deployment::hold(std::slice::from_ref(&self.0.project)).map_err(ioerr)?;
-        Ok(WorkerManifestRead::new(self.0.project.clone(), path.into(), readers))
+        let root = manifest.parent().ok_or_else(denied)?;
+        Ok(WorkerManifestRead::new(root.into(), path.into(), ()))
     }
     fn worker(
         &self,
@@ -38,7 +39,6 @@ impl WorkerAuthority for Demo {
         path: &Path,
         bytes: &[u8],
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
-        let readers = deployment::hold(std::slice::from_ref(&self.0.project)).map_err(ioerr)?;
         let image = Path::new(env!("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_DYLIB"));
         if path != Path::new(MANIFEST)
             || bytes != BYTES
@@ -51,15 +51,16 @@ impl WorkerAuthority for Demo {
             return Err(lean_rs::error::host_internal("outside the build-selected ShipLeanDemo deployment: worker image or manifest"));
         }
         // SAFETY: the captured manifest and image equal this package's build-selected bytes.
-        // A retained reader excludes cooperating builds. The deployed matching Lean runtime
-        // and its loader dependencies are trusted and stable for the process lifetime.
+        // The application runs no build of this package while its worker runs. The deployed
+        // matching Lean runtime and its loader dependencies are trusted and stable for the
+        // process lifetime.
         Ok(unsafe {
             AuthorizedWorkerSnapshot::attest(
                 runtime,
                 path.into(),
                 bytes.to_vec(),
                 vec![("ship_lean_demo_add".into(), WorkerExportContract::U64Binary)],
-                readers,
+                (),
             )
         })
     }
@@ -68,29 +69,25 @@ impl WorkerAuthority for Demo {
         runtime: &'static LeanRuntime,
         p: &LeanPreparedHostArtifacts,
     ) -> LeanResult<LoadedHostArtifacts<'static>> {
-        let mut roots = self.0.shim_roots.clone();
-        roots.push(self.0.project.clone());
-        let readers = deployment::hold(&roots).map_err(ioerr)?;
         if p.manifest_path() != self.0.shim_manifest {
             return Err(lean_rs::error::host_internal(format!("prepared shim manifest path differs: {} versus {}", p.manifest_path().display(), self.0.shim_manifest.display())));
         }
-        if p.artifact_roots() != self.0.shim_roots || p.shim_search_paths() != self.0.shim_paths {
-            return Err(lean_rs::error::host_internal("prepared shim roots differ"));
+        if p.shim_search_paths() != self.0.shim_paths {
+            return Err(lean_rs::error::host_internal("prepared shim search paths differ"));
         }
         if std::fs::read(p.manifest_path()).map_err(ioerr)? != p.manifest_json().as_bytes()
             || self.0.inventory().map_err(ioerr)? != self.0.files {
             return Err(lean_rs::error::host_internal("prepared shim or deployment bytes differ"));
         }
         // SAFETY: the bundled host and interop images and manifest match the SDK build
-        // recorded by this application. The readers retain their checked resolution.
+        // recorded by this application, which runs no build of them while its worker runs.
         Ok(unsafe {
             LoadedHostArtifacts::load(
                 runtime,
                 p.manifest_path().into(),
                 p.manifest_json().as_bytes().to_vec(),
-                self.0.shim_roots.clone(),
                 self.0.shim_paths.clone(),
-                readers,
+                (),
             )
         }?)
     }
@@ -115,8 +112,8 @@ impl WorkerAuthority for Demo {
         {
             return Err(lean_rs::error::host_internal("outside the build-selected ShipLeanDemo deployment: import graph or runtime"));
         }
-        // SAFETY: host() retains the read union and checks the packaged module bytes,
-        // canonical search order and absence of Init shadows. ShipLeanDemo imports only
+        // SAFETY: host() checks the packaged module bytes, canonical search order and
+        // absence of Init shadows. ShipLeanDemo imports only
         // the builtin prelude supplied by the trusted, stable build-selected toolchain.
         Ok(unsafe { cap.import_scope_with_options(paths, names, options) })
     }

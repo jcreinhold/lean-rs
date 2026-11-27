@@ -17,8 +17,6 @@
 #![deny(unsafe_code)]
 
 mod capability;
-#[cfg(unix)]
-mod crash_ownership;
 mod pipe;
 mod pool;
 mod process;
@@ -29,11 +27,6 @@ pub use capability::{
     LeanWorkerBootstrapCheck, LeanWorkerBootstrapDiagnosticCode, LeanWorkerBootstrapReport,
     LeanWorkerBootstrapSeverity, LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild,
     LeanWorkerHostHandle, LeanWorkerHostHandleBuilder, LeanWorkerModuleCacheLimits,
-};
-#[cfg(unix)]
-pub use crash_ownership::{
-    LeanWorkerNativePendingCleanup, LeanWorkerNativeScope, LeanWorkerNativeScopeLease, LeanWorkerNativeSpawnError,
-    LeanWorkerOwnedGeneration, LeanWorkerOwnedProcess, LeanWorkerOwnerObservation,
 };
 pub use pool::{
     LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,
@@ -103,15 +96,14 @@ pub use supervisor::{
 // recorders).
 #[doc(inline)]
 pub use lean_rs_worker_protocol::types::{
-    LeanWorkerArtifactReadEpoch, LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
-    LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection,
-    LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
-    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationOutlineResult,
-    LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
-    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
-    LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchItem,
+    LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
+    LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection, LeanWorkerDeclarationInspectionFields,
+    LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch,
+    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow,
+    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts,
+    LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow,
+    LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo,
+    LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchItem,
     LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationBatchResult,
     LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
     LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,

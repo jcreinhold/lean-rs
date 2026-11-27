@@ -16,7 +16,7 @@ pub(super) fn imports<'lean, 'c>(
         unsafe_code,
         reason = "the build policy pins this graph, profile and artifact inventory"
     )]
-    // SAFETY: the protected policy row covers the complete graph under retained reader custody.
+    // SAFETY: the protected policy row covers the complete graph, and this job keeps its artifacts unchanged.
     unsafe {
         caps.shim_capability()
             .import_scope_with_options(roots, names.iter().map(|s| (*s).into()).collect(), options)

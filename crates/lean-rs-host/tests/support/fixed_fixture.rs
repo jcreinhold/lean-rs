@@ -72,7 +72,6 @@ struct OrdinaryShims {
     prefix: PathBuf,
     manifest: PathBuf,
     manifest_sha256: String,
-    roots: Vec<PathBuf>,
     search_paths: Vec<PathBuf>,
     images: [(PathBuf, u64, u64, String); 2],
     package_identity: Option<(u64, u64)>,
@@ -83,8 +82,8 @@ struct OrdinaryFixture {
     project: PathBuf,
     project_image: PathBuf,
     shims: Option<(OrdinaryShims, String)>,
-    // The job owns its private project. The bundled shim roots also hold
-    // normal shared locks, since SDK builds may use those same roots.
+    // The job owns its private project and the selected shims. These files
+    // keep the verified images open until exit.
     _files: Vec<fs::File>,
 }
 
@@ -92,7 +91,6 @@ struct OrdinaryFixture {
 fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
     use std::io::Read as _;
     use std::os::unix::fs::MetadataExt as _;
-    use std::time::{Duration, Instant};
     let marker = "LEAN_RS_TEST_SCALAR_PRIVATE_JOB";
     let compiled = option_env!("LEAN_RS_TEST_SCALAR_PRIVATE_JOB");
     let runtime = std::env::var(marker).ok();
@@ -156,7 +154,6 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
             let workspace = package.join("crates/lean-rs-host/shims");
             let host = workspace.join("lean-rs-host-shims");
             let interop = workspace.join("lean-rs-interop-shims");
-            assert_eq!(shims.roots, [host.clone(), interop.clone()]);
             let generated = ".lake/lean-rs-generated/lean-4.36.0";
             let host_build = host.join(generated);
             let interop_build = interop.join(generated);
@@ -175,44 +172,6 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
                 assert_eq!(pin.0, path);
             }
 
-            let mut lock_paths = shims
-                .roots
-                .iter()
-                .map(|root| lean_toolchain::shared_writer::project_lock_path(root).expect("ordinary host lock domain"))
-                .collect::<Vec<_>>();
-            lock_paths.sort();
-            let started = Instant::now();
-            let intent = loop {
-                match lean_toolchain::writer_demand::ReadAdmission::try_acquire(&lock_paths) {
-                    // A competing reader holds a transient gate. Our partial gates have been dropped.
-                    Err(err)
-                        if err.kind() == std::io::ErrorKind::WouldBlock
-                            && started.elapsed() < Duration::from_secs(1) =>
-                    {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    result => {
-                        break result
-                            .expect("inspect ordinary host writer demand")
-                            .expect("no competing host writer");
-                    }
-                }
-            };
-            for path in lock_paths {
-                assert_eq!(path.canonicalize().expect("canonical lock"), path);
-                let lock = fs::File::open(&path).expect("open prepared host lock");
-                lock.try_lock_shared().expect("take prepared host read lock");
-                let opened = lock.metadata().expect("held host lock identity");
-                let named = fs::symlink_metadata(path).expect("named host lock identity");
-                assert!(opened.is_file() && opened.nlink() == 1 && named.is_file());
-                assert_eq!((opened.dev(), opened.ino()), (named.dev(), named.ino()));
-                assert!(
-                    lean_toolchain::shared_writer::previous_writer_stopped(&lock)
-                        .expect("prepared host writer closure")
-                );
-                files.push(lock);
-            }
-            drop(intent);
             for (image, dev, ino, hash) in &shims.images {
                 files.push(retained_image(image, *dev, *ino, hash));
             }
@@ -324,26 +283,21 @@ fn native_capabilities_for<'h>(
             .shims
             .as_ref()
             .ok_or_else(|| lean_rs::error::host_module_init("run the existing broken-import step to select shims"))?;
-        let prepared = LeanPreparedHostArtifacts::from_snapshot(
-            shims.manifest.clone(),
-            text.clone(),
-            shims.roots.clone(),
-            shims.search_paths.clone(),
-        )?;
+        let prepared =
+            LeanPreparedHostArtifacts::from_snapshot(shims.manifest.clone(), text.clone(), shims.search_paths.clone())?;
         let runtime = LeanRuntime::init()?;
         #[allow(
             unsafe_code,
-            reason = "the exact SDK shim ABI and images are verified under retained project locks"
+            reason = "the exact SDK shim ABI and images are verified and the job keeps them unchanged"
         )]
         // SAFETY: The trusted job verified the SDK build and runtime before
-        // launch. We checked the actual manifest and both held shim images
-        // under existing read locks. The fixture retains custody until exit.
+        // launch and rebuilds nothing until exit. We checked the actual
+        // manifest and both retained shim images.
         let loaded = unsafe {
             LoadedHostArtifacts::load(
                 runtime,
                 shims.manifest.clone(),
                 text.as_bytes().to_vec(),
-                shims.roots.clone(),
                 shims.search_paths.clone(),
                 fixture,
             )?
@@ -561,19 +515,13 @@ pub(super) fn shims_only<'h>(host: &'h LeanHost<'static>) -> lean_rs::LeanResult
 fn open<'h>(host: &'h LeanHost<'static>, load_project: bool) -> lean_rs::LeanResult<LeanCapabilities<'static, 'h>> {
     let record = &admission().record;
     let host_root = record.scratch.join("lean-rs-host-shims");
-    let interop = record.scratch.join("lean-rs-interop-shims");
     let manifest = host_root.join(".lake/qualification-manifest.json");
     assert!(record.artifact_sha256.contains_key(&manifest));
     let manifest_json =
         fs::read_to_string(&manifest).map_err(|err| lean_rs::error::host_module_init(err.to_string()))?;
-    let roots = vec![host_root, interop];
     let shim_paths = paths().into_iter().skip(1).collect::<Vec<_>>();
-    let prepared = LeanPreparedHostArtifacts::from_snapshot(
-        manifest.clone(),
-        manifest_json.clone(),
-        roots.clone(),
-        shim_paths.clone(),
-    )?;
+    let prepared =
+        LeanPreparedHostArtifacts::from_snapshot(manifest.clone(), manifest_json.clone(), shim_paths.clone())?;
     let rt = LeanRuntime::init()?;
     #[allow(
         unsafe_code,
@@ -582,7 +530,7 @@ fn open<'h>(host: &'h LeanHost<'static>, load_project: bool) -> lean_rs::LeanRes
     // SAFETY: admission verified the reviewed image and manifest bytes under the fixture
     // loans. The protected record approves these exact init symbols and visibility.
     // Keep a permanent image reference for Lean's process-global registrations.
-    let shim = unsafe { LoadedHostArtifacts::load(rt, manifest, manifest_json.into_bytes(), roots, shim_paths, ())? };
+    let shim = unsafe { LoadedHostArtifacts::load(rt, manifest, manifest_json.into_bytes(), shim_paths, ())? };
     if !load_project {
         return LeanCapabilities::from_prepared(host, &prepared, shim);
     }

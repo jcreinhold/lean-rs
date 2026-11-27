@@ -73,15 +73,6 @@ pub enum LinkDiagnostics {
         /// One-line process-spawn failure.
         detail: String,
     },
-    /// Shared-writer failure with execution evidence preserved separately from result text.
-    LakeWriterFailure {
-        /// Project whose build was requested.
-        project_root: PathBuf,
-        /// Requested Lake target.
-        target_name: String,
-        /// Confirmed not-started, stopped, or unknown command-scope evidence.
-        failure: Box<crate::shared_writer::WriterFailure>,
-    },
     /// `lake build <target>:shared` exited unsuccessfully.
     LakeBuildFailed {
         /// Directory where the Lake command ran.
@@ -170,17 +161,6 @@ impl fmt::Display for LinkDiagnostics {
                     project_root.display()
                 )
             }
-            Self::LakeWriterFailure {
-                project_root,
-                target_name,
-                failure,
-            } => {
-                write!(
-                    f,
-                    "lean-toolchain: writer for `{target_name}` in {}: {failure}",
-                    project_root.display()
-                )
-            }
             Self::LakeBuildFailed {
                 project_root,
                 target_name,
@@ -208,12 +188,4 @@ impl fmt::Display for LinkDiagnostics {
     }
 }
 
-impl std::error::Error for LinkDiagnostics {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Self::LakeWriterFailure { failure, .. } = self {
-            Some(failure.as_ref())
-        } else {
-            None
-        }
-    }
-}
+impl std::error::Error for LinkDiagnostics {}

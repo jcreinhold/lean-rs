@@ -36,8 +36,3 @@ required-features = ["admitted"]
 name = "control"
 path = "src/bin/control.rs"
 required-features = ["admitted"]
-
-[[bin]]
-name = "substitute"
-path = "src/bin/substitute.rs"
-required-features = ["admitted"]

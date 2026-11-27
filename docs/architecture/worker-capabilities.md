@@ -22,7 +22,7 @@ and focused lifecycle tests. `LeanWorkerCapabilityBuilder::check()` reports boot
 An application can set one UTF-8 value of up to 4096 bytes with `LeanWorkerChild::application_launch_input`.
 The supervisor supplies those same bytes in `LEAN_RS_WORKER_APPLICATION_INPUT` on every launch and removes the
 variable when omitted. The child interprets and validates the data. If the value identifies an external file, the
-application verifies its contents and maintains custody. A capability pool keeps different launch selections separate
+application verifies its contents and keeps the file unchanged. A capability pool keeps different launch selections separate
 when application input is present.
 
 ## Import workspace

@@ -5,7 +5,7 @@ usage() {
     cat <<'HELP'
 Usage: scripts/test_linux_docker.sh [--platform linux/amd64|linux/arm64]
        [--package NAME] [--test NAME | --lib] [--filter TEXT]
-Defaults: linux/amd64, lean-rs-worker-parent, --test lifetime_bootstrap.
+Defaults: linux/amd64, lean-rs-worker-parent, --lib.
 Packages: lean-rs-worker-parent, lean-rs-worker-protocol, lean-rs-abi.
 Optional filters select libtest names; they are not shell or Cargo arguments.
 Requires Docker Desktop and GNU timeout (timeout or gtimeout).
@@ -14,7 +14,7 @@ HELP
 fail() { printf '%s\n' "$*" >&2; exit 2; }
 platform=linux/amd64
 package=lean-rs-worker-parent
-target=(--test lifetime_bootstrap)
+target=(--lib)
 filter=
 while (($#)); do
     case "$1" in

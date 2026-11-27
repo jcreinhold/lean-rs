@@ -126,8 +126,8 @@ fn missing_library_is_load_error() {
     let library = crate::fixed_test_library();
     let missing = library.path().with_file_name("liblean__rs__fixture_missing.dylib");
     assert!(!missing.exists());
-    #[allow(unsafe_code, reason = "absent pathname in the held fixture directory")]
-    // SAFETY: the fixture loan prevents cooperating writers from creating this absent image.
+    #[allow(unsafe_code, reason = "absent pathname in the fixture directory this test job owns")]
+    // SAFETY: the test job owns the fixture directory and creates no image at this path.
     let err = unsafe { LeanLibrary::open(runtime, missing) }.expect_err("opening a nonexistent path must fail");
     match err {
         LeanError::Host(failure) => {

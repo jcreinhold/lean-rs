@@ -60,18 +60,19 @@ scripts/test_linux_docker.sh
 scripts/test_linux_docker.sh --platform linux/arm64
 # Other small link-free selections:
 scripts/test_linux_docker.sh --package lean-rs-abi --lib
-scripts/test_linux_docker.sh --filter missing_authentication
+scripts/test_linux_docker.sh --filter startup_failure
 ```
 
 The default uses x86-64 emulation (`linux/amd64`) and runs
-`cargo test --locked -j1 -p lean-rs-worker-parent --test lifetime_bootstrap -- --test-threads=1`.
+`cargo test --locked -j1 -p lean-rs-worker-parent --lib -- --test-threads=1`: the parent crate's unit tests, which
+start, fail and clean up fake children.
 It selects the local `desktop-linux` Docker Desktop context on macOS and rejects non-Unix-socket endpoints.
 Inherited Docker endpoint settings are cleared. It requires Docker Desktop and GNU `timeout` (`timeout` or `gtimeout`). The official
 `docker.io/library/rust:1.100.0-bookworm` image pins Rust 1.100.0 with rustup auto-install off.
 Cargo may download locked registry dependencies; no Lean install, header bypass, host Cargo cache or credentials
 are supplied. Only this checkout mounts at `/src`, read-only. A read-only container root and a disposable,
 executable 3 GiB `/lab` tmpfs hold Cargo, home and temporary output. A separate private 16 MiB, non-executable
-`/tmp` tmpfs holds real IPC sockets; no host `/tmp` mounts into the container. The container has 2 CPUs, 4 GiB memory,
+`/tmp` tmpfs gives the read-only root a writable `/tmp`; no host `/tmp` mounts into the container. The container has 2 CPUs, 4 GiB memory,
 192 PIDs, no capabilities and no privilege escalation. Incremental compilation is off.
 
 The script requires 30 GiB free on the checkout's filesystem: a 25 GiB reserve plus 5 GiB headroom.
@@ -82,10 +83,8 @@ A failed Docker connection can prevent cleanup; inspect Docker Desktop before re
 
 The optional package selector allows only `lean-rs-abi`, `lean-rs-worker-protocol` and `lean-rs-worker-parent`;
 `--test`, `--lib` and `--filter` choose a bounded libtest run, not arbitrary Cargo arguments. Check the reported
-selected test count: a mistyped filter can select zero tests. These runs do not cover native Lean loading or
-writer helpers, and do not replace broad nextest or Linux release gates.
-The default command passed all five startup tests on x86-64 Docker Desktop, including cleanup after a failed
-startup handshake. This local command does not use GitHub Actions.
+selected test count: a mistyped filter can select zero tests. These runs do not cover native Lean loading, and
+do not replace broad nextest or Linux release gates. This local command does not use GitHub Actions.
 
 ## Tuning
 
@@ -138,22 +137,6 @@ From the repository root, run the broken-import control:
 python3 scripts/qualify_metadata.py broken-import --emit-host-selection
 ```
 
-For a cold Lake build through the standalone SDK writer, build `lean-rs-writer` and pass the canonical binary path
-and SHA-256 to the custody check. It builds a private copy with `LEAN_RS_WRITER_EXECUTABLE` set and checks that a
-copy without it stops before publishing artifacts.
-
-```sh
-python3 scripts/check_test_custody.py "$WRITER" "$WRITER_SHA256" --lake-fixture
-```
-
-The worker protocol integration test exercises the stock SDK worker and standalone writer under a single
-typed owner-directory binding. It uses the standalone executable for the worker's native guardian.
-
-```sh
-LEAN_TOOLCHAIN_READER_TEST_HELPER="$WRITER" cargo nextest run --locked -p lean-rs-worker-child \
-  --test protocol --run-ignored only -E 'test(=standalone_worker_and_writer_use_the_typed_owner_directory)'
-```
-
 For stream or metadata changes, test the affected cases and one control. Set `SHIM_MANIFEST` to the
 absolute path of the prepared `*.lean-rs-capability.json` file reported in the shim descriptor above.
 The qualifier builds one SDK shim generation under `target/metadata-qualification/stream-package` using the
@@ -178,107 +161,17 @@ Repeat `--case` for each test. Run `interop-stream --help` to see the accepted n
 checks the fixture and verifies that each case's workers exit. These focused checks do not replace
 `scripts/prerelease.sh`, which prepares the fixtures and runs the release checks.
 
-On macOS, the SDK-only cold-open custody regression uses the same host manifest and an SDK guardian launched by
-the test executable. It checks a rejected worker, closure of its worker group and guardian, and successful reuse
-of the same one-slot pool by a fresh worker.
+The cold-open pool regression uses the same host manifest. It checks that a worker the runtime validator refuses is
+reaped and leaves no pool entry, and that a fresh worker then takes the same one-slot pool.
 
 ```sh
 python3 scripts/qualify_metadata.py interop-stream "$SHIM_MANIFEST" \
   --case failed_validator_releases_pool_slot_before_fresh_key
 ```
 
-### Reviewed-writer metadata checks on macOS arm64
-
-The separate `prepare` and `run` commands use a reviewed writer and run the metadata positive and
-mismatch selectors in `capability_builder`. Their typed, verification and disposable-clean modes
-are not available; use the ordinary SDK qualification above for release checks.
-
-Use a Git checkout, Python 3.12 or later, a trusted Rust toolchain, and the installed release selected by the repository
-`lean-toolchain` pin. Select
-the executable writer for this platform and obtain its SHA-256 from an independent local review. Use canonical
-absolute paths and keep the private deployment and release stable through preparation and execution.
-
-```sh
-python3 scripts/qualify_metadata.py --writer "$WRITER" --writer-sha256 "$REVIEWED_WRITER_SHA256" \
-  prepare
-python3 scripts/qualify_metadata.py --writer "$WRITER" --writer-sha256 "$REVIEWED_WRITER_SHA256" \
-  run "$DEPLOYMENT" --worker-sha256 "$REVIEWED_WORKER_SHA256" --control-sha256 "$REVIEWED_CONTROL_SHA256" \
-  --deployment-sha256 "$REVIEWED_DEPLOYMENT_SHA256"
-```
-
-Preparation uses the reviewed canonical writer in place and prints the worker, control and deployment candidate hashes before
-worker launch. Each build embeds local paths and file identities. Have all three reviewed before
-passing those hashes to `run`. The runner checks the deployed app sources, writer, worker, record, and selected
-runtime before readiness. The readiness command and guarded worker use the same explicit private `target/ws` IPC root;
-the runner removes it only after exact owner collection and an empty-root check. The ready descriptor must match the
-sealed record. Failed or uncertain dispatch retains the one-use deployment and does not replay it.
-
-## Native guardian service-loss regressions
-
-The macOS-only `lean-toolchain` guardian tests start an independent writer before killing the actual service, separately
-with a stopped worker. The service and test controller retain no artifact lock; the real guardian alone retains SH after
-the worker drops its local loan handles. The contender records group presence after its first EX acquisition, appends to
-the leaf's actual heartbeat file, and retains the same EX descriptor through observed cleanup. It never explicitly
-unlocks or changes a live lock mode. The test requires no old group or later payload writes.
-
-A separate guardian-loss control proves that raw EX can succeed while the managed writer's owner-record check still
-rejects work. That control deliberately ignores the check to test the write oracle; it is not a production writer
-violating it. Its leaf's fixed safety expiry only cleans up the negative case.
-
-Positive setup and recovery must finish within three seconds, before the leaf's four-second safety exit. A test-only
-thread in that same guardian can stop its own pinned payload group after three seconds; any rescue use or guardian error
-fails the positive test. The outer controller never signals the worker after service death. Failed fixture directories
-remain under `/tmp/native-guard-*` for inspection. These tests need no Lean fixture, runtime import or Mathlib build.
-They are excluded on other platforms because their stopped-state query and inherited-session cleanup observations are
-macOS-specific; they make no Linux, restart or lease claim.
-
-Run the focused tests with an isolated Cargo target if another task owns build output:
-
-```sh
-CARGO_TARGET_DIR=/tmp/lean-rs-guardian-tests cargo nextest run --offline -p lean-toolchain --lib -E 'test(native_guardian::tests::)'
-```
-
-## Guardian record retention after payload exit
-
-The macOS `record_lifetime_tests` regression pauses the **real guardian inside drain**, after complete payload-group
-absence and before its actual SH descriptors drop. This is a running test barrier, not SIGSTOP or process recovery.
-The controller holds no SH alias. It proves EX is still blocked, then reserves another actor under a limit of one:
-the original record and complete domain list must survive while compute capacity becomes available. After normal
-barrier release, actual guardian exit permits same-inode EX acquisition and later collection of the old record.
-
-The test also fills a private namespace with 128 synthetic records referring to this one actual live custodian. This
-checks the metadata bound, not 128 processes or transfers. Header-only capacity fixtures use deliberately mismatched
-births and remain distinct from the real-custody regression. Existing malformed-record cases still reject admission.
-
-The original collector failed this regression while the guardian still held SH: it removed the recovery record.
-An unwind release and a five-second self-kill deadline bound the responsive barrier fixture. Safety use, missing normal
-CLI return, a still-live guardian or an unobserved lock release cannot supply a pass. This does not qualify a frozen
-last owner, guardian takeover, boot/token recovery or a kernel-stuck process.
-
-```sh
-cargo nextest run --offline -p lean-toolchain --lib \
-  -E 'test(native_guardian::tests::record_lifetime_tests::)' --test-threads 1 --no-capture
-```
-
-## Writer retry regressions
-
-The Unix `writer_lock::tests::admission_tests` use private files and actual owned dummy child processes. An observation
-barrier pauses the writer after its real ownership check refuses admission, or after a real later-domain lock blocks.
-A separate SH contender must first observe blockage, then acquire during the retry while the writer still announces
-its complete demand. The owner remains live and the post-admission write must not run. A held recovery SH also blocks
-the writer after that owner exits. The original algorithm failed all three lock-release cases.
-
-The record headers are synthetic but refer to real live private process groups. They test passive admission, not a
-writer helper's custody protocol or guardian recovery. A raw-EX control deliberately ignores the owner fence and writes
-in the private fixture, proving that the write marker detects this unsafe action; it is not a source-mutation test.
-Other cases cover timeout/cancellation cleanup, inode replacement/removal, unlocked anchors, a free zero-budget pass,
-and hard rejection of a malformed committed record. Cleanup acts only through actual owned child handles. No test
-converts a live artifact lock or explicitly unlocks a retained alias.
-
-```sh
-cargo nextest run --offline -p lean-toolchain --lib \
-  -E 'test(writer_lock::tests::) | test(writer_demand::tests::) | test(write_domains::tests::)' --no-capture
-```
+`workspace-tests` also runs the `supervisor` test `parent_death::busy_worker_exits_when_its_parent_is_killed` with the
+sealed fixture worker, whose policy admits one busy `#eval`. The test kills the parent with SIGKILL. The worker, the
+only holder of an inherited probe FIFO, must exit within 10 s while it is inside Lean.
 
 ## Worker fixtures
 

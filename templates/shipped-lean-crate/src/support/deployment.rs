@@ -12,7 +12,6 @@ pub struct Deployment {
     pub project: PathBuf,
     pub sysroot: PathBuf,
     pub shim_manifest: PathBuf,
-    pub shim_roots: Vec<PathBuf>,
     pub shim_paths: Vec<PathBuf>,
     pub files: BTreeMap<PathBuf, String>,
 }
@@ -25,22 +24,6 @@ pub fn digest(path: &Path) -> io::Result<String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
-}
-
-// A competing package build must not replace artifacts between verification and use.
-// Use the same lock path and shared lock operation as the SDK's cooperating writers.
-pub fn hold(roots: &[PathBuf]) -> io::Result<Vec<fs::File>> {
-    let mut roots = roots.to_vec();
-    roots.sort();
-    roots.dedup();
-    roots
-        .iter()
-        .map(|root| {
-            let lock = fs::File::open(lean_toolchain::shared_writer::project_lock_path(root)?)?;
-            lock.try_lock_shared().map_err(io::Error::from)?;
-            Ok(lock)
-        })
-        .collect()
 }
 
 impl Deployment {

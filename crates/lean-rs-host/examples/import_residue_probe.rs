@@ -38,7 +38,7 @@ pub fn measure<'lean, 'c>(
 ) {
     println!(
         "probe_start roots={:?} profiles={} rss_kib={} footprint_kib={}",
-        caps.artifact_roots(),
+        caps.import_search_paths(),
         profiles.len(),
         rss_kib(),
         phys_footprint_kib().map_or_else(|| "unavailable".to_owned(), |kib| kib.to_string()),

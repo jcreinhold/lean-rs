@@ -30,28 +30,20 @@ mod fingerprint;
 pub mod host_shim_abi;
 #[cfg(unix)]
 pub mod inherited_pipe;
+mod lake_packages;
 mod lakefile_toml;
 mod limits;
 mod loader;
 pub mod manifest_validation;
 mod modules;
 #[cfg(unix)]
-pub mod native_guardian;
-#[cfg(unix)]
 pub mod process_group;
-#[cfg(unix)]
-pub mod shared_reader;
-pub mod shared_writer;
 mod source_package;
-mod write_domains;
-#[cfg(unix)]
-pub mod writer_demand;
-mod writer_lock;
 
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
-    build_lake_target_quiet, build_private_lake_target_quiet, capability_env_var, capability_manifest_env_var,
-    emit_lean_link_directives, emit_lean_link_directives_checked, generated_output_key_for_sysroot,
+    build_lake_target_quiet, capability_env_var, capability_manifest_env_var, emit_lean_link_directives,
+    emit_lean_link_directives_checked, generated_output_key_for_sysroot,
 };
 pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;
@@ -77,9 +69,6 @@ pub use source_package::{
     SourcePackageMaterializationRequest, SourcePackageProvenance, materialize_source_package,
     with_materialized_source_package,
 };
-
-#[cfg(unix)]
-pub use source_package::with_materialized_source_package_with_writer;
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

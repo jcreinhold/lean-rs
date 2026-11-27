@@ -69,52 +69,6 @@ impl OwnedCommandGroup {
         })
     }
 
-    /// Adopt this actual, solely owned and still-unreaped child after its
-    /// controlled bootstrap established the authenticated private session.
-    ///
-    /// On macOS the wait-authority probe uses WNOWAIT, preserving the root PID
-    /// pin before any group signal. An error returns the actual Child unchanged.
-    /// Other Unix backends retain their documented weaker post-reap behavior.
-    /// # Errors
-    /// Returns changed birth/scope or revoked wait authority with the Child.
-    pub fn adopt_private_session(
-        child: Child,
-        expected: &crate::native_guardian::NativeProcessIdentity,
-    ) -> Result<Self, (io::Error, Child)> {
-        let checked = (|| {
-            if child.id() != expected.pid
-                || expected.pid != expected.session
-                || expected.pid != expected.process_group
-                || expected.pid <= 1
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "adopted child private scope differs",
-                ));
-            }
-            #[cfg(target_os = "macos")]
-            let _exited = macos::peek_exit(child.id())?;
-            if crate::native_guardian::NativeProcessIdentity::capture(child.id())?.as_ref() != Some(expected) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "adopted child birth differs",
-                ));
-            }
-            Ok(())
-        })();
-        if let Err(error) = checked {
-            return Err((error, child));
-        }
-        Ok(Self {
-            pid: child.id(),
-            child,
-            status: None,
-            custody: Custody::Owned,
-            stop_requested: false,
-            cleanup_pending: false,
-        })
-    }
-
     /// The actual command PID, also its private process-group ID.
     #[must_use]
     pub fn id(&self) -> u32 {
@@ -281,13 +235,23 @@ impl OwnedCommandGroup {
     }
 }
 
-/// Consume the command so its pre-exec callback cannot outlive the descriptor
-/// borrows. Shared-writer helpers use this without becoming group leaders.
+/// Spawn `command` as a plain child that also inherits `descriptors`.
+///
+/// Each descriptor loses close-on-exec only in the child. Its flags in this
+/// process stay as they were, so a descriptor that is close-on-exec here
+/// reaches no other concurrently spawned child.
+/// Unlike [`OwnedCommandGroup::spawn_inheriting`], this creates no process
+/// group; set one on `command` with `CommandExt::process_group` if needed.
+/// The command is consumed so its pre-exec callback cannot outlive the
+/// descriptor borrows.
+///
+/// # Errors
+/// Refuses descriptors 0 through 2, and returns child setup or spawn errors.
 #[allow(
     unsafe_code,
     reason = "child-only inherited descriptor flags require pre_exec and bounded raw-FD borrows"
 )]
-pub(crate) fn spawn_inheriting(mut command: Command, descriptors: &[BorrowedFd<'_>]) -> io::Result<Child> {
+pub fn spawn_inheriting(mut command: Command, descriptors: &[BorrowedFd<'_>]) -> io::Result<Child> {
     let inherited = descriptors
         .iter()
         .map(std::os::fd::AsRawFd::as_raw_fd)
@@ -349,18 +313,11 @@ pub fn group_present(group: u32) -> io::Result<bool> {
     }
 }
 
-/// The guardian must already pin the original session. This observation
-/// establishes a singleton group only and conveys no signaling authority.
-#[cfg(target_os = "macos")]
-pub(crate) fn observed_group_singleton(leader: u32) -> io::Result<bool> {
-    Ok(macos::members(leader)? == macos::Members::OnlyLeader)
-}
-
 /// Observe whether this live private-group leader is its only member.
 ///
 /// The current process pins its own group identity. This read-only observation
-/// grants no authority to signal any stored identity. External native bootstraps
-/// use it after reaping their direct payload, before requesting guardian cleanup.
+/// grants no authority to signal any stored identity. A group leader can use it
+/// after reaping its direct child to learn whether any descendant remains.
 ///
 /// # Errors
 /// Refuses nonleaders and platforms without a complete atomic group census.

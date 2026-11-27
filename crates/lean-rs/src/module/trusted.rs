@@ -6,52 +6,56 @@ use std::path::{Path, PathBuf};
 use super::LeanCapability;
 use crate::{LeanError, LeanResult};
 
-/// A host shim loaded from one immutable manifest snapshot under application custody.
-/// The storage descriptor, loaded token, and custody lifetime travel together.
+/// A host shim loaded from one immutable manifest snapshot.
+/// The manifest, search paths, loaded token, and an optional application guard
+/// travel together.
 pub struct LoadedHostArtifacts<'lean> {
     host: TrustedHostCapability<'lean>,
     manifest_path: PathBuf,
     manifest: Vec<u8>,
-    roots: Vec<PathBuf>,
     search_paths: Vec<PathBuf>,
     // Dropping the closure releases the captured application guard.
     _custody: Box<dyn FnOnce() + 'lean>,
 }
 
 impl<'lean> LoadedHostArtifacts<'lean> {
-    /// Load the exact snapshot and retain the guard covering its artifacts.
+    /// Load the exact snapshot and keep `custody` until this descriptor drops.
+    ///
+    /// `custody` is any value the application wants dropped with the descriptor,
+    /// such as a lock or lease of its own; pass `()` when there is none.
     ///
     /// # Safety
     ///
     /// Before calling, verify the actual primary and dependency images and their complete
     /// host contracts as required by [`LeanCapability::from_manifest_snapshot`] and
-    /// [`TrustedHostCapability::from_loaded`]. The supplied custody must cover these
-    /// actual files, manifest resolution, roots and ordered search paths during and after
-    /// loading. Keep any code or data needed by escaping Lean values and registrations
-    /// available through their full lifetime, including after dropping this descriptor.
+    /// [`TrustedHostCapability::from_loaded`]. Nothing may replace these files, change how
+    /// the manifest resolves, or change the ordered search paths during and after loading.
+    /// Keep any code or data needed by escaping Lean values and registrations available
+    /// through their full lifetime, including after dropping this descriptor.
     ///
     /// # Errors
     ///
     /// Propagates manifest, preflight, load, or initializer failures.
-    #[allow(unsafe_code, reason = "application verifies native custody and the actual host ABI")]
+    #[allow(
+        unsafe_code,
+        reason = "application verifies the native artifacts and the actual host ABI"
+    )]
     pub unsafe fn load(
         runtime: &'lean crate::LeanRuntime,
         manifest_path: PathBuf,
         manifest: Vec<u8>,
-        roots: Vec<PathBuf>,
         search_paths: Vec<PathBuf>,
         custody: impl Sized + 'lean,
     ) -> LeanResult<Self> {
-        // SAFETY: the caller holds custody for this exact snapshot and all artifacts
-        // reached by its loader. The same bytes and paths are retained below.
+        // SAFETY: the caller keeps this exact snapshot and every artifact its loader
+        // reaches unchanged. The same bytes and paths are retained below.
         let image = unsafe { LeanCapability::from_manifest_snapshot(runtime, &manifest_path, &manifest) }?;
-        // SAFETY: the caller attests the actual images just loaded under that custody.
+        // SAFETY: the caller attests the actual images just loaded from that snapshot.
         let host = unsafe { TrustedHostCapability::from_loaded(image) };
         Ok(Self {
             host,
             manifest_path,
             manifest,
-            roots,
             search_paths,
             _custody: Box::new(move || drop(custody)),
         })
@@ -65,8 +69,8 @@ impl<'lean> LoadedHostArtifacts<'lean> {
 
     /// Compare a prepared descriptor against every input retained at loading.
     #[must_use]
-    pub fn matches_snapshot(&self, path: &Path, bytes: &[u8], roots: &[PathBuf], search_paths: &[PathBuf]) -> bool {
-        self.manifest_path == path && self.manifest == bytes && self.roots == roots && self.search_paths == search_paths
+    pub fn matches_snapshot(&self, path: &Path, bytes: &[u8], search_paths: &[PathBuf]) -> bool {
+        self.manifest_path == path && self.manifest == bytes && self.search_paths == search_paths
     }
 }
 

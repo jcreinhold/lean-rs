@@ -1,7 +1,7 @@
 # Release checklist
 
 [`.github/workflows/release.yml`](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release.yml)
-publishes all ten crates when a `v<semver>` tag is pushed. It verifies the head Lean version on Ubuntu and macOS, checks
+publishes all nine crates when a `v<semver>` tag is pushed. It verifies the head Lean version on Ubuntu and macOS, checks
 public API baselines, packages and publishes crates in dependency order, and creates a GitHub Release from the matching
 `## [<version>]` changelog section.
 
@@ -28,8 +28,8 @@ verification job tests only the head.
 4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`. A minor bump
    also changes the `"0.Y"` dependency examples in `README.md` and the crate READMEs.
 5. Regenerate intentionally changed public API baselines using the pinned tools and procedure in
-   [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` and
-   `lean-rs-writer` are published outside that loop.
+   [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` is
+   published outside that loop.
 6. Merge the release changes after the required checks pass.
 
 The repository must have a scoped crates.io publish token in the `CARGO_REGISTRY_TOKEN` Actions secret. Local publishing
@@ -62,7 +62,7 @@ cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'
 This example patches one crate. When a change crosses the worker boundary, include each matching worker crate in the
 same override. Use the consumer's installed-worker test for changes to installation or process ownership. For example,
 lean-host-mcp is a separate consumer repository with such a test: in its checkout,
-`LEAN_RS_CHECKOUT="$sdk" scripts/test-installed-stdio.sh --all-targets` builds the writer, shims, worker and host from
+`LEAN_RS_CHECKOUT="$sdk" scripts/test-installed-stdio.sh --all-targets` builds the shims, worker and host from
 the SDK checkout, restores the host lockfile on exit, and fails if Cargo kept a registry SDK crate. Review the
 consumer's manifest and lockfile for local changes before staging the release.
 
@@ -73,12 +73,7 @@ Run `scripts/prerelease.sh` from the checkout to build the existing Lake package
 binds the scalar and callback images to their canonical paths, file identities and hashes. Selections stay in memory
 locally; the script restores temporary fixture directory modes on exit. Keep this checkout and its installed toolchain
 unchanged until the script finishes: do not run a competing build or clean. This is trusted job ownership, not
-protection against arbitrary same-user writes. The opt-in covers only ordinary scalar/callback tests; shared-reader and
-custody tests keep their real guards.
-
-On macOS the prerelease script gives workspace Nextest a short, private socket directory under `target` and removes it
-when the tests exit. An export directly below `target` uses that outer directory to keep Unix socket paths short. For a
-longer checkout path, set `LEAN_RS_TEST_IPC_BASE` to a short, canonical directory you own with mode `0700`.
+protection against arbitrary same-user writes. The opt-in covers only ordinary scalar and callback tests.
 
 ## Interop checks
 
@@ -96,7 +91,7 @@ cargo run -p lean-rs-worker-child --example worker_capability_runner
 ```
 
 The progress example accepts an application-admitted session. Its build checks the example API; the host progress test
-above exercises runtime callbacks. The executable examples need their artifact-writer prerequisites; see the
+above exercises runtime callbacks. The executable examples need their Lake fixtures built; see the
 [interop](recipes/downstream-interop.md) and [worker](recipes/worker-capability-runner.md) recipes. For
 performance-sensitive changes, compare saved baselines on the same toolchain and machine:
 
@@ -118,7 +113,7 @@ Dispatch the Release workflow with `dry_run: true` (the default). It runs verifi
 without uploading crates or creating a GitHub Release. Manual runs of Release cannot upload crates; use the tag for a
 live release.
 
-Cargo builds all ten publishable tarballs from a temporary registry. Sibling crates do not need to be published for this
+Cargo builds all nine publishable tarballs from a temporary registry. Sibling crates do not need to be published for this
 check, but external dependencies still have to resolve. A real release runs the same check before its first upload, then
 publishes crates in dependency order.
 
@@ -150,7 +145,7 @@ exists. A live recovery requires the existing release tag to point to that commi
 verification gates; use it only for contents already verified for that release. Recovery defaults to `dry_run: true`,
 which builds the tarballs without uploading. Set it to `false` only when you intend to resume the upload.
 
-For example, `gh workflow run release-recover.yml --ref vX.Y.Z -f version=X.Y.Z -f dry_run=true` checks all ten packages
+For example, `gh workflow run release-recover.yml --ref vX.Y.Z -f version=X.Y.Z -f dry_run=true` checks all nine packages
 at the original tag. The publish script checks that every publishable crate has the workspace version and uses the
 committed lockfile for crates.io. If Cargo times out waiting for the index after an upload, check the registry for that
 version before resuming. An indexing timeout can follow a successful upload.

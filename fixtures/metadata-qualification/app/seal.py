@@ -301,16 +301,6 @@ def main():
         assert Path(rec["consumer_image"]) == ci
     assert list(map(Path, rec["shim_paths"])) == shims
     user_dep = project / ".lake/packages/dep"
-    assert list(map(Path, rec["roots"])) == sorted(
-        [
-            project,
-            dep,
-            host,
-            *([user_dep] if transitive else []),
-            *([foreign] if foreign else []),
-        ]
-    )
-    assert list(map(Path, rec["shim_roots"])) == sorted([dep, host])
     filepins = {}
     contentpins = {}
     directories = []
@@ -337,8 +327,8 @@ def main():
     for manifest in ["shim"] if broken or legacy else ["consumer", "shim"]:
         path = Path(rec[manifest + "_manifest"])
         assert path.read_text() == rec[manifest + "_json"]
-        # Pin the typed capability manifest in the private state. The existing
-        # typed host-shim snapshot can be republished under its writer.
+        # Pin the typed capability manifest in the private state. A later SDK
+        # build may rewrite the typed host-shim snapshot, so it is not pinned.
         if scalar and manifest == "consumer":
             assert path.parent == project / ".lake/lean-rs-build-cache"
             assert path.name.startswith("LeanRsFixture-") and path.name.endswith(

@@ -7,15 +7,15 @@ capability. The child performs Lean work; the parent receives copied, serializab
 The worker records the effective ordered search roots during the first observed import for an admitted host anchor.
 Before reusing a current or parked environment, it asks the same shim to compute the requested order under the
 current import admission. A changed order retires the child before the request body. A legacy shim can open fresh
-sessions. The ordered paths say where Lean searched. The application and artifact readers still own stability of
-the files and of earlier module prefixes that could shadow them. Relative entries use the worker’s working directory
+sessions. The ordered paths say where Lean searched. The application still owns stability of the files and of
+earlier module prefixes that could shadow them. Relative entries use the worker’s working directory
 at import and comparison time. Before each source grant, `WorkerAuthority::validate_source_context` receives
 the opened session context and its retained root order. Applications that require this observation can refuse a
 legacy session with no recorded order.
 
 An application can select one native plugin in its unsafe import attestation. The application verifies the canonical
-image, explicit initializer, matching compiled modules and dependencies under its retained deployment custody. It
-establishes the loader environment before executing the worker or its helpers. Ordinary requests supply only the
+image, explicit initializer, matching compiled modules and dependencies, and keeps them unchanged while the worker
+runs. It establishes the loader environment before executing the worker or its helpers. Ordinary requests supply only the
 existing import fields. Lean loads the plugin during the import transaction and can retain it if the import fails.
 The worker binds the policy on its first import attempt. Changing the image, initializer or presence of the plugin
 requires a fresh worker. Plugin-free imports continue to work with older shims. A plugin requires the versioned
@@ -127,93 +127,34 @@ clears it before every new session open and shutdown/replacement attempt; old me
 generation. Inspection itself does not consume the request-cycle budget. An old worker that lacks this extension cannot
 satisfy an opted-in requirement and receives no body command through that session.
 
-A guarded worker can report `effective_import_roots` alongside `artifact_read_epochs`. The list preserves the order
-and duplicates observed during the active session’s import. Relative entries, including empty entries, use the
-worker’s import-time working directory. The worker omits the list if it cannot give absolute paths, if the shim
-did not observe the order, if there is no active read custody, or if the complete list exceeds the frame budget.
-Ordinary execution still works. Consumers using these facts for reuse must bind them to the same session and epochs
-and establish custody for the artifacts and shadowing prefixes they depend on.
-
-Older readers ignore this optional field. Older workers omit it. When updating a Rust struct literal for
-`LeanWorkerHostRuntimeMetadata`, add `effective_import_roots: None` for an unobserved order.
-
 An embedder may advertise its expected contract before opening a session. Actual loaded metadata exists only after a
 session has opened and must be bound to that owner/generation when projected into an execution receipt. It does not
 prove a submitted command ran, a child exited, or a proof succeeded.
 
-## Shared artifact read custody
+## Prepared host artifacts
 
 An application with an immutable prepared deployment can pass its descriptor through
 `LeanWorkerChild::prepared_host_artifacts` to an ordinary child running `run_worker_child_with_authority`.
 The child checks the bounded descriptor and named shim manifest, then uses those inputs for every host anchor in
 that generation. Only an omitted ordinary descriptor selects bundled shim discovery and preparation. An invalid
 explicit descriptor or a refused grant fails the operation. The application's `WorkerAuthority::host` must
-independently verify the exact manifest, images, initializers and ordered import paths under custody that prevents
-replacement throughout native use. The launch-time byte comparison alone cannot establish immutability.
-Project manifest reads, native loads and imports still require their ordinary application grants, including
-`use_generated_project_imports` to select generated project output. Shared-read workers require their descriptor
-and the guardian admission below.
+independently verify the exact manifest, images, initializers and ordered import paths. The launch-time byte comparison
+alone cannot establish immutability. Project manifest reads, native loads and imports still require their ordinary
+application grants, including `use_generated_project_imports` to select generated project output.
 
-`LeanWorkerChild::shared_artifact_reads(true)` requires the actual child to hold shared artifact locks while it imports
-or runs a host operation. Generic library configuration defaults to false; embedders opt in on each worker builder
-that requires this coordination. The configured helper owns the read/write admission algorithm. The actual worker
-receives shared lock descriptors through a private Unix socket and makes them inheritable only in that controlled process. Native
-children use guardian-owned loans; broker-side Rust cache/index readers use atomic close-on-exec opens.
-Multithreaded embedders may instead use the helper proxy, without receiving a lock descriptor. Canonical sibling lock
-files also admit a genuinely cold root without creating `.lake`; an existing `.lake` must remain an unaliased directory
-in that root.
+The worker binary has runtime-free preparation entries. `--lean-rs-ready-host-artifacts` checks the existing
+host/interop build keys and the exact manifests without materializing, building, loading or publishing anything, and
+`--lean-rs-ready-host-artifacts-generated KEY` checks one generated output slot; a miss exits 75.
+`--lean-rs-prepare-host-artifacts [DEST]` builds the shims and emits one bounded storage descriptor before any
+`LeanRuntime::init` or parent lifeline. Without `DEST` it builds the shims where Cargo unpacked `lean-rs-host`. With
+`DEST`, a directory that must not exist yet, it first writes the shim sources compiled into the worker there and builds
+them there, so an installer can give a worker its own copy (`lean_rs_host::host::prepare_host_artifacts_in`). The parent
+passes that exact descriptor to a native generation. The descriptor is planned storage metadata, never a loaded-runtime
+receipt.
 
-The worker binary has two runtime-free preparation entries. `--lean-rs-ready-host-artifacts [IPC_ROOT]` takes shared helper custody
-and checks existing host/interop build keys and the exact manifests without materializing, building, loading or
-publishing anything; an explicit root selects the reviewed private transient IPC directory, while omission preserves
-the existing placement. A miss exits 75. `--lean-rs-prepare-host-artifacts [DEST]` uses only the configured writer helper and
-emits one bounded storage descriptor before any `LeanRuntime::init`, native lifeline or guardian bootstrap. Without
-`DEST` it builds the shims where Cargo unpacked `lean-rs-host`. With `DEST`, a directory that must not exist yet, it
-first writes the shim sources compiled into the worker there and builds them there, so an installer can give a worker
-its own copy (`lean_rs_host::host::prepare_host_artifacts_in`). The parent
-passes that exact descriptor to a guarded native generation. The descriptor is planned storage metadata, never a
-loaded-runtime receipt.
-
-Before any capability `dlopen`, module initializer, import or body, the guarded child independently reconstructs the
-canonical union from the shim snapshot, optional capability snapshot and import workspace's complete Lake dependency
-graph. It requires the descriptor's shim union to agree, acquires all shared domains in the same hashed lock-path order
-as exclusive writers, and waits for the independent guardian's durable FD-custody acknowledgement. It then rechecks the
-captured manifest bytes and workspace graph before consuming exactly those snapshots. Missing, changed or unsupported
-metadata refuses before native loading. Guarded workers reject the direct fixture-manifest loaders even when another
-host read scope is active.
-
-The generation retains one fixed read union. A later session requiring different domains requests a fresh generation
-before acquiring another lock. Cold admission can wait on the complete fixed domain union only after every partial read
-has closed. Warm admission never waits behind a writer: it waits out only another reader's brief admission gate, whose
-holder never waits, and rechecks writer demand on each pass. Other typed contention maps to the existing pre-body
-epoch-change response, so the parent confirms full generation closure before its single fresh open attempt. This
-releases the guardian's old SH union; dropping only the new local guards would not. The outer request identity remains
-stable and its target body is invoked once. Hard errors and any failure after inheritance or guardian exchange are never
-retried by this loop. A failed guardian exchange also requires retirement before another admission because the guardian
-may already have retained custody. Loaded capabilities use ready import paths; no native-generation import or body may
-trigger a nested Lake writer. The parent probes warm artifacts under shared custody before requesting exclusive
-preparation, and drains affected generations before a genuine writer.
-
-Every genuine writer advances its output epoch before starting work, including work that later fails. The worker
-compares all held read epochs before reusing imported state. A change requests a full child cycle before any target
-body, invalidating process-global Lean state and every pooled environment. Comparing only the named import's `.olean` is
-insufficient when a failed build changed a transitive import. The broker must independently compare the same epoch
-before consulting its own result cache.
-
-The read scope spans `OpenHostSession`, loaded metadata validation and the subsequent host body commands.
-`ReleaseHostRead` closes this child's request aliases after a known terminal operation; it never explicitly unlocks an
-open file description. The independent guardian retains the generation's complete FD union until that owned process
-group is confirmed empty, including descendants that closed their inherited aliases. A known import refusal closes
-aliases before returning. An unknown in-flight operation cannot release custody and must retire through the supervisor.
-Embedders that enable the option finish a known scope with `LeanWorker::release_host_read` or its host/capability
-delegation after dropping the session borrow; dropping `LeanWorkerSession` alone does not stop the worker or finish the
-scope.
-
-`LeanWorkerHostRuntimeMetadata::artifact_read_epochs` records the actual held domains and epochs at session validation.
-It is absent in an older or unconfigured worker. A read-required parent refuses that absence before exposing a body
-session. A receipt preserves past execution evidence; it is not a claim that the worker remains alive or still holds
-those descriptors when the receipt is read. Children that deliberately leave the ownership scope and close inherited
-custody are outside this cooperative native-read contract.
+The SDK takes no lock on these artifacts or on project outputs. The process that owns the checkout stops or cycles the
+workers that read a project before it builds that project, so no session imports some modules from before a build and
+some from after.
 
 ## Terminal errors and lifecycle evidence
 
@@ -223,6 +164,5 @@ whether the failure occurred during session import or runtime validation before 
 change does not by itself make this returned outcome unknown.
 
 Unconfirmed transport, shutdown or descendant cleanup retains its exact pending exit observation and capacity fence. A
-completed body result remains known even if subsequent read-scope release fails: an embedder preserves the recorded
-result and retires that owner. A stopped receipt remains bound to its own request and generation; it cannot settle a new
-request, a replacement startup, or another semantic companion.
+stopped receipt remains bound to its own request and generation; it cannot settle a new request, a replacement startup,
+or another worker.

@@ -12,8 +12,7 @@ semantic facts, and Lean services must not depend on a Rust application's schedu
 | Crate | Responsibility |
 | --- | --- |
 | `lean-rs-abi` | Static supported-toolchain, required-symbol, and `lean.h` layout metadata. No build script, extern declarations, link directives, or installed-toolchain probe. |
-| `lean-toolchain` | Toolchain discovery, live build-time identity, fingerprints, Lake builds, artifact manifests, linking diagnostics, and native command/artifact ownership helpers. Builds without Lean when no runtime is required. |
-| `lean-rs-writer` | Standalone executable for shared Lake artifact writes and read custody using the SDK's project lock domains. |
+| `lean-toolchain` | Toolchain discovery, live build-time identity, fingerprints, Lake builds, artifact manifests, linking diagnostics, and native command ownership helpers. Builds without Lean when no runtime is required. |
 | `lean-rs-sys` | Raw Lean C ABI declarations and inline mirrors. Public FFI types are opaque; layout representations remain crate-private. Its build script checks the active header digest and emits runtime link directives. |
 | `lean-rs-interop-shims` | Packaged Lean/C source for generic callback and worker-stream helpers, materialized into a caller-owned build root. |
 | `lean-rs` | Runtime and thread handles, object ownership, ABI conversion, library/module loading, checked typed exports, callbacks, and errors. |
@@ -57,7 +56,7 @@ imports; process exit is the reset boundary. See [Production hosting](../product
 | Safe runtime | Initialization order; scalar/heap tags; constructor layout; owned versus borrowed reference counts; object conversion; module initializer symbols; dynamic loader calls; callback context pointers and panic containment. |
 | Host services | Host-shim symbol binding and ABI; Lean monad/state plumbing; environment handles; batching; cache and same-process pool bookkeeping. |
 | Worker services | Child handles; request framing; generation and cleanup ownership; request interruption; bounded event buffers; replacement and admission policy. |
-| Build tooling | Toolchain discovery order; Lake artifact naming; content-addressed build reuse; artifact manifests; native command and writer-lock lifetimes. |
+| Build tooling | Toolchain discovery order; Lake artifact naming; content-addressed build reuse; artifact manifests; native command lifetimes. |
 
 Public callers choose capabilities, imports, budgets, commands, and typed results. They should not need to reconstruct
 the hidden decisions to use an operation safely. Explicitly unsafe raw FFI remains available through `lean-rs-sys` for

@@ -1,30 +1,14 @@
 #[path = "src/support/deployment.rs"]
 mod deployment;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(out) = std::env::var_os("OUT_DIR") {
-        // The worker reads manifests under the managed package locks. A Cargo
-        // build script normally emits them under OUT_DIR, outside those domains.
-        // Run the same preparation in a child with the SDK's workspace-local
-        // manifest layout; Cargo directives are inherited on stdout.
-        let record = std::path::PathBuf::from(out).join("worker-deployment.json");
-        let status = std::process::Command::new(std::env::current_exe()?)
-            .env_remove("OUT_DIR")
-            .arg(record)
-            .status()?;
-        return if status.success() {
-            Ok(())
-        } else {
-            Err(format!("package preparation failed: {status}").into())
-        };
-    }
-    let path = std::path::PathBuf::from(std::env::args_os().nth(1).ok_or("missing worker deployment output")?);
     use lean_toolchain::{
         LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
         LeanExportSignature,
     };
 
-    let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
-    let lean_root = owner.join("lean");
+    let path = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("missing OUT_DIR")?)
+        .join("worker-deployment.json");
+    let lean_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?).join("lean");
     let toolchain = lean_toolchain::discover_toolchain(&Default::default())?;
     let pin = std::fs::read_to_string(lean_root.join("lean-toolchain"))?;
     if pin.trim() != format!("leanprover/lean4:v{}", toolchain.version) {
@@ -54,10 +38,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed={}", lean_root.join(input).display());
     }
     let shim_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?;
-    let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
     let demo = lean_toolchain::CargoLeanCapability::new(&lean_root, "ShipLeanDemo")
         .lean_sysroot(&sysroot)
-        .private_bootstrap(bootstrap)
         .package("ship_lean_demo")
         .module("ShipLeanDemo")
         .export_signature(LeanExportSignature::function(
@@ -75,19 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Cargo can keep its build record after Lake's outputs are removed. Watch
     // both files, and reuse a ready manifest without rewriting it when Cargo
     // reruns because the outputs were just generated.
-    let ready = match deployment::hold(std::slice::from_ref(&lean_root)) {
-        Ok(_readers) => demo.probe_ready()?,
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::WouldBlock
-            ) =>
-        {
-            None
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let demo = match ready {
+    let demo = match demo.probe_ready()? {
         Some(ready) => ready,
         None => demo.build_quiet()?,
     };
@@ -139,28 +109,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("missing package root")?;
     let interop = host.join("shims/lean-rs-interop-shims");
     let shim = host.join("shims/lean-rs-host-shims");
-    let builder = |root: &std::path::Path, package: &str, target: &str| -> Result<_, Box<dyn std::error::Error>> {
-        let private = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(host, root)?;
-        let mut builder = lean_toolchain::CargoLeanCapability::new(root, target)
+    let builder = |root: &std::path::Path, package: &str, target: &str| {
+        let builder = lean_toolchain::CargoLeanCapability::new(root, target)
             .package(package)
             .module(target)
-            .lean_sysroot(&sysroot)
-            .private_bootstrap(private);
-        if let Some(key) = shim_output_key {
-            builder = builder.generated_output_key(key);
+            .lean_sysroot(&sysroot);
+        match shim_output_key {
+            Some(key) => builder.generated_output_key(key),
+            None => builder,
         }
-        Ok(builder)
     };
-    let interop_built = builder(&interop, "lean_rs_interop_shims", "LeanRsInterop")?.build_quiet()?;
-    let mut host_builder = builder(&shim, "lean_rs_host_shims", "LeanRsHostShims")?;
+    let interop_built = builder(&interop, "lean_rs_interop_shims", "LeanRsInterop").build_quiet()?;
+    let mut host_builder = builder(&shim, "lean_rs_host_shims", "LeanRsHostShims");
     for sig in lean_toolchain::host_shim_abi::compiled_host_binding_signatures().into_values() {
         host_builder = host_builder.export_signature(sig);
     }
     let built = host_builder.build_quiet()?;
-    let shim_roots = lean_toolchain::shared_writer::project_artifact_root_union(&[shim.clone(), interop.clone()])?;
-    let mut roots = shim_roots.clone();
-    roots.push(lean_root.clone());
-    let _readers = deployment::hold(&roots)?;
     // Both shim search paths must name the outputs this build actually selected.
     // The demo retains its standard Lake layout.
     let import_path = |built: &lean_toolchain::BuiltLeanCapability| -> Result<_, Box<dyn std::error::Error>> {
@@ -176,7 +140,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sysroot,
         shim_manifest: built.manifest_path().canonicalize()?,
         shim_paths: vec![import_path(&interop_built)?, import_path(&built)?],
-        shim_roots,
         files: Default::default(),
     };
     record.files = record.inventory()?;

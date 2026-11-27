@@ -38,8 +38,6 @@ wait is a bounded synchronous wait at a call site, not a reserved mailbox slot. 
 `queue_depth` field, but that field is currently `0` and is not evidence of a request queue.
 
 The public worker contract is a serial request/response supervisor and a local affine lease pool.
-`NativeCapacitySlot` uses actor keys for bounded native ownership; those keys do not add actor addresses, mailboxes,
-delivery policy, or fairness guarantees to the worker API.
 
 ## Mathematical Objects
 
@@ -281,12 +279,9 @@ receipt fields; the in-process checkpoint is not a durable process handle.
 protocol, kill, or wait failures, so callers needing status must call `shutdown`. Drop is a cleanup obligation, not a
 status-reporting API.
 
-**Parent-death handling.** Without configured native ownership, the child exits when its protocol loop observes stdin
-EOF or a failed stdout write. Linux also requests `SIGTERM` through `PR_SET_PDEATHSIG` and checks the fork/exec
-reparenting race. Pipe-loss handling cannot preempt a body that never returns to protocol I/O; these baseline paths
-provide no portable descendant-cleanup guarantee. Configured Unix guardian ownership has the separate assumptions and
-limits in
-[Optional native guardian ownership](#optional-native-guardian-ownership).
+**Parent-death handling.** On Unix each child holds the read end of a lifeline pipe and exits as soon as its parent
+dies, even while a request is inside Lean. [Parent death and inherited descriptors](#parent-death-and-inherited-descriptors)
+states the mechanism and its limits.
 
 **Restart semantics.** Crash, timeout, cancellation after dispatch, shutdown, explicit cycle, memory cycling, and
 restart-limit exhaustion all end the current generation. Only a successfully admitted replacement can create generation
@@ -374,14 +369,14 @@ The table maps the control and cleanup contracts above to their implementation o
 | Restart generation | `LeanWorkerLifecycleSnapshot::worker_generation`; private `WorkerGeneration`; in-flight request and reader-task generation tags | Generation bumps on accepted replacement before future work is admitted; parent-side frame consumers know which generation produced each event | No generation field on the wire protocol; snapshots and request-bound stop evidence remain parent-side observations | `lean-rs-worker-parent` | Compare snapshots around operations when supervising higher-level sessions |
 | Stale output rejection | Serial request model; parent owns stdout during one request; reader events carry parent-side generation; replacement drops old pipes | Normal serial operation cannot interleave two live requests on one child; any stale-generation reader event is rejected as protocol output before request completion | No cross-process request id for future overlapping protocol modes | `lean-rs-worker-parent`, `lean-rs-worker-protocol` | Avoid assuming cross-request output identity beyond the current serial contract |
 | Restart intensity limits | `LeanWorkerRestartPolicy::max_restarts_per_window`; default 16 restarts per 60 seconds; `LeanWorkerError::RestartLimitExceeded` | Replacement attempts are bounded by a moving window; exhaustion terminalizes the old child, refuses the replacement, and stops accepting more work on that supervisor | No backoff scheduler or automatic recovery after exhaustion | `lean-rs-worker-parent` | Create a new worker/pool entry only after deciding the service-level policy permits another restart window |
-| Parent/control-channel death | Child stdio loop reads stdin and exits on protocol read error/EOF; child response writes propagate broken-pipe errors; Linux children install `PR_SET_PDEATHSIG(SIGTERM)` | Loss of stdin or stdout causes the child loop to fail and process exit under ordinary pipe semantics; on Linux, parent process death also requests child termination even if stdio remains open | The unconfigured pipe/signal baseline has no portable descendant-cleanup guarantee; optional Unix guardian ownership has separate assumptions below | `lean-rs-worker-child` | Use an external supervisor/process manager for service-level parent death policy |
-| Orphan and zombie prevention | Parent `Drop`, `shutdown`, timeout, cancellation, RSS, and restart paths kill/wait or request terminate/wait | Parent-owned children are reaped on explicit lifecycle paths and best-effort `Drop` | Ordinary Drop may be skipped on abrupt parent death; configured guardian/group ownership follows the optional native contract below | `lean-rs-worker-parent`, `lean-rs-worker-child` | Configure OS/process-manager containment for abrupt parent death |
+| Parent/control-channel death | Unix lifeline pipe watched by a child thread that calls `_exit(125)` at end of file; child stdio loop exits on stdin EOF or a failed stdout write; Linux children install `PR_SET_PDEATHSIG(SIGTERM)` | A child exits promptly when its parent dies, even while a request is inside Lean | The lifeline ends only the worker child, not processes the child starts; see the limits below | `lean-rs-worker-parent`, `lean-rs-worker-child` | Use an external supervisor/process manager for service-level parent death policy |
+| Orphan and zombie prevention | Parent `Drop`, `shutdown`, timeout, cancellation, RSS, and restart paths kill/wait or request terminate/wait; the lifeline covers abrupt parent death | Parent-owned children are reaped on explicit lifecycle paths and best-effort `Drop`; a child whose parent died exits and is reaped by its new parent | Ordinary Drop may be skipped on abrupt parent death | `lean-rs-worker-parent`, `lean-rs-worker-child` | Stop processes the worker starts through their own process group or supervisor |
 
 ## Proof Status
 
 This document states the SDK worker and pool contract. Its named Rust conformance tests exercise selected
-implementation behaviors; they do not establish trace refinement, shutdown liveness, or the full native guardian
-contract. No formal model checks this contract.
+implementation behaviors; they do not establish trace refinement or shutdown liveness. No formal model checks this
+contract.
 
 ## Worker pipe I/O (macOS and Linux)
 
@@ -405,22 +400,17 @@ cleanup confirms its owned scope is closed.
 ## Confirmed child exit and capacity
 
 `LeanWorkerProcessTracker` counts child processes across startup and replacement. Pass one shared tracker to every
-worker builder covered by a capacity slot. After the actor stops and cannot spawn again, release its slot only when
-`active_processes()` returns zero. The tracker reserves one count before spawn after establishing a cleanup thread. A failed spawn returns
-the reservation. After spawn, retirement requires direct exit and closure of the attached scope. Guarded retirement
-also requires closure of the authenticated guardian. An attached lifetime can establish resource closure after
-`ECHILD` without supplying an exit status.
+worker builder whose children an embedder counts against one limit. After the owner stops and cannot spawn again, it
+may release that capacity when `active_processes()` returns zero. The tracker reserves one count before spawn, after it
+starts a cleanup thread, and a failed spawn returns the reservation. After spawn, only a confirmed direct exit releases
+the count.
 
 `try_shutdown(&mut self)` allows cleanup retries without consuming the owner. Dropping an owner moves any unconfirmed
 child into the tracker's cleanup registry. The reaper remains available while launches or children are outstanding,
 wakes on transfer and retries unresolved handles every 100 ms. If the thread cannot start, launch fails before spawn.
-Cleanup sends a kill only after `try_wait`
-reports the owned child still running; a wait error never authorizes a signal to a reused PID. Other wait errors keep
-the actual child and count for retry. `ECHILD` without an attached whole-group absence witness can still keep capacity
-unavailable indefinitely. A normally stopped child, or a closed attached group after `ECHILD`, recovers automatically;
-resource-only recovery leaves the request's missing exit status unresolved.
-`LeanWorkerExitObservation::scope_closed_without_status()` separately marks that terminal resource recovery, allowing
-retained-request lifecycle watchers to stop and retention to expire while preserving the unknown proof outcome.
+Cleanup sends a kill only after `try_wait` reports the owned child still running; a wait error never authorizes a
+signal to a reused PID. Other wait errors, including `ECHILD`, keep the actual child and its count, so a child that
+some other wait call reaped stays counted.
 
 ## Source-header imports and retained memory
 
@@ -455,148 +445,24 @@ retained-byte budget, not this session-count limit. With the byte budget disable
 the byte budget to bound it. Header import counts remain available through host accounting and protocol events.
 
 
-## Optional native guardian ownership
+## Parent death and inherited descriptors
 
-On Unix, a configured `native_guardian` plus `lifetime_directory` establishes a private worker session before the Lean
-runtime starts. The original parent keeps the actual `Child` in the common `OwnedCommandGroup`, which preserves its
-unreaped root pin until a complete group census permits reaping. One independent link-free helper joins that session in
-a separate process group, keeping the session number pinned while it signals and drains the worker's inherited process
-group. Server EOF, the exact server birth becoming absent or zombie, root-parent death, and malformed control all
-request the same group drain. Failure to signal or observe closure retains read custody; it never establishes a
-successful proof result. Managed payloads must not change process group or detach into another session. This is process
-lifecycle ownership, not a sandbox against arbitrary native code.
+On Unix the parent creates a pipe for each child it starts and keeps the write end. The child inherits the read end and
+finds its number in `LEAN_RS_WORKER_PARENT_LIFELINE`. Before the Lean runtime starts, a child thread checks that the
+descriptor is the read end of a pipe, marks it close-on-exec so that processes the child starts do not hold it, and
+blocks reading it. When the parent exits or drops the worker, the kernel closes the write end, the read returns end of
+file, and the thread calls `_exit(125)`. The child therefore exits even while its main thread is inside a Lean call,
+and it runs no destructors on the way out. A child started without the variable relies on stdin EOF. On Linux the
+child also asks for `SIGTERM` through `PR_SET_PDEATHSIG` and checks the fork/exec reparenting race.
 
-Callers that cannot use the default transient socket location may also set `lifetime_socket_directory`. The selected
-directory must already be an absolute, canonical, private directory owned by the caller, and the complete socket path
-must fit the platform limit. An invalid explicit directory fails before durable ownership reservation or child launch;
-it never falls back to the default. The socket directory is temporary bootstrap state, not a second ownership record.
+Each child runs in its own process group (`process_group(0)`), apart from the parent's terminal and its other children.
+The lifeline ends only the worker child; processes it starts keep running until their own owner stops them.
 
-Protected shared-artifact reads reuse that same explicit socket root. The parent removes any inherited artifact-root
-override, derives the child handoff from `lifetime_socket_directory`, and the guarded child requires it to match the
-parent lifeline root before Lean starts. Standalone host readiness accepts the root only as a command argument. When
-no explicit root is supplied, the existing shared-reader placement remains unchanged.
+Children inherit every descriptor the parent leaves open without `FD_CLOEXEC`, and the SDK never closes a descriptor it
+did not open. lean-host-mcp will clear `FD_CLOEXEC` on its store lock, so every worker child holds that `flock` until
+it exits, and a second server cannot take the store while an old worker still runs.
 
-A generation's single bounded `owner.json` moves from Preparing to Running before the guardian acknowledges runtime
-startup. Each acquired artifact SH descriptor is transferred to the guardian and its canonical lock domain is durably
-published before admission returns. The union is retained until that whole generation closes, including after logical
-request release. All multi-domain readers and writers acquire locks in stable lock-path order. Managed writers check the
-same registry after taking EX: a guardian's death can close its descriptors while a payload descendant is still alive,
-so successful EX alone does not grant write admission. Live legacy records without an independent descriptor custodian
-fence every domain. Closed payloads need no filesystem access to former artifact roots; malformed committed records
-remain unavailable.
-
-Older guardians could write a private version 4 owner record, which fences a planned path/device/inode before any
-shared descriptor arrives. The guardian no longer writes one, but writers still read it: they check the plan even when
-EX succeeds, and a replacement inode fails closed until exact native closure. The plan carries no writer epoch, so an
-already admitted writer can still advance the epoch on that inode.
-
-Payload closure and record collection are separate. A Running v2 record stays until the whole payload group is absent
-and the exact guardian is no longer live: that guardian can retain SH descriptors after its payload has stopped.
-The bounded admission collector uses this same predicate under `.admission.lock`. Explicit fixture cleanup can invoke
-that collector without reserving a new generation; it returns pending or an error unless every record is removable.
-Collection retains the record and private inputs through that interval. Actor capacity ignores confirmed-closed
-payloads even while their guardian metadata remains, including before checking old slot keys or configured limits.
-The finite namespace limit still counts every retained record. Validation and observation errors propagate rather
-than authorizing removal or a new reservation; no historical result supplies a closure fact.
-
-When the original parent survives a guardian failure, its existing idle/request/cleanup polls observe the exact guardian
-birth becoming absent or zombie and request the same owned-group stop primitive used for external native readers. Root
-wait authority is checked without reaping before each macOS group signal. A request being awaited polls this lifetime at
-a bounded interval and returns no proof result after guardian intervention. There is no replacement watcher or alternate
-numeric-PID recovery path. All failed signal or closure observations retain actual ownership.
-
-Optional `NativeCapacitySlot` admission bounds actor keys in that same registry. A key belongs to one exact server
-incarnation while occupied and permits one main and one semantic generation. All occupied keys agree on the configured
-limit; existing active payload groups survive server restart in the count until whole-group absence is observed.
-Retained guardian-only records do not count as occupied actor keys. One global
-`preparation` utility group may coexist without consuming a resident actor key, allowing configuration discovery at a
-full resident quota. It uses a disjoint fresh key and the same configured limit agreement, owner record and admission
-mutex; a second preparation group gets backpressure. Main/semantic actor limits are unchanged. Admission returns
-immediate bounded backpressure when slots are occupied, rather than waiting or redispatching a request. The registry
-also has a 128-record backstop, 32 artifact domains per generation and 256 KiB per owner record. The admission mutex and
-scans use the original remaining startup budget; filesystem syscalls themselves cannot be preempted by this userspace
-deadline.
-
-Preparing means spawn has not been authorized. Before calling `Command::spawn`, the exact owner durably
-publishes `dispatching` and reserves cleanup capacity in the tracker. An error returned from `Command::spawn`
-allows explicit retirement. A parent that reaps its direct child before authenticating it also publishes
-`preparing_closed` and returns the capacity: without HELLO no ACK follows, so no guardian holds read loans and no
-worker started Lean. A guardian may outlive that reservation briefly; it finds the record closed or collected and
-exits. Parent death never collects `dispatching`: the interval between possible spawn
-and authenticated durable identity is unknown and remains fenced. After HELLO the owner retains the authenticated
-stream and birth identities before any fallible write, publishes `bootstrap`, adopts the private group, publishes
-Running and finally ACKs. Pre-Running bootstrap capacity requires both group and guardian absence; Running retains
-the separate payload-only registry occupancy policy described above. Tracker custody always requires both absences.
-The guardian captures its worker and own birth identities before HELLO. After pre-Running group drain it publishes
-`bootstrap_closed`, serialized with parent publication under the admission lock. Registry collection additionally
-requires that exact guardian to be absent. Its bounded dedicated staging file is not evidence; interrupted partial
-staging can be retried by the same guardian. Failed observation or durable publication retains custody.
-A missing committed record with only known protocol temporary files can be collected under the admission mutex;
-spawn is forbidden before durable dispatch publication. Unknown files and malformed records remain fenced.
-
-The external native-scope API now owns spawn and adoption (`LeanWorkerNativeScope::spawn`) rather than accepting
-an already-spawned numeric PID. Downstream native-reader callers of the old `accept` API must migrate before release;
-the current host pin and its tests do not establish conformance to this new boundary. The lease exposes one-time
-`take_stdin`, `take_stdout`, and `take_stderr` plus owned `kill`, `try_wait`, `acknowledge`, and passive custody
-observations; it never returns the raw Child or permits a second adoption.
-
-Preparation source files live only in the literal private `inputs` child of that same generation directory. Public
-scope creation exposes it before body admission; an admitted lease returns the existing directory and permits cleanup
-only after custody closes. Registry collection removes inputs before owner metadata. Cleanup uses descriptor-relative
-no-follow operations, unlinks symlinks themselves, and is bounded by 4096 entries, depth 32 and a two-second userspace
-budget. Unknown generation children, excessive depth and special files preserve the parseable owner record and fail
-closed. Partial count-budget deletion can resume on the next admission. A cancelled exact undispatched Preparing reservation first
-publishes `preparing_closed` in the same record. The command launch must return an error to retire dispatch explicitly.
-This permits cleanup retry and utility-capacity recovery while the original caller remains
-alive, without retiring a Running or uncertain payload. Already collected generations make post-closure cleanup a
-no-op. No additional cleanup process or journal is created.
-
-If another waiter has revoked the actual parent's wait authority (`ECHILD`), confirmed whole-group absence may release
-resource capacity without supplying any exit-status receipt. Other wait errors retain the actual child for retry.
-The SDK can persist a first recovery intent in a guarded Running owner record after the exact original service and
-guardian are non-live and the original worker anchor still matches. The admission lock serializes competing claims.
-Claimed records use registry version 3, which older registry readers refuse. Startup snapshots keep their original format.
-A committed intent carries no signal, descriptor, or launch authority. A replacement must observe the same kernel
-boot session, a non-live exact claimant, and the original live worker anchor under the admission lock. A failed boot
-or process observation keeps the previous intent. An eligible retry discards uncommitted staging under the admission lock.
-After rename, the visible owner record fences further claims even when publication returned an error.
-On guarded startup, the original launcher can publish a boot witness with Running after matching the worker birth
-in Bootstrap and checking that same live worker across the boot observation. The private version 3 Running record
-keeps the witness when a recovery claim is added. Without an observable boot UUID, ordinary startup can continue
-with a version 2 record. Its first claim stores only the claimant's boot UUID. Any future signaling or custody
-reclamation requires the original-worker boot witness and a matching current boot.
-
-Physical capacity recovery never changes an unknown request into a proof result. A failed guardian does not authorize
-signaling a serialized numeric PID: a surviving parent uses only its still-owned unreaped child pin. If both the server
-and guardian disappear, no such signaling authority remains and surviving descendants must close before passive recovery
-can proceed. macOS session pinning and group observation are covered by real-process fault tests; Linux observations
-have weaker atomicity and do not gain an identical platform guarantee from those tests.
-
-An application selects its ownership namespace by calling
-`lean_toolchain::native_guardian::bind_registry_directory(&path)` before the process first uses it. Use the same path
-for the worker's `lifetime_directory` and pass it as `LEAN_RS_WORKER_OWNERS_DIRECTORY` to independently launched SDK
-helpers. The SDK passes the selected path to the helpers it launches. `registry_directory()` is read-only and falls
-back to `lean-rs/native-generations` under the per-user local-data directory. Only reservation creates the directory.
-`validate_registry_directory(&path)` checks a path without binding it. An explicit binding and an environment selection
-must agree. Protected native spawn requires the worker lifetime directory and the writer registry to agree. Cooperating
-readers and writers must share one namespace to see each other's records.
-
-For an unguarded worker using shared artifact reads, an explicit child environment value for the owner directory
-must match the SDK's bound namespace before the parent spawns the worker.
-
-When updating an existing application, close its current native work before switching executables, and bind the
-application's existing namespace explicitly. Keep that directory, its records, and the existing project lock inodes
-in place so the restarted application can use the original custody records.
-
-Public native startup returns `LeanWorkerNativeSpawnError`: `BeforeSpawn`
-means the SDK owns no child handle. This covers a refusal before a child exists and a
-launch error such as exec failure in a child reaped by the standard library. A failed dispatch write can still fence
-the registry. `AfterSpawn` preserves the original error and an owned
-`LeanWorkerNativePendingCleanup`. Callers retain host keepalive resources beside
-that owner until its exact `custody_closed` observation succeeds. Its `try_wait`
-remains separate: ECHILD does not become an exit receipt. Dropping pending
-cleanup transfers local cleanup to the tracker, never certifies closure.
-HELLO wait is synchronous and bounded by the supplied startup timeout; prompt
-mid-wait cancellation is not supported. Callers must check cancellation and their
-deadline after return and before ACK. Host keepalive migration and stage-fixture
-rendezvous migration remain separate integration gates.
+macOS has no atomic close-on-exec pipe call: the standard library calls `pipe` and then sets `FD_CLOEXEC`. The SDK
+serializes that step with its other worker spawns, but a thread outside the SDK that starts a process in that window,
+such as a Lake build, gives that process a copy of the write end. The worker then outlives its parent until that
+process exits. Linux creates the pipe with `pipe2(O_CLOEXEC)` and has no such window.

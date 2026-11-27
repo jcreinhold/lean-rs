@@ -47,13 +47,13 @@ impl MetadataApp {
                 {
                     return Err("worker and record select different host builder tests".to_owned());
                 }
-                Held::acquire(record)
-                    .and_then(|held| {
-                        held.verify()?;
+                let held = Held { record };
+                held.verify()
+                    .map(|()| {
                         if held.record.host_builder_case.is_some() {
                             audit("verified-deployment");
                         }
-                        Ok(Arc::new(held))
+                        Arc::new(held)
                     })
                     .map_err(|error| {
                         if !broken_import_profile() {
@@ -108,7 +108,7 @@ impl MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source verified the session and its exact sealed roots.
-        // Held pins the artifacts. The request table admits only exact source,
+        // Held verified the artifacts. The request table admits only exact source,
         // target, label, verification policy and budgets in this scope.
         let grant = unsafe {
             session.capability.verification_scope(
@@ -261,6 +261,9 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
         "theorem reuseProbeDecl : True := trivial\ntheorem reuseProbeSorry : True := by\n  sorry\n";
     const SCOPE_PROBE: &str =
         "namespace P\n\nsection S\n\nopen Nat in\ntheorem t (h : True) : True := by\n  exact h\n\nend S\n\nend P\n";
+    // Writes a marker in the worker's directory, then stays inside Lean long
+    // after the parent-death test kills its parent.
+    const PARENT_DEATH: &str = "#eval show IO Unit from do\n  IO.FS.writeFile \"busy\" \"\"\n  IO.sleep 60000\n";
     const DEFAULT_LIMITS: [&str; 3] = ["4", "300000", "67108864"];
 
     let source = batch.source.as_str();
@@ -392,6 +395,7 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
         {
             (DEFAULT_LIMITS, true)
         }
+        ("/parent-death/busy.lean", PARENT_DEATH, [Diagnostics { id }]) if id == "busy" => (DEFAULT_LIMITS, true),
         _ => return None,
     };
     Some(FixedBatchPolicy { limits, audit })
@@ -585,7 +589,6 @@ impl WorkerAuthority for MetadataApp {
         let d = &held.record;
         if p.manifest_path() != d.shim_manifest
             || p.manifest_json() != d.shim_json
-            || p.artifact_roots() != d.shim_roots
             || p.shim_search_paths() != d.shim_paths
         {
             if !d.broken_import {
@@ -601,13 +604,12 @@ impl WorkerAuthority for MetadataApp {
         }
         // SAFETY: the build-selected SDK supplied its own compiled shim and full generated ABI.
         // Admission checked both manifests, the common interop image and all image bytes
-        // under the retained deployment guard. This worker uses the pinned private release.
+        // of the verified deployment. This worker uses the pinned private release.
         let shim = unsafe {
             LoadedHostArtifacts::load(
                 runtime,
                 p.manifest_path().into(),
                 p.manifest_json().as_bytes().to_vec(),
-                d.shim_roots.clone(),
                 d.shim_paths.clone(),
                 held.clone(),
             )?
@@ -685,7 +687,7 @@ impl WorkerAuthority for MetadataApp {
         }
         audit("authorize-LeanRsFixture-load");
         // SAFETY: Held verified the reviewed release, fixture image, linked dependencies and
-        // roll-up initializer under the deployment locks retained for the worker lifetime.
+        // roll-up initializer, and no build writes them while this worker runs.
         let library = unsafe { LeanLibrary::open(runtime, path) }?;
         Ok((library, expected))
     }
@@ -731,7 +733,7 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source checked the complete search path and plugin absence. Held
-        // retains the sealed images and imports. Only the named terms can enter their
+        // verified the sealed images and imports. Only the named terms can enter their
         // exact import scopes, with default options and no plugin.
         let grant = unsafe {
             session.capability.term_scope(
@@ -851,7 +853,7 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source checked the complete search path and ruled out plugins.
-        // Held retains the sealed images and imports. Each exact query above is tied
+        // Held verified the sealed images and imports. Each exact query above is tied
         // to its own fixed import scope, with unchanged resource limits.
         let grant = unsafe {
             session.capability.module_query_scope(
@@ -930,7 +932,7 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source checked the actual retained capability, environment
-        // and complete observed roots. Held protects all sealed imports and images.
+        // and complete observed roots. Held verified all sealed imports and images.
         // Only the fixed sources, projections and limits above enter this frontend.
         let grant = unsafe {
             session.capability.cached_module_batch_scope(
@@ -975,7 +977,7 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source checked the exact search path and ruled out plugins.
-        // Held pins the sealed images and imports. The checker admits only the fixed
+        // Held verified the sealed images and imports. The checker admits only the fixed
         // in-memory source, targets, candidate order and budgets in the table.
         let grant = unsafe {
             session.capability.proof_attempt_scope(
@@ -1057,7 +1059,7 @@ impl WorkerAuthority for MetadataApp {
         };
         let roots = self.deployment()?.record.verification_roots();
         // SAFETY: grant_source validated this opened environment's exact import order immediately
-        // before calling verify. Held retains the sealed libraries, modules and release throughout.
+        // before calling verify. Held verified the sealed libraries, modules and release.
         // Only the four reviewed in-memory declarations and their exact options reach the shim.
         let grant = unsafe {
             session
@@ -1090,7 +1092,7 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         // SAFETY: grant_source verified the session and its exact sealed roots.
-        // Held pins the artifacts. This is one checked batch with its exact
+        // Held verified the artifacts. This is one checked batch with its exact
         // ordered targets, source, file label, verification policy and budgets.
         let grant = unsafe {
             session.capability.verification_batch_scope(

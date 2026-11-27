@@ -36,7 +36,7 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 13;
+pub const PROTOCOL_VERSION: u16 = 14;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -130,8 +130,6 @@ pub enum Request {
     Health,
     /// Inspect the already-open host session; never opens or imports a session.
     HostRuntimeMetadata,
-    /// Close this child's read aliases after a known terminal host operation.
-    ReleaseHostRead,
     LoadFixtureCapability {
         manifest_path: String,
     },
@@ -277,10 +275,9 @@ pub enum HostSessionMode {
 pub enum Response {
     /// A fresh source-header import was declined before body execution; retry once in a fresh child.
     HeaderImportRecycle,
-    /// A writer changed a shared output domain; recycle before importing or body work.
+    /// The session's import roots or loaded plugins no longer match what this
+    /// child installed; recycle before importing or body work.
     HostArtifactEpochChanged,
-    /// The child closed its read aliases without issuing an explicit unlock.
-    HostReadReleased,
     HealthOk,
     /// Actual checked bindings and toolchain facts of the current host session.
     HostRuntimeMetadata {

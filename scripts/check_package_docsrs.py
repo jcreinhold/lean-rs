@@ -17,7 +17,6 @@ CRATES = [
     "lean-rs-abi",
     "lean-rs-sys",
     "lean-toolchain",
-    "lean-rs-writer",
     "lean-rs-interop-shims",
     "lean-rs",
     "lean-rs-host",
@@ -125,14 +124,6 @@ def package_contents(version: str, package_dir: pathlib.Path) -> None:
             "src/diagnostics.rs",
             "src/fingerprint.rs",
             "src/source_package.rs",
-        ],
-        "lean-rs-writer": [
-            "Cargo.toml",
-            "LICENSE-APACHE",
-            "LICENSE-MIT",
-            "README.md",
-            "src/lib.rs",
-            "src/main.rs",
         ],
         "lean-rs-interop-shims": [
             "Cargo.toml",

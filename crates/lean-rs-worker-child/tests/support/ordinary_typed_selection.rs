@@ -3,8 +3,8 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-/// Ordinary SDK-owned deployment. The app verifies its sealed images and imports
-/// under real reader locks; this launcher only selects that exact worker and shim descriptor.
+/// Ordinary SDK-owned deployment. The app verifies its sealed images before it
+/// imports them; this launcher only selects that exact worker and shim descriptor.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OrdinaryTypedSelection {

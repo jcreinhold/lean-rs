@@ -456,3 +456,236 @@ fn pre_handshake_child_failure_carries_stderr() {
         other => panic!("expected ChildPanicOrAbort carrying stderr, got {other:?}"),
     }
 }
+
+/// A worker child dies with its parent, even while its main thread is inside a
+/// Lean call.
+///
+/// The test binary runs itself again as the parent. That parent opens the write
+/// end of a probe FIFO in a scratch directory, clears its `FD_CLOEXEC` flag and
+/// starts a real worker there. It then closes its own copy, so the worker holds
+/// the only write end. It writes the worker's pid and asks the worker to
+/// elaborate an `#eval` that creates a marker file and then sleeps for a minute.
+///
+/// Once the marker exists, the probe must still be open. That shows the worker
+/// inherited a descriptor its parent left open without `FD_CLOEXEC`, and that
+/// the SDK did not close it. The test then kills the parent with SIGKILL. The
+/// probe reaches end of file when the worker exits, which must happen long
+/// before its Lean call would return.
+///
+/// Only an application worker may elaborate source. The SDK fixture
+/// qualification runs this test with its sealed worker, whose fixed policy
+/// admits exactly `BUSY_SOURCE` under `BUSY_FILE`.
+#[cfg(unix)]
+mod parent_death {
+    use std::fs;
+    use std::io::{ErrorKind, Read as _};
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    use lean_rs_worker_parent::{
+        LeanWorker, LeanWorkerElabOptions, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
+        LeanWorkerSessionConfig,
+    };
+
+    use super::{ensure_fixture_built, fixture_root, ordinary_typed_selection, ordinary_typed_worker, worker_config};
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    /// Names the directory the parent role works in. Its absence means the
+    /// parent role runs as an ordinary ignored test and does nothing.
+    const DIRECTORY_ENV: &str = "LEAN_RS_TEST_PARENT_DEATH_DIRECTORY";
+
+    /// The file label the fixture worker's policy admits for `BUSY_SOURCE`.
+    const BUSY_FILE: &str = "/parent-death/busy.lean";
+
+    /// Creates `MARKER` in the worker's directory, then keeps the worker
+    /// inside Lean for `LEAN_SLEEP`.
+    const BUSY_SOURCE: &str = "#eval show IO Unit from do\n  IO.FS.writeFile \"busy\" \"\"\n  IO.sleep 60000\n";
+
+    /// The file `BUSY_SOURCE` creates once the worker is inside the Lean call.
+    const MARKER: &str = "busy";
+
+    /// The FIFO whose write end only the worker holds once it is busy.
+    const PROBE: &str = "probe";
+
+    /// How long the Lean call would keep the worker busy if nothing stopped it.
+    const LEAN_SLEEP: Duration = Duration::from_secs(60);
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    fn session_root() -> PathBuf {
+        ordinary_typed_selection::ordinary_typed_selection()
+            .map_or_else(fixture_root, |selected| selected.fixture.clone())
+    }
+
+    /// Removes the test directory on every exit path.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new() -> std::io::Result<Self> {
+            let directory = std::env::temp_dir().join(format!(
+                "lean-rs-parent-death-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&directory)?;
+            Ok(Self(directory.canonicalize()?))
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _cleanup = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Stands in for a host: it starts a worker and keeps it busy in Lean
+    /// until the test kills this process.
+    #[test]
+    #[ignore = "parent role; busy_worker_exits_when_its_parent_is_killed starts it in its own process"]
+    fn parent_role() -> TestResult {
+        let Some(directory) = std::env::var_os(DIRECTORY_ENV).map(PathBuf::from) else {
+            return Ok(());
+        };
+        let config = ordinary_typed_worker::worker_config()
+            .unwrap_or_else(worker_config)
+            .current_dir(&directory);
+        let probe = fs::OpenOptions::new().write(true).open(directory.join(PROBE))?;
+        // Leave the probe open across exec, as a server leaves its store lock.
+        rustix::io::fcntl_setfd(&probe, rustix::io::FdFlags::empty())?;
+        let mut worker = LeanWorker::spawn(&config)?;
+        drop(probe);
+        let pid = worker.__child_pid_for_test().ok_or("worker has no live child")?;
+        fs::write(directory.join("worker.pid"), pid.to_string())?;
+        let session_config = LeanWorkerSessionConfig::new(
+            session_root(),
+            "lean_rs_fixture",
+            "LeanRsFixture",
+            ["LeanRsHostShims.Elaboration"],
+        );
+        let mut session = worker.open_session(&session_config, None, None)?;
+        let outcome = session.process_module_query_batch(
+            BUSY_SOURCE,
+            &[LeanWorkerModuleQuerySelector::Diagnostics { id: "busy".to_owned() }],
+            &LeanWorkerOutputBudgets::default(),
+            &LeanWorkerElabOptions::new().file_label(BUSY_FILE),
+            None,
+            None,
+        );
+        // Reaching this line means the Lean call ended before the test killed
+        // this process; the test reports it as a missing marker or a slow exit.
+        Err(format!("busy Lean call returned: {outcome:?}").into())
+    }
+
+    fn wait_for(
+        limit: Duration,
+        mut done: impl FnMut() -> Result<bool, Box<dyn std::error::Error>>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let started = Instant::now();
+        while started.elapsed() < limit {
+            if done()? {
+                return Ok(true);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        done()
+    }
+
+    /// Whether some process still holds a write end of the probe.
+    fn probe_open(probe: &mut fs::File) -> Result<bool, Box<dyn std::error::Error>> {
+        match probe.read(&mut [0_u8; 1]) {
+            Ok(0) => Ok(false),
+            Ok(_) => Err("the probe carried data".into()),
+            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => Ok(true),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn process_group_of(pid: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let output = Command::new("ps").args(["-o", "pgid=", "-p", pid]).output()?;
+        if !output.status.success() {
+            return Err(format!("ps found no process {pid}").into());
+        }
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    }
+
+    /// Kill a worker that outlived the test, so a failure leaves nothing behind.
+    fn kill_leftover(pid: &str) {
+        let _cleanup = Command::new("kill").args(["-KILL", pid]).status();
+    }
+
+    #[test]
+    fn busy_worker_exits_when_its_parent_is_killed() -> TestResult {
+        if ordinary_typed_selection::ordinary_typed_selection().is_none() {
+            ensure_fixture_built();
+        }
+        let scratch = Scratch::new()?;
+        let fifo = scratch.0.join(PROBE);
+        if !Command::new("mkfifo").arg(&fifo).status()?.success() {
+            return Err("mkfifo failed".into());
+        }
+        // A blocking open of a FIFO's read end would wait for a writer.
+        let mut probe = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)?;
+        let mut command = Command::new(std::env::current_exe()?);
+        command
+            .args(["--exact", "parent_death::parent_role", "--ignored", "--nocapture"])
+            .env(DIRECTORY_ENV, &scratch.0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit());
+        let mut parent = command.spawn()?;
+
+        let marker = scratch.0.join(MARKER);
+        let mut early_exit = None;
+        // Stay inside Nextest's four-minute limit so a failure reports here.
+        let busy = wait_for(Duration::from_secs(120), || {
+            early_exit = parent.try_wait()?;
+            Ok(early_exit.is_some() || marker.exists())
+        })?;
+        let pid = fs::read_to_string(scratch.0.join("worker.pid")).unwrap_or_default();
+        if !busy || early_exit.is_some() || pid.is_empty() {
+            parent.kill()?;
+            parent.wait()?;
+            if !pid.is_empty() {
+                kill_leftover(&pid);
+            }
+            return Err(format!("worker never became busy in Lean; parent exit: {early_exit:?}").into());
+        }
+
+        let group = process_group_of(&pid);
+        if group.as_deref().ok() != Some(pid.as_str()) {
+            parent.kill()?;
+            parent.wait()?;
+            kill_leftover(&pid);
+            return Err(format!("worker {pid} does not lead its own process group: {group:?}").into());
+        }
+
+        // The parent closed its copy before it wrote the pid, so only the
+        // worker can hold the probe open now.
+        if !probe_open(&mut probe)? {
+            parent.kill()?;
+            parent.wait()?;
+            kill_leftover(&pid);
+            return Err(format!("worker {pid} does not hold the probe its parent left open").into());
+        }
+
+        // SIGKILL leaves the parent no chance to stop the worker itself.
+        parent.kill()?;
+        parent.wait()?;
+        let killed = Instant::now();
+        if !wait_for(LEAN_SLEEP / 6, || Ok(!probe_open(&mut probe)?))? {
+            kill_leftover(&pid);
+            return Err(format!("worker {pid} kept the probe open 10 s after its parent died").into());
+        }
+        let elapsed = killed.elapsed();
+        assert!(
+            elapsed < LEAN_SLEEP / 6,
+            "worker took {elapsed:?} to exit after its parent died"
+        );
+        Ok(())
+    }
+}

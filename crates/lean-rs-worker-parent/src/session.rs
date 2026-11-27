@@ -490,9 +490,6 @@ pub struct LeanWorkerTypedStreamSummary<Summary> {
 /// Dropping this value does not stop the worker. If a request is cancelled
 /// while in flight, the supervisor cycles the child process and this session is
 /// invalidated; open a fresh session before issuing more host requests.
-/// With shared artifact reads enabled, finish the known scope through
-/// [`LeanWorker::release_host_read`] after dropping this borrow. An unknown
-/// in-flight operation must retain custody and retire through the supervisor.
 pub struct LeanWorkerSession<'worker> {
     worker: &'worker mut LeanWorker,
     open: bool,

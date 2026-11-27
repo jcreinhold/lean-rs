@@ -690,8 +690,6 @@ fn second_receipt<'lean, 'c>(
     let root = project.0.join(".lake/build/lib/lean");
     assert_eq!(root.canonicalize().expect("canonical empty root"), root);
     assert!(fs::read_dir(&root).expect("inspect empty root").next().is_none());
-    assert!(second.artifact_roots().contains(&project.0));
-    assert!(!first.artifact_roots().contains(&project.0));
     assert_eq!(
         second.shim_capability().library_path(),
         first.shim_capability().library_path()

@@ -1290,14 +1290,6 @@ impl LeanWorkerCapability {
         self.worker.cleanup_pending()
     }
 
-    /// Finish an observed host read scope by closing only child FD aliases.
-    ///
-    /// # Errors
-    /// Refuses unknown active work or a failed release acknowledgement.
-    pub fn release_host_read(&mut self) -> Result<(), LeanWorkerError> {
-        self.worker.release_host_read()
-    }
-
     /// Exact pre-body terminal refusal, preserved before resource cleanup.
     #[must_use]
     pub fn host_session_refusal_since(&self, checkpoint: &LeanWorkerRequestCheckpoint) -> Option<&'static str> {
@@ -1678,14 +1670,6 @@ impl LeanWorkerHostHandle {
         self.worker.cleanup_pending()
     }
 
-    /// Finish an observed host read scope by closing only child FD aliases.
-    ///
-    /// # Errors
-    /// Refuses unknown active work or a failed release acknowledgement.
-    pub fn release_host_read(&mut self) -> Result<(), LeanWorkerError> {
-        self.worker.release_host_read()
-    }
-
     /// Exact pre-body terminal refusal, preserved before resource cleanup.
     #[must_use]
     pub fn host_session_refusal_since(&self, checkpoint: &LeanWorkerRequestCheckpoint) -> Option<&'static str> {
@@ -1878,11 +1862,8 @@ fn spawn_checked_worker(
     validate_worker_child_path(&worker_executable)?;
     let lean_sysroot = worker_child.resolve_lean_sysroot()?;
 
-    let mut config = LeanWorkerConfig::new(worker_executable)
-        .env("LEAN_SYSROOT", lean_sysroot.as_os_str())
-        .shared_artifact_reads(worker_child.shared_artifact_reads);
+    let mut config = LeanWorkerConfig::new(worker_executable).env("LEAN_SYSROOT", lean_sysroot.as_os_str());
     config.application_launch_input = worker_child.application_launch_input;
-    config.shared_writer_executable = worker_child.shared_writer_executable;
     if worker_child.check_loader_environment {
         config = config.checked_native_loader_environment();
     }
@@ -1896,22 +1877,6 @@ fn spawn_checked_worker(
             });
         }
         config = config.env("LEAN_RS_PREPARED_HOST_ARTIFACTS", encoded);
-    }
-    #[cfg(unix)]
-    if let Some(directory) = &worker_child.lifetime_directory {
-        config = config.lifetime_directory(directory);
-    }
-    #[cfg(unix)]
-    if let Some(directory) = &worker_child.lifetime_socket_directory {
-        config = config.lifetime_socket_directory(directory);
-    }
-    #[cfg(unix)]
-    if let Some(executable) = &worker_child.native_guardian_executable {
-        config = config.native_guardian(executable);
-    }
-    #[cfg(unix)]
-    if let Some(slot) = &worker_child.native_capacity_slot {
-        config = config.native_capacity_slot(slot.key.clone(), slot.scope.clone(), slot.limit);
     }
     if let Some(tracker) = process_tracker {
         config = config.process_tracker(tracker);
@@ -2040,19 +2005,9 @@ pub struct LeanWorkerChild {
     explicit_path: Option<PathBuf>,
     env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
-    shared_writer_executable: Option<PathBuf>,
     application_launch_input: Option<String>,
     prepared_host_artifacts: Option<lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts>,
     check_loader_environment: bool,
-    shared_artifact_reads: bool,
-    #[cfg(unix)]
-    lifetime_directory: Option<PathBuf>,
-    #[cfg(unix)]
-    lifetime_socket_directory: Option<PathBuf>,
-    #[cfg(unix)]
-    native_guardian_executable: Option<PathBuf>,
-    #[cfg(unix)]
-    native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
 }
 
 impl LeanWorkerChild {
@@ -2072,19 +2027,9 @@ impl LeanWorkerChild {
             explicit_path: None,
             env_var: None,
             lean_sysroot: None,
-            shared_writer_executable: None,
             application_launch_input: None,
             prepared_host_artifacts: None,
             check_loader_environment: false,
-            shared_artifact_reads: false,
-            #[cfg(unix)]
-            lifetime_directory: None,
-            #[cfg(unix)]
-            lifetime_socket_directory: None,
-            #[cfg(unix)]
-            native_guardian_executable: None,
-            #[cfg(unix)]
-            native_capacity_slot: None,
         }
     }
 
@@ -2096,19 +2041,9 @@ impl LeanWorkerChild {
             explicit_path: Some(path.into()),
             env_var: None,
             lean_sysroot: None,
-            shared_writer_executable: None,
             application_launch_input: None,
             prepared_host_artifacts: None,
             check_loader_environment: false,
-            shared_artifact_reads: false,
-            #[cfg(unix)]
-            lifetime_directory: None,
-            #[cfg(unix)]
-            lifetime_socket_directory: None,
-            #[cfg(unix)]
-            native_guardian_executable: None,
-            #[cfg(unix)]
-            native_capacity_slot: None,
         }
     }
 
@@ -2126,19 +2061,9 @@ impl LeanWorkerChild {
             explicit_path: Some(path.into()),
             env_var: None,
             lean_sysroot: Some(sysroot.into()),
-            shared_writer_executable: None,
             application_launch_input: None,
             prepared_host_artifacts: None,
             check_loader_environment: false,
-            shared_artifact_reads: false,
-            #[cfg(unix)]
-            lifetime_directory: None,
-            #[cfg(unix)]
-            lifetime_socket_directory: None,
-            #[cfg(unix)]
-            native_guardian_executable: None,
-            #[cfg(unix)]
-            native_capacity_slot: None,
         }
     }
 
@@ -2149,15 +2074,6 @@ impl LeanWorkerChild {
     #[must_use]
     pub fn lean_sysroot(mut self, sysroot: impl Into<PathBuf>) -> Self {
         self.lean_sysroot = Some(sysroot.into());
-        self
-    }
-
-    /// Bind the process-bound helper used for host-side Lake shared writes.
-    ///
-    /// The worker receives the explicit helper path rather than searching PATH.
-    #[must_use]
-    pub fn shared_writer_executable(mut self, executable: impl Into<PathBuf>) -> Self {
-        self.shared_writer_executable = Some(executable.into());
         self
     }
 
@@ -2182,71 +2098,16 @@ impl LeanWorkerChild {
 
     /// Select the exact prepared host shims for this worker generation.
     ///
-    /// An ordinary child passes the snapshot to its application's host loader.
-    /// The application must verify the actual artifacts and retain their custody.
-    /// A shared-read child also acquires the admitted domains through its guardian.
-    /// An explicit descriptor error fails startup or session admission.
+    /// The child passes the snapshot to its application's host loader. The
+    /// application must verify the actual artifacts and keep them unchanged
+    /// while the worker uses them. An explicit descriptor error fails startup
+    /// or session admission.
     #[must_use]
     pub fn prepared_host_artifacts(
         mut self,
         artifacts: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts,
     ) -> Self {
         self.prepared_host_artifacts = Some(artifacts);
-        self
-    }
-
-    /// Enable the worker's authenticated, durable parent startup lifeline.
-    ///
-    /// See [`LeanWorkerConfig::lifetime_directory`] for the inherited-group
-    /// lifecycle boundary. This is opt-in and does not recover old proof results.
-    #[cfg(unix)]
-    #[must_use]
-    pub fn lifetime_directory(mut self, directory: impl Into<PathBuf>) -> Self {
-        self.lifetime_directory = Some(directory.into());
-        self
-    }
-
-    /// Select the private directory for the temporary parent socket.
-    ///
-    /// See [`LeanWorkerConfig::lifetime_socket_directory`] for path and
-    /// ownership requirements. Requires [`Self::lifetime_directory`].
-    #[cfg(unix)]
-    #[must_use]
-    pub fn lifetime_socket_directory(mut self, directory: impl Into<PathBuf>) -> Self {
-        self.lifetime_socket_directory = Some(directory.into());
-        self
-    }
-
-    /// Bind a link-free independent guardian for this worker generation.
-    ///
-    /// Use the same ownership registry for the guardian and all managed
-    /// writers.
-    #[cfg(unix)]
-    #[must_use]
-    pub fn native_guardian(mut self, executable: impl Into<PathBuf>) -> Self {
-        self.native_guardian_executable = Some(executable.into());
-        self
-    }
-
-    /// Bind this generation to a bounded actor slot shared with a companion.
-    ///
-    /// The registry keeps occupied slots across broker death until their actual
-    /// groups close. Each slot permits one main and one companion scope.
-    #[cfg(unix)]
-    #[must_use]
-    pub fn native_capacity_slot(mut self, key: impl Into<String>, scope: impl Into<String>, limit: usize) -> Self {
-        self.native_capacity_slot = Some(lean_toolchain::native_guardian::NativeCapacitySlot {
-            key: key.into(),
-            scope: scope.into(),
-            limit,
-        });
-        self
-    }
-
-    /// Require actual read custody in every opened host session.
-    #[must_use]
-    pub fn shared_artifact_reads(mut self, required: bool) -> Self {
-        self.shared_artifact_reads = required;
         self
     }
 

@@ -1,72 +1,85 @@
-//! Optional parent lifeline, established before the Lean runtime starts.
+//! The parent lifeline: the read end of a pipe whose write end only the parent holds.
 //!
-//! The configured independent guardian owns group cleanup and read custody.
-//! Legacy opt-in lifelines without that configuration remain self-only.
+//! The parent passes the descriptor number in `LEAN_RS_WORKER_PARENT_LIFELINE`.
+//! When the parent exits, the kernel closes the write end, the read returns end
+//! of file, and this process exits at once, even while another thread is inside
+//! a Lean call. Without the variable, the child relies on stdin end of file.
 #![allow(
     unsafe_code,
-    reason = "setsid establishes this process session; _exit terminates only this current process"
+    reason = "fcntl checks and flags the inherited descriptor; _exit ends only this process"
 )]
 
-pub(crate) use lean_toolchain::native_guardian::GuardianHandle;
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::time::Duration;
+use std::fs::File;
+use std::io::{self, Read};
+use std::os::fd::{FromRawFd as _, RawFd};
+use std::os::unix::fs::FileTypeExt as _;
 
-pub(crate) fn install_parent_watchdog() -> io::Result<Option<GuardianHandle>> {
-    let Some(socket) = std::env::var_os("LEAN_RS_WORKER_PARENT_SOCKET") else {
-        return if std::env::var_os(lean_toolchain::native_guardian::EXECUTABLE_ENV).is_some() {
-            Err(io::Error::other("native guardian requires parent lifeline"))
-        } else {
-            Ok(None)
-        };
+/// Names the inherited read end of the parent lifeline pipe.
+pub(crate) const LIFELINE_ENV: &str = "LEAN_RS_WORKER_PARENT_LIFELINE";
+
+/// Exit status of a child whose parent lifeline closed.
+const PARENT_LOST_EXIT: i32 = 125;
+
+/// Start the thread that exits this process when the parent lifeline closes.
+///
+/// # Errors
+/// Returns an error if the variable does not name an inherited read end of a
+/// pipe, or if the thread cannot start.
+pub(crate) fn install_parent_watchdog() -> io::Result<()> {
+    let Some(value) = std::env::var_os(LIFELINE_ENV) else {
+        return Ok(());
     };
-    let nonce = std::env::var("LEAN_RS_WORKER_PARENT_NONCE").map_err(io::Error::other)?;
-    if nonce.len() != 48 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(io::Error::other("invalid parent lifeline nonce"));
-    }
-    // SAFETY: fresh child bootstrap before Lean; scalar setsid failure prevents
-    // all runtime/body work, and no foreign process identity is signalled.
-    let session = unsafe { libc::setsid() };
-    if session < 0 || session as u32 != std::process::id() {
-        return Err(io::Error::last_os_error());
-    }
-    if let Some(executable) = std::env::var_os(lean_toolchain::native_guardian::EXECUTABLE_ENV) {
-        return GuardianHandle::spawn(
-            Path::new(&executable),
-            Path::new(&socket),
-            &nonce,
-            Duration::from_secs(30),
-        )
-        .map(Some);
-    }
-    let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.write_all(format!("{nonce} {}\n", std::process::id()).as_bytes())?;
-    let mut acknowledgment = String::new();
-    BufReader::new(&stream).take(64).read_line(&mut acknowledgment)?;
-    if acknowledgment != "durable-owner-ready\n" {
-        return Err(io::Error::other("durable startup ACK missing"));
-    }
-    stream.set_read_timeout(None)?;
+    let descriptor = value
+        .to_str()
+        .and_then(|text| text.parse::<RawFd>().ok())
+        .filter(|descriptor| *descriptor > 2)
+        .ok_or_else(|| io::Error::other("invalid parent lifeline descriptor"))?;
+    let lifeline = adopt(descriptor)?;
     std::thread::Builder::new()
         .name("lean-parent-lifeline".to_owned())
         .spawn(move || {
-            let _observed = std::panic::catch_unwind(move || {
-                let mut byte = [0_u8; 1];
-                let _delivery = stream.read(&mut byte);
-            });
-            // SAFETY: EOF, unexpected data, read error or panic exits only this
-            // worker; parent capacity still waits for verified session absence.
-            unsafe { libc::_exit(125) }
+            let _observed = std::panic::catch_unwind(move || wait_for_close(lifeline));
+            // SAFETY: `_exit` ends only this process and runs no destructors or
+            // atexit handlers, so it cannot wait on a thread stuck in Lean.
+            unsafe { libc::_exit(PARENT_LOST_EXIT) }
         })?;
-    Ok(None)
+    Ok(())
+}
+
+/// Take ownership of the inherited read end after checking what it is.
+fn adopt(descriptor: RawFd) -> io::Result<File> {
+    // SAFETY: F_GETFL only reads the status flags of a descriptor number and
+    // fails with EBADF if none is open there.
+    let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: F_GETFL succeeded, so the descriptor is open. It arrived with
+    // exec, so no other handle in this process owns it. ManuallyDrop leaves it
+    // open if the checks below refuse it.
+    let file = std::mem::ManuallyDrop::new(unsafe { File::from_raw_fd(descriptor) });
+    if flags & libc::O_ACCMODE != libc::O_RDONLY || !file.metadata()?.file_type().is_fifo() {
+        return Err(io::Error::other("parent lifeline is not the read end of a pipe"));
+    }
+    // Keep processes this child starts, such as Lake, from holding the lifeline.
+    // SAFETY: F_SETFD changes only the close-on-exec flag of this open descriptor.
+    if unsafe { libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(std::mem::ManuallyDrop::into_inner(file))
+}
+
+/// Block until the lifeline reaches end of file, carries data, or fails.
+fn wait_for_close(mut lifeline: File) {
+    let mut byte = [0_u8; 1];
+    loop {
+        match lifeline.read(&mut byte) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Ok(_) | Err(_) => return,
+        }
+    }
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    reason = "isolated bootstrap tests own their sockets and child processes"
-)]
 #[path = "parent_watchdog/tests.rs"]
 mod tests;

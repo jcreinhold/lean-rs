@@ -23,7 +23,6 @@ include = [
 
 [dependencies]
 lean-rs-host = { path = "../../crates/lean-rs-host" }
-lean-toolchain = { path = "../../crates/lean-toolchain" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 

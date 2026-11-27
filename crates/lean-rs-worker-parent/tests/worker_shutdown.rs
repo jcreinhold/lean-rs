@@ -118,24 +118,12 @@ fn main() {
     public_worker_handles_keep_unwind_safety();
     let tests: &[(&str, fn() -> Result<(), String>)] = &[
         (
-            "terminal_refusal_survives_release_but_not_later_dispatch",
-            terminal_refusal_survives_release_but_not_later_dispatch,
-        ),
-        (
-            "terminal_refusal_survives_failed_release_replacement",
-            terminal_refusal_survives_failed_release_replacement,
-        ),
-        (
-            "read_custody_metadata_is_required_before_body",
-            read_custody_metadata_is_required_before_body,
+            "terminal_refusal_survives_until_later_dispatch",
+            terminal_refusal_survives_until_later_dispatch,
         ),
         (
             "artifact_epoch_change_recycles_all_pooled_state_before_body",
             artifact_epoch_change_recycles_all_pooled_state_before_body,
-        ),
-        (
-            "read_release_failure_seals_owner_without_proof_replay",
-            read_release_failure_seals_owner_without_proof_replay,
         ),
         (
             "host_metadata_is_checked_before_session_is_exposed",
@@ -460,7 +448,7 @@ fn run_fake_child(mode: &str) {
                 ..
             } => {
                 host_open_count = host_open_count.saturating_add(1);
-                if mode.starts_with("host_read_refuse_once") && host_open_count == 1 {
+                if mode == "refuse_once" && host_open_count == 1 {
                     write_frame(
                         &mut stdout,
                         Message::Response(Response::Error {
@@ -472,7 +460,7 @@ fn run_fake_child(mode: &str) {
                     .expect("fake terminal import refusal");
                     continue;
                 }
-                if mode == "host_read_epoch" && host_open_count == 2 {
+                if mode == "artifact_epoch" && host_open_count == 2 {
                     write_frame(
                         &mut stdout,
                         Message::Response(Response::HostArtifactEpochChanged),
@@ -668,19 +656,6 @@ fn run_fake_child(mode: &str) {
                 stdout.flush().expect("fake child flushes terminating response");
                 return;
             }
-            Request::ReleaseHostRead
-                if mode == "host_read_release_hang" || mode == "host_read_refuse_once_release_hang" =>
-            {
-                sleep_forever()
-            }
-            Request::ReleaseHostRead => {
-                write_frame(
-                    &mut stdout,
-                    Message::Response(Response::HostReadReleased),
-                    MAX_FRAME_BYTES,
-                )
-                .expect("fake read alias release");
-            }
             Request::CapabilityMetadata { .. } if mode.starts_with("host_metadata_") => {
                 if let Some(root) = env::var_os("LEAN_SYSROOT") {
                     std::fs::write(PathBuf::from(root).join("capability-export-dispatched"), b"dispatched")
@@ -708,13 +683,6 @@ fn run_fake_child(mode: &str) {
                 }
                 let fingerprint = if mode == "host_metadata_bad" { "c" } else { "a" };
                 let metadata = LeanWorkerHostRuntimeMetadata {
-                    effective_import_roots: None,
-                    artifact_read_epochs: mode.starts_with("host_read_").then(|| {
-                        vec![lean_rs_worker_parent::LeanWorkerArtifactReadEpoch {
-                            project_root: "/fake-metadata-project".to_owned(),
-                            epoch: "writer-before-turn-17".to_owned(),
-                        }]
-                    }),
                     compiled_lean_version: "4.35.0".into(),
                     compiled_header_sha256: "b".repeat(64),
                     runtime_lean_version: Some("4.35.0".into()),
@@ -2594,29 +2562,13 @@ fn host_metadata_accepts_compatible_extra_bindings() -> Result<(), String> {
     Ok(())
 }
 
-fn read_custody_metadata_is_required_before_body() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("host_metadata_ok", |config| config.shared_artifact_reads(true))
-        .map_err(|error| error.to_string())?;
-    let result = worker.open_session(&host_metadata_config(), None, None);
-    let error = result
-        .err()
-        .ok_or_else(|| "missing custody exposed a host session".to_owned())?;
-    assert!(error.to_string().contains("actual project artifact read custody"));
-    assert!(worker.host_runtime_metadata().is_none());
-    assert_eq!(worker.stats().requests, 1, "no proof body was dispatched");
-    worker.try_shutdown().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
 fn artifact_epoch_change_recycles_all_pooled_state_before_body() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("host_read_epoch", |config| config.shared_artifact_reads(true))
-        .map_err(|error| error.to_string())?;
+    let mut worker = fake_worker("artifact_epoch").map_err(|error| error.to_string())?;
     {
         let _session = worker
             .open_session(&host_metadata_config(), None, None)
             .map_err(|error| error.to_string())?;
     }
-    worker.release_host_read().map_err(|error| error.to_string())?;
     let first = worker.host_runtime_metadata().cloned();
     {
         let _session = worker
@@ -2634,33 +2586,12 @@ fn artifact_epoch_change_recycles_all_pooled_state_before_body() -> Result<(), S
         "new process imports rather than reusing old pooled state"
     );
     assert_eq!(worker.host_runtime_metadata(), first.as_ref());
-    worker.release_host_read().map_err(|error| error.to_string())?;
     worker.try_shutdown().map_err(|error| error.to_string())?;
     Ok(())
 }
 
-fn read_release_failure_seals_owner_without_proof_replay() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("host_read_release_hang", |config| config.shared_artifact_reads(true))
-        .map_err(|error| error.to_string())?;
-    {
-        let _session = worker
-            .open_session(&host_metadata_config(), None, None)
-            .map_err(|error| error.to_string())?;
-    }
-    assert!(worker.release_host_read().is_err());
-    assert!(worker.cleanup_pending(), "unknown cleanup cannot accept another body");
-    assert_eq!(
-        worker.stats().imports,
-        1,
-        "cleanup never repeats the original import or body"
-    );
-    worker.try_shutdown().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn terminal_refusal_survives_release_but_not_later_dispatch() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("host_read_refuse_once", |config| config.shared_artifact_reads(true))
-        .map_err(|error| error.to_string())?;
+fn terminal_refusal_survives_until_later_dispatch() -> Result<(), String> {
+    let mut worker = fake_worker("refuse_once").map_err(|error| error.to_string())?;
     let checkpoint = worker.request_checkpoint();
     let error = worker
         .open_session(&host_metadata_config(), None, None)
@@ -2670,12 +2601,6 @@ fn terminal_refusal_survives_release_but_not_later_dispatch() -> Result<(), Stri
     assert_eq!(
         worker.host_session_refusal_since(&checkpoint),
         Some("open_worker_session")
-    );
-    assert_eq!(
-        worker
-            .pending_request_stop_since(&checkpoint)
-            .map(|pending| pending.operation()),
-        Some("release_host_read")
     );
     assert!(
         worker
@@ -2717,39 +2642,6 @@ fn terminal_refusal_survives_release_but_not_later_dispatch() -> Result<(), Stri
     assert!(
         worker.host_session_refusal_since(&checkpoint).is_none(),
         "successful session/body in the same checkpoint has no earlier refusal"
-    );
-    worker.release_host_read().map_err(|error| error.to_string())?;
-    worker.try_shutdown().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn terminal_refusal_survives_failed_release_replacement() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("host_read_refuse_once_release_hang", |config| {
-        config.shared_artifact_reads(true)
-    })
-    .map_err(|error| error.to_string())?;
-    let checkpoint = worker.request_checkpoint();
-    let error = worker
-        .open_session(&host_metadata_config(), None, None)
-        .err()
-        .ok_or_else(|| "fixture must refuse its first host open".to_owned())?;
-    assert!(
-        matches!(error, LeanWorkerError::Worker { ref code, .. } if code == "fake.import_refused"),
-        "cleanup cannot overwrite the original framed refusal"
-    );
-    assert_eq!(
-        worker.host_session_refusal_since(&checkpoint),
-        Some("open_worker_session")
-    );
-    assert_eq!(worker.stats().restarts, 1, "only cleanup replaced the generation");
-    assert!(
-        worker.cleanup_pending(),
-        "unknown release remains sealed despite known target phase"
-    );
-    assert!(
-        worker
-            .host_session_refusal_since(&worker.request_checkpoint())
-            .is_none()
     );
     worker.try_shutdown().map_err(|error| error.to_string())?;
     Ok(())

@@ -19,8 +19,8 @@ owns linking, object conversion, scheduling, diagnostics, and packaging.
 ## Start with a runnable project
 
 The [shipped-crate template](templates/shipped-lean-crate/) builds its Lean library from `build.rs` and calls it from
-Rust. It also includes an application-owned worker binary. Set `LEAN_RS_WRITER_EXECUTABLE` to configure the writer for
-shared-source builds. See the [build prerequisites](docs/recipes/ship-crate-with-lean.md) before running:
+Rust. It also includes an application-owned worker binary. See the
+[build prerequisites](docs/recipes/ship-crate-with-lean.md) before running:
 
 ```sh
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
@@ -55,7 +55,6 @@ All published crates share the workspace version; dependency examples use `"0.11
 | Build the Lean-linked worker binary | [`lean-rs-worker-child`](crates/lean-rs-worker-child/README.md) |
 | Implement a worker protocol peer | [`lean-rs-worker-protocol`](crates/lean-rs-worker-protocol/README.md) |
 | Discover toolchains or build and package Lean capabilities | [`lean-toolchain`](crates/lean-toolchain/README.md) |
-| Run the shared Lake writer or the worker's guardian helper | [`lean-rs-writer`](crates/lean-rs-writer/README.md) |
 | Read static ABI metadata without Lean installed | [`lean-rs-abi`](crates/lean-rs-abi/README.md) |
 | Materialize the reusable Lean callback and streaming shims | [`lean-rs-interop-shims`](crates/lean-rs/shims/lean-rs-interop-shims/README.md) |
 | Call raw Lean C symbols with explicit unsafe obligations | [`lean-rs-sys`](crates/lean-rs-sys/README.md) |

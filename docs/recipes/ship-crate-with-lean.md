@@ -13,19 +13,16 @@ cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shippe
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
 ```
 
-The template's build script uses `PrivateLakeBootstrap` for the packaged demo and the host-owned shims. The first
-command calls Lean in process. The other two build the application-owned child and open a worker session. A shared
-project that cannot meet the private bootstrap requirements uses the configured shared-writer helper.
+The template's build script runs Lake for the packaged demo and the host-owned shims. The first command calls Lean in
+process. The other two build the application-owned child and open a worker session.
 
-The template depends on the workspace's matching `lean-rs`, `lean-rs-worker-parent`, `lean-rs-worker-child` and
-`lean-toolchain` crates by path. Its `Cargo.toml` also lists the dependencies for the application-owned artifact
+The template depends on the workspace's matching `lean-rs`, `lean-rs-host`, `lean-rs-worker-parent` and
+`lean-rs-worker-child` crates by path, and its build script on `lean-toolchain`. Its `Cargo.toml` also lists the dependencies for the application-owned artifact
 checks. Keep the parent, child, runtime and capability artifacts compatible when packaging them together.
 
 ## Build the capability
 
-`CargoLeanCapability` names the Lake root, target, package, module, and trusted export ABI. For Lean sources and all
-materialized dependencies strictly below one Cargo package, an explicit `PrivateLakeBootstrap` permits package-local
-builds before a shared-writer executable exists:
+`CargoLeanCapability` names the Lake root, target, package, module, and trusted export ABI:
 
 ```rust,ignore
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,11 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LeanExportSignature,
     };
 
-    let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
-    let lean_root = owner.join("lean");
-    let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
+    let lean_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?).join("lean");
     lean_toolchain::CargoLeanCapability::new(&lean_root, "MyCapability")
-        .private_bootstrap(bootstrap)
         .package("my_app")
         .module("MyCapability")
         .export_signature(LeanExportSignature::function(
@@ -58,9 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For shared project roots or dependencies outside the Cargo owner, use the configured shared-writer helper instead;
-`private_bootstrap` rejects escaped roots. The helper emits Lean link directives and Cargo rerun triggers, builds or
-reuses the Lake shared target, and writes a JSON capability manifest. Its compile-time outputs are:
+The builder runs Lake directly and takes no lock; see
+[Concurrent builds](../architecture/build-and-link.md#concurrent-builds). It emits Lean link directives and Cargo rerun
+triggers, builds or reuses the Lake shared target, and writes a JSON capability manifest. Its compile-time outputs are:
 
 ```text
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST=<manifest path>
@@ -75,7 +69,8 @@ that trusted metadata.
 
 The template embeds the manifest and image selected by its build, verifies the expected module and dependency list,
 and writes the image bytes into an application-owned private directory. It uses the matching Lean runtime and
-passes custody of that directory to `TrustedWorkerCapability::load_snapshot`. The unsafe call admits exactly
+passes that directory's guard to `TrustedWorkerCapability::load_snapshot`, which keeps the directory until the
+capability drops. The unsafe call admits exactly
 `ship_lean_demo_add` as `WorkerExportContract::U64Binary`. The resulting typed binding runs in the current process.
 [Complete in-process caller](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/main.rs)
 

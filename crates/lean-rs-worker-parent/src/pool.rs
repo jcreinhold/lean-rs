@@ -1414,9 +1414,7 @@ mod tests {
         let caller = LeanWorkerProcessTracker::new();
         let mut unrelated_command = std::process::Command::new("/bin/sleep");
         unrelated_command.arg("30");
-        let mut unrelated = caller
-            .spawn(&mut unrelated_command)
-            .expect("spawn unrelated test child");
+        let mut unrelated = caller.spawn(unrelated_command).expect("spawn unrelated test child");
 
         let builder = |name| {
             LeanWorkerCapabilityBuilder::new(".", name, name, std::iter::empty::<String>())
@@ -1431,7 +1429,7 @@ mod tests {
                 failed = Some(
                     observed.test_process_tracker()
                         .expect("cold opener has a process tracker")
-                        .spawn(&mut command)
+                        .spawn(command)
                         .expect("spawn failed-open test child"),
                 );
                 Err(LeanWorkerError::Protocol { message: "original cold-open error".to_owned() })
@@ -1486,7 +1484,7 @@ mod tests {
                 observed
                     .test_process_tracker()
                     .expect("reopen has a process tracker")
-                    .spawn(&mut command)
+                    .spawn(command)
                     .expect("spawn failed replacement child"),
             );
             Err(LeanWorkerError::Protocol {
@@ -1514,7 +1512,7 @@ mod tests {
                     observed
                         .test_process_tracker()
                         .expect("unrelated reopen has a process tracker")
-                        .spawn(&mut command)
+                        .spawn(command)
                         .expect("spawn unrelated child"),
                 );
                 Err(LeanWorkerError::Protocol { message: "unrelated opener ran".to_owned() })
@@ -1538,170 +1536,6 @@ mod tests {
             Err(LeanWorkerError::Protocol { message }) if message == "entry can reopen"
         ));
         stop(&mut unrelated_child.expect("unrelated child was spawned"));
-    }
-
-    #[test]
-    fn pool_reopen_guardian_fixture() {
-        if std::env::var_os("LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD").is_none() {
-            return;
-        }
-        let state = PathBuf::from(std::env::var_os("LEAN_RS_TEST_POOL_REOPEN_ROOT").expect("fixture root"));
-        let retired = lean_toolchain::native_guardian::run_guardian_cli();
-        let deadline = Instant::now() + Duration::from_secs(15);
-        while state.join("hold-guardian").exists() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        retired.expect("run fixture guardian");
-    }
-
-    #[test]
-    #[ignore = "requires a job-owned prepared Lean 4.36 fixture"]
-    fn real_failed_reopen_waits_for_guardian() {
-        use lean_toolchain::native_guardian::NativeProcessIdentity;
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let state = PathBuf::from(std::env::var_os("LEAN_RS_TEST_POOL_REOPEN_ROOT").expect("fixture root"));
-        let selection: Value = serde_json::from_str(
-            &std::env::var("LEAN_RS_TEST_ORDINARY_TYPED_SESSION").expect("prepared fixture selection"),
-        )
-        .expect("parse fixture selection");
-        assert_eq!(
-            selection.get("fixture").and_then(Value::as_str).map(PathBuf::from),
-            Some(state.join("lean"))
-        );
-        let worker = selection
-            .get("worker")
-            .and_then(Value::as_str)
-            .expect("selected worker");
-        let hash = std::process::Command::new("/usr/bin/shasum")
-            .args(["-a", "256", worker])
-            .output()
-            .expect("hash fixture worker");
-        assert!(hash.status.success());
-        assert_eq!(
-            String::from_utf8_lossy(&hash.stdout).split_whitespace().next(),
-            selection.get("worker_sha256").and_then(Value::as_str)
-        );
-        let owners = lean_toolchain::native_guardian::registry_directory().expect("private fixture registry");
-        assert_eq!(owners, state.join("owners"));
-        lean_toolchain::native_guardian::collect_closed_owner_records(&owners, Duration::from_secs(2))
-            .expect("fixture registry has no previous open scope");
-        let guardian_script = state.join("guardian");
-        let this = std::env::current_exe().expect("fixture executable");
-        let quoted = this.to_str().expect("UTF-8 fixture executable").replace('\'', "'\\''");
-        let root = state.to_str().expect("UTF-8 fixture root").replace('\'', "'\\''");
-        std::fs::write(
-            &guardian_script,
-            format!(
-                "#!/bin/sh\n\
-                 export LEAN_RS_TEST_POOL_REOPEN_ROOT='{root}'\n\
-                 exec '{quoted}' --exact pool::tests::pool_reopen_guardian_fixture --nocapture\n"
-            ),
-        )
-        .expect("write disposable guardian launcher");
-        std::fs::set_permissions(&guardian_script, std::fs::Permissions::from_mode(0o700))
-            .expect("enable disposable guardian launcher");
-        let tracker = LeanWorkerProcessTracker::new();
-        let builder = |imports: &[&str]| {
-            LeanWorkerCapabilityBuilder::from_built_capability(
-                &lean_toolchain::LeanBuiltCapability::manifest_path(
-                    selection
-                        .get("json_manifest")
-                        .and_then(Value::as_str)
-                        .expect("fixture manifest"),
-                ),
-                imports.iter().copied(),
-            )
-            .expect("use prepared capability")
-            .worker_child(
-                crate::LeanWorkerChild::for_toolchain(
-                    worker,
-                    selection.get("sysroot").and_then(Value::as_str).expect("sysroot"),
-                )
-                .checked_native_loader_environment()
-                .native_guardian(&guardian_script)
-                .lifetime_directory(&owners)
-                .lifetime_socket_directory(PathBuf::from(
-                    std::env::var_os("LEAN_RS_TEST_POOL_REOPEN_SOCKETS").expect("short private socket directory"),
-                )),
-            )
-            .process_tracker(tracker.clone())
-            .shutdown_timeout(Duration::from_millis(500))
-        };
-        let first = builder(&["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"]);
-        let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2));
-        pool.acquire_lease(first.clone())
-            .expect("open original Lean entry")
-            .release();
-        pool.entries
-            .first_mut()
-            .expect("original pool entry")
-            .capability
-            .try_shutdown()
-            .expect("retire original entry");
-        assert_eq!(tracker.active_processes(), 0);
-
-        let hold = state.join("hold-guardian");
-        std::fs::write(&hold, b"").expect("hold guardian after normal drain");
-        let mut guardian = None;
-        assert!(matches!(
-            pool.acquire_lease_with_open(first.clone(), |observed| {
-                let replacement = observed.open().expect("open actual replacement");
-                guardian = std::fs::read_dir(&owners)
-                    .expect("read fixture registry")
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| std::fs::read(entry.path().join("owner.json")).ok())
-                    .filter_map(|record| serde_json::from_slice::<Value>(&record).ok())
-                    .filter_map(|record| {
-                        let guardian = record.get("guardian")?.clone();
-                        serde_json::from_value::<NativeProcessIdentity>(guardian).ok()
-                    })
-                    .find(|identity| identity.is_live().expect("observe exact guardian"));
-                drop(replacement);
-                Err(LeanWorkerError::Protocol { message: "original replacement refusal".to_owned() })
-            }),
-            Err(LeanWorkerError::Protocol { message }) if message == "original replacement refusal"
-        ));
-        let guardian = guardian.expect("replacement published its exact guardian identity");
-        assert!(guardian.is_live().expect("held guardian remains alive"));
-        assert_eq!(tracker.active_processes(), 1);
-        assert!(matches!(
-            pool.acquire_lease_with_open(first.clone(), |_| panic!("second launch before closure")),
-            Err(LeanWorkerError::ShutdownInProgress {
-                operation: "pool_acquire_lease"
-            })
-        ));
-        pool.acquire_lease(builder(&["LeanRsFixture.Scalars"]))
-            .expect("admit disjoint key")
-            .release();
-        assert_eq!(tracker.active_processes(), 2);
-        assert!(
-            guardian
-                .is_live()
-                .expect("held guardian remains alive through disjoint admission")
-        );
-        std::fs::remove_file(&hold).expect("release test guardian");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while tracker.active_processes() != 1 {
-            assert!(Instant::now() < deadline, "failed replacement did not close");
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(!guardian.is_live().expect("guardian closure"));
-        let mut reopened = 0;
-        pool.acquire_lease_with_open(first.clone(), |observed| {
-            reopened += 1;
-            observed.open()
-        })
-        .expect("same key reopens after closure")
-        .release();
-        pool.acquire_lease_with_open(first, |_| panic!("warm reuse launched a second replacement"))
-            .expect("reuse the admitted replacement")
-            .release();
-        assert_eq!(reopened, 1);
-        drop(pool);
-        assert_eq!(tracker.active_processes(), 0);
-        lean_toolchain::native_guardian::collect_closed_owner_records(&owners, Duration::from_secs(2))
-            .expect("all fixture workers and guardians closed");
     }
 
     #[test]

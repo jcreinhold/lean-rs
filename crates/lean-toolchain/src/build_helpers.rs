@@ -194,7 +194,7 @@ fn emit_lean_link_directives_checked_with_options(opts: &DiscoverOptions) -> Res
 /// unsuccessfully, and [`LinkDiagnostics::LakeOutputUnresolved`] for unreadable manifests,
 /// source-set traversal failures, cache write failures, or missing built dylibs.
 pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
-    let mut runner = RealLakeRunner::default();
+    let mut runner = RealLakeRunner;
     build_lake_target_with_runner_and_options(
         project_root,
         target_name,
@@ -215,7 +215,7 @@ pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathB
 ///
 /// Returns the same [`LinkDiagnostics`] variants as [`build_lake_target`].
 pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
-    let mut runner = RealLakeRunner::default();
+    let mut runner = RealLakeRunner;
     build_lake_target_with_runner_and_options(
         project_root,
         target_name,
@@ -223,23 +223,6 @@ pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result
         CargoMetadata::Suppress,
         &LakeBuildOptions::default(),
     )
-}
-
-/// Build only the bundled package named by an explicit private bootstrap token.
-///
-/// # Errors
-/// Returns the ordinary Lake build/cache diagnostics for that package.
-pub fn build_private_lake_target_quiet(
-    bootstrap: crate::shared_writer::PrivateLakeBootstrap,
-    target_name: &str,
-) -> Result<PathBuf, LinkDiagnostics> {
-    let root = bootstrap.project_root().to_path_buf();
-    let options = LakeBuildOptions {
-        private_bootstrap: Some(bootstrap),
-        ..LakeBuildOptions::default()
-    };
-    let mut runner = RealLakeRunner::default();
-    build_lake_target_with_runner_and_options(&root, target_name, &mut runner, CargoMetadata::Suppress, &options)
 }
 
 /// Build-script helper for shipping a Rust crate with bundled Lean code.
@@ -269,8 +252,6 @@ pub struct CargoLeanCapability {
     lean_sysroot: Option<PathBuf>,
     lean_num_threads: Option<u32>,
     generated_output_key: Option<String>,
-    private_bootstrap: Option<crate::shared_writer::PrivateLakeBootstrap>,
-    writer_executable: Option<PathBuf>,
     export_signatures: Vec<LeanExportSignature>,
     dependencies: Vec<LeanLibraryDependency>,
 }
@@ -289,25 +270,9 @@ impl CargoLeanCapability {
             lean_sysroot: None,
             lean_num_threads: None,
             generated_output_key: None,
-            private_bootstrap: None,
-            writer_executable: None,
             export_signatures: Vec::new(),
             dependencies: Vec::new(),
         }
-    }
-
-    /// Permit only a typed package-local bootstrap when no helper exists.
-    #[must_use]
-    pub fn private_bootstrap(mut self, bootstrap: crate::shared_writer::PrivateLakeBootstrap) -> Self {
-        self.private_bootstrap = Some(bootstrap);
-        self
-    }
-
-    /// Bind the shared-writer helper explicitly for parent-side builds.
-    #[must_use]
-    pub fn writer_executable(mut self, executable: impl Into<PathBuf>) -> Self {
-        self.writer_executable = Some(executable.into());
-        self
     }
 
     /// Set the Lake package name used by the module initializer.
@@ -423,7 +388,7 @@ impl CargoLeanCapability {
     /// Returns [`LinkDiagnostics`] if Lean cannot be discovered, Lake cannot
     /// build the target, or the target output cannot be resolved.
     pub fn build(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        self.build_with_runner(&mut RealLakeRunner::default(), CargoMetadata::Emit)
+        self.build_with_runner(&mut RealLakeRunner, CargoMetadata::Emit)
     }
 
     /// Same as [`Self::build`] without printing Cargo directives.
@@ -436,15 +401,15 @@ impl CargoLeanCapability {
     /// Returns [`LinkDiagnostics`] if Lake cannot build the target or the
     /// target output cannot be resolved.
     pub fn build_quiet(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        self.build_with_runner(&mut RealLakeRunner::default(), CargoMetadata::Suppress)
+        self.build_with_runner(&mut RealLakeRunner, CargoMetadata::Suppress)
     }
 
     /// Probe the existing build cache and exact capability manifest without writes.
     ///
-    /// The caller must retain shared custody for the complete artifact-root union
-    /// throughout this probe and subsequent loading. A miss never starts Lake or
-    /// publishes metadata. Dependencies need their own cache probes when prepared
-    /// independently; this probe also requires their recorded dylibs to exist.
+    /// A miss never starts Lake or publishes metadata. Nothing may build the
+    /// project while the caller probes and then loads the result. Dependencies
+    /// need their own cache probes when prepared independently; this probe also
+    /// requires their recorded dylibs to exist.
     ///
     /// # Errors
     /// Returns malformed project, source traversal, toolchain or manifest errors.
@@ -485,8 +450,6 @@ impl CargoLeanCapability {
             lean_sysroot: self.lean_sysroot.clone(),
             lean_num_threads: self.lean_num_threads,
             generated_output_key: self.generated_output_key.clone(),
-            private_bootstrap: self.private_bootstrap.clone(),
-            writer_executable: self.writer_executable.clone(),
             dependencies: self.dependencies.clone(),
         };
         let key = cache_key(
@@ -594,55 +557,6 @@ impl CargoLeanCapability {
         }
     }
 
-    /// Build using existing writer custody through cache and manifest publication.
-    ///
-    /// # Errors
-    /// Returns cancellation, build, custody, or publication errors. Unknown work
-    /// seals the supplied writer and never authorizes another command.
-    #[cfg(unix)]
-    pub fn build_quiet_with_writer(
-        self,
-        writer: &mut crate::shared_writer::SharedWriter,
-        cancelled: impl Fn() -> bool,
-    ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        let mut runner = RealLakeRunner {
-            borrowed: Some(writer),
-            cancelled: Some(&cancelled),
-            ..RealLakeRunner::default()
-        };
-        self.build_with_runner(&mut runner, CargoMetadata::Suppress)
-    }
-
-    /// Build with bounded cancellable lock acquisition.
-    ///
-    /// # Errors
-    /// Returns acquisition, cancellation, build, or publication diagnostics.
-    pub fn build_quiet_with_lock_wait(
-        self,
-        timeout: std::time::Duration,
-        cancelled: impl Fn() -> bool,
-    ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        let mut runner = RealLakeRunner {
-            lock_timeout: Some(timeout),
-            cancelled: Some(&cancelled),
-            ..RealLakeRunner::default()
-        };
-        self.build_with_runner(&mut runner, CargoMetadata::Suppress)
-    }
-
-    /// Admit the writer without waiting, but keep the normal helper startup budget.
-    ///
-    /// # Errors
-    /// Returns admission, helper, build or publication errors.
-    #[doc(hidden)]
-    pub fn build_quiet_with_immediate_admission(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        let mut runner = RealLakeRunner {
-            immediate_admission: true,
-            ..RealLakeRunner::default()
-        };
-        self.build_with_runner(&mut runner, CargoMetadata::Suppress)
-    }
-
     fn build_with_runner(
         self,
         runner: &mut impl LakeRunner,
@@ -658,8 +572,6 @@ impl CargoLeanCapability {
             lean_sysroot: self.lean_sysroot.clone(),
             lean_num_threads: self.lean_num_threads,
             generated_output_key: self.generated_output_key.clone(),
-            private_bootstrap: self.private_bootstrap.clone(),
-            writer_executable: self.writer_executable.clone(),
             dependencies: self.dependencies.clone(),
         };
         let dylib_path = build_lake_target_with_runner_and_options(
@@ -842,9 +754,6 @@ fn emit_rerun_triggers(info: Option<&ToolchainInfo>) {
 }
 
 trait LakeRunner {
-    fn prepare(&mut self, _root: &Path, _options: &LakeBuildOptions) -> Result<(), std::io::Error> {
-        Ok(())
-    }
     fn build_shared(
         &mut self,
         project_root: &Path,
@@ -853,111 +762,9 @@ trait LakeRunner {
     ) -> Result<LakeRun, std::io::Error>;
 }
 
-fn writer_diagnostic(project_root: &Path, target_name: &str, error: &io::Error, admission: bool) -> LinkDiagnostics {
-    if let Some(failure) = crate::shared_writer::WriterFailure::from_io(error) {
-        return LinkDiagnostics::LakeWriterFailure {
-            project_root: project_root.to_path_buf(),
-            target_name: target_name.to_owned(),
-            failure: Box::new(failure.clone()),
-        };
-    }
-    if admission {
-        LinkDiagnostics::LakeOutputUnresolved {
-            project_root: project_root.to_path_buf(),
-            target_name: target_name.to_owned(),
-            reason: format!("could not acquire shared Lake writer: {error}"),
-        }
-    } else {
-        LinkDiagnostics::LakeUnavailable {
-            project_root: project_root.to_path_buf(),
-            target_name: target_name.to_owned(),
-            detail: error.to_string(),
-        }
-    }
-}
+struct RealLakeRunner;
 
-fn never_cancelled() -> bool {
-    false
-}
-
-#[derive(Default)]
-struct RealLakeRunner<'a> {
-    root: Option<PathBuf>,
-    writer: Option<crate::shared_writer::SharedWriter>,
-    borrowed: Option<&'a mut crate::shared_writer::SharedWriter>,
-    cancelled: Option<&'a dyn Fn() -> bool>,
-    lock_timeout: Option<std::time::Duration>,
-    immediate_admission: bool,
-    private_locks: Vec<crate::writer_lock::WriterLock>,
-}
-
-impl LakeRunner for RealLakeRunner<'_> {
-    fn prepare(&mut self, project_root: &Path, options: &LakeBuildOptions) -> Result<(), std::io::Error> {
-        let root = project_root.canonicalize()?;
-        if let Some(existing) = &self.root {
-            return if existing == &root {
-                Ok(())
-            } else {
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "one Lake build runner cannot cross writer roots",
-                ))
-            };
-        }
-        let cancelled: &dyn Fn() -> bool = self.cancelled.unwrap_or(&never_cancelled);
-        let timeout = self.lock_timeout.unwrap_or(crate::writer_lock::DEFAULT_LOCK_TIMEOUT);
-        if cancelled() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Interrupted,
-                "Lake build cancelled",
-            ));
-        }
-        let configured_writer = crate::shared_writer::writer_executable_from_env()?;
-        if let Some(writer) = &self.borrowed {
-            if !writer.covers_project(&root)? {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "borrowed writer does not cover this project",
-                ));
-            }
-        } else if let Some(executable) = options.writer_executable.as_deref().or(configured_writer.as_deref()) {
-            self.writer = Some(if self.immediate_admission {
-                crate::shared_writer::SharedWriter::open_immediately(executable, &root, timeout, cancelled)?
-            } else {
-                crate::shared_writer::SharedWriter::open_cancellable(executable, &root, timeout, cancelled)?
-            });
-        } else if options
-            .private_bootstrap
-            .as_ref()
-            .is_some_and(|mode| mode.project_root() == root)
-        {
-            let lock_timeout = if self.immediate_admission {
-                std::time::Duration::ZERO
-            } else {
-                timeout
-            };
-            let (locks, roots) = crate::writer_lock::WriterLock::acquire_projects(&root, &[], lock_timeout, cancelled)?;
-            if options
-                .private_bootstrap
-                .as_ref()
-                .is_none_or(|mode| !mode.covers_roots(&roots))
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "private bootstrap dependency escaped its Cargo owner",
-                ));
-            }
-            self.private_locks = locks;
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "shared Lake writes require the configured writer helper; only typed package-local bootstraps are exempt",
-            ));
-        }
-        self.root = Some(root);
-        Ok(())
-    }
-
+impl LakeRunner for RealLakeRunner {
     fn build_shared(
         &mut self,
         project_root: &Path,
@@ -978,28 +785,18 @@ impl LakeRunner for RealLakeRunner<'_> {
         if let Some(threads) = options.lean_num_threads {
             command.env("LEAN_NUM_THREADS", threads.to_string());
         }
-        if options.generated_output_key.is_some()
-            && options
-                .private_bootstrap
-                .as_ref()
-                .is_some_and(|mode| mode.is_bundled_host_interop(project_root))
-        {
-            // A previous Lake trace can retain the default options. Reconfigure
-            // this bundled provider under the writer; do not touch read probes.
+        if options.generated_output_key.is_some() {
+            // The lean-rs shim lakefiles select the generated build directory
+            // only when `leanRsGeneratedShims` is set; packages that do not read
+            // the option ignore it. `-R` makes Lake read the lakefile again
+            // rather than a configuration it cached under other options.
             command.args(["-R", "-KleanRsGeneratedShims=true"]);
         }
-        command
+        let output = command
             .arg("build")
             .arg(format!("{target_name}:shared"))
-            .current_dir(project_root);
-        self.prepare(project_root, options)?;
-        let cancelled: &dyn Fn() -> bool = self.cancelled.unwrap_or(&never_cancelled);
-        let output = if let Some(writer) = self.borrowed.as_deref_mut().or(self.writer.as_mut()) {
-            writer.run_cancellable(&command, std::time::Duration::from_secs(120), cancelled)?
-        } else {
-            // A typed token proves this cwd is below its Rust package owner.
-            command.output()?
-        };
+            .current_dir(project_root)
+            .output()?;
         Ok(LakeRun {
             success: output.status.success(),
             status: output.status.to_string(),
@@ -1016,8 +813,6 @@ struct LakeBuildOptions {
     /// (hardware-concurrency) parallelism, which can fork-storm a machine; `Some(n)` caps it.
     lean_num_threads: Option<u32>,
     generated_output_key: Option<String>,
-    private_bootstrap: Option<crate::shared_writer::PrivateLakeBootstrap>,
-    writer_executable: Option<PathBuf>,
     dependencies: Vec<LeanLibraryDependency>,
 }
 
@@ -1077,10 +872,6 @@ fn build_lake_target_with_runner_and_options(
         reason: format!("could not canonicalize project root {} ({err})", project_root.display()),
     })?;
     validate_generated_output_key(&project_root, target_name, options.generated_output_key.as_deref())?;
-    runner
-        .prepare(&project_root, options)
-        .map_err(|error| writer_diagnostic(&project_root, target_name, &error, true))?;
-    validate_generated_output_key(&project_root, target_name, options.generated_output_key.as_deref())?;
     let lakefile_lean = project_root.join("lakefile.lean");
     cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile_lean.display()));
     let lakefile_toml = project_root.join("lakefile.toml");
@@ -1134,8 +925,8 @@ fn build_lake_target_with_runner_and_options(
     }
 
     let dylib = resolve_dylib_path(&project_root, &package_name, target_name, options);
-    // All declared domains are already held by the runner. Normalize standard
-    // output directories for the entire closure before source observation.
+    // Lake creates `.lake` in every package it builds. Create those first, so
+    // the build itself does not change the source directories observed below.
     for root in build_input_roots(&project_root, target_name)? {
         fs::create_dir_all(root.join(".lake")).map_err(|e| input_diagnostic(&project_root, target_name, &e))?;
     }
@@ -1169,7 +960,11 @@ fn build_lake_target_with_runner_and_options(
 
     let run = runner
         .build_shared(&project_root, target_name, options)
-        .map_err(|error| writer_diagnostic(&project_root, target_name, &error, false))?;
+        .map_err(|error| LinkDiagnostics::LakeUnavailable {
+            project_root: project_root.clone(),
+            target_name: target_name.to_owned(),
+            detail: error.to_string(),
+        })?;
     if !run.success {
         return Err(LinkDiagnostics::LakeBuildFailed {
             project_root,
@@ -1629,7 +1424,7 @@ fn write_capability_manifest(
 }
 
 // Check the same ordered dependency list on the read-only probe and immediately
-// before writer publication. Lake can produce some of these files during the build.
+// before publication. Lake can produce some of these files during the build.
 fn check_manifest_dependency_files(manifest: &serde_json::Value) -> io::Result<()> {
     let dependencies = manifest["dependencies"]
         .as_array()
@@ -2093,7 +1888,7 @@ fn build_input_roots(root: &Path, target: &str) -> Result<Vec<PathBuf>, LinkDiag
             .try_exists()
             .map_err(|e| input_diagnostic(root, target, &e))?
         {
-            crate::shared_writer::project_artifact_roots(root).map_err(|e| input_diagnostic(root, target, &e))?
+            crate::lake_packages::package_roots(root).map_err(|e| input_diagnostic(root, target, &e))?
         } else {
             vec![root.to_path_buf()]
         },
@@ -2101,9 +1896,8 @@ fn build_input_roots(root: &Path, target: &str) -> Result<Vec<PathBuf>, LinkDiag
 }
 
 fn build_inputs_fingerprint(root: &Path, target: &str) -> Result<String, LinkDiagnostics> {
-    // The direct build-script helper historically lets Lake create a missing
-    // manifest. Runtime writer admission separately requires one; if creation
-    // changes this input set during a build, publication is refused below.
+    // Lake may create a missing manifest during the build. That changes this
+    // input set, so the caller then refuses to publish the result.
     let roots = build_input_roots(root, target)?;
     let mut hasher = Sha256::new();
     hasher.update(b"lean-rs-content-inputs-v2");

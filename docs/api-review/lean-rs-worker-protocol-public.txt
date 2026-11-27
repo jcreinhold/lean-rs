@@ -162,7 +162,6 @@ pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQueryBatch::budgets
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQueryBatch::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQueryBatch::selectors: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector>
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQueryBatch::source: alloc::string::String
-pub lean_rs_worker_protocol::protocol::Request::ReleaseHostRead
 pub lean_rs_worker_protocol::protocol::Request::RunDataStream
 pub lean_rs_worker_protocol::protocol::Request::RunDataStream::export: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::RunDataStream::progress: bool
@@ -234,7 +233,6 @@ pub lean_rs_worker_protocol::protocol::Response::Error::message: alloc::string::
 pub lean_rs_worker_protocol::protocol::Response::HeaderImportRecycle
 pub lean_rs_worker_protocol::protocol::Response::HealthOk
 pub lean_rs_worker_protocol::protocol::Response::HostArtifactEpochChanged
-pub lean_rs_worker_protocol::protocol::Response::HostReadReleased
 pub lean_rs_worker_protocol::protocol::Response::HostRuntimeMetadata
 pub lean_rs_worker_protocol::protocol::Response::HostRuntimeMetadata::metadata: lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
 pub lean_rs_worker_protocol::protocol::Response::HostSessionOpened
@@ -1347,28 +1345,6 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerTypeAtRes
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerTypeAtResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerTypeAtResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerTypeAtResult
-pub struct lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-pub lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::epoch: alloc::string::String
-pub lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::project_root: alloc::string::String
-impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-pub fn lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-pub fn lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch) -> bool
-impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-pub fn lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-pub fn lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-pub fn lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
-impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch
 pub struct lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
 pub lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::name: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::version: alloc::string::String
@@ -2226,11 +2202,9 @@ impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerHos
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation
 pub struct lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
-pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::artifact_read_epochs: core::option::Option<alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch>>
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::checked_host_bindings: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::compiled_header_sha256: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::compiled_lean_version: alloc::string::String
-pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::effective_import_roots: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::runtime_lean_version: core::option::Option<alloc::string::String>
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
 pub fn lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
@@ -2529,7 +2503,6 @@ impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerOut
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
 pub struct lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts
-pub lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts::artifact_roots: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts::protocol: u32
 pub lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts::shim_manifest_json: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts::shim_manifest_path: alloc::string::String

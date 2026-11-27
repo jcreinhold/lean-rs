@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-use crate::artifact_reads::ArtifactReadScope;
-use crate::host_artifacts::SessionAdmission;
+use std::time::Instant;
 
 use lean_rs::error::host_internal;
 use lean_rs::module::{
@@ -151,43 +148,8 @@ impl ProtocolWriter {
             .stdout
             .lock()
             .map_err(|_| ProtocolError::Io(std::io::Error::other("worker stdout mutex was poisoned")))?;
-        write_worker_frame(&mut *stdout, message, cap)
+        write_frame(&mut *stdout, message, cap)
     }
-}
-
-fn copy_import_roots_for_frame(roots: &[String], cap: u32) -> Option<Vec<String>> {
-    // Even before JSON escaping, each entry needs its bytes and two quotes.
-    // Discard obviously oversized orders before duplicating the anchor's storage.
-    let mut remaining = cap as usize;
-    for root in roots {
-        remaining = remaining.checked_sub(2)?.checked_sub(root.len())?;
-    }
-    Some(roots.to_vec())
-}
-
-/// Optional observations must fit as a whole. A size refusal from the codec
-/// happens before it writes the length prefix, so only one frame reaches the parent.
-fn write_worker_frame(writer: &mut impl std::io::Write, message: Message, cap: u32) -> Result<(), ProtocolError> {
-    let Message::Response(Response::HostRuntimeMetadata { mut metadata }) = message else {
-        return write_frame(writer, message, cap);
-    };
-    if let Some(roots) = metadata.effective_import_roots.take() {
-        let mut full = metadata.clone();
-        full.effective_import_roots = Some(roots);
-        match write_frame(
-            writer,
-            Message::Response(Response::HostRuntimeMetadata { metadata: full }),
-            cap,
-        ) {
-            Err(ProtocolError::FrameTooLarge { .. }) => {}
-            result => return result,
-        }
-    }
-    write_frame(
-        writer,
-        Message::Response(Response::HostRuntimeMetadata { metadata }),
-        cap,
-    )
 }
 
 fn write_response(writer: &ProtocolWriter, response: Response) -> Result<(), ProtocolError> {
@@ -406,48 +368,16 @@ fn install_parent_death_signal() -> bool {
     reason = "the child owns stdin/stdout for the full protocol loop"
 )]
 fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
-    let writer_executable = lean_toolchain::shared_writer::writer_executable_from_env()?;
     #[cfg(unix)]
-    let parent_socket = std::env::var_os("LEAN_RS_WORKER_PARENT_SOCKET").map(PathBuf::from);
-    #[cfg(unix)]
-    let mut guardian = crate::parent_watchdog::install_parent_watchdog()?;
-    let shared_reads = std::env::var_os("LEAN_RS_WORKER_SHARED_ARTIFACT_READS").is_some_and(|value| value == "1");
-    #[cfg(unix)]
-    let artifact_ipc_root = match std::env::var_os("LEAN_RS_WORKER_ARTIFACT_IPC_ROOT") {
-        Some(root) => {
-            let root = PathBuf::from(root);
-            let lifeline_root = parent_socket
-                .as_deref()
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .ok_or_else(|| std::io::Error::other("artifact IPC root requires a parent lifeline"))?;
-            if guardian.is_none() || root != lifeline_root {
-                return Err(
-                    std::io::Error::other("artifact IPC root differs from the guarded parent lifeline root").into(),
-                );
-            }
-            Some(root)
-        }
-        None => None,
-    };
-    let descriptor = crate::host_artifacts::from_launch(
-        std::env::var_os(crate::host_artifacts::PREPARED_ENV).as_deref(),
-        shared_reads,
-    )?;
-    let (guarded_prepared, mut ordinary_prepared) = if shared_reads {
-        (descriptor, None)
-    } else {
-        (None, descriptor)
-    };
+    crate::parent_watchdog::install_parent_watchdog()?;
+    let mut prepared =
+        crate::host_artifacts::from_launch(std::env::var_os(crate::host_artifacts::PREPARED_ENV).as_deref())?;
     let runtime = LeanRuntime::init()?;
     configure_lean_runtime_memory_limit_from_env();
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let writer = ProtocolWriter::new();
     let mut host_session: Option<HostSessionState> = None;
-    let mut host_read: Option<ArtifactReadScope> = None;
-    let mut read_admission_failed = false;
-    let mut artifact_epochs: Option<Vec<lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch>> = None;
     // Imported environments this child holds but is not currently serving, MRU
     // at the back. Bounded by `session_pool_capacity` together with
     // `host_session`; a linear scan for the same reason `anchors` is one.
@@ -501,40 +431,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         };
 
-        if shared_reads
-            && matches!(
-                &request,
-                Request::LoadFixtureCapability { .. }
-                    | Request::CallFixtureMul { .. }
-                    | Request::TriggerLeanPanic { .. }
-            )
-        {
-            write_response(
-                &writer,
-                Response::Error {
-                    code: "lean_rs.worker.artifact_read_required".to_owned(),
-                    message: "direct fixture loaders are unavailable in a guarded host worker".to_owned(),
-                },
-            )?;
-            continue;
-        }
-        if shared_reads
-            && host_read.is_none()
-            && !matches!(
-                &request,
-                Request::Health | Request::Terminate | Request::OpenHostSession { .. } | Request::ReleaseHostRead
-            )
-        {
-            write_response(
-                &writer,
-                Response::Error {
-                    code: "lean_rs.worker.artifact_read_required".to_owned(),
-                    message: "host body requires actual shared artifact read custody".to_owned(),
-                },
-            )?;
-            continue;
-        }
-
         if let Some(state) = host_session.as_mut()
             && let Err(err) = state
                 .session
@@ -546,11 +442,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
         match request {
             Request::Health => {
                 write_response(&writer, Response::HealthOk)?;
-            }
-            Request::ReleaseHostRead => {
-                // Closing aliases leaves inherited body descriptors locked.
-                host_read = None;
-                write_response(&writer, Response::HostReadReleased)?;
             }
             Request::LoadFixtureCapability { manifest_path } => {
                 let response = match load_fixture_capability(runtime, Path::new(&manifest_path)) {
@@ -588,129 +479,9 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 imports,
                 import_profile,
             } => {
-                if read_admission_failed {
-                    // A failed guardian exchange may already have retained
-                    // custody. Retire this generation before another admission.
-                    write_response(&writer, Response::HostArtifactEpochChanged)?;
-                    continue;
-                }
-                if host_read.is_some() {
-                    write_response(
-                        &writer,
-                        Response::Error {
-                            code: "lean_rs.worker.artifact_read_active".to_owned(),
-                            message: "finish the previous host read scope before reopening".to_owned(),
-                        },
-                    )?;
-                    continue;
-                }
-                // Capture storage facts only. No dylib/initializer may run
-                // before the actual FD union is ACKed by the independent guardian.
-                let admission = match guarded_prepared
-                    .as_ref()
-                    .map(|prepared| SessionAdmission::capture(&project_root, &mode, prepared.clone()))
-                    .transpose()
-                {
-                    Ok(admission) => admission,
-                    Err(error) => {
-                        write_response(
-                            &writer,
-                            Response::Error {
-                                code: "lean_rs.worker.artifact_read_unavailable".to_owned(),
-                                message: error.to_string(),
-                            },
-                        )?;
-                        continue;
-                    }
-                };
-                if let (Some(previous), Some(admission)) = (&artifact_epochs, &admission) {
-                    let previous_roots: std::collections::BTreeSet<_> = previous
-                        .iter()
-                        .map(|entry: &lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch| {
-                            PathBuf::from(&entry.project_root)
-                        })
-                        .collect();
-                    if previous_roots != admission.roots().iter().cloned().collect() {
-                        // Guardians retain this generation's whole union. Never
-                        // expand it while another writer could hold a later lock.
-                        write_response(&writer, Response::HostArtifactEpochChanged)?;
-                        continue;
-                    }
-                }
-                if shared_reads {
-                    let allow_wait = artifact_epochs.is_none();
-                    let read = writer_executable
-                        .as_deref()
-                        .ok_or_else(|| std::io::Error::other("shared artifact helper is not configured"))
-                        .and_then(|helper| {
-                            ArtifactReadScope::acquire(
-                                helper,
-                                admission.as_ref().map_or(&[], SessionAdmission::roots),
-                                Duration::from_secs(30),
-                                allow_wait,
-                                guardian.as_mut(),
-                                artifact_ipc_root.as_deref(),
-                            )
-                        });
-                    let read = match read {
-                        Ok(read) => read,
-                        Err(error) if !allow_wait && lean_toolchain::shared_reader::is_admission_contention(&error) => {
-                            // Only the one-pass pre-transfer collector creates
-                            // this exact typed error. No body or new guardian
-                            // retain ran. The parent confirms the old generation
-                            // stopped, then permits one cold session attempt.
-                            write_response(&writer, Response::HostArtifactEpochChanged)?;
-                            continue;
-                        }
-                        Err(error) => {
-                            read_admission_failed = true;
-                            write_response(
-                                &writer,
-                                Response::Error {
-                                    code: "lean_rs.worker.artifact_read_unavailable".to_owned(),
-                                    message: error.to_string(),
-                                },
-                            )?;
-                            continue;
-                        }
-                    };
-                    if artifact_epochs
-                        .as_ref()
-                        .is_some_and(|previous| previous != read.epochs())
-                    {
-                        drop(read);
-                        write_response(&writer, Response::HostArtifactEpochChanged)?;
-                        continue;
-                    }
-                    artifact_epochs = Some(read.epochs().to_vec());
-                    host_read = Some(read);
-                }
-                if let Some(admission) = &admission
-                    && let Err(error) = admission.validate_after_admission()
-                {
-                    read_admission_failed = true;
-                    host_read = None;
-                    write_response(
-                        &writer,
-                        Response::Error {
-                            code: "lean_rs.worker.artifact_read_unavailable".to_owned(),
-                            message: error.to_string(),
-                        },
-                    )?;
-                    continue;
-                }
-                let anchor = match ready_host_anchor(
-                    runtime,
-                    &mut anchors,
-                    &project_root,
-                    &mode,
-                    admission.as_ref(),
-                    &mut ordinary_prepared,
-                ) {
+                let anchor = match ready_host_anchor(runtime, &mut anchors, &project_root, &mode, &mut prepared) {
                     Ok(anchor) => anchor,
                     Err(error) => {
-                        read_admission_failed = shared_reads;
-                        host_read = None;
                         write_response(&writer, error_response(&error))?;
                         continue;
                     }
@@ -736,14 +507,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                         import_profile,
                     },
                 );
-                if !matches!(
-                    &response,
-                    Response::HostSessionOpened { .. } | Response::HostSessionReused { .. }
-                ) {
-                    // A known import refusal ran no later body. Unknown exits
-                    // never reach this point and retain their actual FD custody.
-                    host_read = None;
-                }
                 if let Response::HostSessionOpened { import_stats } = &response {
                     session_imports = session_imports.saturating_add(1);
                     session_import_bytes =
@@ -838,11 +601,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                                     compiled_header_sha256: lean_toolchain::LEAN_HEADER_DIGEST.to_owned(),
                                     runtime_lean_version: actual.runtime_lean_version,
                                     checked_host_bindings,
-                                    artifact_read_epochs: host_read.as_ref().map(|read| read.epochs().to_vec()),
-                                    effective_import_roots: host_read
-                                        .as_ref()
-                                        .and(state.observed_roots)
-                                        .and_then(|roots| copy_import_roots_for_frame(roots, writer.max_frame_bytes())),
                                 },
                             }
                         }
@@ -1190,8 +948,8 @@ impl GenerationPlugin {
 /// leaked; the child cannot free them, so the only defence against unbounded
 /// growth is to build at most one anchor per distinct `(project_root, mode)`
 /// and reuse it. Its first observed import fixes the root order for this anchor.
-/// The artifact readers and the application continue to own stability of the
-/// files and prefixes reached through that order.
+/// The application keeps the files and prefixes reached through that order
+/// unchanged.
 struct HostAnchor {
     installed_roots: std::cell::OnceCell<Vec<String>>,
     project_root: String,
@@ -1586,13 +1344,12 @@ fn ready_host_anchor(
     anchors: &mut Vec<&'static HostAnchor>,
     project_root: &str,
     mode: &HostSessionMode,
-    admission: Option<&SessionAdmission>,
-    ordinary_prepared: &mut Option<LeanPreparedHostArtifacts>,
+    prepared: &mut Option<LeanPreparedHostArtifacts>,
 ) -> LeanResult<&'static HostAnchor> {
     if let Some(anchor) = anchors.iter().find(|anchor| anchor.matches(project_root, mode)) {
         return Ok(*anchor);
     }
-    let anchor = HostAnchor::build(runtime, project_root, mode, admission, ordinary_prepared)?;
+    let anchor = HostAnchor::build(runtime, project_root, mode, prepared)?;
     anchors.push(anchor);
     Ok(anchor)
 }
@@ -1608,29 +1365,24 @@ fn load_worker_snapshot(
     authorize(path, bytes)?.load_for(runtime, path, bytes)
 }
 
-fn prepare_ordinary_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
-    #[cfg(unix)]
-    {
-        match lean_rs_host::host::ready_host_artifacts_locally()? {
-            Some(prepared) => Ok(prepared),
-            None => lean_rs_host::host::prepare_host_artifacts_without_lock_wait(),
-        }
+/// Use the bundled shims if they are built, and build them otherwise.
+fn prepare_bundled_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
+    match lean_rs_host::host::ready_host_artifacts()? {
+        Some(prepared) => Ok(prepared),
+        None => lean_rs_host::host::prepare_host_artifacts(),
     }
-    #[cfg(not(unix))]
-    lean_rs_host::host::prepare_host_artifacts()
 }
 
 impl HostAnchor {
     #[allow(
         clippy::wildcard_enum_match_arm,
-        reason = "all future guarded mode variants must refuse before loading"
+        reason = "all future host session mode variants must refuse before loading"
     )]
     fn build(
         runtime: &'static LeanRuntime,
         project_root: &str,
         mode: &HostSessionMode,
-        admission: Option<&SessionAdmission>,
-        ordinary_prepared: &mut Option<LeanPreparedHostArtifacts>,
+        prepared: &mut Option<LeanPreparedHostArtifacts>,
     ) -> LeanResult<&'static Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
         let authority = worker_authority()?;
@@ -1640,30 +1392,16 @@ impl HostAnchor {
             _ => return Err(host_internal("unsupported host session loading mode")),
         };
         // Prepare before the first grant and never rebuild under earlier grants.
-        // The ordinary ready probe releases its read locks before calling the
-        // application, which must independently verify and hold custody. Guarded
-        // admission carries its own descriptor and its load order is unchanged.
-        let prepared = match (admission, ordinary_prepared) {
-            (Some(admission), _) => &admission.prepared,
-            (None, Some(prepared)) => prepared,
-            (None, missing) => missing.insert(prepare_ordinary_host_artifacts()?),
+        // The application must verify the artifacts and keep them unchanged.
+        let prepared = match prepared {
+            Some(prepared) => prepared,
+            missing => missing.insert(prepare_bundled_host_artifacts()?),
         };
-        let load = |path: &Path, bytes: &[u8]| {
-            load_worker_snapshot(runtime, path, bytes, |p, b| authority.worker(runtime, p, b))
-        };
-        let worker_capability = if let Some(admission) = admission {
-            admission
-                .capability
-                .as_ref()
-                .map(|s| load(s.path(), s.bytes()))
-                .transpose()?
-        } else if let Some(path) = manifest {
-            Some(load_worker_manifest(runtime, Path::new(path))?)
-        } else {
-            None
-        };
+        let worker_capability = manifest
+            .map(|path| load_worker_manifest(runtime, Path::new(path)))
+            .transpose()?;
         let selected;
-        let prepared = if let (None, Some(image)) = (admission, &worker_capability)
+        let prepared = if let Some(image) = &worker_capability
             && authority.use_generated_project_imports(Path::new(project_root), image)?
         {
             selected = prepared.clone().for_generated_project(host, image)?;
@@ -4085,41 +3823,6 @@ mod tests {
     }
 
     #[test]
-    fn metadata_frame_omits_only_complete_order_when_over_budget() -> Result<(), Box<dyn std::error::Error>> {
-        use lean_rs_worker_protocol::protocol::{Message, Response, read_frame};
-        use lean_rs_worker_protocol::types::{LeanWorkerArtifactReadEpoch, LeanWorkerHostRuntimeMetadata};
-
-        let base = LeanWorkerHostRuntimeMetadata {
-            compiled_lean_version: "4.36.0".into(),
-            compiled_header_sha256: "a".repeat(64),
-            runtime_lean_version: Some("4.36.0".into()),
-            checked_host_bindings: std::collections::BTreeMap::new(),
-            artifact_read_epochs: Some(vec![LeanWorkerArtifactReadEpoch {
-                project_root: "/fixture".into(),
-                epoch: "17".into(),
-            }]),
-            effective_import_roots: None,
-        };
-        let message = |metadata| Message::Response(Response::HostRuntimeMetadata { metadata });
-        let mut full = base.clone();
-        let roots = vec![r#"/fixture/a"b"#.into(); 3];
-        assert!(super::copy_import_roots_for_frame(&roots, 2).is_none());
-        full.effective_import_roots = super::copy_import_roots_for_frame(&roots, u32::MAX);
-        assert_eq!(full.effective_import_roots.as_ref(), Some(&roots));
-        let mut bytes = Vec::new();
-        super::write_worker_frame(&mut bytes, message(full.clone()), u32::MAX)?;
-        let exact_cap = u32::try_from(bytes.len() - 4)?;
-        for (cap, expected) in [(exact_cap, full.clone()), (exact_cap - 1, base)] {
-            bytes.clear();
-            super::write_worker_frame(&mut bytes, message(full.clone()), cap)?;
-            let mut received = bytes.as_slice();
-            assert_eq!(read_frame(&mut received, cap)?.message, message(expected));
-            assert!(received.is_empty());
-        }
-        Ok(())
-    }
-
-    #[test]
     fn bootstrap_rejects_valid_authorization_for_another_manifest_snapshot() -> Result<(), Box<dyn std::error::Error>> {
         // A real, test-owned capability suffices for this byte-identity check.
         let owner = tempfile::tempdir()?;
@@ -4145,10 +3848,6 @@ mod tests {
         let prepared = lean_toolchain::CargoLeanCapability::new(&project, "Snapshot")
             .package("snapshot")
             .module("Snapshot")
-            .private_bootstrap(lean_toolchain::shared_writer::PrivateLakeBootstrap::new(
-                owner.path(),
-                &project,
-            )?)
             .build_quiet()?;
         let runtime = lean_rs::LeanRuntime::init()?;
         let path = prepared.manifest_path();
