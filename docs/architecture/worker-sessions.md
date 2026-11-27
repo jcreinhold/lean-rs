@@ -183,14 +183,15 @@ metadata refuses before native loading. Guarded workers reject the direct fixtur
 host read scope is active.
 
 The generation retains one fixed read union. A later session requiring different domains requests a fresh generation
-before acquiring another lock. Cold admission can wait on the complete fixed domain union only after every partial
-read has closed. Warm admission makes one pass: typed contention maps to the existing pre-body epoch-change response,
-so the parent confirms full generation closure before its single fresh open attempt. This releases the guardian's old
-SH union; dropping only the new local guards would not. The outer request identity remains stable and its target body
-is invoked once. Hard errors and any failure after inheritance or guardian exchange are never retried by this loop.
-A failed guardian exchange also requires retirement before another admission because the
-guardian may already have retained custody. Loaded capabilities use ready import paths; no native-generation import or
-body may trigger a nested Lake writer. The parent probes warm artifacts under shared custody before requesting exclusive
+before acquiring another lock. Cold admission can wait on the complete fixed domain union only after every partial read
+has closed. Warm admission never waits behind a writer: it waits out only another reader's brief admission gate, whose
+holder never waits, and rechecks writer demand on each pass. Other typed contention maps to the existing pre-body
+epoch-change response, so the parent confirms full generation closure before its single fresh open attempt. This
+releases the guardian's old SH union; dropping only the new local guards would not. The outer request identity remains
+stable and its target body is invoked once. Hard errors and any failure after inheritance or guardian exchange are never
+retried by this loop. A failed guardian exchange also requires retirement before another admission because the guardian
+may already have retained custody. Loaded capabilities use ready import paths; no native-generation import or body may
+trigger a nested Lake writer. The parent probes warm artifacts under shared custody before requesting exclusive
 preparation, and drains affected generations before a genuine writer.
 
 Every genuine writer advances its output epoch before starting work, including work that later fails. The worker

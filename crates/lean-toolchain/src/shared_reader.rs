@@ -2,6 +2,7 @@
 //!
 //! Single-domain acquisition fails closed; whole-domain admission can wait only
 //! on validated pre-transfer contention, dropping every tentative read first.
+//! One-pass admission waits only on another reader's transient gate.
 //! No path unlocks an open file description. On Darwin, use it only in the worker's pre-body
 //! scope: `SCM_RIGHTS` has no atomic CLOEXEC receive there. Multithreaded parents
 //! must use the helper's EOF proxy instead.
@@ -167,6 +168,9 @@ struct ReaderContention {
     stage: &'static str,
     status: Option<ExitStatus>,
     diagnostics: String,
+    /// Another reader's transient EX gate: its holder never waits, and no
+    /// writer or writer demand is involved.
+    reader_gate: bool,
 }
 impl std::fmt::Display for ReaderContention {
     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -215,6 +219,14 @@ fn status_label(status: Option<ExitStatus>) -> String {
 #[must_use]
 pub fn is_admission_contention(error: &io::Error) -> bool {
     error.get_ref().is_some_and(|source| source.is::<ReaderContention>())
+}
+/// Whether contention came only from another reader's transient gate, which
+/// even a caller retaining earlier guardian loans may wait out.
+fn is_reader_gate(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<ReaderContention>())
+        .is_some_and(|contention| contention.reader_gate)
 }
 fn check_admission(deadline: Instant, cancelled: &(impl Fn() -> bool + ?Sized)) -> io::Result<()> {
     if cancelled() {
@@ -357,6 +369,7 @@ impl Helper {
                 stage,
                 status: Some(status),
                 diagnostics: self.diagnostics.text(),
+                reader_gate: false,
             },
         )
     }
@@ -403,6 +416,7 @@ fn preflight(domains: &[(usize, PathBuf, PathBuf)]) -> io::Result<()> {
                 stage: "whole-domain preflight",
                 status: None,
                 diagnostics: "validated writer demand".to_owned(),
+                reader_gate: false,
             },
         )),
         Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(io::Error::new(
@@ -411,6 +425,7 @@ fn preflight(domains: &[(usize, PathBuf, PathBuf)]) -> io::Result<()> {
                 stage: "whole-domain preflight",
                 status: None,
                 diagnostics: "validated transient reader gate".to_owned(),
+                reader_gate: true,
             },
         )),
         Err(error) => Err(error),
@@ -510,12 +525,15 @@ impl SharedReader {
         )
     }
 
-    /// Make one complete admission pass, releasing partial reads on failure.
+    /// Admit a fixed union without waiting behind any writer, releasing
+    /// partial reads on failure.
     ///
     /// A warm worker retaining earlier guardian loans must use this rather than
-    /// wait behind a writer it may itself exclude. Validated contention is
-    /// recognizable through [`is_admission_contention`]; never retry a body.
-    /// Result order and pre-body restrictions match [`Self::acquire_union`].
+    /// wait behind a writer it may itself exclude. It retries only another
+    /// reader's transient gate, whose holder never waits, so a brief probe is
+    /// not an epoch change. Writer demand and helper-reported contention return
+    /// at once, recognizable through [`is_admission_contention`]; never retry a
+    /// body. Result order and pre-body restrictions match [`Self::acquire_union`].
     /// # Errors
     /// Returns validated contention or any hard admission/transfer failure.
     pub fn try_acquire_union(
@@ -527,7 +545,7 @@ impl SharedReader {
         Self::union_until(helper, roots, admission_deadline(timeout)?, cancelled, false, None)
     }
 
-    /// Make one complete admission pass using one explicit private IPC root.
+    /// Admit as [`Self::try_acquire_union`] does, using one explicit private IPC root.
     ///
     /// # Errors
     /// Rejects an invalid or overlong IPC root before union admission.
@@ -579,7 +597,10 @@ impl SharedReader {
                 }
                 Err(error) => {
                     drop(readers); // No inherited/guardian aliases exist yet.
-                    if !wait || !is_admission_contention(&error) {
+                    // Each pass rechecks demand, so waiting out a reader gate
+                    // never holds back a writer the caller may exclude.
+                    let retry = is_admission_contention(&error) && (wait || is_reader_gate(&error));
+                    if !retry {
                         return Err(error);
                     }
                     retry_admission(deadline, cancelled)?;

@@ -476,11 +476,10 @@ fn acquire_while_until(
                     }
                 },
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    if matches!(demand_policy, ReaderDemandPolicy::ReportContention) {
-                        return Err(reader_contention("reader_gate"));
-                    }
                     // Another reader holds only a transient gate, never an
                     // artifact wait. All partial gates were closed by try_acquire.
+                    // Every policy waits: no writer is involved, so even a
+                    // reader holding earlier domains cannot hold one back.
                     if Instant::now() >= deadline {
                         return Err(io::Error::new(io::ErrorKind::TimedOut, "reader admission gate is busy"));
                     }
@@ -1647,6 +1646,39 @@ mod tests {
             contract().expect("contract").executable,
             first.canonicalize().expect("fixture")
         );
+    }
+
+    #[test]
+    fn reporting_reader_waits_out_a_reader_gate_but_not_writer_demand() {
+        let directory = tempfile::tempdir().expect("fixture");
+        let root = directory.path().join("project");
+        fs::create_dir(&root).expect("fixture");
+        let lock = lean_toolchain::shared_writer::project_lock_path(&root).expect("lock path");
+        let deadline = Instant::now().checked_add(Duration::from_secs(4)).expect("deadline");
+        let admit = || acquire_while_until(&lock, deadline, true, ReaderDemandPolicy::ReportContention, || Ok(true));
+
+        let demand = WriterDemand::announce(std::slice::from_ref(&lock), Duration::from_secs(1), &|| false)
+            .expect("writer demand");
+        let error = admit().expect_err("writer demand is reported, not waited on");
+        assert_eq!(reader_failure_exit_code(&error), 75);
+        drop(demand);
+
+        // A probe or another reader's admission holds this gate for a moment.
+        let gate = ReadAdmission::try_acquire(std::slice::from_ref(&lock))
+            .expect("gate")
+            .expect("no writer demand");
+        let held_until = Instant::now()
+            .checked_add(Duration::from_millis(100))
+            .expect("gate hold");
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            drop(gate);
+        });
+        let admitted = admit();
+        let returned = Instant::now();
+        release.join().expect("gate release");
+        admitted.expect("a reader gate is waited out, not reported");
+        assert!(returned >= held_until, "admission passed a held reader gate");
     }
 }
 

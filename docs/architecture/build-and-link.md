@@ -149,8 +149,10 @@ readiness bytes, permits another admission round. The descriptor path rechecks i
 requires empty output and actual helper exit. Ordinary helper, transport, descriptor, identity and cleanup errors remain
 hard, with bounded stage/status/stderr diagnostics. Every tentative descriptor closes first; partial proxies all receive
 EOF and their actual helper exits are confirmed before waiting. One absolute deadline and cancellation predicate cover
-all rounds. A warm owner retaining earlier guardian custody uses one-pass `try_acquire_union` and must retire that
-generation on typed contention rather than wait on its own old locks. No metadata, import, initializer, guardian
+all rounds. The helper waits out another reader's gate itself and exits 75 only for writer demand, a held artifact
+lock, or a live previous writer. A warm owner retaining earlier guardian custody uses `try_acquire_union`, which
+retries only another reader's gate, and must retire that generation on other typed contention rather than wait on
+its own old locks. No metadata, import, initializer, guardian
 acknowledgement or target body is replayed by these admission loops.
 
 Writers try all project locks in globally sorted path order. Each pass independently opens each candidate, tries EX, and

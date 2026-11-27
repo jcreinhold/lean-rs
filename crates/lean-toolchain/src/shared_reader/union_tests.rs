@@ -496,6 +496,32 @@ fn proxy_readiness_then_exit75_never_authorizes_a_retry() -> io::Result<()> {
 }
 
 #[test]
+fn one_pass_union_waits_out_another_readers_gate() -> io::Result<()> {
+    let fixture = Fixture::new("normal")?;
+    // A probe or another reader's admission holds these gates for a moment.
+    // Treating that as contention would restart a warm worker for nothing.
+    let gate = crate::writer_demand::ReadAdmission::try_acquire(&fixture.locks)?
+        .expect("a fresh fixture has no writer demand");
+    let held_until = Instant::now()
+        .checked_add(Duration::from_millis(100))
+        .expect("gate hold");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        drop(gate);
+    });
+    let admitted =
+        SharedReader::try_acquire_union_with_ipc_root(&fixture.helper, &fixture.roots, WAIT, &|| false, fixture.base());
+    let returned = Instant::now();
+    release
+        .join()
+        .map_err(|_| io::Error::other("gate release thread panicked"))?;
+    assert_eq!(admitted?.len(), fixture.roots.len());
+    assert!(returned >= held_until, "admission passed a held reader gate");
+    assert_eq!(fixture.starts()?, 2, "no helper starts while the gate is held");
+    Ok(())
+}
+
+#[test]
 fn complete_domain_preflight_refuses_demand_before_spawning_any_helper() -> io::Result<()> {
     let fixture = Fixture::new("normal")?;
     let demand = crate::writer_demand::WriterDemand::announce(&fixture.locks, WAIT, &|| false)?;
