@@ -166,8 +166,11 @@ in that root.
 The worker binary has two runtime-free preparation entries. `--lean-rs-ready-host-artifacts [IPC_ROOT]` takes shared helper custody
 and checks existing host/interop build keys and the exact manifests without materializing, building, loading or
 publishing anything; an explicit root selects the reviewed private transient IPC directory, while omission preserves
-the existing placement. A miss exits 75. `--lean-rs-prepare-host-artifacts` uses only the configured writer helper and
-emits one bounded storage descriptor before any `LeanRuntime::init`, native lifeline or guardian bootstrap. The parent
+the existing placement. A miss exits 75. `--lean-rs-prepare-host-artifacts [DEST]` uses only the configured writer helper and
+emits one bounded storage descriptor before any `LeanRuntime::init`, native lifeline or guardian bootstrap. Without
+`DEST` it builds the shims where Cargo unpacked `lean-rs-host`. With `DEST`, a directory that must not exist yet, it
+first writes the shim sources compiled into the worker there and builds them there, so an installer can give a worker
+its own copy (`lean_rs_host::host::prepare_host_artifacts_in`). The parent
 passes that exact descriptor to a guarded native generation. The descriptor is planned storage metadata, never a
 loaded-runtime receipt.
 

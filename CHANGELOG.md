@@ -15,6 +15,9 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - The module-query file driver elaborates a whole file, header included, as `lean` does. Header-reading
   elaborators and linters now see the file they run in, positions are file positions, and messages Lean marks
   silent, such as a formatter plugin's records, are dropped as `lean` drops them.
+- `lean-rs-host` compiles in its shim sources. `prepare_host_artifacts_in(DEST)`, and the worker's
+  `--lean-rs-prepare-host-artifacts DEST`, write them into a new directory and build them there, so an installer
+  can give a worker its own copy without reading the Cargo source cache or pinning the shim files' hashes.
 
 ## [0.10.17]
 

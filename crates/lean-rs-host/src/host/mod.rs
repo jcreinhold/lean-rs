@@ -68,6 +68,8 @@ mod progress;
 mod project_initializer;
 mod session;
 mod shim_bindings;
+#[cfg(unix)]
+mod shim_sources;
 
 pub use self::bracketed::{
     LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult, LeanBracketedRejectedOperation,
@@ -78,8 +80,8 @@ pub use self::capabilities::{LeanCapabilities, LeanPreparedHostArtifacts, prepar
 pub use self::capabilities::{prepare_host_artifacts_for_generated_output, prepare_host_artifacts_without_lock_wait};
 #[cfg(unix)]
 pub use self::capabilities::{
-    ready_host_artifacts, ready_host_artifacts_for_generated_output_with_ipc_root, ready_host_artifacts_locally,
-    ready_host_artifacts_with_ipc_root,
+    prepare_host_artifacts_in, ready_host_artifacts, ready_host_artifacts_for_generated_output_with_ipc_root,
+    ready_host_artifacts_locally, ready_host_artifacts_with_ipc_root,
 };
 pub use self::declaration_search::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use lean_rs_host::host::{
-    LeanPreparedHostArtifacts, prepare_host_artifacts, ready_host_artifacts_for_generated_output_with_ipc_root,
-    ready_host_artifacts_with_ipc_root,
+    LeanPreparedHostArtifacts, prepare_host_artifacts, prepare_host_artifacts_in,
+    ready_host_artifacts_for_generated_output_with_ipc_root, ready_host_artifacts_with_ipc_root,
 };
 use lean_rs_worker_protocol::protocol::HostSessionMode;
 use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
@@ -37,10 +37,8 @@ pub(crate) fn preparation_mode() -> Option<ExitCode> {
         let args = std::env::args_os().collect::<Vec<_>>();
         let valid_args = if generated {
             args.len() == 4
-        } else if probe {
-            args.len() == 2 || args.len() == 3
         } else {
-            args.len() == 2
+            args.len() == 2 || args.len() == 3
         };
         if !valid_args || writer_executable_from_env()?.is_none() {
             return Err(
@@ -70,6 +68,8 @@ pub(crate) fn preparation_mode() -> Option<ExitCode> {
             } else {
                 Ok(lean_rs_host::host::ready_host_artifacts()?)
             }
+        } else if let Some(destination) = args.get(2) {
+            Ok(Some(prepare_host_artifacts_in(Path::new(destination))?))
         } else {
             Ok(Some(prepare_host_artifacts()?))
         }

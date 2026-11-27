@@ -463,6 +463,23 @@ pub fn prepare_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
     prepare_host_artifacts_for_output(None)
 }
 
+/// Write the bundled shim sources into `destination` and build them there.
+///
+/// [`prepare_host_artifacts`] builds the shims where Cargo unpacked this crate.
+/// An installer calls this instead to give a worker its own copy, which does
+/// not change when the Cargo cache does. The sources are the ones this build
+/// links against. `destination` must not exist; its parent must. The writer
+/// helper named by `LEAN_RS_WRITER_EXECUTABLE` runs Lake.
+///
+/// # Errors
+/// Returns an existing `destination`, a missing writer helper, or a write,
+/// build or snapshot failure.
+#[cfg(unix)]
+pub fn prepare_host_artifacts_in(destination: &std::path::Path) -> LeanResult<LeanPreparedHostArtifacts> {
+    let selection = crate::host::lake::ShimOutputSelection::resolve(None)?;
+    crate::host::lake::prepare_in(destination, host_shim_export_signatures(), &selection)
+}
+
 /// Prepare the bundled host capability in one validated generated-output slot.
 ///
 /// # Errors

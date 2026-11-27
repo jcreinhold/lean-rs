@@ -389,6 +389,61 @@ pub(crate) fn prepared_artifacts(
     built: &BuiltLeanCapability,
     generated_output_key: Option<&str>,
 ) -> LeanResult<super::LeanPreparedHostArtifacts> {
+    prepared_artifacts_at(
+        built,
+        generated_output_key,
+        &bundled_host_shims_root(),
+        &bundled_interop_shims_root(),
+    )
+}
+
+/// Write the bundled shim sources into `destination` and build them there.
+///
+/// One writer turn covers both packages, as the host package's Lake build
+/// also builds its interop dependency.
+#[cfg(unix)]
+pub(crate) fn prepare_in(
+    destination: &Path,
+    export_signatures: Vec<LeanExportSignature>,
+    selection: &ShimOutputSelection,
+) -> LeanResult<super::LeanPreparedHostArtifacts> {
+    let writer = lean_toolchain::shared_writer::writer_executable_from_env()
+        .map_err(artifact_error)?
+        .ok_or_else(|| {
+            artifact_error(std::io::Error::other(
+                "shim preparation requires a configured writer helper",
+            ))
+        })?;
+    super::shim_sources::write(destination).map_err(artifact_error)?;
+    let destination = destination.canonicalize().map_err(artifact_error)?;
+    let host_root = destination.join(BUNDLED_HOST_SHIMS_DIR);
+    let interop_root = destination.join(BUNDLED_INTEROP_SHIMS_DIR);
+    let mut custody = lean_toolchain::shared_writer::SharedWriter::open_with_write_roots(
+        &writer,
+        &host_root,
+        std::slice::from_ref(&interop_root),
+        std::time::Duration::from_secs(30),
+        &|| false,
+    )
+    .map_err(artifact_error)?;
+    let built = bundled_capability_builder(&host_root, SHIM_LIB_NAME, export_signatures, selection)
+        .writer_executable(&writer)
+        .build_quiet_with_writer(&mut custody, || false)
+        .map_err(|diagnostic| {
+            lean_rs::__host_internals::host_module_init(format!(
+                "could not build the bundled lean-rs shims under {}: {diagnostic}",
+                destination.display()
+            ))
+        })?;
+    prepared_artifacts_at(&built, selection.key(), &host_root, &interop_root)
+}
+
+fn prepared_artifacts_at(
+    built: &BuiltLeanCapability,
+    generated_output_key: Option<&str>,
+    host_root: &Path,
+    interop_root: &Path,
+) -> LeanResult<super::LeanPreparedHostArtifacts> {
     use std::io::Read as _;
     let manifest_path = built.manifest_path().canonicalize().map_err(artifact_error)?;
     let mut bytes = Vec::new();
@@ -398,15 +453,13 @@ pub(crate) fn prepared_artifacts(
         .read_to_end(&mut bytes)
         .map_err(artifact_error)?;
     let manifest_json = String::from_utf8(bytes).map_err(|error| artifact_error(std::io::Error::other(error)))?;
-    let roots = lean_toolchain::shared_writer::project_artifact_root_union(&[
-        bundled_host_shims_root(),
-        bundled_interop_shims_root(),
-    ])
-    .map_err(artifact_error)?;
-    let paths = [bundled_interop_shims_root(), bundled_host_shims_root()]
+    let roots =
+        lean_toolchain::shared_writer::project_artifact_root_union(&[host_root.to_owned(), interop_root.to_owned()])
+            .map_err(artifact_error)?;
+    let paths = [interop_root, host_root]
         .into_iter()
         .map(|root| {
-            project_olean_search_path_for_output(&root, generated_output_key)
+            project_olean_search_path_for_output(root, generated_output_key)
                 .canonicalize()
                 .map_err(artifact_error)
         })
