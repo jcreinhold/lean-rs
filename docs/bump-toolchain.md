@@ -61,8 +61,7 @@ probe is [`lean-rs-sys/tests/linkage.rs`](https://github.com/jcreinhold/lean-rs/
 not load `libleanshared` or prove symbol presence.
 
 Run the [workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md) on the new version. Use CI's manual `full_matrix: true` dispatch for the
-full supported window on Ubuntu and macOS. Ordinary push CI runs only Ubuntu at the head; release verification runs the
-head on both platforms.
+full supported window on Ubuntu and macOS. Ordinary push CI and release verification run the head on both platforms.
 
 For a local sweep, [`scripts/test-all-toolchains.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/test-all-toolchains.sh) accepts explicit versions or
 reads the digest manifest. It repins every tracked `lean-toolchain`, deletes Cargo and Lake build outputs, rebuilds the

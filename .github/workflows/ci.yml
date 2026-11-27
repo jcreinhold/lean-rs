@@ -1,7 +1,7 @@
 name: CI
 
-# Pushes and pull requests check the head Lean release on Ubuntu. Dispatch
-# full_matrix to test every supported version on both operating systems.
+# Pushes and pull requests check the head Lean release on Ubuntu and macOS.
+# Dispatch full_matrix to test every supported version on both.
 # The API baselines under docs/ are verification inputs even on a docs-only PR.
 
 on:
@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       full_matrix:
-        description: "Check every supported Lean release on Ubuntu and macOS."
+        description: "Check every supported Lean release."
         type: boolean
         default: false
 
@@ -71,8 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each listed version runs on both platforms in the manual sweep.
-        os: ${{ fromJSON(inputs.full_matrix && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        os: [ubuntu-latest, macos-latest]
         lean_version: >-
           ${{ fromJSON(inputs.full_matrix &&
             '["4.30.0", "4.31.0-rc1", "4.31.0-rc2", "4.31.0", "4.32.0-rc1", "4.32.0", "4.32.2",

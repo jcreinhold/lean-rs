@@ -34,7 +34,7 @@ Linux qualification for that mode remains open, as recorded in the [0.10.0 chang
 
 | Trigger | Lean versions | Platforms |
 | --- | --- | --- |
-| Ordinary code push or PR | Head (`4.36.0`) | Ubuntu |
+| Ordinary code push or PR | Head (`4.36.0`) | Ubuntu and macOS |
 | CI dispatch with `full_matrix: true` | Every listed version | Ubuntu and macOS |
 | Release verification | Head | Ubuntu and macOS |
 

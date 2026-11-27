@@ -20,10 +20,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 Use nextest for the full suite: separate test processes bound cumulative Lean state. See [Testing](docs/testing.md) for
 fixture setup, resource limits, Linux unwind settings, and focused debugging commands.
 
-[CI](.github/workflows/ci.yml) normally checks Ubuntu on the head Lean toolchain. Manual `full_matrix` checks expand to
-the supported window on Ubuntu and macOS; [release verification](.github/workflows/release.yml) checks the head on both
-systems. CI also checks docs.rs builds, packages, and committed API baselines. The full toolchain policy and current
-coverage are in [Version matrix](docs/version-matrix.md).
+[CI](.github/workflows/ci.yml) checks Ubuntu and macOS on the head Lean toolchain. Manual `full_matrix` checks expand to
+the supported window on both; [release verification](.github/workflows/release.yml) checks the head on both systems. CI
+also checks docs.rs builds, packages, and committed API baselines. The full toolchain policy and current coverage are in
+[Version matrix](docs/version-matrix.md).
 
 Documentation has a separate [build workflow](.github/workflows/docs.yml). For prose-only changes, build the book and
 check affected local links, anchors, commands, and source claims:
