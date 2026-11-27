@@ -9,6 +9,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.11.1]
+
 - A warm worker no longer restarts when another reader holds its brief admission gate. One-pass admission,
   `SharedReader::try_acquire_union`, now waits out that gate as whole-domain admission does, and the reader helper
   waits it out even when it reports writer contention. Writer demand still returns at once, so a warm worker never
