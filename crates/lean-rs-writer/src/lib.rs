@@ -1606,6 +1606,27 @@ mod tests {
     }
 
     #[test]
+    fn a_storage_turn_record_never_reads_as_stopped() {
+        let owner_identity = json!({"version":1,"pid":4242,"start":"1795279667:913227","session":4242});
+        let record = |extra: Value| {
+            let mut file = tempfile::tempfile().expect("fixture");
+            let mut value = json!({"version":1,"owner":owner_identity,"process":null});
+            if let (Some(fields), Value::Object(extra)) = (value.as_object_mut(), extra) {
+                fields.extend(extra);
+            }
+            file.write_all(format!("{value}\n").as_bytes()).expect("fixture");
+            file
+        };
+        // 0.10 left this record after a storage turn: no process, plus the turn.
+        let mut turn = record(json!({"storage_turn":"0610796b452ba7d3cae96b1f578017d8"}));
+        assert!(owner(&mut turn).is_err());
+        assert!(lean_toolchain::shared_writer::previous_writer_stopped(&turn).is_err());
+        let mut plain = record(json!({}));
+        assert!(owner(&mut plain).expect("plain record").is_some());
+        assert!(lean_toolchain::shared_writer::previous_writer_stopped(&plain).expect("plain record"));
+    }
+
+    #[test]
     fn torn_prelaunch_record_is_not_committed() {
         let mut file = tempfile::tempfile().expect("fixture");
         file.write_all(b"{\"version\":1").expect("fixture");
