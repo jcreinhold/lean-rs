@@ -485,10 +485,10 @@ so successful EX alone does not grant write admission. Live legacy records witho
 fence every domain. Closed payloads need no filesystem access to former artifact roots; malformed committed records
 remain unavailable.
 
-The private version 4 owner format can fence a planned path/device/inode before any shared descriptor arrives.
-The plan carries no writer epoch. An already admitted writer can still advance the epoch on that inode before
-the reader acquires SH. New writers check the plan even when EX succeeds, and a replacement inode fails closed
-until exact native closure. Readers that only understand versions 1 through 3 refuse this format.
+Older guardians could write a private version 4 owner record, which fences a planned path/device/inode before any
+shared descriptor arrives. The guardian no longer writes one, but writers still read it: they check the plan even when
+EX succeeds, and a replacement inode fails closed until exact native closure. The plan carries no writer epoch, so an
+already admitted writer can still advance the epoch on that inode.
 
 Payload closure and record collection are separate. A Running v2 record stays until the whole payload group is absent
 and the exact guardian is no longer live: that guardian can retain SH descriptors after its payload has stopped.
