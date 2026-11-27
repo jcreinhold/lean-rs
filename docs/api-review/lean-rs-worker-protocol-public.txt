@@ -131,9 +131,6 @@ pub lean_rs_worker_protocol::protocol::Request::InferType::options: lean_rs_work
 pub lean_rs_worker_protocol::protocol::Request::InferType::source: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::InspectDeclaration
 pub lean_rs_worker_protocol::protocol::Request::InspectDeclaration::request: lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
-pub lean_rs_worker_protocol::protocol::Request::InspectDeclarationFenced
-pub lean_rs_worker_protocol::protocol::Request::InspectDeclarationFenced::command: lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub lean_rs_worker_protocol::protocol::Request::InspectDeclarationFenced::request: lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
 pub lean_rs_worker_protocol::protocol::Request::IsDefEq
 pub lean_rs_worker_protocol::protocol::Request::IsDefEq::lhs: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::IsDefEq::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
@@ -156,10 +153,6 @@ pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::import_profile:
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::imports: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::mode: lean_rs_worker_protocol::protocol::HostSessionMode
 pub lean_rs_worker_protocol::protocol::Request::OpenHostSession::project_root: alloc::string::String
-pub lean_rs_worker_protocol::protocol::Request::PrepareBoundHostRead
-pub lean_rs_worker_protocol::protocol::Request::PrepareBoundHostRead::project_root: alloc::string::String
-pub lean_rs_worker_protocol::protocol::Request::PrepareHostRead
-pub lean_rs_worker_protocol::protocol::Request::PrepareHostRead::project_root: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub lean_rs_worker_protocol::protocol::Request::ProcessModuleQuery::query: lean_rs_worker_protocol::types::LeanWorkerModuleQuery
@@ -225,9 +218,6 @@ pub lean_rs_worker_protocol::protocol::Response::DeclarationBulk
 pub lean_rs_worker_protocol::protocol::Response::DeclarationBulk::rows: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationRow>
 pub lean_rs_worker_protocol::protocol::Response::DeclarationInspection
 pub lean_rs_worker_protocol::protocol::Response::DeclarationInspection::result: lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
-pub lean_rs_worker_protocol::protocol::Response::DeclarationInspectionFinished
-pub lean_rs_worker_protocol::protocol::Response::DeclarationInspectionFinished::command: lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub lean_rs_worker_protocol::protocol::Response::DeclarationInspectionFinished::result: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult>
 pub lean_rs_worker_protocol::protocol::Response::DeclarationSearch
 pub lean_rs_worker_protocol::protocol::Response::DeclarationSearch::result: lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
 pub lean_rs_worker_protocol::protocol::Response::DeclarationType
@@ -244,7 +234,6 @@ pub lean_rs_worker_protocol::protocol::Response::Error::message: alloc::string::
 pub lean_rs_worker_protocol::protocol::Response::HeaderImportRecycle
 pub lean_rs_worker_protocol::protocol::Response::HealthOk
 pub lean_rs_worker_protocol::protocol::Response::HostArtifactEpochChanged
-pub lean_rs_worker_protocol::protocol::Response::HostReadPrepared
 pub lean_rs_worker_protocol::protocol::Response::HostReadReleased
 pub lean_rs_worker_protocol::protocol::Response::HostRuntimeMetadata
 pub lean_rs_worker_protocol::protocol::Response::HostRuntimeMetadata::metadata: lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata
@@ -413,30 +402,6 @@ impl core::marker::Unpin for lean_rs_worker_protocol::protocol::Frame
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::protocol::Frame
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::protocol::Frame
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol::Frame
-pub struct lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub lean_rs_worker_protocol::protocol::ManagedInspectionCommand::attempt: [u8; 16]
-pub lean_rs_worker_protocol::protocol::ManagedInspectionCommand::command: u64
-pub lean_rs_worker_protocol::protocol::ManagedInspectionCommand::generation: alloc::string::String
-pub lean_rs_worker_protocol::protocol::ManagedInspectionCommand::stage: u64
-impl core::clone::Clone for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub fn lean_rs_worker_protocol::protocol::ManagedInspectionCommand::clone(&self) -> lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::cmp::Eq for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub fn lean_rs_worker_protocol::protocol::ManagedInspectionCommand::eq(&self, &lean_rs_worker_protocol::protocol::ManagedInspectionCommand) -> bool
-impl core::fmt::Debug for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub fn lean_rs_worker_protocol::protocol::ManagedInspectionCommand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub fn lean_rs_worker_protocol::protocol::ManagedInspectionCommand::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-pub fn lean_rs_worker_protocol::protocol::ManagedInspectionCommand::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::marker::Send for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::marker::Sync for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::marker::Unpin for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
-impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol::ManagedInspectionCommand
 #[non_exhaustive] pub struct lean_rs_worker_protocol::protocol::ProgressTick
 pub lean_rs_worker_protocol::protocol::ProgressTick::current: u64
 pub lean_rs_worker_protocol::protocol::ProgressTick::phase: alloc::string::String

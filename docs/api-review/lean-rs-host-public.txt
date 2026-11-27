@@ -2678,6 +2678,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::SessionStats
 pub trait lean_rs_host::host::LeanProgressSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_host::host::LeanProgressSink::report(&self, lean_rs_host::LeanProgressEvent)
 pub fn lean_rs_host::host::prepare_host_artifacts() -> lean_rs::error::LeanResult<lean_rs_host::host::LeanPreparedHostArtifacts>
+pub fn lean_rs_host::host::prepare_host_artifacts_in(&std::path::Path) -> lean_rs::error::LeanResult<lean_rs_host::host::LeanPreparedHostArtifacts>
 pub fn lean_rs_host::host::ready_host_artifacts() -> lean_rs::error::LeanResult<core::option::Option<lean_rs_host::host::LeanPreparedHostArtifacts>>
 pub mod lean_rs_host::meta
 pub enum lean_rs_host::meta::LeanMetaResponse<Resp>
