@@ -32,6 +32,12 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   `PrepareBoundHostRead` and `InspectDeclarationFenced` requests, and the `HostReadPrepared` and
   `DeclarationInspectionFinished` responses. Use `LeanWorkerHostHandle::inspect_declaration_with_imports` or
   `LeanWorkerSession::inspect_declaration`.
+- The guardian no longer takes deadlines or read plans; only the managed inspection sent them. It refuses the
+  `prepare_hard_deadline`, `arm_*_hard_deadline`, `finish_hard_deadline` and `plan_reads` frames, drains its
+  worker if the parent sends anything after the startup ACK, and ignores `LEAN_RS_WORKER_GUARDIAN_WARM_IDLE_SECS`.
+  `native_guardian` loses `WARM_IDLE_TIMEOUT_ENV`, `guardian_deadline_ticks`, `validate_managed_guardian_scope`,
+  `observe_managed_guardian_binding` and `GuardianHandle::plan_reads`. It still reads the version 4 owner records
+  older guardians wrote.
 - The writer's storage turns, stage permits, module-setup capture and source handoff are gone; no consumer used
   them. This removes `SharedWriter::{open_with_storage_request, open_with_write_roots_handoff_observed,
   stage_ready, run_permitted}`, `WriterStageReady`, `WriterStagePermit`, `MODULE_SETUP_CAPTURE_ENV`, the

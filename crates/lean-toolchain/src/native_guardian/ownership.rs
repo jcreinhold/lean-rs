@@ -1064,19 +1064,12 @@ pub(super) fn publish_guardian_zombie_closure(
     record: &Path,
     worker: &NativeProcessIdentity,
     guardian: &NativeProcessIdentity,
-    autonomous_expiry: bool,
 ) -> io::Result<bool> {
-    if autonomous_expiry
-        && (!matches_zombie_birth(worker)? || !crate::process_group::observed_group_singleton(worker.pid)?)
-    {
-        // Do not wait on registry publication before sending the first stop.
-        return Ok(false);
-    }
     let _lock = lock_publication(record, Duration::from_secs(2))?;
     let mut value = read_owner(record)?;
     verify_original_worker_boot(&value)?;
     if field(&value, "phase") != "running"
-        || (!autonomous_expiry && field(&value, "guardian_drain") != "requested")
+        || field(&value, "guardian_drain") != "requested"
         || checked_identity(field(&value, "process"))? != *worker
         || checked_identity(field(&value, "guardian"))? != *guardian
         || guardian.pid != std::process::id()
@@ -1100,8 +1093,6 @@ pub(super) fn publish_guardian_zombie_closure(
     let object = value
         .as_object_mut()
         .ok_or_else(|| invalid("native owner object missing"))?;
-    // An autonomous decision is published together with the exact closure evidence.
-    object.insert("guardian_drain".to_owned(), json!("requested"));
     object.insert("guardian_zombie_closure".to_owned(), json!(true));
     super::persist_closure_owner(record, &value)?;
     Ok(true)
