@@ -12,6 +12,9 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - A guarded worker that exits before it authenticates no longer leaves its owner record in `dispatching`, which
   fenced every later build and kept its capacity. Its parent closes the record once it reaps the child, and a
   guardian that never bound its record exits instead of retrying forever.
+- Upgrade a worker parent and its guardian executable together. When a parent from this release closes such a
+  record, a 0.10 guardian rejects the record's phase and keeps retrying. The guardian handshake still reports
+  protocol 1, so the parent cannot refuse the older guardian.
 - The module-query file driver elaborates a whole file, header included, as `lean` does. Header-reading
   elaborators and linters now see the file they run in, positions are file positions, and messages Lean marks
   silent, such as a formatter plugin's records, are dropped as `lean` drops them.
