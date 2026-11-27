@@ -98,6 +98,25 @@ pub fn contract() -> io::Result<WriterContract> {
 /// subcommands and calls [`HelperCommand::run`]. If the host keeps its owner
 /// directory somewhere other than the environment or the SDK default, it calls
 /// `lean_toolchain::native_guardian::bind_registry_directory` first.
+///
+/// ```no_run
+/// use clap::Parser as _;
+///
+/// #[derive(clap::Parser)]
+/// enum Command {
+///     /// The host's own work.
+///     Serve,
+///     #[command(flatten)]
+///     Helper(lean_rs_writer::HelperCommand),
+/// }
+///
+/// fn main() -> std::process::ExitCode {
+///     match Command::parse() {
+///         Command::Serve => std::process::ExitCode::SUCCESS,
+///         Command::Helper(helper) => helper.run("my-host"),
+///     }
+/// }
+/// ```
 #[derive(Debug, clap::Subcommand)]
 pub enum HelperCommand {
     /// Hold the project write locks and run commands sent on stdin.

@@ -6,10 +6,10 @@ mangling.
 
 ## Build Script Contract
 
-Every build call acquires writer custody before cache inspection, including cache hits. Bind a shared-writer helper
-such as the standalone `lean-rs-writer` executable by canonical path
-with `.writer_executable(...)` or `LEAN_RS_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap`
-when its Lean root and all dependencies lie strictly below the owning Cargo package:
+Every build call acquires writer custody before cache inspection, including cache hits. Bind a shared-writer helper such
+as the standalone `lean-rs-writer` executable by canonical path with `.writer_executable(...)` or
+`LEAN_RS_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap` when its Lean root and all dependencies
+lie strictly below the owning Cargo package:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -99,9 +99,8 @@ The version 2 cache key covers the Lake project and its bounded declared depende
 - maximum mtime of `lakefile.lean`, `lakefile.toml`, `lean-toolchain`, and every `*.lean` file below the project root,
   excluding `.lake/`;
 - streaming content SHA-256 of the primary project and each canonical dependency's supported owned file tree, excluding
-  `.lake` and `.git`,
-  including C/header/resource inputs, Lake configuration, toolchain pin, manifest and supported override metadata; this
-  detects content changes even when size and modification timestamps are preserved;
+  `.lake` and `.git`, including C/header/resource inputs, Lake configuration, toolchain pin, manifest and supported
+  override metadata; this detects content changes even when size and modification timestamps are preserved;
 - file and directory identity observations, including Unix device, inode and change time, which also detect ordinary
   restored edits and transient source creation/removal; non-Unix platforms lack that Unix change-time evidence;
 - content SHA-256 of dependent dylibs recorded by the capability builder, excluding the target's own output.
@@ -118,9 +117,9 @@ A hit is accepted only when the cache key matches and the expected dylib exists.
 output-resolution failures are `LinkDiagnostics::LakeOutputUnresolved`.
 
 After the target succeeds, `CargoLeanCapability` checks each dependency library before publishing the capability
-manifest. A separately built dependency that is still missing yields `LakeOutputUnresolved` with its path. Under
-shared reader custody, `probe_ready()` reports a cache miss for the missing file. Release reader custody before
-building the missing dependency and refreshing the capability.
+manifest. A separately built dependency that is still missing yields `LakeOutputUnresolved` with its path. Under shared
+reader custody, `probe_ready()` reports a cache miss for the missing file. Release reader custody before building the
+missing dependency and refreshing the capability.
 
 ## Writer Custody
 
@@ -148,52 +147,54 @@ process fences remain authoritative after helper or caller loss. Demand files ar
 are never unlinked as recovery. Embedders retaining warm readers must fence matching new admissions and retire those
 readers only after their admitted calls finish.
 
-Whole-domain readers use `SharedReader::acquire_union` or `SharedReadProxy::acquire_union` before any body. The
-complete canonical input union stays fixed; acquisition sorts lock paths but returns guards in input order. A complete
-short gate preflight closes before helpers are spawned. Only opted-in normal helper exit 75, observed before any
-transfer or readiness bytes, permits another admission round. The descriptor path rechecks its listener after reap;
-the proxy path requires empty output and actual helper exit. Ordinary helper, transport, descriptor, identity and
-cleanup errors remain hard, with bounded stage/status/stderr diagnostics. Every tentative descriptor closes first;
-partial proxies all receive EOF and their actual helper exits are confirmed before waiting. One absolute deadline and
-cancellation predicate cover all rounds. A warm owner retaining earlier guardian custody uses one-pass
-`try_acquire_union` and must retire that generation on typed contention rather than wait on its own old locks.
-No metadata, import, initializer, guardian acknowledgement or target body is replayed by these admission loops.
+Whole-domain readers use `SharedReader::acquire_union` or `SharedReadProxy::acquire_union` before any body. The complete
+canonical input union stays fixed; acquisition sorts lock paths but returns guards in input order. A complete short gate
+preflight closes before helpers are spawned. Only opted-in normal helper exit 75, observed before any transfer or
+readiness bytes, permits another admission round. The descriptor path rechecks its listener after reap; the proxy path
+requires empty output and actual helper exit. Ordinary helper, transport, descriptor, identity and cleanup errors remain
+hard, with bounded stage/status/stderr diagnostics. Every tentative descriptor closes first; partial proxies all receive
+EOF and their actual helper exits are confirmed before waiting. One absolute deadline and cancellation predicate cover
+all rounds. A warm owner retaining earlier guardian custody uses one-pass `try_acquire_union` and must retire that
+generation on typed contention rather than wait on its own old locks. No metadata, import, initializer, guardian
+acknowledgement or target body is replayed by these admission loops.
 
-Writers try all project locks in globally sorted path order. Each pass independently opens each candidate, tries EX,
-and checks prior writer/native ownership once. Contention or an explicit false ownership check closes the candidate
-and every earlier ungranted artifact guard before any wait. Other errors propagate. The complete union's compatible
-writer demand stays held across these retries; cancellation and the original time budget bound waiting. Zero timeout
-still permits one immediate pass. Retrying never runs a command or turns an unknown outcome into success.
+Writers try all project locks in globally sorted path order. Each pass independently opens each candidate, tries EX, and
+checks prior writer/native ownership once. Contention or an explicit false ownership check closes the candidate and
+every earlier ungranted artifact guard before any wait. Other errors propagate. The complete union's compatible writer
+demand stays held across these retries; cancellation and the original time budget bound waiting. Zero timeout still
+permits one immediate pass. Retrying never runs a command or turns an unknown outcome into success.
 
-An initial **unlocked** file handle pins each target's original inode across retry passes. It is never flocked, cloned or
-lent, and its descriptor closes on exec; every EX attempt opens a separate description without creating a replacement. Admission compares the
-anchor, candidate and named inode before and after ownership checks. Anchors remain for domains present across a graph
-refresh; removed domains close their anchors, matching the existing changed-graph restart policy. This is distinct from
-keeping an ungranted EX lock. A caller may still own a separate cache-entry lock during project admission.
+An initial **unlocked** file handle pins each target's original inode across retry passes. It is never flocked, cloned
+or lent, and its descriptor closes on exec; every EX attempt opens a separate description without creating a
+replacement. Admission compares the anchor, candidate and named inode before and after ownership checks. Anchors remain
+for domains present across a graph refresh; removed domains close their anchors, matching the existing changed-graph
+restart policy. This is distinct from keeping an ungranted EX lock. A caller may still own a separate cache-entry lock
+during project admission.
 
 Writers revalidate the graph under the complete granted set and retry a changed graph only before launch within the
 original admission budget, announcing the new complete union before another EX attempt. Returned loans name the primary
 project first. Releasing retry candidates does not let ordinary readers bypass writer demand or grant permission to read
 artifacts still in use; a recovery reader requires a separate reviewed path.
 
-The helper validates every borrowed domain before
-ACK and rechecks graph coverage and inode identity before each GO. Loan order still names the primary project first,
-with up to 64 project/source-entry descriptions. `open_with_write_roots` also binds independently runnable prepared
-workspaces. `project_artifact_root_union` validates their combined graph; `write_roots` exposes the held domains and
-`covers_project` checks the current graph of a registered borrowed-build workspace. Commands must keep outputs inside
-those declared domains or helper-owned assets. Arbitrary configuration I/O is not sandboxed. After EX acquisition,
-borrowed-loan adoption, and immediately before GO, writers also inspect the common native ownership registry. An
-unresolved generation protecting the same canonical logical domain blocks admission even when its guardian died and the
-kernel lock became obtainable. A changed inode remains unresolved while that generation lives. Closed generations are
-checked before resolving old paths, so removal of a closed generation's domain does not permanently fence writers. The
-authoritative registry comes from `native_guardian::bind_registry_directory(&path)`,
-`LEAN_RS_WORKER_OWNERS_DIRECTORY`, or the SDK's per-user local-data default. Parent native startup requires its lifetime
-namespace to match that binding. Managed writer helpers receive the same path. The application and helper configuration
-contract is described under [native guardian ownership](worker-runtime.md#optional-native-guardian-ownership).
+The helper validates every borrowed domain before ACK and rechecks graph coverage and inode identity before each GO.
+Loan order still names the primary project first, with up to 64 project/source-entry descriptions.
+`open_with_write_roots` also binds independently runnable prepared workspaces. `project_artifact_root_union` validates
+their combined graph; `write_roots` exposes the held domains and `covers_project` checks the current graph of a
+registered borrowed-build workspace. Commands must keep outputs inside those declared domains or helper-owned assets.
+Arbitrary configuration I/O is not sandboxed. After EX acquisition, borrowed-loan adoption, and immediately before GO,
+writers also inspect the common native ownership registry. An unresolved generation protecting the same canonical
+logical domain blocks admission even when its guardian died and the kernel lock became obtainable. A changed inode
+remains unresolved while that generation lives. Closed generations are checked before resolving old paths, so removal of
+a closed generation's domain does not permanently fence writers. The authoritative registry comes from
+`native_guardian::bind_registry_directory(&path)`, `LEAN_RS_WORKER_OWNERS_DIRECTORY`, or the SDK's per-user local-data
+default. Parent native startup requires its lifetime namespace to match that binding. Managed writer helpers receive the
+same path. The application and helper configuration contract is described under
+[native guardian ownership](worker-runtime.md#optional-native-guardian-ownership).
 
 The writer passes its bound owner directory to each payload so cooperating helpers spawned by the payload inspect the
-same namespace. A command may explicitly supply the matching owner setting. Removing or replacing it is refused
-before the writer releases the command.
+same namespace. A command may explicitly supply the matching owner setting. The client refuses a command that removes or
+replaces it before delivery, and the helper refuses such a stage before launch with `stage_refused`. Either way the run
+fails as `NotStarted` and the writer stays open for another stage.
 
 A sibling lock requires a stable parent. An unrelated workspace that replaces an ancestor Git checkout can invalidate
 nested project domains absent from its own graph; an independent project under a replaceable source-package root has the
@@ -203,7 +204,8 @@ unresolved safety limit.
 `CargoLeanCapability` acquires the configured helper before cache inspection and retains it through Lake, cache
 publication and `finish`'s capability manifest. Parent callers bind `.writer_executable(...)`. Worker launchers can use
 `.shared_writer_executable(...)` on their child configuration. `build_quiet_with_writer(writer, cancelled)` reuses an
-already-owned scope.
+already-owned scope. A host binary can serve the helper subcommands itself through `lean_rs_writer::HelperCommand`; see
+the [`lean-rs-writer` README](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-writer/README.md).
 `probe_ready()` is a read-only alternative under caller-held SH custody: it checks the same build-cache key and exact
 expected capability manifest, including ABI exports, selected fingerprint and dependencies, without a runner, write or
 publication. A miss returns `None`; each independently prepared dependency also needs its own probe. This lets a warm
@@ -221,10 +223,22 @@ retain their private PGID. The Linux backend is weaker: after leader reap it pas
 safely signal surviving descendants. Failed cleanup retains custody. Helper failure permits passive admission checks
 only, never signaling from persisted numbers; a reused recorded group can conservatively delay admission.
 
+Each lock file holds one owner record: `version`, the helper's `owner` identity, and `process`, the running stage's
+process group or `null` between stages. Readers and writers read an empty or torn record, or a `null` process, as a
+stopped writer, and a recorded group as stopped only once the kernel reports the group gone. A record with any other
+field, such as one a 0.10 storage turn left, refuses admission rather than reading as stopped.
+
 `WriterFailure` preserves `NotStarted`, `Stopped`, or `Unknown` independently of proof/result bytes. Confirmed stop with
 unusable output carries the actual terminal receipt; it never becomes a successful `Output`. `LakeWriterFailure`
 preserves this typed cause through build diagnostics. An observer created before helper launch drains replies without
 blocking on a discarded recipient and retains the helper's `Child` until reaped. This adds no recovery queue or daemon.
+
+Each stage's stdout and stderr go to a 64 KiB capture that the stopped frame carries, which keeps every frame under 1
+MiB. Output past that stops the stage with no result. A command that sets `LEAN_RS_WRITER_LOG` (an absolute path) and
+`LEAN_RS_WRITER_LOG_LIMIT` (bytes) sends both streams to that file instead. The helper removes both settings from the
+stage's environment and opens the file before launch, refusing the stage for a symbolic link or a file that is not
+regular. It appends output up to the cap, writes one truncation line, and keeps draining the pipe, so output never stops
+the stage. The stopped frame then carries empty output.
 
 A typed `PrivateLakeBootstrap` is a separate Cargo bootstrap exception for bundled outputs below their Rust package. It
 uses controller-held locks over its declared package-local dependency union and direct `Command::output`; it does not
@@ -247,8 +261,8 @@ Each diagnostic renders as one line, so callers may print it through `cargo:warn
 
 ## Generic Interop Example
 
-[`crates/lean-rs/examples/interop_callback.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/examples/interop_callback.rs) builds two Lake
-targets through the helper:
+[`crates/lean-rs/examples/interop_callback.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/examples/interop_callback.rs)
+builds two Lake targets through the helper:
 
 - `crates/lean-rs/shims/lean-rs-interop-shims` target `LeanRsInterop`;
 - `fixtures/interop-shims` target `LeanRsInteropConsumer`.
