@@ -774,7 +774,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn ordinary_pre_auth_requires_direct_reap_not_unknown_wait() {
-        let bootstrap = crate::crash_ownership::BootstrapCustody::for_spawn(false);
+        let bootstrap = crate::crash_ownership::BootstrapCustody::ordinary();
         let deferred = bootstrap.clone();
         assert!(!custody_closed(None, Some(&bootstrap)));
         assert!(custody_closed_after_direct_reap(None, Some(&bootstrap)));

@@ -533,7 +533,10 @@ deadline.
 
 Preparing means spawn has not been authorized. Before calling `Command::spawn`, the exact owner durably
 publishes `dispatching` and reserves cleanup capacity in the tracker. An error returned from `Command::spawn`
-allows explicit retirement. Parent death never collects `dispatching`: the interval between possible spawn
+allows explicit retirement. A parent that reaps its direct child before authenticating it also publishes
+`preparing_closed` and returns the capacity: without HELLO no ACK follows, so no guardian holds read loans and no
+worker started Lean. A guardian may outlive that reservation briefly; it finds the record closed or collected and
+exits. Parent death never collects `dispatching`: the interval between possible spawn
 and authenticated durable identity is unknown and remains fenced. After HELLO the owner retains the authenticated
 stream and birth identities before any fallible write, publishes `bootstrap`, adopts the private group, publishes
 Running and finally ACKs. Pre-Running bootstrap capacity requires both group and guardian absence; Running retains

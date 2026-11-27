@@ -146,11 +146,12 @@ mod registry_tests;
 pub mod writer_storage;
 pub use ownership::{
     NativeCapacitySlot, NativeGuardianDrainBinding, NativeGuardianDrainStatus, NativeOwnerObservation,
-    NativeProcessIdentity, bind_registry_directory, claim_native_recovery, collect_closed_owner_records,
-    dispatch_owner_record, observe_original_guardian_closure, observe_original_guardian_drain, publish_startup_owner,
-    registry_directory, request_bound_original_guardian_drain, request_original_guardian_drain, reserve_owner_record,
-    reserve_owner_record_with_slot, retire_preparing_owner_record, retire_unspawned_owner_record,
-    submit_original_guardian_drain, validate_registry_directory,
+    NativeProcessIdentity, bind_registry_directory, claim_native_recovery, close_unacknowledged_owner_record,
+    collect_closed_owner_records, dispatch_owner_record, observe_original_guardian_closure,
+    observe_original_guardian_drain, publish_startup_owner, registry_directory, request_bound_original_guardian_drain,
+    request_original_guardian_drain, reserve_owner_record, reserve_owner_record_with_slot,
+    retire_preparing_owner_record, retire_unspawned_owner_record, submit_original_guardian_drain,
+    validate_registry_directory,
 };
 
 /// One actual shared lock and epoch protected by a native generation.
@@ -711,12 +712,19 @@ impl Guardian {
             .as_ref()
             .ok_or_else(|| invalid("bootstrap identity unknown"))?;
         let _lock = ownership::lock_publication(record, Duration::from_secs(2))?;
-        let mut value = read_owner(record)?;
+        // A running record outlives its live guardian, so a collected record
+        // was one the parent closed before any ACK.
+        let mut value = match read_owner(record) {
+            Ok(value) => value,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
         ownership::validate_owner_header(&value)?;
         if field(&value, "generation_id") != self.nonce.as_str() {
             return Err(invalid("bootstrap closure generation differs"));
         }
-        if field(&value, "phase") == "running" {
+        // The parent closes an unacknowledged dispatch after reaping its child.
+        if matches!(field(&value, "phase").as_str(), Some("running" | "preparing_closed")) {
             return Ok(());
         }
         if field(&value, "phase") == "bootstrap_closed" {
@@ -1027,7 +1035,9 @@ impl Guardian {
                 Ok(false) => {
                     #[cfg(all(test, target_os = "macos"))]
                     tests::pause_after_payload_closed(self);
-                    if self.publish_bootstrap_closed().is_ok() {
+                    // Without a bound record the guardian sent no HELLO, so it
+                    // holds no loans and has no receipt to publish.
+                    if self.record.is_none() || self.publish_bootstrap_closed().is_ok() {
                         return;
                     }
                 }
@@ -1056,6 +1066,7 @@ impl Guardian {
 #[cfg(test)]
 mod closure_publication_tests {
     use super::*;
+    use std::os::unix::fs::DirBuilderExt as _;
 
     #[test]
     fn requested_drain_retries_directory_sync_after_uncertain_rename() -> io::Result<()> {
@@ -1103,6 +1114,65 @@ mod closure_publication_tests {
         persist_closure_owner(&record, &value)?;
         assert!(!record.with_extension("closure-write").exists());
         fs::remove_dir_all(root)
+    }
+
+    fn unbound_guardian(worker: u32, nonce: &str) -> io::Result<Guardian> {
+        Ok(Guardian {
+            worker,
+            nonce: nonce.to_owned(),
+            control: UnixStream::pair()?.0,
+            parent: None,
+            parent_identity: None,
+            record: None,
+            next_sequence: 0,
+            loans: Vec::new(),
+            plans: Vec::new(),
+            incoming: Incoming::default(),
+            bootstrap_identity: None,
+            autonomous_expiry: false,
+        })
+    }
+
+    #[test]
+    fn parent_closes_an_unacknowledged_dispatch_and_its_guardian_accepts_it() -> io::Result<()> {
+        let root = std::env::temp_dir().join(format!("lean-unacknowledged-{}", std::process::id()));
+        fs::DirBuilder::new().mode(0o700).create(&root)?;
+        let registry = root.canonicalize()?.join("owners");
+        fs::DirBuilder::new().mode(0o700).create(&registry)?;
+        let nonce = "ab".repeat(24);
+        let record = reserve_owner_record_with_slot(&registry, &nonce, Duration::from_secs(1), None)?;
+        dispatch_owner_record(&record, &nonce)?;
+        assert!(close_unacknowledged_owner_record(&record, &"cd".repeat(24)).is_err());
+        assert!(close_unacknowledged_owner_record(&record, &nonce)?);
+        assert_eq!(field(&read_owner(&record)?, "phase"), "preparing_closed");
+        assert!(close_unacknowledged_owner_record(&record, &nonce)?);
+        // A guardian bound before the parent closed the record exits cleanly,
+        // also once a later admission collected the record.
+        let own = NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("test process absent"))?;
+        let mut guardian = unbound_guardian(std::process::id(), &nonce)?;
+        guardian.record = Some(record.clone());
+        guardian.bootstrap_identity = Some((own.clone(), own));
+        guardian.publish_bootstrap_closed()?;
+        assert_eq!(field(&read_owner(&record)?, "phase"), "preparing_closed");
+        fs::remove_dir_all(record.parent().ok_or_else(|| invalid("owner directory missing"))?)?;
+        guardian.publish_bootstrap_closed()?;
+        assert!(close_unacknowledged_owner_record(&record, &nonce)?);
+        fs::remove_dir_all(root)
+    }
+
+    #[test]
+    fn a_guardian_that_never_bound_its_record_drains_and_returns() -> io::Result<()> {
+        // No process can have this ID on macOS or Linux, so the group is absent
+        // and the drain never signals.
+        let guardian = unbound_guardian(4_194_304, &"ab".repeat(24))?;
+        assert!(!crate::process_group::group_present(guardian.worker)?);
+        let drained = thread::spawn(move || guardian.drain());
+        let until = Instant::now() + Duration::from_secs(2);
+        while !drained.is_finished() {
+            assert!(Instant::now() < until, "the drain kept looping");
+            thread::sleep(Duration::from_millis(5));
+        }
+        Ok(())
     }
 }
 

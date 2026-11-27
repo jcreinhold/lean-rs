@@ -1225,6 +1225,45 @@ pub fn dispatch_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
 pub fn retire_unspawned_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
     transition_preparing(record, nonce, "dispatching", "preparing_closed")
 }
+/// Close this caller's dispatched generation once it has reaped the direct
+/// child, provided it never sent the ACK, and report whether custody ended.
+///
+/// The ACK follows durable Running. Without it the guardian holds no read
+/// loans and the worker never started Lean, so the record fences nothing and
+/// its parent may close it. A guardian that published `bootstrap_closed` first
+/// keeps its receipt; custody then ends when that guardian exits. A missing
+/// record was collected, which only happens to a closed one.
+/// # Errors
+/// Refuses another owner, a phase past bootstrap, or an uncertain write. A
+/// busy publication lock returns `WouldBlock`, so a poller tries again.
+#[doc(hidden)]
+pub fn close_unacknowledged_owner_record(record: &Path, nonce: &str) -> io::Result<bool> {
+    let _lock = try_lock_publication(record)?;
+    let mut value = match read_owner(record) {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    validate_owner_header(&value)?;
+    let parent =
+        NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native parent identity absent"))?;
+    if field(&value, "generation_id") != nonce || checked_identity(field(&value, "parent"))? != parent {
+        return Err(invalid("unacknowledged closure belongs to another exact owner"));
+    }
+    match field(&value, "phase").as_str() {
+        Some("preparing_closed") => Ok(true),
+        Some("bootstrap_closed") => payload_closed(&value),
+        Some("dispatching") => {
+            value
+                .as_object_mut()
+                .ok_or_else(|| invalid("native owner object missing"))?
+                .insert("phase".to_owned(), json!("preparing_closed"));
+            persist_owner(record, &value)?;
+            Ok(true)
+        }
+        _ => Err(invalid("only an unacknowledged dispatch closes after a direct reap")),
+    }
+}
 fn transition_preparing(record: &Path, nonce: &str, from: &str, to: &str) -> io::Result<()> {
     let mut value = read_owner(record)?;
     validate_owner_header(&value)?;

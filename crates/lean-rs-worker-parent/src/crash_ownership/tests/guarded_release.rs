@@ -178,6 +178,45 @@ fn native_dispatch_refusal_does_not_create_child() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn guarded_child_that_exits_before_hello_closes_its_record_and_slot() {
+    let root = directory().canonicalize().unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let registry = root.join("owners");
+    let slot = lean_toolchain::native_guardian::NativeCapacitySlot {
+        key: "early-exit".into(),
+        scope: "main".into(),
+        limit: 1,
+    };
+    let scope = LeanWorkerNativeScope::prepare(&registry, Duration::from_secs(2), Some(&slot)).unwrap();
+    let record = scope.0.directory.join("owner.json");
+    let mut command = Command::new("/bin/sh");
+    command.args(["-c", "exit 3"]);
+    let error = scope.spawn(&mut command, Duration::from_millis(200)).unwrap_err();
+    assert!(matches!(
+        error,
+        LeanWorkerNativeSpawnError::AfterSpawn { ref source, .. } if source.kind() == io::ErrorKind::TimedOut
+    ));
+    let LeanWorkerNativeSpawnError::AfterSpawn { mut pending, .. } = error else {
+        return;
+    };
+    assert_owner_phase(&record, "dispatching");
+    // A build waits while any record is dispatching.
+    let lock = root.join("project.lock");
+    let reads_stopped =
+        || lean_toolchain::native_guardian::protected_native_reads_stopped(&registry, &lock, (0, 0)).unwrap();
+    assert!(!reads_stopped());
+    wait_for(|| pending.try_wait().unwrap().is_some());
+    assert_owner_phase(&record, "preparing_closed");
+    assert!(pending.custody_closed().unwrap());
+    assert!(reads_stopped());
+    let successor = LeanWorkerNativeScope::prepare(&registry, Duration::from_secs(2), Some(&slot)).unwrap();
+    assert!(!record.exists());
+    drop(successor);
+    drop(pending);
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn assert_owner_phase(record: &Path, expected: &str) {
     let owner: serde_json::Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
     assert_eq!(owner.get("phase").and_then(serde_json::Value::as_str), Some(expected));

@@ -14,6 +14,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt as _, PermissionsExt};
 use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 pub(crate) const SOCKET_ENV: &str = "LEAN_RS_WORKER_PARENT_SOCKET";
@@ -173,8 +174,9 @@ impl std::error::Error for LeanWorkerNativeSpawnError {
 
 /// Retained local process/tracker ownership after failed startup.
 ///
-/// Dropping this value delegates cleanup, but does not certify closure. Unknown
-/// authenticated identity remains fenced; direct exit alone is not closure.
+/// Dropping this value delegates cleanup, but does not certify closure. A child
+/// reaped before it authenticated closes its generation. Otherwise unknown
+/// identity stays fenced, and a direct exit alone is not closure.
 #[derive(Debug)]
 pub struct LeanWorkerNativePendingCleanup {
     child: Box<crate::process::OwnedChild>,
@@ -196,7 +198,9 @@ impl LeanWorkerNativePendingCleanup {
             custody,
         }
     }
-    /// Observe exact group and guardian closure independently of wait status.
+    /// Observe exact group and guardian closure independently of wait status,
+    /// except that a child which exited before authenticating counts as closed
+    /// once `try_wait` has reaped it.
     /// # Errors
     /// A failed OS observation is not closure.
     pub fn custody_closed(&self) -> io::Result<bool> {
@@ -453,6 +457,7 @@ impl LeanWorkerNativeScopeLease {
 pub(crate) struct BootstrapCustody {
     state: Arc<Mutex<Option<AuthenticatedBootstrap>>>,
     ordinary: bool,
+    unacknowledged: Option<Arc<UnacknowledgedGeneration>>,
 }
 #[derive(Debug)]
 struct AuthenticatedBootstrap {
@@ -460,28 +465,65 @@ struct AuthenticatedBootstrap {
     owner: LeanWorkerOwnedProcess,
     guardian: Option<LeanWorkerOwnedProcess>,
 }
+/// A guarded generation's record, which its parent closes itself when the
+/// child exits before authenticating.
+#[derive(Debug)]
+struct UnacknowledgedGeneration {
+    record: PathBuf,
+    nonce: String,
+    closed: AtomicBool,
+}
 impl BootstrapCustody {
-    pub(crate) fn for_spawn(guarded: bool) -> Self {
+    pub(crate) fn ordinary() -> Self {
         Self {
-            ordinary: !guarded,
+            ordinary: true,
             ..Self::default()
         }
     }
-    /// Only an owned direct-child wait status permits the ordinary pre-HELLO case.
+    pub(crate) fn guarded(record: PathBuf, nonce: String) -> Self {
+        Self {
+            unacknowledged: Some(Arc::new(UnacknowledgedGeneration {
+                record,
+                nonce,
+                closed: AtomicBool::new(false),
+            })),
+            ..Self::default()
+        }
+    }
+    /// Only an owned direct-child wait status permits the pre-HELLO case.
     /// This does not establish group absence and must never handle ECHILD.
+    /// An ordinary child holds nothing before HELLO. A guarded child that never
+    /// authenticated got no ACK, so this parent closes its record.
     pub(crate) fn closed_after_direct_reap(&self) -> io::Result<bool> {
-        if self.ordinary
-            && self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_none()
         {
-            return Ok(true);
+            // A reaped child can no longer authenticate, so no state here
+            // means this parent never sent the ACK.
+            let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.is_none() {
+                if self.ordinary {
+                    return Ok(true);
+                }
+                if let Some(generation) = &self.unacknowledged {
+                    if generation.closed.load(Ordering::Acquire) {
+                        return Ok(true);
+                    }
+                    let closed =
+                        native_guardian::close_unacknowledged_owner_record(&generation.record, &generation.nonce)?;
+                    generation.closed.store(closed, Ordering::Release);
+                    return Ok(closed);
+                }
+            }
         }
         self.closed()
     }
     pub(crate) fn closed(&self) -> io::Result<bool> {
+        if self
+            .unacknowledged
+            .as_ref()
+            .is_some_and(|generation| generation.closed.load(Ordering::Acquire))
+        {
+            return Ok(true);
+        }
         let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some((owner, guardian)) = state
             .as_ref()
@@ -626,6 +668,11 @@ impl ParentLifetime {
                 fs::DirBuilder::new().mode(0o700).create(&directory)?;
                 directory
             };
+            let custody = if guarded {
+                BootstrapCustody::guarded(directory.join("owner.json"), nonce.clone())
+            } else {
+                BootstrapCustody::ordinary()
+            };
             Ok(Self {
                 listener,
                 directory,
@@ -633,7 +680,7 @@ impl ParentLifetime {
                 nonce,
                 guarded,
                 capacity_slot: slot.cloned(),
-                custody: BootstrapCustody::for_spawn(guarded),
+                custody,
                 dispatched: false,
             })
         })();
