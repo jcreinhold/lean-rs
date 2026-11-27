@@ -51,8 +51,9 @@ rmp-serde = "1"
 tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]
-# The parent-death test clears the close-on-exec flag on its probe without unsafe code.
-rustix = "1.1.6"
+# The parent-death test clears the close-on-exec flag on its probe and, on Linux,
+# reaps the orphaned worker as its subreaper, without unsafe code.
+rustix = { version = "1.1.6", features = ["process"] }
 
 [[bin]]
 name = "lean-rs-worker-child"

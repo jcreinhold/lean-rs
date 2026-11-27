@@ -643,6 +643,13 @@ mod parent_death {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
+        // When the parent dies, Linux hands the worker to the nearest
+        // subreaper above it, or to init. After the worker exits it stays a
+        // zombie until that process reaps it, and the fixture qualification
+        // then finds its PID still in use. As the subreaper, this process can
+        // reap the worker itself and read its exit status.
+        #[cfg(target_os = "linux")]
+        rustix::process::set_child_subreaper(Some(rustix::process::getpid()))?;
         let mut parent = command.spawn()?;
 
         let marker = scratch.0.join(MARKER);
@@ -691,6 +698,35 @@ mod parent_death {
         assert!(
             elapsed < LEAN_SLEEP / 6,
             "worker took {elapsed:?} to exit after its parent died"
+        );
+        #[cfg(target_os = "linux")]
+        reap_orphan(&pid)?;
+        Ok(())
+    }
+
+    /// Reaps the worker this process inherited as its subreaper, and checks
+    /// that the lifeline stopped it: `parent_watchdog.rs` exits with 125.
+    #[cfg(target_os = "linux")]
+    fn reap_orphan(pid: &str) -> TestResult {
+        use rustix::process::{Pid, WaitOptions, waitpid};
+
+        let worker = Pid::from_raw(pid.trim().parse()?).ok_or("worker PID is not positive")?;
+        let mut reaped = None;
+        // The worker closes the probe as it exits, a moment before it becomes
+        // a zombie, so the first `waitpid` may find it still running.
+        wait_for(Duration::from_secs(10), || {
+            reaped = waitpid(Some(worker), WaitOptions::NOHANG)
+                .map_err(|error| format!("waitpid on worker {pid}: {error}"))?;
+            Ok(reaped.is_some())
+        })?;
+        let Some((_, status)) = reaped else {
+            kill_leftover(pid);
+            return Err(format!("worker {pid} closed the probe but did not exit").into());
+        };
+        assert_eq!(
+            status.exit_status(),
+            Some(125),
+            "worker {pid} ended with {status:?}, not the lifeline's exit status"
         );
         Ok(())
     }
