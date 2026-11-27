@@ -44,6 +44,9 @@ When the candidate becomes the head, update these together:
   verification matrix; and `DEFAULT_LEAN_VERSION` in [`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh).
 - Every tracked `lean-toolchain` file. Find the pins with `git ls-files '*lean-toolchain'`; this includes bundled shims,
   fixtures, and the shipped-crate template.
+- The generated-shim build slot `lean-<head>`: the version check and directory in each shim `lakefile.lean`, the
+  matching check in `crates/lean-toolchain/src/build_helpers.rs`, and the tests that name the slot. Find them with
+  `git grep -nF 'lean-<old head>'`.
 
 Keep the committed pins equal to the head. The sanitizer and compile-fail workflows install that version without
 repinning the workspace, so mismatched pins can mix headers and runtime-library search paths.

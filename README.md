@@ -45,7 +45,7 @@ The tour opens an import session, elaborates a term, kernel-checks it, runs a bu
 
 ## Choose a crate
 
-All published crates share the workspace version; dependency examples use `"0.9"` for the 0.9.x series.
+All published crates share the workspace version; dependency examples use `"0.10"` for the 0.10.x series.
 
 | Job | Crate |
 | --- | --- |
@@ -55,6 +55,7 @@ All published crates share the workspace version; dependency examples use `"0.9"
 | Build the Lean-linked worker binary | [`lean-rs-worker-child`](crates/lean-rs-worker-child/README.md) |
 | Implement a worker protocol peer | [`lean-rs-worker-protocol`](crates/lean-rs-worker-protocol/README.md) |
 | Discover toolchains or build and package Lean capabilities | [`lean-toolchain`](crates/lean-toolchain/README.md) |
+| Run the shared Lake writer or the worker's guardian helper | [`lean-rs-writer`](crates/lean-rs-writer/README.md) |
 | Read static ABI metadata without Lean installed | [`lean-rs-abi`](crates/lean-rs-abi/README.md) |
 | Materialize the reusable Lean callback and streaming shims | [`lean-rs-interop-shims`](crates/lean-rs/shims/lean-rs-interop-shims/README.md) |
 | Call raw Lean C symbols with explicit unsafe obligations | [`lean-rs-sys`](crates/lean-rs-sys/README.md) |

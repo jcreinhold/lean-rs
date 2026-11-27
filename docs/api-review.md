@@ -2,7 +2,7 @@
 
 [`api-review/*-public.txt`](https://github.com/jcreinhold/lean-rs/tree/main/docs/api-review) contains `cargo public-api --simplified` baselines for the eight crates
 currently gated by [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). Intentional API changes update the matching baseline in the same
-commit. `lean-rs-abi` currently has no committed baseline or CI comparison.
+commit. `lean-rs-abi` and `lean-rs-writer` currently have no committed baseline or CI comparison.
 
 ## Regenerate
 
