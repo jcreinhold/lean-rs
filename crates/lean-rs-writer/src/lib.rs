@@ -52,16 +52,91 @@ pub struct WriterContract {
     pub ownership_registry: PathBuf,
 }
 
-/// Report the current executable, without a path-specific compatibility pin.
+/// The helper executable set by [`use_helper_executable`].
+static HELPER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Name the executable that serves the [`HelperCommand`] subcommands, for a
+/// process whose own executable does not, such as a test harness. Call it once
+/// before native work; [`contract`] then reports `path`.
+///
+/// # Errors
+/// Returns an error when `path` cannot be resolved, or when an earlier call
+/// named another file.
+pub fn use_helper_executable(path: &Path) -> io::Result<()> {
+    let path = path.canonicalize()?;
+    if *HELPER.get_or_init(|| path.clone()) == path {
+        Ok(())
+    } else {
+        Err(invalid("the helper executable is already set to another file"))
+    }
+}
+
+/// Report the helper executable, without a path-specific compatibility pin.
+///
+/// That is the path given to [`use_helper_executable`], else this process's
+/// own executable.
 ///
 /// # Errors
 /// Returns the operating-system error when the executable cannot be identified.
 pub fn contract() -> io::Result<WriterContract> {
+    let executable = match HELPER.get() {
+        Some(path) => path.clone(),
+        None => std::env::current_exe()?.canonicalize()?,
+    };
     Ok(WriterContract {
         protocol: PROTOCOL,
-        executable: std::env::current_exe()?.canonicalize()?,
+        executable,
         ownership_registry: lean_toolchain::native_guardian::registry_directory()?,
     })
+}
+
+/// The helper subcommands.
+///
+/// A host binary that serves them itself flattens this enum into its own
+/// subcommands and calls [`HelperCommand::run`]. If the host keeps its owner
+/// directory somewhere other than the environment or the SDK default, it calls
+/// `lean_toolchain::native_guardian::bind_registry_directory` first.
+#[derive(Debug, clap::Subcommand)]
+pub enum HelperCommand {
+    /// Hold the project write locks and run commands sent on stdin.
+    Writer(WriterArgs),
+    /// Print the project lock path without taking it.
+    WriterLockPath(WriterLockPathArgs),
+    /// Pass shared read custody to a worker over a socket.
+    Reader(ReaderArgs),
+    /// Hold shared read custody for a parent that keeps no lock descriptor.
+    ReadProxy(ReadProxyArgs),
+    /// Own one native worker generation.
+    #[command(hide = true)]
+    NativeGuardian,
+    /// Wrap one writer command until its process group is recorded.
+    #[command(hide = true)]
+    WriterExec,
+}
+
+impl HelperCommand {
+    /// Run the subcommand. On failure, print `{program} {subcommand}: {error}`
+    /// to stderr and return the subcommand's failure status.
+    pub fn run(&self, program: &str) -> std::process::ExitCode {
+        let (name, result) = match self {
+            Self::Writer(args) => ("writer", run_cli(args)),
+            Self::WriterLockPath(args) => ("writer-lock-path", run_lock_path_cli(args)),
+            Self::Reader(args) => ("reader", run_reader(args)),
+            Self::ReadProxy(args) => ("read-proxy", run_read_proxy(args)),
+            Self::NativeGuardian => ("native-guardian", lean_toolchain::native_guardian::run_guardian_cli()),
+            Self::WriterExec => ("writer-exec", run_exec()),
+        };
+        let Err(error) = result else {
+            return std::process::ExitCode::SUCCESS;
+        };
+        eprintln!("{program} {name}: {error}");
+        match self {
+            Self::Reader(_) | Self::ReadProxy(_) => std::process::ExitCode::from(reader_failure_exit_code(&error)),
+            Self::Writer(_) | Self::WriterLockPath(_) | Self::NativeGuardian | Self::WriterExec => {
+                std::process::ExitCode::FAILURE
+            }
+        }
+    }
 }
 
 /// Read-only access to the shared Rust project-lock resolver.
@@ -1393,6 +1468,22 @@ mod tests {
         let mut file = tempfile::tempfile().expect("fixture");
         file.write_all(b"{\"version\":1").expect("fixture");
         assert!(owner(&mut file).expect("uncommitted").is_none());
+    }
+
+    #[test]
+    fn helper_executable_is_set_once_and_reported_by_the_contract() {
+        let directory = tempfile::tempdir().expect("fixture");
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        fs::write(&first, "").expect("fixture");
+        fs::write(&second, "").expect("fixture");
+        use_helper_executable(&first).expect("first call");
+        use_helper_executable(&first).expect("same file again");
+        assert!(use_helper_executable(&second).is_err());
+        assert_eq!(
+            contract().expect("contract").executable,
+            first.canonicalize().expect("fixture")
+        );
     }
 }
 
