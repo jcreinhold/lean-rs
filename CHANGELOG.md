@@ -37,6 +37,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
   `writer-storage` commands.
 - A lock record or owner-registry entry left by a 0.10 storage turn now refuses writer admission instead of
   reading as a stopped writer.
+- The import planner and Lake module discovery are gone; no consumer used them, and Lake owns the module graph.
+  `lean-rs-worker-parent` loses `LeanWorkerImportPlanner`, `LeanWorkerImportPlanConfig`,
+  `LeanWorkerPlanMetadataExpectation`, `LeanWorkerModuleWork`, `LeanWorkerPlannedBatch`,
+  `LeanWorkerBatchFingerprint` and `LeanWorkerImportPlanError`. `lean-toolchain` loses `discover_lake_modules`,
+  `LeanModuleDiscoveryOptions`, `LeanLakeProjectModules`, `LeanModuleDescriptor`, `LeanModuleSetFingerprint`, and
+  the `MissingLakeRoot`, `MissingModuleRoot` and `UnsupportedToolchain` variants of
+  `LeanModuleDiscoveryDiagnostic`; `olean_candidate` stays. Build a worker with `LeanWorkerCapabilityBuilder::new`
+  or `LeanWorkerCapabilityBuilder::from_built_capability`. `mathlib_scale_probe` no longer reads
+  `LEAN_RS_MATHLIB_ROOT` or `LEAN_RS_MATHLIB_SCALE_LIMIT`.
 
 ## [0.10.17]
 

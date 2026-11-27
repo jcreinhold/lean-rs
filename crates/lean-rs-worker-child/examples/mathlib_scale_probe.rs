@@ -1,20 +1,18 @@
 //! Mathlib-scale worker fixture probe.
 //!
-//! This example exercises the normal large-workload path:
+//! This example runs the normal large-workload path:
 //!
 //! ```text
-//! import planner -> LeanWorkerPool -> session lease -> typed command
+//! capability builder -> LeanWorkerPool -> session lease -> typed command
 //! ```
 //!
-//! It does not import `lean-dup` schemas. If `LEAN_RS_MATHLIB_ROOT` points at a
-//! mathlib checkout, the planner uses that module list as the workload shape;
-//! otherwise it uses a deterministic mathlib-style fallback.
+//! It sends a fixed list of mathlib-style module names as the workload.
 //!
 //! Run from the workspace root:
 //!
 //! ```sh
-//! cargo build -p lean-rs-worker --bin lean-rs-worker-child
-//! cargo run -p lean-rs-worker --example mathlib_scale_probe
+//! cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+//! cargo run -p lean-rs-worker-child --example mathlib_scale_probe
 //! ```
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::print_stdout)]
@@ -25,13 +23,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use lean_rs_worker_parent::{
-    LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerError,
-    LeanWorkerImportPlanConfig, LeanWorkerImportPlanner, LeanWorkerModuleWork, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRestartPolicy, LeanWorkerStreamingCommand,
-    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
-};
-use lean_toolchain::{
-    LeanModuleDiscoveryOptions, LeanModuleSetFingerprint, ToolchainFingerprint, discover_lake_modules,
+    LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink,
+    LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerProgressEvent, LeanWorkerProgressSink,
+    LeanWorkerRestartPolicy, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -54,24 +48,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = interop_root();
     lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsInteropConsumer")?;
     let worker_binary = worker_binary()?;
-    let workload = workload()?;
 
     println!("workload=mathlib_scale_worker_fixture");
     println!("platform={} {}", std::env::consts::OS, std::env::consts::ARCH);
-    println!("module_source={}", workload.source);
-    println!("module_count={}", workload.modules.len());
-    println!("mathlib_available={}", workload.mathlib_available);
+    println!("module_count={}", scale_modules().len());
     println!(
         "parent_rss_start_kib={}",
         current_process_rss_kib().map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
     );
 
-    let single = run_index_workload("single_worker", 1, &worker_binary, &workload)?;
-    let pooled = run_index_workload("pool_max_2", 2, &worker_binary, &workload)?;
-    let cancellation = run_cancelled_workload(&worker_binary, &workload)?;
-    let fatal = run_fatal_workload(&worker_binary, &workload)?;
-    let cycle = run_cycle_workload(&worker_binary, &workload)?;
-    let slow = run_slow_sink_workload(&worker_binary, &workload)?;
+    let single = run_index_workload("single_worker", 1, &worker_binary)?;
+    let pooled = run_index_workload("pool_max_2", 2, &worker_binary)?;
+    let cancellation = run_cancelled_workload(&worker_binary)?;
+    let fatal = run_fatal_workload(&worker_binary)?;
+    let cycle = run_cycle_workload(&worker_binary)?;
+    let slow = run_slow_sink_workload(&worker_binary)?;
 
     println!(
         "summary single_rows={} pool_rows={} cancellation={} fatal_exit={} post_cycle_rows={} slow_sink_rows={}",
@@ -81,17 +72,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "parent_rss_end_kib={}",
         current_process_rss_kib().map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
     );
-    println!("comparison_command=skipped");
     println!("status=ok");
     Ok(())
-}
-
-#[derive(Clone)]
-struct Workload {
-    source: String,
-    mathlib_available: bool,
-    modules: Vec<LeanWorkerModuleWork>,
-    fingerprint: LeanModuleSetFingerprint,
 }
 
 #[derive(Clone, Copy)]
@@ -99,62 +81,7 @@ struct WorkloadResult {
     rows: u64,
 }
 
-fn workload() -> Result<Workload, Box<dyn std::error::Error>> {
-    if let Some(root) = std::env::var_os("LEAN_RS_MATHLIB_ROOT") {
-        let root = PathBuf::from(root);
-        let limit = std::env::var("LEAN_RS_MATHLIB_SCALE_LIMIT")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(128);
-        let discovered =
-            discover_lake_modules(LeanModuleDiscoveryOptions::new(&root).selected_roots(["Mathlib".to_owned()]))?;
-        let modules = discovered
-            .modules
-            .iter()
-            .take(limit)
-            .map(|module| {
-                LeanWorkerModuleWork::new(
-                    module.module.clone(),
-                    module.path.clone(),
-                    module.source_root.clone(),
-                    ["LeanRsInteropConsumer.Callback"],
-                )
-            })
-            .collect::<Vec<_>>();
-        return Ok(Workload {
-            source: root.display().to_string(),
-            mathlib_available: true,
-            modules,
-            fingerprint: discovered.fingerprint,
-        });
-    }
-
-    let modules = fallback_modules()
-        .into_iter()
-        .map(|module| {
-            LeanWorkerModuleWork::new(
-                module.clone(),
-                PathBuf::from(format!("{}.lean", module.replace('.', "/"))),
-                "Mathlib",
-                ["LeanRsInteropConsumer.Callback"],
-            )
-        })
-        .collect::<Vec<_>>();
-    Ok(Workload {
-        source: "fallback".to_owned(),
-        mathlib_available: false,
-        fingerprint: LeanModuleSetFingerprint {
-            toolchain: ToolchainFingerprint::current(),
-            lakefile_sha256: "mathlib-scale-fixture-lakefile".to_owned(),
-            manifest_sha256: Some("mathlib-scale-fixture-manifest".to_owned()),
-            source_count: modules.len() as u64,
-            source_max_mtime_ns: 0,
-        },
-        modules,
-    })
-}
-
-fn fallback_modules() -> Vec<String> {
+fn scale_modules() -> Vec<String> {
     [
         "Mathlib.Algebra.Group.Basic",
         "Mathlib.Algebra.Ring.Basic",
@@ -178,65 +105,51 @@ fn fallback_modules() -> Vec<String> {
     .collect()
 }
 
-fn planned_builders(
-    worker_binary: &Path,
-    workload: &Workload,
-) -> Result<Vec<lean_rs_worker_parent::LeanWorkerCapabilityBuilder>, Box<dyn std::error::Error>> {
-    let config = LeanWorkerImportPlanConfig::new(interop_root(), "lean_rs_interop_consumer", "LeanRsInteropConsumer")
-        .base_imports(["LeanRsInteropConsumer.Callback"])
-        .validate_metadata(
-            "lean_rs_interop_consumer_worker_shape_metadata",
-            json!({"source": "mathlib_scale_probe"}),
-        );
-    let batches =
-        LeanWorkerImportPlanner::new(config).plan_work_items(workload.modules.clone(), &workload.fingerprint)?;
-    Ok(batches
-        .into_iter()
-        .map(|batch| {
-            batch
-                .capability_builder()
-                .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
-                .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
-                .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
-                .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
-                .worker_executable(worker_binary)
-                .restart_policy(memory_restart_policy())
-        })
-        .collect())
+fn builder(worker_binary: &Path) -> LeanWorkerCapabilityBuilder {
+    LeanWorkerCapabilityBuilder::new(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        ["LeanRsInteropConsumer.Callback"],
+    )
+    .validate_metadata(
+        "lean_rs_interop_consumer_worker_shape_metadata",
+        json!({"source": "mathlib_scale_probe"}),
+    )
+    .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
+    .worker_executable(worker_binary)
+    .restart_policy(memory_restart_policy())
 }
 
 fn run_index_workload(
     label: &str,
     max_workers: usize,
     worker_binary: &Path,
-    workload: &Workload,
 ) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
     let started = Instant::now();
     let mut pool = LeanWorkerPool::new(memory_pool_config(max_workers));
     let command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_index",
     );
-    let mut rows = 0_u64;
-    let mut diagnostics = 0_usize;
-    let mut progress = 0_usize;
-
-    for builder in planned_builders(worker_binary, workload)? {
-        let sink = CountingRows::default();
-        let diagnostic_sink = CountingDiagnostics::default();
-        let progress_sink = CountingProgress::default();
-        let mut lease = pool.acquire_lease(builder)?;
-        let summary = lease.run_streaming_command(
-            &command,
-            &ScaleRequest::from_workload(workload),
-            &sink,
-            Some(&diagnostic_sink),
-            None,
-            Some(&progress_sink),
-        )?;
-        rows = rows.saturating_add(summary.total_rows);
-        diagnostics = diagnostics.saturating_add(diagnostic_sink.count());
-        progress = progress.saturating_add(progress_sink.count());
-    }
+    let sink = CountingRows::default();
+    let diagnostic_sink = CountingDiagnostics::default();
+    let progress_sink = CountingProgress::default();
+    let mut lease = pool.acquire_lease(builder(worker_binary))?;
+    let summary = lease.run_streaming_command(
+        &command,
+        &ScaleRequest::probe(),
+        &sink,
+        Some(&diagnostic_sink),
+        None,
+        Some(&progress_sink),
+    )?;
+    drop(lease);
+    let rows = summary.total_rows;
+    let diagnostics = diagnostic_sink.count();
+    let progress = progress_sink.count();
 
     let elapsed = started.elapsed();
     let snapshot = pool.snapshot();
@@ -271,7 +184,7 @@ fn run_index_workload(
     Ok(WorkloadResult { rows })
 }
 
-fn run_cancelled_workload(worker_binary: &Path, workload: &Workload) -> Result<bool, Box<dyn std::error::Error>> {
+fn run_cancelled_workload(worker_binary: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     let started = Instant::now();
     let mut pool = LeanWorkerPool::new(memory_pool_config(1));
     let token = LeanWorkerCancellationToken::new();
@@ -282,15 +195,8 @@ fn run_cancelled_workload(worker_binary: &Path, workload: &Workload) -> Result<b
     let command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_index",
     );
-    let mut lease = pool.acquire_lease(first_builder(worker_binary, workload)?)?;
-    let result = lease.run_streaming_command(
-        &command,
-        &ScaleRequest::from_workload(workload),
-        &sink,
-        None,
-        Some(&token),
-        None,
-    );
+    let mut lease = pool.acquire_lease(builder(worker_binary))?;
+    let result = lease.run_streaming_command(&command, &ScaleRequest::probe(), &sink, None, Some(&token), None);
     println!(
         "cancellation elapsed_ms={:.3} lease_valid_after={}",
         started.elapsed().as_secs_f64() * 1000.0,
@@ -299,22 +205,15 @@ fn run_cancelled_workload(worker_binary: &Path, workload: &Workload) -> Result<b
     Ok(matches!(result, Err(LeanWorkerError::Cancelled { .. })))
 }
 
-fn run_fatal_workload(worker_binary: &Path, workload: &Workload) -> Result<bool, Box<dyn std::error::Error>> {
+fn run_fatal_workload(worker_binary: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     let started = Instant::now();
     let mut pool = LeanWorkerPool::new(memory_pool_config(1));
     let sink = CountingRows::default();
     let command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row",
     );
-    let mut lease = pool.acquire_lease(first_builder(worker_binary, workload)?)?;
-    let result = lease.run_streaming_command(
-        &command,
-        &ScaleRequest::from_workload(workload),
-        &sink,
-        None,
-        None,
-        None,
-    );
+    let mut lease = pool.acquire_lease(builder(worker_binary))?;
+    let result = lease.run_streaming_command(&command, &ScaleRequest::probe(), &sink, None, None, None);
     println!(
         "fatal_exit elapsed_ms={:.3} rows_before_failure={} lease_valid_after={}",
         started.elapsed().as_secs_f64() * 1000.0,
@@ -324,18 +223,15 @@ fn run_fatal_workload(worker_binary: &Path, workload: &Workload) -> Result<bool,
     Ok(matches!(result, Err(LeanWorkerError::ChildPanicOrAbort { .. })))
 }
 
-fn run_cycle_workload(worker_binary: &Path, workload: &Workload) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
+fn run_cycle_workload(worker_binary: &Path) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
     let mut pool = LeanWorkerPool::new(memory_pool_config(1));
-    let mut lease = pool.acquire_lease(first_builder(worker_binary, workload)?)?;
+    let mut lease = pool.acquire_lease(builder(worker_binary))?;
     lease.cycle()?;
     drop(lease);
-    run_index_workload("post_cycle", 1, worker_binary, workload)
+    run_index_workload("post_cycle", 1, worker_binary)
 }
 
-fn run_slow_sink_workload(
-    worker_binary: &Path,
-    workload: &Workload,
-) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
+fn run_slow_sink_workload(worker_binary: &Path) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
     let parent_rss_before = current_process_rss_kib();
     let started = Instant::now();
     let mut pool = LeanWorkerPool::new(memory_pool_config(1));
@@ -343,7 +239,7 @@ fn run_slow_sink_workload(
     let command = LeanWorkerStreamingCommand::<serde_json::Value, ManyRow, serde_json::Value>::new(
         "lean_rs_interop_consumer_worker_data_stream_many",
     );
-    let mut lease = pool.acquire_lease(first_builder(worker_binary, workload)?)?;
+    let mut lease = pool.acquire_lease(builder(worker_binary))?;
     let summary = lease.run_streaming_command(&command, &json!({"rows": 512}), &sink, None, None, None)?;
     drop(lease);
     let elapsed = started.elapsed();
@@ -398,16 +294,6 @@ fn env_u64(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-fn first_builder(
-    worker_binary: &Path,
-    workload: &Workload,
-) -> Result<lean_rs_worker_parent::LeanWorkerCapabilityBuilder, Box<dyn std::error::Error>> {
-    planned_builders(worker_binary, workload)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| "workload produced no planned worker batches".into())
-}
-
 #[derive(Clone, Debug, Serialize)]
 struct ScaleRequest {
     workspace: String,
@@ -416,10 +302,10 @@ struct ScaleRequest {
 }
 
 impl ScaleRequest {
-    fn from_workload(workload: &Workload) -> Self {
+    fn probe() -> Self {
         Self {
-            workspace: workload.source.clone(),
-            modules: workload.modules.iter().map(|module| module.module.clone()).collect(),
+            workspace: "mathlib-scale-probe".to_owned(),
+            modules: scale_modules(),
             limit: 256,
         }
     }
@@ -604,7 +490,7 @@ fn worker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let binary = profile_dir.join(format!("lean-rs-worker-child{}", std::env::consts::EXE_SUFFIX));
     if !binary.exists() {
         return Err(format!(
-            "worker child binary not found at {}; run `cargo build -p lean-rs-worker --bin lean-rs-worker-child` first",
+            "worker child binary not found at {}; run `cargo build -p lean-rs-worker-child --bin lean-rs-worker-child` first",
             binary.display()
         )
         .into());

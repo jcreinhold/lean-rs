@@ -10,10 +10,8 @@ to the latest supported entry when none is installed) to bake the live `LEAN_VER
 `LEAN_HEADER_DIGEST`, and `LEAN_RESOLVED_VERSION`; it re-exports `REQUIRED_SYMBOLS` and the supported-window table from
 the purely static `lean-rs-abi` so metadata consumers depend on neither the raw FFI/link crate nor a probe in `abi`.
 
-It also owns Lake module discovery for higher layers. `discover_lake_modules` resolves a Lake root, discovers `lean_lib`
-source roots, validates module names, enumerates Lean source files deterministically, and returns source-set
-fingerprints. This discovery layer does not know worker pools or downstream cache policy; `lean-rs-worker-parent` uses
-it to build import/session batches.
+`olean_candidate` picks the `.olean` path Lean's `findOLean` would read for a module name. Lake owns the module graph;
+this crate does not rebuild it.
 
 Runtime application code usually does not depend on this crate directly: it shows up transitively through `lean-rs`.
 Downstream crates that ship Lean source commonly depend on it from `build.rs`, where `CargoLeanCapability` builds the

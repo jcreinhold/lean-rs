@@ -189,35 +189,6 @@ impl LeanWorkerCapabilityBuilder {
         })
     }
 
-    pub(crate) fn from_planned_manifest(
-        manifest: &Path,
-        project: &Path,
-        package: &str,
-        target: &str,
-        imports: Vec<String>,
-    ) -> Result<Self, LeanWorkerError> {
-        let mut artifact = WorkerCapabilityArtifact::from_manifest(manifest)?;
-        let invalid = || LeanWorkerError::Setup {
-            message: format!(
-                "prebuilt manifest does not match planned target {package}::{target} in '{}'",
-                project.display()
-            ),
-        };
-        let root = project.canonicalize().map_err(|_| invalid())?;
-        let image = artifact.dylib_path.canonicalize().map_err(|_| invalid())?;
-        if artifact.package != package
-            || artifact.module != target
-            || artifact.target_name.as_deref() != Some(target)
-            || artifact.dylib_path != image
-            || !image.is_file()
-            || infer_lake_project_root_from_dylib(&image)? != root
-        {
-            return Err(invalid());
-        }
-        artifact.dylib_path = image;
-        Self::from_capability_artifact(&LeanBuiltCapability::manifest_path(manifest), artifact, imports)
-    }
-
     /// Enforce required actual host-runtime metadata before exposing any session.
     ///
     /// The requirement is installed before this builder's initial session open
@@ -1799,7 +1770,6 @@ struct WorkerCapabilityArtifact {
     manifest_path: Option<PathBuf>,
     package: String,
     module: String,
-    target_name: Option<String>,
 }
 
 impl WorkerCapabilityArtifact {
@@ -1824,7 +1794,6 @@ impl WorkerCapabilityArtifact {
             manifest_path: None,
             package: package.to_owned(),
             module: module.to_owned(),
-            target_name: None,
         })
     }
 
@@ -1865,7 +1834,6 @@ impl WorkerCapabilityArtifact {
             manifest_path: Some(manifest_path.to_path_buf()),
             package: manifest.package,
             module: manifest.module,
-            target_name: manifest.target_name,
         })
     }
 }
@@ -1876,7 +1844,6 @@ struct WorkerCapabilityManifest {
     primary_dylib: PathBuf,
     package: String,
     module: String,
-    target_name: Option<String>,
 }
 
 fn worker_child_static_checks(worker_child: Option<&LeanWorkerChild>) -> Vec<LeanWorkerBootstrapCheck> {

@@ -1,11 +1,7 @@
-//! Shared TOML lakefile parser used by both `build_helpers` (link-time target
-//! resolution) and `modules` (Lake module discovery).
+//! TOML lakefile parser for `build_helpers` link-time target resolution.
 //!
-//! The parser is intentionally diagnostic-agnostic: it returns a small typed
-//! shape plus `toml::de::Error` on parse failure, and each caller maps that
-//! error into its own [`crate::LinkDiagnostics`] or
-//! [`crate::modules::LeanModuleDiscoveryDiagnostic`] variant. That keeps the
-//! parser one place while preserving each module's error contract.
+//! The parser returns a small typed shape plus `toml::de::Error` on parse
+//! failure; the caller maps that error into [`crate::LinkDiagnostics`].
 
 use toml::Value;
 

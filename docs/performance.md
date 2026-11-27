@@ -90,7 +90,6 @@ cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 cargo run --release -p lean-rs-worker-child --example row_perf_probe
 cargo run --release -p lean-rs-worker-child --example proof_candidate_probe
 cargo run -p lean-rs-worker-child --example mathlib_scale_probe
-cargo run -p lean-rs-worker-child --example lean_dup_readiness
 ```
 
 These cover startup/import cost, warm dispatch, row throughput, proof-candidate batch outcomes, shutdown/cancellation,
@@ -98,18 +97,16 @@ fatal-exit recovery, cycling, pool reuse, RSS availability, and slow-sink backpr
 machine; report the named workload, row counts, throughput, relevant allocation/payload evidence, and parent/child RSS
 or explicit unavailable status.
 
-The scale fixture exercises planner → pool → session lease → typed command → live rows → terminal summary → pool stats.
-Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` and `LEAN_RS_MATHLIB_SCALE_LIMIT=<n>` to plan from real mathlib module
-names. Its rows remain deterministic fixture data: the probe does not measure arbitrary mathlib elaboration. A
-corresponding Criterion filter is:
+The scale fixture exercises builder → pool → session lease → typed command → live rows → terminal summary → pool stats
+over a fixed list of 16 mathlib-style module names. Its rows are deterministic fixture data: the probe does not measure
+mathlib elaboration. A corresponding Criterion filter is:
 
 ```sh
 cargo bench -p lean-rs-worker-child --bench worker_capability -- mathlib_scale
 ```
 
-The readiness fixture drives generic `version`, `doctor`, `extract`, `features`, `index`, and `probe` commands. Its
-schemas are fixture schemas. See
-[readiness](testing.md#worker-readiness) and the
+`worker_capability_probe` drives generic `version`, `doctor`, `extract`, `features`, `index`, and `probe` commands. Its
+schemas are fixture schemas. See [shape commands](testing.md#worker-shape-commands) and the
 [scale contract](architecture/worker-pool.md#validation-evidence) for coverage limits.
 
 Rows reach sinks before terminal success and remain tentative until the terminal summary. Pool snapshots expose request

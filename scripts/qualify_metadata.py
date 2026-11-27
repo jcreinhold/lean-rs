@@ -404,16 +404,8 @@ SDK_SHAPE_GRANTS_BY_WORKER = {
     ),
     "worker_cycle_leaves_shape_fixture_usable": (1, 1),
 }
-PLANNER_SHAPE_TESTS = {
-    "readiness_commands_run_through_planner_pool_lease_and_typed_facade": (
-        "lean_dup_readiness",
-        (1,),
-    ),
-    "readiness_operational_failures_and_recovery_are_typed": (
-        "lean_dup_readiness",
-        (1, 1, 1, 1, 1),
-    ),
-    "mathlib_scale_fixture_runs_through_planner_pool_lease_and_typed_command": (
+SCALE_SHAPE_TESTS = {
+    "mathlib_scale_fixture_runs_through_pool_lease_and_typed_command": (
         "mathlib_scale_fixture",
         (1,),
     ),
@@ -422,10 +414,8 @@ PLANNER_SHAPE_TESTS = {
         (1, 0, 1, 0, 1),
     ),
 }
-IMPORT_PLANNING_CASE = "planned_batches_execute_through_pool_with_one_import_group"
 ORDINARY_GRANTS_BY_WORKER = {
-    **{name: grants for name, (_, grants) in PLANNER_SHAPE_TESTS.items()},
-    IMPORT_PLANNING_CASE: (1, 1, 1),
+    **{name: grants for name, (_, grants) in SCALE_SHAPE_TESTS.items()},
     **SDK_SHAPE_GRANTS_BY_WORKER,
     "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker": (1, 1),
     "cancellation_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
@@ -1463,8 +1453,7 @@ INTEROP_LEGACY_CASE = (
 )
 INTEROP_TESTS = (
     *STREAM_TESTS,
-    *((target, name) for name, (target, _) in PLANNER_SHAPE_TESTS.items()),
-    ("import_planning", IMPORT_PLANNING_CASE),
+    *((target, name) for name, (target, _) in SCALE_SHAPE_TESTS.items()),
     *INTEROP_METADATA_TESTS,
     *(("pool", name) for name in POOL_BATCH_GRANTS),
     ("pool", "distinct_session_key_respects_fixed_pool_limit"),
@@ -1475,7 +1464,7 @@ INTEROP_TESTS = (
     ),
     *(("capability_builder", name) for name in INTEROP_FOREIGN_IMPORT_CASES),
     ("capability_builder", INTEROP_LEGACY_CASE),
-    *(("lean_dup_shaped_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
+    *(("worker_shape_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
 )
 
 
@@ -1959,12 +1948,11 @@ def run_stream_group(
             marker = "admit-fixed-no-exports"
         elif name in INTEROP_DOCTOR_EVENTS:
             marker = INTEROP_DOCTOR_EVENTS[name]
-        elif name in SDK_SHAPE_GRANTS_BY_WORKER or name in PLANNER_SHAPE_TESTS:
+        elif name in SDK_SHAPE_GRANTS_BY_WORKER or name in SCALE_SHAPE_TESTS:
             marker = "authorize-fixed-shape"
         elif pool_recovery or name in INTEROP_METADATA_CASES:
             marker = "authorize-fixed-metadata"
         elif name in {
-            IMPORT_PLANNING_CASE,
             "typed_json_command_decode_error_is_typed",
             "distinct_session_key_respects_fixed_pool_limit",
         }:
@@ -1976,10 +1964,8 @@ def run_stream_group(
         if name in POOL_BATCH_GRANTS:
             grant_order = (grant_event,) + (BATCH_GRANT,) * POOL_BATCH_GRANTS[name]
             counts = (1, 1 + POOL_BATCH_GRANTS[name])
-        elif name == IMPORT_PLANNING_CASE:
-            counts = (3, 3)
-        elif name in PLANNER_SHAPE_TESTS:
-            _, shape_grants = PLANNER_SHAPE_TESTS[name]
+        elif name in SCALE_SHAPE_TESTS:
+            _, shape_grants = SCALE_SHAPE_TESTS[name]
             counts = (len(shape_grants), sum(shape_grants))
         elif shape_grants := SDK_SHAPE_GRANTS_BY_WORKER.get(name):
             counts = (len(shape_grants), sum(shape_grants))

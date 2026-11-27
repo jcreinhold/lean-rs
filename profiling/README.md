@@ -43,7 +43,7 @@ Run `./profiling/scripts/profile_memory.sh <workload>` with one of:
 | `long-session-derived` | Source-range, pretty-printing, proof-search, parser/elaborator, snapshot, and lazy discriminator work. |
 | `worker-cycling` | Child replacement under a small import budget. |
 | `pool-memory` | Pool admission, RSS ceilings, and warm reuse. |
-| `mathlib-scale` | Planner/pool fixture; optionally set `LEAN_RS_MATHLIB_ROOT`. |
+| `mathlib-scale` | Pool fixture with a fixed mathlib-style module list. |
 
 `long-session` runs the same-process modes in separate child processes, preventing retained imports from one mode from
 contaminating another. Full sessions load extensions and cannot safely free compacted regions. The bracketed workload

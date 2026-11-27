@@ -55,7 +55,6 @@ pool-memory)
 	;;
 mathlib-scale)
 	cargo build --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-child --example mathlib_scale_probe
-	export LEAN_RS_MATHLIB_SCALE_LIMIT="${LEAN_RS_MATHLIB_SCALE_LIMIT:-32}"
 	record_profile "mathlib-scale" "$REPO_ROOT/target/profiling/examples/mathlib_scale_probe"
 	;;
 *)

@@ -64,8 +64,7 @@ run_pool_memory() {
 run_mathlib_scale() {
 	echo "=== mathlib-scale ==="
 	build_worker_examples
-	LEAN_RS_MATHLIB_SCALE_LIMIT="${LEAN_RS_MATHLIB_SCALE_LIMIT:-32}" \
-		"$REPO_ROOT/target/profiling/examples/mathlib_scale_probe"
+	"$REPO_ROOT/target/profiling/examples/mathlib_scale_probe"
 }
 
 case "$TARGET" in

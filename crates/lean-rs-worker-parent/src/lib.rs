@@ -20,7 +20,6 @@ mod capability;
 #[cfg(unix)]
 mod crash_ownership;
 mod pipe;
-mod planning;
 mod pool;
 mod process;
 mod session;
@@ -35,10 +34,6 @@ pub use capability::{
 pub use crash_ownership::{
     LeanWorkerNativePendingCleanup, LeanWorkerNativeScope, LeanWorkerNativeScopeLease, LeanWorkerNativeSpawnError,
     LeanWorkerOwnedGeneration, LeanWorkerOwnedProcess, LeanWorkerOwnerObservation,
-};
-pub use planning::{
-    LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
-    LeanWorkerModuleWork, LeanWorkerPlanMetadataExpectation, LeanWorkerPlannedBatch,
 };
 pub use pool::{
     LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,

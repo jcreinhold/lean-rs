@@ -77,7 +77,7 @@ The [documentation index](docs/SUMMARY.md) is the complete reading map; the same
 | Run typed commands with live rows, diagnostics, and deadlines | [Worker capability runner](docs/recipes/worker-capability-runner.md) |
 | Work with raw worker requests and frames | [Worker transport](docs/recipes/worker-capability-runner.md#wire-and-raw-rows) |
 | Fan out through a local pool | `cargo run -p lean-rs-worker-child --example worker_pool` |
-| Inspect import planning and scale probes | [Scale fixtures](docs/testing.md#worker-fixtures) |
+| Inspect scale probes | [Scale fixtures](docs/testing.md#worker-fixtures) |
 | Diagnose a failure | [Diagnostics](docs/diagnostics.md); start with `RUST_LOG=lean_rs=debug` |
 | Measure performance or memory | [Performance](docs/performance.md) and [retention measurements](docs/safety/long-session-memory.md) |
 

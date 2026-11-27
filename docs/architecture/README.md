@@ -33,7 +33,6 @@ provide the reading order.
 | Configure a downstream command and its import workspace | [Worker capabilities](worker-capabilities.md) |
 | Deliver live rows, apply backpressure, or change framing | [Worker streaming](worker-streaming.md) |
 | Reuse workers, admit leases, or report pool statistics | [Worker pool](worker-pool.md) |
-| Discover modules and group compatible import work | [Import planning](import-planning.md) |
 | Change generations, cleanup ownership, capacity, or restart semantics | [Worker runtime](worker-runtime.md) |
 
 The worker runtime is the lifecycle contract. The session, build, and loading pages own their boundary-specific details;

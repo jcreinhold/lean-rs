@@ -6,17 +6,17 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use lean_rs_worker_parent::{
-    LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerError,
-    LeanWorkerImportPlanConfig, LeanWorkerImportPlanner, LeanWorkerModuleWork, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRestartReason, LeanWorkerStreamingCommand,
-    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
+    LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink,
+    LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerProgressEvent, LeanWorkerProgressSink,
+    LeanWorkerRestartReason, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
-use lean_toolchain::{LeanModuleSetFingerprint, ToolchainFingerprint};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
+#[path = "support/sealed_stream_builder.rs"]
+mod sealed_stream_builder;
 
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
@@ -59,56 +59,25 @@ fn fallback_modules() -> Vec<String> {
     .collect()
 }
 
-fn source_fingerprint(module_count: usize) -> LeanModuleSetFingerprint {
-    LeanModuleSetFingerprint {
-        toolchain: ToolchainFingerprint::current(),
-        lakefile_sha256: "mathlib-scale-fixture-lakefile".to_owned(),
-        manifest_sha256: Some("mathlib-scale-fixture-manifest".to_owned()),
-        source_count: module_count as u64,
-        source_max_mtime_ns: 0,
-    }
-}
-
-fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
-    let selected = ordinary_typed_selection::ordinary_stream_selection();
-    let project = selected.map_or_else(interop_root, |fixture| fixture.fixture.clone());
-    let modules = fallback_modules();
-    let config = LeanWorkerImportPlanConfig::new(project, "lean_rs_interop_consumer", "LeanRsInteropConsumer")
-        .base_imports(["LeanRsInteropConsumer.Callback"])
+fn scale_builder() -> LeanWorkerCapabilityBuilder {
+    sealed_stream_builder::selected()
+        .unwrap_or_else(|| {
+            LeanWorkerCapabilityBuilder::new(
+                interop_root(),
+                "lean_rs_interop_consumer",
+                "LeanRsInteropConsumer",
+                ["LeanRsInteropConsumer.Callback"],
+            )
+            .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+            .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+            .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_timeout_after_row")
+            .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
+            .worker_executable(worker_binary())
+        })
         .validate_metadata(
             "lean_rs_interop_consumer_worker_shape_metadata",
             json!({"source": "mathlib-scale-fixture-test"}),
-        );
-    let planner = LeanWorkerImportPlanner::new(config);
-    let work = modules.iter().map(|module| {
-        LeanWorkerModuleWork::new(
-            module,
-            PathBuf::from(format!("{}.lean", module.replace('.', "/"))),
-            "Mathlib",
-            ["LeanRsInteropConsumer.Callback"],
         )
-    });
-    let batches = planner
-        .plan_work_items(work, &source_fingerprint(modules.len()))
-        .expect("mathlib-style modules plan");
-    assert_eq!(batches.len(), 1, "fallback modules share one worker session key");
-    let batch = batches.into_iter().next().expect("one planned batch");
-    if let Some(fixture) = selected {
-        return batch
-            .capability_builder_with_manifest(&fixture.json_manifest)
-            .expect("use the prebuilt artifact for the real plan")
-            .worker_child(
-                lean_rs_worker_parent::LeanWorkerChild::for_toolchain(&fixture.worker, &fixture.sysroot)
-                    .checked_native_loader_environment(),
-            );
-    }
-    batch
-        .capability_builder()
-        .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
-        .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
-        .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_timeout_after_row")
-        .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
-        .worker_executable(worker_binary())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -233,9 +202,9 @@ impl LeanWorkerProgressSink for RecordingProgress {
 }
 
 #[test]
-fn mathlib_scale_fixture_runs_through_planner_pool_lease_and_typed_command() {
+fn mathlib_scale_fixture_runs_through_pool_lease_and_typed_command() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2));
-    let mut lease = pool.acquire_lease(planned_builder()).expect("planned lease opens");
+    let mut lease = pool.acquire_lease(scale_builder()).expect("lease opens");
     let command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_index",
     );
@@ -293,9 +262,7 @@ fn mathlib_scale_fixture_runs_through_planner_pool_lease_and_typed_command() {
 #[test]
 fn mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly() {
     let mut timeout_pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut timeout_lease = timeout_pool
-        .acquire_lease(planned_builder())
-        .expect("planned lease opens");
+    let mut timeout_lease = timeout_pool.acquire_lease(scale_builder()).expect("lease opens");
     // The request deadline includes dispatch and first-row delivery. The
     // paired Lean fixture waits longer after emitting its row.
     timeout_lease
@@ -323,9 +290,7 @@ fn mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly(
     assert!(!timeout_lease.is_valid());
 
     let mut cancel_pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut cancel_lease = cancel_pool
-        .acquire_lease(planned_builder())
-        .expect("planned lease opens");
+    let mut cancel_lease = cancel_pool.acquire_lease(scale_builder()).expect("lease opens");
     let token = LeanWorkerCancellationToken::new();
     let cancel_rows = CancelAfterFirstRow {
         token: &token,
@@ -351,9 +316,7 @@ fn mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly(
     assert!(!cancel_lease.is_valid());
 
     let mut panic_pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let mut panic_lease = panic_pool
-        .acquire_lease(planned_builder())
-        .expect("planned lease opens");
+    let mut panic_lease = panic_pool.acquire_lease(scale_builder()).expect("lease opens");
     let panic_command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row",
     );

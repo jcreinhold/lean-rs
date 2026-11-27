@@ -79,21 +79,20 @@ rows, bytes, and waits; see the [fixture commands](../testing.md#worker-fixture-
 The supported workload path is:
 
 ```text
-LeanWorkerImportPlanner -> LeanWorkerPool -> LeanWorkerSessionLease
+LeanWorkerCapabilityBuilder -> LeanWorkerPool -> LeanWorkerSessionLease
   -> typed command -> live rows -> terminal summary -> snapshot
 ```
 
 The repository tests cover keyed reuse, affine release, death, timeout, cancellation, metadata mismatch, explicit and
 policy cycling, memory admission, typed commands, and bounded backpressure. Relevant worker-child suites are `pool`,
-`session_reuse`, `import_planning`, `observability_backpressure`, `mathlib_scale_fixture`, and `lean_dup_readiness`.
+`session_reuse`, `observability_backpressure`, `mathlib_scale_fixture`, and `worker_shape_fixture`.
 The parent `worker_shutdown` suite checks import-light lifecycle conformance.
 
-The [scale and replacement fixtures](../testing.md#worker-fixtures) use deterministic test schemas, including when
-planning with a real mathlib module list. They establish operational coverage, not mathlib indexing semantics or a
+The [scale and replacement fixtures](../testing.md#worker-fixtures) use deterministic test schemas and a fixed list of
+mathlib-style module names. They establish operational coverage, not mathlib indexing semantics or a
 portable throughput guarantee. [Streaming measurements](worker-streaming.md) justify the retained per-row,
 raw-JSON path.
 
-Performance reports must name the command, revision, platform, row/module counts, throughput, RSS availability, and
-whether the workload used the deterministic fallback or `LEAN_RS_MATHLIB_ROOT`; use the probes in
-[performance guidance](../performance.md). Downstream schemas, cache validity, ranking, reporting, and provenance stay
-with the application.
+Performance reports must name the command, revision, platform, row/module counts, throughput, and RSS availability; use
+the probes in [performance guidance](../performance.md). Downstream schemas, cache validity, ranking, reporting, and
+provenance stay with the application.

@@ -39,7 +39,6 @@
 - [Worker sessions](architecture/worker-sessions.md)
 - [Worker streaming](architecture/worker-streaming.md)
 - [Worker pool](architecture/worker-pool.md)
-- [Import planning](architecture/import-planning.md)
 - [Worker runtime](architecture/worker-runtime.md)
 
 # Verification and maintenance
