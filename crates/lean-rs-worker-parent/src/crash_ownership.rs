@@ -830,11 +830,6 @@ impl ParentLifetimeLease {
         Ok(())
     }
 
-    /// Correlation with the actual guarded admission, not authority to signal.
-    pub(crate) fn guarded_generation_id(&self) -> Option<&str> {
-        self.guarded.then_some(self.nonce.as_str())
-    }
-
     pub(crate) fn acknowledge(&mut self) -> io::Result<()> {
         if !self.running_published {
             return Err(io::Error::other("startup ACK requires adopted durable Running"));
