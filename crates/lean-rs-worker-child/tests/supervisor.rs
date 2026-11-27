@@ -548,9 +548,15 @@ mod parent_death {
         let Some(directory) = std::env::var_os(DIRECTORY_ENV).map(PathBuf::from) else {
             return Ok(());
         };
+        // `.cargo/config.toml` caps each worker's Lean runtime at 1.5 GiB. On
+        // Linux this worker's resident memory passes that cap during the
+        // `#eval`, and Lean stops it with "(kernel) excessive memory
+        // consumption detected" before `BUSY_SOURCE` writes `MARKER`. This test
+        // checks the lifeline, not the cap, so its worker runs without one.
         let config = ordinary_typed_worker::worker_config()
             .unwrap_or_else(worker_config)
-            .current_dir(&directory);
+            .current_dir(&directory)
+            .env("LEAN_RS_LEAN_MAX_MEMORY_KIB", "0");
         let probe = fs::OpenOptions::new().write(true).open(directory.join(PROBE))?;
         // Leave the probe open across exec, as a server leaves its store lock.
         rustix::io::fcntl_setfd(&probe, rustix::io::FdFlags::empty())?;

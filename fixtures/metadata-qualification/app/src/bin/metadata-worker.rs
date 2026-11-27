@@ -316,7 +316,7 @@ fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -
         ("/cache/incremental.lean" | "/cache/incremental-cold.lean", SHIFTED, _) if state_at(5) => {
             (DEFAULT_LIMITS, false)
         }
-        ("/cache/ttl.lean", BASE, _) if state_at(2) => (["4", "1", "67108864"], false),
+        ("/cache/ttl.lean", BASE, _) if state_at(2) => (["4", "250", "67108864"], false),
         ("/cache/entry-a.lean" | "/cache/entry-b.lean", BASE, _) if state_at(2) => (["1", "300000", "67108864"], false),
         ("/cache/tiny.lean", BASE, _) if state_at(2) => (["4", "300000", "1"], false),
 

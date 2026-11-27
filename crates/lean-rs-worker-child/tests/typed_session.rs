@@ -2402,8 +2402,12 @@ fn process_module_query_batch_isolates_snapshots_by_session_imports() {
 fn process_module_query_batch_ttl_evicts_idle_snapshot() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new().file_label("/cache/ttl.lean");
+    // After a miss the shim stamps the new snapshot, inserts it, and prunes
+    // again with a fresh clock reading. A TTL shorter than that gap can drop
+    // the new entry at once, and the next lookup then reports `Miss`. The TTL
+    // must outlast that gap, and the sleep below must outlast the TTL.
     let mut worker =
-        LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_TTL_MILLIS", "1")).expect("worker starts");
+        LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_TTL_MILLIS", "250")).expect("worker starts");
     let mut session = worker
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
@@ -2420,7 +2424,7 @@ fn process_module_query_batch_ttl_evicts_idle_snapshot() {
             None,
         )
         .expect("populate cache");
-    std::thread::sleep(Duration::from_millis(5));
+    std::thread::sleep(Duration::from_millis(500));
     let after_ttl = session
         .process_module_query_batch(
             source,
