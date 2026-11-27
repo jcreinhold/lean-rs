@@ -553,7 +553,7 @@ fn bench_worker_stream(c: &mut Criterion) {
     let worker_path = worker_binary();
     if !worker_path.is_file() {
         eprintln!(
-            "skipping worker stream bench: {} is missing; run `cargo build --release -p lean-rs-worker --bin lean-rs-worker-child` first",
+            "skipping worker stream bench: {} is missing; run `cargo build --release -p lean-rs-worker-child --bin lean-rs-worker-child` first",
             worker_path.display(),
         );
         return;

@@ -3,7 +3,7 @@
 //! Run from the workspace root:
 //!
 //! ```sh
-//! cargo run -p lean-rs-worker --example worker_streaming
+//! cargo run -p lean-rs-worker-child --example worker_streaming
 //! ```
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::print_stdout)]

@@ -3,7 +3,7 @@
 //! Usage:
 //!
 //! ```text
-//! cargo run --release -p lean-rs-worker --example row_perf_probe
+//! cargo run --release -p lean-rs-worker-child --example row_perf_probe
 //! ```
 //!
 //! This probe measures the parent process. Child Lean allocations use the
