@@ -238,7 +238,8 @@ fn skip_if_missing_worker() -> bool {
         false
     } else {
         eprintln!(
-            "skipping worker capability bench: {} is missing; run `cargo build --release -p lean-rs-worker-child --bin lean-rs-worker-child` first",
+            "skipping worker capability bench: {} is missing; run \
+             `cargo build --release -p lean-rs-worker-child --bin lean-rs-worker-child` first",
             worker.display(),
         );
         true

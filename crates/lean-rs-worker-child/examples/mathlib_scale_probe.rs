@@ -490,7 +490,8 @@ fn worker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let binary = profile_dir.join(format!("lean-rs-worker-child{}", std::env::consts::EXE_SUFFIX));
     if !binary.exists() {
         return Err(format!(
-            "worker child binary not found at {}; run `cargo build -p lean-rs-worker-child --bin lean-rs-worker-child` first",
+            "worker child binary not found at {}; run \
+             `cargo build -p lean-rs-worker-child --bin lean-rs-worker-child` first",
             binary.display()
         )
         .into());
