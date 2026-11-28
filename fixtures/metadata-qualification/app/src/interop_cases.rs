@@ -1,6 +1,10 @@
-//! The existing fixture commands each named test may call.
+//! The fixed interop consumer exports each named interop test may load.
 use lean_rs_worker_protocol::worker_exports::{doctor_signature, metadata_signature};
 use lean_toolchain::LeanExportSignature;
+
+/// The file name of the capability manifest `prepare` writes for interop runs.
+/// The worker opens only a manifest with this name.
+pub(crate) const MANIFEST_NAME: &str = "worker-interop-capability.json";
 
 #[derive(Clone, Copy)]
 pub(crate) enum Exports {

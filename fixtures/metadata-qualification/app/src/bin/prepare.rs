@@ -1,7 +1,7 @@
-#[path = "../stream_cases.rs"]
-mod stream_cases;
+#[path = "../interop_cases.rs"]
+mod interop_cases;
 
-use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature, metadata_signature};
+use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 use lean_toolchain::{CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, ToolchainFingerprint};
 use std::io::Write as _;
 use std::{
@@ -21,38 +21,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let target = sdk.join("target").canonicalize()?;
     let profile = env::args().nth(2);
-    if profile.as_deref() == Some("--stream-shims") && env::args().len() == 3 {
-        if state != target.join("metadata-qualification/stream-package") {
-            return Err("stream shims require the private fixture package".into());
+    if profile.as_deref() == Some("--shim-package") && env::args().len() == 3 {
+        if state != target.join("metadata-qualification/shim-package") {
+            return Err("--shim-package requires the private fixture package".into());
         }
         let prepared = lean_rs_host::host::prepare_host_artifacts()?;
         println!("{}", prepared.manifest_path().display());
         return Ok(());
     }
-    let broken_import =
-        match profile.as_deref() {
-            Some(
-                "--typed-session" | "--interop-stream" | "--scalar-entry" | "--optional-whnf",
-            ) if env::args().len() == 3 => false,
-            Some(
-                "--broken-import"
-                | "--host-builder-lazy"
-                | "--host-builder-shims-only"
-                | "--host-builder-transitive"
-                | "--host-builder-good"
-                | "--direct-host-broken-shared",
-            ) if env::args().len() == 3 => true,
-            _ => return Err("unknown metadata qualification profile".into()),
-        };
-    let stream = profile.as_deref() == Some("--interop-stream");
+    let broken_import = match profile.as_deref() {
+        Some("--typed-session" | "--interop" | "--scalar-entry" | "--optional-whnf") if env::args().len() == 3 => false,
+        Some(
+            "--broken-import"
+            | "--host-builder-lazy"
+            | "--host-builder-shims-only"
+            | "--host-builder-transitive"
+            | "--host-builder-good"
+            | "--direct-host-broken-shared",
+        ) if env::args().len() == 3 => true,
+        _ => return Err("unknown metadata qualification profile".into()),
+    };
+    let interop = profile.as_deref() == Some("--interop");
     let scalar = profile.as_deref() == Some("--scalar-entry");
     let optional_whnf = profile.as_deref() == Some("--optional-whnf");
     let expected_state = if optional_whnf {
         app.join("target/optional-whnf")
     } else if scalar {
         app.join("target/scalar-entry")
-    } else if stream {
-        target.join("metadata-qualification/interop-stream")
+    } else if interop {
+        target.join("metadata-qualification/interop")
     } else if broken_import {
         target.join("metadata-qualification/broken-import")
     } else {
@@ -70,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if broken_import {
         return prepare_broken_import(app, &state, &sysroot, generated_output_key, profile.as_deref());
     }
-    prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream)
+    prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, interop)
 }
 
 fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -184,7 +181,7 @@ fn prepare_typed_session(
     state: &Path,
     sysroot: &Path,
     key: &str,
-    stream: bool,
+    interop: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let optional_whnf = state == app.join("target/optional-whnf");
     let shim = if optional_whnf {
@@ -193,8 +190,8 @@ fn prepare_typed_session(
         // Reuse the same run's normal prepared shims.
         selected_host_artifacts()?
     };
-    let expected_project = if stream {
-        sdk.join("target/metadata-qualification/stream-package/fixtures/interop-worker")
+    let expected_project = if interop {
+        sdk.join("target/metadata-qualification/shim-package/fixtures/interop-worker")
     } else if optional_whnf {
         sdk.join("fixtures/lean")
     } else {
@@ -215,7 +212,7 @@ fn prepare_typed_session(
     {
         return Err("typed fixture is not the job-owned private checkout fixture".into());
     }
-    let (image_dir, stem) = if stream {
+    let (image_dir, stem) = if interop {
         (
             format!(".lake/lean-rs-generated/{key}/lib"),
             "lean__rs__interop__consumer_LeanRsInteropConsumer",
@@ -238,42 +235,50 @@ fn prepare_typed_session(
     {
         return Err("typed state is not a private job directory".into());
     }
-    let fingerprint = ToolchainFingerprint::current();
-    let manifest_path = state.join(if stream {
-        "worker-stream-capability.json"
-    } else {
-        "worker-json-capability.json"
+    let mut record = serde_json::json!({
+        "broken_import": false, "typed_session": true, "interop": interop, "verification": false,
+        "optional_whnf": optional_whnf,
+        "generated_output_key": key, "project": project, "sysroot": sysroot,
+        "consumer_image": image,
+        "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),
+        "shim_paths": shim.shim_search_paths(),
     });
+    // The typed tests open the fixture library through its initializer, so only
+    // the interop tests read a capability manifest.
+    if interop {
+        let (manifest_path, manifest) = write_interop_manifest(state, sysroot, &shim, &image)?;
+        record["consumer_manifest"] = serde_json::json!(manifest_path);
+        record["consumer_json"] = manifest.into();
+    }
+    fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
+    seal(app, state)
+}
+
+/// Writes the capability manifest the interop tests open. It names every fixed
+/// export an interop case may load, and the shim package's interop dependency.
+fn write_interop_manifest(
+    state: &Path,
+    sysroot: &Path,
+    shim: &lean_rs_host::host::LeanPreparedHostArtifacts,
+    image: &Path,
+) -> Result<(PathBuf, String), Box<dyn std::error::Error>> {
+    let fingerprint = ToolchainFingerprint::current();
+    let manifest_path = state.join(interop_cases::MANIFEST_NAME);
     let shim_json: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
     let mut seen = std::collections::BTreeSet::new();
-    let (package, module, dependencies, signatures) = if stream {
-        (
-            "lean_rs_interop_consumer",
-            "LeanRsInteropConsumer",
-            shim_json["dependencies"].clone(),
-            stream_cases::CASES
-                .iter()
-                .flat_map(|(_, exports)| exports.signatures())
-                .filter(|signature| seen.insert(signature.symbol().to_owned()))
-                .map(|sig| sig.to_json())
-                .collect::<Vec<_>>(),
-        )
-    } else {
-        (
-            "lean_rs_fixture",
-            "LeanRsFixture.Effects",
-            serde_json::json!([]),
-            // The typed session admits this `String -> IO String` export by its shape alone.
-            vec![metadata_signature("lean_rs_interop_consumer_worker_json_command").to_json()],
-        )
-    };
+    let signatures = interop_cases::CASES
+        .iter()
+        .flat_map(|(_, exports)| exports.signatures())
+        .filter(|signature| seen.insert(signature.symbol().to_owned()))
+        .map(|sig| sig.to_json())
+        .collect::<Vec<_>>();
     let manifest = serde_json::to_string(&serde_json::json!({
         "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
-        "package": package,
-        "module": module,
-        "target_name": if stream { "LeanRsInteropConsumer" } else { "LeanRsFixture" },
+        "package": "lean_rs_interop_consumer",
+        "module": "LeanRsInteropConsumer",
+        "target_name": "LeanRsInteropConsumer",
         "primary_dylib": image,
-        "dependencies": dependencies,
+        "dependencies": shim_json["dependencies"],
         "build_toolchain": {"sysroot": sysroot},
         "toolchain_fingerprint": {
             "lean_version": fingerprint.lean_version,
@@ -289,19 +294,9 @@ fn prepare_typed_session(
         .open(&manifest_path)?
         .write_all(manifest.as_bytes())?;
     if !lean_toolchain::manifest_validation::check_static(&manifest_path).is_ok() {
-        return Err("typed JSON capability manifest failed SDK preflight".into());
+        return Err("interop capability manifest failed SDK preflight".into());
     }
-    let record = serde_json::json!({
-        "broken_import": false, "typed_session": true, "stream": stream, "verification": false,
-        "optional_whnf": optional_whnf,
-        "consumer_manifest": manifest_path, "consumer_json": manifest,
-        "generated_output_key": key, "project": project, "sysroot": sysroot,
-        "consumer_image": image,
-        "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),
-        "shim_paths": shim.shim_search_paths(),
-    });
-    fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
-    seal(app, state)
+    Ok((manifest_path, manifest))
 }
 
 fn prepare_broken_import(

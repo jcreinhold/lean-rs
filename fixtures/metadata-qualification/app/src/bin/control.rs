@@ -33,7 +33,7 @@ fn with_direct_shims(
         record: Record::selected(),
     });
     let r = &held.record;
-    assert!(!r.stream && !r.verification);
+    assert!(!r.interop && !r.verification);
     if case == "meta_missing_optional_symbol_returns_unsupported" {
         assert!(r.optional_whnf && r.typed_session && !r.broken_import && r.host_builder_case.is_none());
         // Keep the deployment record alive through process exit, even if a

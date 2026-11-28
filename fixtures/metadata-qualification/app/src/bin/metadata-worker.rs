@@ -1,5 +1,5 @@
-#[path = "../stream_cases.rs"]
-mod stream_cases;
+#[path = "../interop_cases.rs"]
+mod interop_cases;
 
 use lean_rs::host_bridge::{
     HostCachedModuleBatch, HostModuleBatch, HostModuleQuery, HostSourceOptions, TrustedHostKernelRequest,
@@ -19,10 +19,7 @@ use lean_rs_host::host::LeanPreparedHostArtifacts;
 use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceContext};
 use std::path::Path;
 
-use metadata_qualification::{
-    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_MANIFEST_NAME, audit,
-    module_syntax_case,
-};
+use metadata_qualification::{EXPORT, Held, MODULE_SYNTAX_IMPORTS, Record, audit, module_syntax_case};
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
 impl MetadataApp {
@@ -77,7 +74,7 @@ impl MetadataApp {
         let d = &self.deployment()?.record;
         if d.broken_import
             || !d.typed_session
-            || d.stream
+            || d.interop
             || d.verification
             || !session.imports.matches_request(
                 &d.import_roots
@@ -206,40 +203,6 @@ fn matches_fixed_proof(file: &str, request: &ProofAttemptRequest) -> bool {
 struct FixedBatchPolicy {
     limits: [&'static str; 3],
     audit: bool,
-}
-
-fn pool_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -> Option<FixedBatchPolicy> {
-    if file != "<elaborate>"
-        || imports != ["LeanRsInteropConsumer.Callback"]
-        || batch.source != "theorem poolBatchProbe (h : True) : True := by\n  exact h\n"
-    {
-        return None;
-    }
-    use ModuleQuerySelector::{Diagnostics, ProofState};
-    let allowed = match std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() {
-        Ok("lease_module_query_batch_reuses_one_warm_session") => {
-            batch.budgets.per_field_bytes == 8192
-                && batch.budgets.total_bytes == 65536
-                && matches!(
-                    batch.selectors.as_slice(),
-                    [Diagnostics { id: diagnostics }, ProofState { id: state, line: 2, column: 4 }]
-                        if diagnostics == "diagnostics" && state == "state"
-                )
-        }
-        Ok("lease_module_query_batch_preserves_item_level_budget_failures") => {
-            batch.budgets.per_field_bytes == 128
-                && batch.budgets.total_bytes == 0
-                && matches!(
-                    batch.selectors.as_slice(),
-                    [ProofState { id: state, line: 2, column: 4 }] if state == "state"
-                )
-        }
-        _ => false,
-    };
-    allowed.then_some(FixedBatchPolicy {
-        limits: ["4", "300000", "67108864"],
-        audit: true,
-    })
 }
 
 fn fixed_batch_policy(file: &str, batch: &HostModuleBatch, imports: &[String]) -> Option<FixedBatchPolicy> {
@@ -447,19 +410,14 @@ impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || path != d.consumer_manifest {
+        if !d.has_consumer_manifest() || path != d.consumer_manifest {
             return Err(denied());
         }
         let root = if d.scalar_entry {
             &d.project
-        } else if d.typed_session {
+        } else if d.interop {
             if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
-                || path.file_name().and_then(|name| name.to_str())
-                    != Some(if d.stream {
-                        STREAM_MANIFEST_NAME
-                    } else {
-                        JSON_MANIFEST_NAME
-                    })
+                || path.file_name().and_then(|name| name.to_str()) != Some(interop_cases::MANIFEST_NAME)
             {
                 return Err(denied());
             }
@@ -477,7 +435,7 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
+        if !d.has_consumer_manifest() || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
         let contracts = if d.scalar_entry {
@@ -501,23 +459,23 @@ impl WorkerAuthority for MetadataApp {
                 (mul.into(), WorkerExportContract::U64Binary),
                 (panic.into(), WorkerExportContract::U8ToUnit),
             ]
-        } else if d.stream {
-            let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
+        } else if d.interop {
+            let requested = std::env::var("LEAN_RS_METADATA_INTEROP_CASE").map_err(|_| denied())?;
             let manifest: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
             let signatures = manifest
                 .get("exports")
                 .and_then(serde_json::Value::as_array)
                 .ok_or_else(denied)?;
-            let (_, exports) = stream_cases::CASES
+            let (_, exports) = interop_cases::CASES
                 .iter()
                 .find(|(names, _)| names.contains(&requested.as_str()))
                 .ok_or_else(denied)?;
             let event = match exports {
-                stream_cases::Exports::Metadata => "authorize-fixed-metadata",
-                stream_cases::Exports::Doctor | stream_cases::Exports::MalformedMetadataAndDoctor => {
+                interop_cases::Exports::Metadata => "authorize-fixed-metadata",
+                interop_cases::Exports::Doctor | interop_cases::Exports::MalformedMetadataAndDoctor => {
                     "authorize-fixed-doctor"
                 }
-                stream_cases::Exports::NoExports => "admit-fixed-no-exports",
+                interop_cases::Exports::NoExports => "admit-fixed-no-exports",
             };
             let mut contracts = Vec::new();
             for signature in exports.signatures() {
@@ -530,16 +488,8 @@ impl WorkerAuthority for MetadataApp {
             audit(&format!("{event}-{requested}"));
             contracts
         } else {
-            let export = if d.typed_session {
-                if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
-                    return Err(denied());
-                }
-                JSON_COMMAND_EXPORT
-            } else {
-                EXPORT
-            };
             audit("authorize-consumer-load");
-            vec![(export.into(), WorkerExportContract::StringIoString)]
+            vec![(EXPORT.into(), WorkerExportContract::StringIoString)]
         };
         // SAFETY: Held checks the exact sealed images, initializer and runtime.
         // Each named interop case selects only its exact genuine contracts.
@@ -561,7 +511,7 @@ impl WorkerAuthority for MetadataApp {
             }
             return Err(denied());
         }
-        if !d.broken_import && (!d.typed_session || d.stream) {
+        if !d.broken_import && (!d.typed_session || d.interop) {
             held.check_interop_visibility(true).map_err(ioerr)?;
         }
         if !d.broken_import {
@@ -629,7 +579,7 @@ impl WorkerAuthority for MetadataApp {
         let expected = LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture");
         if held.record.broken_import
             || !held.record.typed_session
-            || held.record.stream
+            || held.record.interop
             || path != held.record.consumer_image
             || requested != &expected
         {
@@ -670,7 +620,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
-            || d.stream
+            || d.interop
             || d.verification
             || !(recovery || meta || adapter)
             || *session.imports.options() != HostImportOptions::default()
@@ -784,7 +734,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
-            || d.stream
+            || d.interop
             || d.verification
             || !(exact_request || module_syntax)
             || !session.imports.matches_request(
@@ -835,6 +785,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
+            || d.interop
             || d.verification
             || !options.namespace.is_empty()
             || options.options_json != "{}"
@@ -845,12 +796,7 @@ impl WorkerAuthority for MetadataApp {
             return Err(denied());
         }
         let names = session.imports.imports();
-        let fixed = if d.stream {
-            pool_batch_policy(&options.file, &request.batch, names)
-        } else {
-            fixed_batch_policy(&options.file, &request.batch, names)
-        }
-        .ok_or_else(denied)?;
+        let fixed = fixed_batch_policy(&options.file, &request.batch, names).ok_or_else(denied)?;
         let [entries, ttl, bytes] = fixed.limits;
         let paths = d
             .import_roots
@@ -908,7 +854,7 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || d.broken_import
             || !d.typed_session
-            || d.stream
+            || d.interop
             || d.verification
             || !session.imports.matches_request(
                 &d.import_roots
@@ -950,12 +896,7 @@ impl WorkerAuthority for MetadataApp {
         let roots = d.verification_roots();
         if d.broken_import
             || !d.typed_session
-            || (d.stream
-                && !matches!(
-                    std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref(),
-                    Ok("lease_module_query_batch_reuses_one_warm_session"
-                        | "lease_module_query_batch_preserves_item_level_budget_failures")
-                ))
+            || d.interop
             || (!d.verification && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1"))
             || context.capability.library_path() != d.host_image
             || observed != Some(roots.as_slice())

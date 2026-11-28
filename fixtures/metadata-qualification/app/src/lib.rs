@@ -120,9 +120,6 @@ fn runtime_image_names() -> (&'static str, &'static str, &'static str) {
 }
 
 pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
-pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_command";
-pub const STREAM_MANIFEST_NAME: &str = "worker-stream-capability.json";
-pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
 
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
@@ -145,7 +142,7 @@ pub struct Record {
     #[serde(default)]
     pub optional_whnf: bool,
     #[serde(default)]
-    pub stream: bool,
+    pub interop: bool,
     pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]
@@ -247,6 +244,11 @@ impl Record {
             "deployment content file changed",
         )
     }
+    /// Whether this record names a consumer capability manifest. The typed
+    /// tests open the fixture library through its initializer and read none.
+    pub fn has_consumer_manifest(&self) -> bool {
+        !self.broken_import && (self.interop || !self.typed_session)
+    }
     pub fn verification_roots(&self) -> Vec<String> {
         self.import_roots
             .iter()
@@ -281,7 +283,7 @@ impl Record {
 
     pub fn adapter_handles_case(&self) -> bool {
         self.typed_session
-            && !self.stream
+            && !self.interop
             && !self.broken_import
             && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
@@ -296,7 +298,7 @@ impl Record {
 
     pub fn adapter_kernel_case(&self) -> bool {
         self.typed_session
-            && !self.stream
+            && !self.interop
             && !self.broken_import
             && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
@@ -305,11 +307,11 @@ impl Record {
     }
 
     fn interop_builder_imports(&self, names: &[String], options: &lean_rs::module::HostImportOptions) -> Option<R<()>> {
-        if !self.typed_session || !self.stream || self.broken_import || self.verification {
+        if !self.typed_session || !self.interop || self.broken_import || self.verification {
             return None;
         }
         let default = lean_rs::module::HostImportOptions::default();
-        let allowed = match std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() {
+        let allowed = match std::env::var("LEAN_RS_METADATA_INTEROP_CASE").as_deref() {
             Ok("session_import_profile_reaches_child_import") => {
                 names == [MODULE]
                     && (*options == default
@@ -332,7 +334,7 @@ impl Record {
     ) -> R<()> {
         let expected: &[&str] = if self.broken_import {
             &["Demo.Broken"]
-        } else if self.typed_session && !self.stream {
+        } else if self.typed_session && !self.interop {
             &["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"]
         } else {
             &[MODULE]
@@ -349,7 +351,7 @@ impl Record {
             && (names == ["LeanRsHostShims.Elaboration", "LeanRsFixtureLateExtension"]
                 || names == ["LeanRsHostShims.Elaboration", "LeanRsFixture.Meta"]);
         let reuse_imports = self.typed_session
-            && !self.stream
+            && !self.interop
             && !self.broken_import
             && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
@@ -534,7 +536,7 @@ impl Held {
         }
         require(found, "selected libleanshared absent")?;
         require(
-            d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
+            !d.has_consumer_manifest() || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
             "consumer manifest or initializer differs",
         )?;
         require(

@@ -3,6 +3,10 @@
 #[path = "../../lean-rs-host/tests/support/fixed_fixture.rs"]
 mod fixture;
 
+#[path = "support/checked_worker.rs"]
+mod checked_worker;
+#[path = "support/ordinary_scalar_selection.rs"]
+mod ordinary_scalar_selection;
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
 #[path = "support/ordinary_typed_worker.rs"]
@@ -246,7 +250,7 @@ fn declaration_bulk_adapter_matches_in_process_session() {
 #[test]
 fn shims_only_session_opens_without_user_dylib() {
     let mut temporary = None;
-    let (project, config, tracker) = if let Some(selected) = ordinary_typed_selection::ordinary_scalar_selection() {
+    let (project, config, tracker) = if let Some(selected) = ordinary_scalar_selection::ordinary_scalar_selection() {
         let target = workspace_root().canonicalize().expect("canonical SDK").join("target");
         assert_eq!(
             selected.fixture,

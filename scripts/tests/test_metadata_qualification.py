@@ -185,7 +185,7 @@ class MetadataQualificationTest(unittest.TestCase):
         self.launch.assert_not_called()
 
     def mock_private_package(self):
-        root = qualification.stream_package_root()
+        root = qualification.shim_package_root()
         manifest = root / "crates/lean-rs-host/shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lib/host.json"
 
         def prepare(_release):
@@ -194,7 +194,7 @@ class MetadataQualificationTest(unittest.TestCase):
             manifest.write_text("{}")
             return root.stat(), manifest, []
 
-        self.enterContext(patch.object(qualification, "prepare_stream_package", side_effect=prepare))
+        self.enterContext(patch.object(qualification, "prepare_shim_package", side_effect=prepare))
         return manifest
 
     def test_broken_import_runs_exact_case_then_cleans(self):
@@ -220,7 +220,7 @@ class MetadataQualificationTest(unittest.TestCase):
 
         self.assertEqual(len(seen), 3)
         self.assertEqual(json.loads(seen[0][2]["LEAN_RS_PREPARED_HOST_ARTIFACTS"])["shim_manifest_path"], str(manifest))
-        self.assertFalse(qualification.stream_package_root().exists())
+        self.assertFalse(qualification.shim_package_root().exists())
         for command, _, env, check in seen:
             self.assertEqual(
                 command[:4],
@@ -309,7 +309,6 @@ class MetadataQualificationTest(unittest.TestCase):
                     "files": {**record["files"], image: [5, 6, "fixture-digest"]},
                 }
                 (typed / "deployment.json").write_text(json.dumps(typed_record))
-                (typed / "worker-json-capability.json").write_text("{}")
             elif (
                 "nextest" in command
                 and "typed_session" in command
@@ -680,8 +679,8 @@ class MetadataQualificationTest(unittest.TestCase):
                 run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"],
             )
         self.assertEqual(
-            json.loads(run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"])["json_manifest"],
-            str(self.fixtures / "typed-session/worker-json-capability.json"),
+            set(json.loads(run_env["LEAN_RS_TEST_ORDINARY_TYPED_SESSION"])),
+            {"worker", "worker_sha256", "fixture", "sysroot", "prepared"},
         )
         remaining = assignments["LEAN_RS_TEST_REMAINING_FILTER"]
         builder_cases = (
@@ -854,21 +853,21 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(good, expected)
 
-    def test_stream_runs_one_cohort_on_the_pinned_images(self):
+    def test_interop_runs_one_group_on_the_pinned_images(self):
         release = self.target
         manifest = self.target / "shim.json"
         cases = [name for _, name in qualification.INTEROP_TESTS]
-        assets = qualification.stream_package_root()
+        assets = qualification.shim_package_root()
         assets.mkdir(parents=True)
         manifest.write_text("{}")
         original_images = [("original", 1, 2, "original-digest")]
         isolated_images = [("isolated", 1, 3, "isolated-digest")]
         pinned = ({"shim_manifest_path": str(manifest), "shim_manifest_json": "{}"}, original_images)
         with (
-            patch.object(qualification, "prepare_stream_package", return_value=(assets.stat(), manifest, isolated_images)),
-            patch.object(qualification, "run_stream_group") as run,
+            patch.object(qualification, "prepare_shim_package", return_value=(assets.stat(), manifest, isolated_images)),
+            patch.object(qualification, "run_interop_group") as run,
         ):
-            qualification.qualify_stream(
+            qualification.qualify_interop(
                 release, qualification.DARWIN_ARM64_PINS, manifest, None, pinned_selection=pinned,
             )
         run.assert_called_once()
@@ -877,16 +876,16 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertFalse(assets.exists())
         assets.mkdir()
         with (
-            patch.object(qualification, "prepare_stream_package", return_value=(assets.stat(), manifest, [])),
-            patch.object(qualification, "run_stream_group", side_effect=ValueError("cohort did not close")) as run,
+            patch.object(qualification, "prepare_shim_package", return_value=(assets.stat(), manifest, [])),
+            patch.object(qualification, "run_interop_group", side_effect=ValueError("cohort did not close")) as run,
             self.assertRaisesRegex(ValueError, "cohort did not close"),
         ):
-            qualification.qualify_stream(release, qualification.DARWIN_ARM64_PINS, manifest, cases[:1])
+            qualification.qualify_interop(release, qualification.DARWIN_ARM64_PINS, manifest, cases[:1])
         run.assert_called_once()
         self.assertTrue(assets.is_dir())
 
     def test_workspace_uses_the_named_package_and_removes_it_only_after_success(self):
-        root = qualification.stream_package_root()
+        root = qualification.shim_package_root()
         root.mkdir(mode=0o700)
         owner = root.stat()
         manifest = root / "shim.json"
@@ -902,10 +901,10 @@ class MetadataQualificationTest(unittest.TestCase):
             "shim_search_paths": [],
         }
         with (
-            patch.object(qualification, "prepare_stream_package", return_value=(owner, manifest, pins)),
-            patch.object(qualification, "run_stream_group", return_value=descriptor),
+            patch.object(qualification, "prepare_shim_package", return_value=(owner, manifest, pins)),
+            patch.object(qualification, "run_interop_group", return_value=descriptor),
         ):
-            selection = qualification.qualify_stream(
+            selection = qualification.qualify_interop(
                 self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE],
                 prepared_package=(owner, manifest, pins), retain_for_workspace=True,
             )
@@ -940,8 +939,8 @@ class MetadataQualificationTest(unittest.TestCase):
             )
         self.assertFalse(root.exists())
 
-    def test_focused_stream_consumes_the_verified_handoff_only_once(self):
-        root = qualification.stream_package_root()
+    def test_focused_interop_consumes_the_verified_handoff_only_once(self):
+        root = qualification.shim_package_root()
         root.mkdir(mode=0o700)
         owner = root.stat()
         manifest = root / "host.json"
@@ -954,22 +953,22 @@ class MetadataQualificationTest(unittest.TestCase):
             pins.append([str(image), info.st_dev, info.st_ino, qualification.digest(image)])
         receipt = {"package_identity": [owner.st_dev, owner.st_ino], "manifest": str(manifest),
                    "manifest_sha256": qualification.digest(manifest), "images": pins}
-        note = root / "stream-ready.json"
+        note = root / "interop-ready.json"
         note.write_text(json.dumps(receipt))
-        with patch.object(qualification, "prepare_stream_package") as build, patch.object(
-            qualification, "run_stream_group", side_effect=ValueError("worker closure unknown")
+        with patch.object(qualification, "prepare_shim_package") as build, patch.object(
+            qualification, "run_interop_group", side_effect=ValueError("worker closure unknown")
         ) as run:
             manifest.write_text("changed")
             with self.assertRaisesRegex(ValueError, "manifest changed"):
-                qualification.qualify_stream(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
+                qualification.qualify_interop(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
             run.assert_not_called()
             self.assertTrue(note.exists())
             manifest.write_text("{}")
             with self.assertRaisesRegex(ValueError, "closure unknown"):
-                qualification.qualify_stream(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
+                qualification.qualify_interop(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
             self.assertFalse(note.exists())
             with self.assertRaises(FileNotFoundError):
-                qualification.qualify_stream(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
+                qualification.qualify_interop(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
             run.assert_called_once()
             build.assert_not_called()
         self.assertTrue(root.is_dir())
@@ -1164,7 +1163,7 @@ class MetadataQualificationTest(unittest.TestCase):
             qualification.LINUX_X86_64_PINS,
             emit_host_selection=False,
             run_typed=False,
-            run_stream=False,
+            run_interop=False,
             bookended_release=True,
             retain_for_workspace=False,
         )

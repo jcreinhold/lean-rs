@@ -48,6 +48,8 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+#[path = "support/checked_worker.rs"]
+mod checked_worker;
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
 #[path = "support/ordinary_typed_worker.rs"]

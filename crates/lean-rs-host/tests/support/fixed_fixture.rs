@@ -137,7 +137,7 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
                 Some(shims.prefix.as_os_str())
             );
             let package = if let Some(identity) = shims.package_identity {
-                let package = checkout.join("target/metadata-qualification/stream-package");
+                let package = checkout.join("target/metadata-qualification/shim-package");
                 assert_eq!(
                     package.canonicalize().expect("canonical workspace shim package"),
                     package

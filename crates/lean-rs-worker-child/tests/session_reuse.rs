@@ -30,6 +30,8 @@ use lean_rs_worker_parent::{
     LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerRestartPolicy, LeanWorkerSessionConfig,
 };
 
+#[path = "support/checked_worker.rs"]
+mod checked_worker;
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
 #[path = "support/ordinary_typed_worker.rs"]

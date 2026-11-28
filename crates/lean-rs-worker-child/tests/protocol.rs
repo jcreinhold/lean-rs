@@ -1,7 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
-#[path = "support/ordinary_typed_selection.rs"]
-mod ordinary_typed_selection;
+#[path = "support/checked_worker.rs"]
+mod checked_worker;
+#[path = "support/ordinary_scalar_selection.rs"]
+mod ordinary_scalar_selection;
 
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
@@ -30,7 +32,7 @@ fn fixture_root() -> PathBuf {
 }
 
 fn scalar_fixture() -> (PathBuf, PathBuf) {
-    ordinary_typed_selection::ordinary_scalar_selection().map_or_else(
+    ordinary_scalar_selection::ordinary_scalar_selection().map_or_else(
         || (fixture_root(), worker_binary()),
         |selected| (selected.fixture.clone(), selected.worker.clone()),
     )

@@ -8,9 +8,11 @@ use lean_rs_worker_parent::{
 };
 use serde_json::json;
 
-#[path = "support/ordinary_typed_selection.rs"]
-mod ordinary_typed_selection;
-use ordinary_typed_selection::ordinary_stream_selection;
+#[path = "support/checked_worker.rs"]
+mod checked_worker;
+#[path = "support/ordinary_interop_selection.rs"]
+mod ordinary_interop_selection;
+use ordinary_interop_selection::ordinary_interop_selection;
 
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
@@ -30,7 +32,7 @@ fn interop_root() -> PathBuf {
 }
 
 fn ensure_interop_built() {
-    if ordinary_stream_selection().is_none() {
+    if ordinary_interop_selection().is_none() {
         drop(interop_manifest_path());
     }
 }
@@ -58,7 +60,7 @@ fn interop_manifest_path() -> PathBuf {
 }
 
 fn worker_config() -> LeanWorkerConfig {
-    if let Some(selected) = ordinary_stream_selection() {
+    if let Some(selected) = ordinary_interop_selection() {
         return LeanWorkerConfig::new(&selected.worker)
             .checked_native_loader_environment()
             .env("LEAN_SYSROOT", selected.sysroot.as_os_str());
@@ -67,12 +69,12 @@ fn worker_config() -> LeanWorkerConfig {
 }
 
 fn session_config() -> LeanWorkerSessionConfig {
-    if let Some(selected) = ordinary_stream_selection() {
+    if let Some(selected) = ordinary_interop_selection() {
         return LeanWorkerSessionConfig::manifest_backed(
             &selected.fixture,
             "lean_rs_interop_consumer",
             "LeanRsInteropConsumer",
-            &selected.json_manifest,
+            &selected.capability_manifest,
             ["LeanRsInteropConsumer.Callback"],
         );
     }

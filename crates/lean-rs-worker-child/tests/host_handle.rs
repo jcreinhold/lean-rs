@@ -11,8 +11,10 @@ use lean_rs_worker_parent::{
     LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerSessionConfig, LeanWorkerSessionImportProfile,
 };
 
-#[path = "support/ordinary_typed_selection.rs"]
-mod ordinary_typed_selection;
+#[path = "support/checked_worker.rs"]
+mod checked_worker;
+#[path = "support/ordinary_interop_selection.rs"]
+mod ordinary_interop_selection;
 
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
@@ -470,7 +472,7 @@ fn handshake_failure_is_a_bootstrap_diagnostic() {
 }
 
 fn sealed_interop_session() -> Option<(LeanWorkerConfig, LeanWorkerSessionConfig)> {
-    ordinary_typed_selection::ordinary_stream_selection().map(|selected| {
+    ordinary_interop_selection::ordinary_interop_selection().map(|selected| {
         let worker = LeanWorkerConfig::new(&selected.worker)
             .checked_native_loader_environment()
             .env("LEAN_SYSROOT", selected.sysroot.as_os_str());
@@ -478,7 +480,7 @@ fn sealed_interop_session() -> Option<(LeanWorkerConfig, LeanWorkerSessionConfig
             &selected.fixture,
             "lean_rs_interop_consumer",
             "LeanRsInteropConsumer",
-            &selected.json_manifest,
+            &selected.capability_manifest,
             ["LeanRsInteropConsumer.Callback"],
         );
         (worker, session)

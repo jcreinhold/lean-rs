@@ -170,14 +170,14 @@ def main():
     broken = rec.get("broken_import", False)
     scalar = rec.get("scalar_entry", False)
     typed = rec.get("typed_session", False)
-    stream = rec.get("stream", False)
+    interop = rec.get("interop", False)
     optional_whnf = rec.get("optional_whnf", False)
     assert not optional_whnf or (
-        typed and not stream and state == a / "target/optional-whnf"
+        typed and not interop and state == a / "target/optional-whnf"
     )
     assert not (broken and typed)
     assert not scalar or (state == a / "target/scalar-entry" and not (broken or typed))
-    assert not stream or typed
+    assert not interop or typed
     if typed:
         assert rec.get("verification") is False
     host_builder_case = rec.get("host_builder_case")
@@ -209,8 +209,8 @@ def main():
         )
     )
     builder = builder_profiles.get(host_builder_case)
-    private_package = sdk / "target/metadata-qualification/stream-package"
-    assets = private_package if stream else sdk
+    private_package = sdk / "target/metadata-qualification/shim-package"
+    assets = private_package if interop else sdk
     project = (
         state
         / (
@@ -228,7 +228,7 @@ def main():
         else assets
         / (
             "fixtures/interop-worker"
-            if stream
+            if interop
             else "fixtures/lean"
             if typed
             else "fixtures/metadata-qualification/lean"
@@ -236,7 +236,7 @@ def main():
     )
     if scalar:
         project = state / "lean"
-    elif typed and not stream and not optional_whnf:
+    elif typed and not interop and not optional_whnf:
         project = Path(os.environ["LEAN_RS_TEST_TYPED_PROJECT"])
         assert project in (sdk / "fixtures/lean", state / "lean"), project
         assert project == project.resolve(strict=True) and project.is_dir(), project
@@ -256,8 +256,7 @@ def main():
     hi = image(host, "lean__rs__host__shims_LeanRsHostShims")
     package, module = ("lean_rs_interop_consumer", "LeanRsInteropConsumer")
     stem = package.replace("_", "__") + "_" + module
-    if typed and not stream:
-        package, module = "lean_rs_fixture", "LeanRsFixture.Effects"
+    if typed and not interop:
         stem = "lean__rs__fixture_LeanRsFixture"
     if scalar:
         package, module = "lean_rs_fixture", "LeanRsFixture"
@@ -267,7 +266,7 @@ def main():
         if broken
         else (
             project / ".lake/build/lib" / native_name(stem)
-            if scalar or (typed and not stream)
+            if scalar or (typed and not interop)
             else image(project, stem)
         )
     )
@@ -299,10 +298,12 @@ def main():
         with path.open("rb") as stream:
             contentpins[str(path)] = hashlib.file_digest(stream, "sha256").hexdigest()
 
-    for manifest in ["shim"] if broken else ["consumer", "shim"]:
+    # The typed tests open the fixture library through its initializer and read
+    # no consumer manifest.
+    for manifest in ["shim"] if broken or (typed and not interop) else ["consumer", "shim"]:
         path = Path(rec[manifest + "_manifest"])
         assert path.read_text() == rec[manifest + "_json"]
-        # Pin the typed capability manifest in the private state. A later SDK
+        # Pin the interop capability manifest in the private state. A later SDK
         # build may rewrite the typed host-shim snapshot, so it is not pinned.
         if scalar and manifest == "consumer":
             # The SDK writes the manifest beside the library Lake built.
@@ -311,12 +312,8 @@ def main():
                 ".lean-rs-capability.json"
             )
             pin(path)
-        elif typed and manifest == "consumer":
-            assert path == state / (
-                "worker-stream-capability.json"
-                if stream
-                else "worker-json-capability.json"
-            )
+        elif interop and manifest == "consumer":
+            assert path == state / "worker-interop-capability.json"
             pin(path)
         elif optional_whnf or (not broken and not typed):
             pin(path)
@@ -329,11 +326,11 @@ def main():
         assert (v["package"], v["module"], v["primary_dylib"]) == (p, m, str(i))
         if optional_whnf and manifest == "shim":
             assert [row["symbol"] for row in v["exports"]].count(WHNF) == 1
-        if stream and manifest == "consumer":
+        if interop and manifest == "consumer":
             assert v["target_name"] == "LeanRsInteropConsumer"
         assert v["dependencies"] == (
             []
-            if (scalar or (typed and not stream)) and manifest == "consumer"
+            if scalar and manifest == "consumer"
             else [
                 {
                     "name": "lean_rs_interop_shims",
@@ -355,7 +352,7 @@ def main():
             == "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4"
         )
     project_symbols = ["initialize_" + stem]
-    if stream:
+    if interop:
         exports = json.loads(rec["consumer_json"])["exports"]
         symbols = [export["symbol"] for export in exports]
         assert 0 < len(symbols) <= 33 and len(set(symbols)) == len(symbols)
@@ -366,16 +363,9 @@ def main():
             e["symbol"] for e in json.loads(rec["consumer_json"])["exports"]
         ] == expected
         project_symbols.extend(expected)
-    elif typed:
-        project_symbols.extend(
-            [
-                "initialize_lean__rs__fixture_LeanRsFixture_Effects",
-                "lean_rs_interop_consumer_worker_json_command",
-            ]
-        )
-    elif not broken:
+    elif not (broken or typed):
         project_symbols.append("lean_rs_interop_consumer_worker_metadata")
-    if stream:
+    if interop:
         pin_content(project / "lakefile.lean")
         for source in (
             "LeanRsInteropConsumer.lean",
@@ -408,7 +398,7 @@ def main():
         pin_content(root / "lake-manifest.json")
     packages = json.loads((project / "lake-manifest.json").read_text())["packages"]
     project_deps = []
-    if scalar or (typed and not stream):
+    if scalar or (typed and not interop):
         assert packages == []
     elif transitive:
         assert packages == [
@@ -507,7 +497,7 @@ def main():
         project_deps = [out(dep) / "lean"]
     project_oleans = (
         project / ".lake/build/lib/lean"
-        if scalar or broken or (typed and not stream)
+        if scalar or broken or (typed and not interop)
         else out(project) / "lean"
     )
     # Both built packages must actually select the same source package.
@@ -528,7 +518,7 @@ def main():
         release / "lib/lean",
     ]:
         tree(r)
-    if typed and not stream:
+    if typed and not interop:
         for module in ("LeanRsFixtureLateExtension.olean", "LeanRsFixture/Meta.olean"):
             required = project_oleans / module
             assert str(required) in filepins, (
@@ -583,7 +573,7 @@ def main():
             (r / "Demo/Broken.olean").exists() or (r / "Demo.olean").exists()
             for r in [project_oleans, *shims, release / "lib/lean"]
         )
-    elif scalar or (typed and not stream):
+    elif scalar or (typed and not interop):
         for module in ("LeanRsFixture/Handles", "LeanRsFixture/SourceRanges"):
             assert (project_oleans / (module + ".olean")).is_file()
     else:
