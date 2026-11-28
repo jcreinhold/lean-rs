@@ -388,12 +388,12 @@ pub enum LeanLoaderSeverity {
 ///
 /// Matches the workspace error-message bound so diagnostics that flow back
 /// through `LeanError` are not double-truncated.
-pub const LOADER_DIAGNOSTIC_TEXT_LIMIT: usize = 4 * 1024;
+const LOADER_DIAGNOSTIC_TEXT_LIMIT: usize = 4 * 1024;
 
 /// Truncate `text` to at most [`LOADER_DIAGNOSTIC_TEXT_LIMIT`] bytes on a
 /// UTF-8 char boundary.
 #[must_use]
-pub fn bound_loader_text(mut text: String) -> String {
+fn bound_loader_text(mut text: String) -> String {
     if text.len() <= LOADER_DIAGNOSTIC_TEXT_LIMIT {
         return text;
     }

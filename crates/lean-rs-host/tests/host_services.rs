@@ -269,9 +269,9 @@ use lean_rs_host::host::meta::{
 };
 use lean_rs_host::{
     DeclarationInspectionFields, DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest,
-    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanBracketedImportRequest,
-    LeanBracketedImportResult, LeanCancellationToken, LeanDeclarationFilter, LeanElabOptions, LeanHost,
-    LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
+    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LeanBracketedImportRequest, LeanBracketedImportResult,
+    LeanCancellationToken, LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession,
+    LeanSessionImportProfile, LeanSeverity,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -1491,9 +1491,10 @@ fn checked_evidence_revalidates_and_retains_summary() {
         !signature.contains("rfl"),
         "type signature must not leak the proof term `rfl`, got: {signature:?}",
     );
+    // The host shim cuts each field to `proofSummaryByteLimit`, 4,096 bytes.
     for field in [summary.declaration_name(), summary.kind(), summary.type_signature()] {
         assert!(
-            field.len() <= LEAN_PROOF_SUMMARY_BYTE_LIMIT,
+            field.len() <= 4096,
             "ProofSummary field exceeds the documented byte bound: {} bytes",
             field.len()
         );

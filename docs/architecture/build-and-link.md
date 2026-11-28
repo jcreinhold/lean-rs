@@ -63,17 +63,15 @@ Lower-level helpers remain available for custom build flows:
 
 - `emit_lean_link_directives_checked` emits only Lean link directives and returns typed `LinkDiagnostics` on discovery
   failure.
-- `emit_lean_link_directives` preserves the warning-on-failure behavior.
-- `build_lake_target` builds one Lake shared-library target and emits Cargo rerun directives.
 - `LakeWorkspace` asks the same questions without Cargo directives, for runtime code and tests: `lean_path` runs
   `lake env`, `shared_library` runs `lake query`, and `built_shared_library` runs `lake --no-build query`. Each also
   comes as a pair, such as `lean_path_command` and `read_lean_path`: the first builds the Lake command and the second
   reads its output, so a caller can run Lake under its own time limit, process group or turn. The host's bundled shim
   path uses `CargoLeanCapability::build_quiet` so its manifest also carries trusted export signatures.
 
-`build_lake_target` emits `cargo:rerun-if-changed` for each regular file at the top of the project and each `.lean` file
-below it, skipping directories whose names start with `.`. It captures Lake stdout and stderr, so stdout stays limited
-to Cargo directives and caller-chosen `cargo:` lines.
+`CargoLeanCapability::build` emits `cargo:rerun-if-changed` for each regular file at the top of the project and each
+`.lean` file below it, skipping directories whose names start with `.`. It captures Lake stdout and stderr, so stdout
+stays limited to Cargo directives and caller-chosen `cargo:` lines.
 
 ## What Lake Answers
 

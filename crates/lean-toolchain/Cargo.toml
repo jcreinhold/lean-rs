@@ -21,7 +21,7 @@ sha2 = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-rustix = { version = "1.1.6", features = ["fs", "process"] }
+rustix = { version = "1.1.6", features = ["process"] }
 
 [build-dependencies]
 # `lean-rs-abi` is purely static (no build script, no Lean link), so depending

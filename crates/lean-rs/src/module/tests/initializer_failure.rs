@@ -97,7 +97,7 @@ fn failed_initializer_stays_failed_across_handles() {
     let wrong = fixture_manifest(&good_image, "probe", "OtherProbe", &[]);
     let manifest =
         lean_toolchain::CapabilityManifest::from_bytes(&manifest_path, &wrong).expect("well-formed manifest");
-    let report = crate::LeanRuntimePreflight::check_manifest(&manifest_path, &manifest);
+    let report = crate::module::preflight::LeanRuntimePreflight::check_manifest(&manifest_path, &manifest);
     assert!(
         report
             .checks()

@@ -1,12 +1,8 @@
-//! Integration tests for structured diagnostic codes and `tracing` span
-//! coverage.
+//! Integration tests for structured diagnostic codes.
 //!
 //! One test per major code family (`Linking`, `ModuleInit`,
 //! `SymbolLookup`, `AbiConversion`, `LeanException`, `Elaboration`,
-//! `Unsupported`) plus a [`DiagnosticCapture`] smoke test that confirms
-//! the session-import span fires. `RuntimeInit` is covered by the
-//! happy-path span event captured by the same smoke test: the
-//! `lean_rs.runtime.init` span enters on every test process.
+//! `Unsupported`).
 //!
 //! The tests live under `tests/` so the fixture Lake project is
 //! resolved relative to the workspace root the same way every other
@@ -18,7 +14,7 @@
 mod fixture;
 use std::path::PathBuf;
 
-use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanRuntime};
+use lean_rs::{LeanDiagnosticCode, LeanRuntime};
 use lean_rs_host::meta::{MetaCallStatus, infer_type};
 use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession};
 
@@ -184,52 +180,6 @@ fn unsupported_code_on_absent_meta_service() {
             "unexpected code {code:?} on non-Ok response"
         );
     }
-}
-
-// -- diagnostic-capture smoke test --------------------------------------
-
-#[test]
-fn capture_records_runtime_init_span() {
-    // The runtime init span is the only one whose call site is
-    // guaranteed to fire on every test thread (every `LeanRuntime::init`
-    // call enters the span, even after the OnceLock short-circuits).
-    // Use it as the anchor that proves the capture infrastructure is
-    // wired up end-to-end against the real `lean_rs` instrumentation.
-    //
-    // The richer span coverage—`library.open`, `session.import`, and
-    // bulk dispatch—is covered by single-test runs at
-    // `RUST_LOG=lean_rs=trace cargo test -p lean-rs --test diagnostics`
-    // and documented in `docs/diagnostics.md`. We do not assert it from
-    // the parallel-`cargo test` happy path because callsite Interest
-    // caching across threads makes the timing of the first
-    // capture-on-this-thread fragile.
-    let capture = DiagnosticCapture::install();
-    let _runtime = LeanRuntime::init().expect("runtime init");
-    let events = capture.events();
-    assert!(
-        events.iter().any(|e| e.span.as_deref() == Some("lean_rs.runtime.init")),
-        "DiagnosticCapture must record the runtime.init span on its install thread; got {events:?}",
-    );
-}
-
-#[test]
-fn capture_records_explicit_diagnostic_event() {
-    // Anchor the capture's `code` projection against an event we
-    // synthesise locally—this is independent of which Lean call
-    // sites happen to fire on this thread.
-    let capture = DiagnosticCapture::install();
-    tracing::error!(
-        target: "lean_rs",
-        code = LeanDiagnosticCode::Linking.as_str(),
-        "synthetic linker failure",
-    );
-    let events = capture.events();
-    assert!(
-        events
-            .iter()
-            .any(|e| e.code == Some(LeanDiagnosticCode::Linking) && e.message == "synthetic linker failure"),
-        "DiagnosticCapture must project a `code` field back to LeanDiagnosticCode; got {events:?}",
-    );
 }
 
 // -- as_str + description coverage --------------------------------------

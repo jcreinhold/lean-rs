@@ -9,9 +9,6 @@
 //! the leader they only observe group absence, never signal the stored PGID.
 //! A surviving or late-forked descendant may therefore retain custody forever.
 
-mod measured_child;
-pub use measured_child::{MeasuredChild, WaitedChildUsage};
-
 use std::io;
 use std::os::fd::BorrowedFd;
 use std::os::unix::process::CommandExt as _;
@@ -310,32 +307,6 @@ pub fn group_present(group: u32) -> io::Result<bool> {
             Err(error) if error == rustix::io::Errno::SRCH => Ok(false),
             Err(error) => Err(error.into()),
         }
-    }
-}
-
-/// Observe whether this live private-group leader is its only member.
-///
-/// The current process pins its own group identity. This read-only observation
-/// grants no authority to signal any stored identity. A group leader can use it
-/// after reaping its direct child to learn whether any descendant remains.
-///
-/// # Errors
-/// Refuses nonleaders and platforms without a complete atomic group census.
-pub fn current_group_is_singleton() -> io::Result<bool> {
-    let current = std::process::id();
-    if rustix::process::getpgrp().as_raw_nonzero().get() != i32::try_from(current).map_err(io::Error::other)? {
-        return Err(io::Error::other("private current-group leader required"));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Ok(macos::members(current)? == macos::Members::OnlyLeader)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "complete native-reader group census unavailable",
-        ))
     }
 }
 

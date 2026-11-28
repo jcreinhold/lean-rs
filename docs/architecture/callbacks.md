@@ -133,6 +133,6 @@ the bundled helper source instead of defining a second callback ABI.
 
 [`fixtures/interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims) and the
 [`interop_callback`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/examples/interop_callback.rs)
-example check addition, ticks, and strings without host sessions. Build with `lean_toolchain::build_lake_target`; the
-[build contract](build-and-link.md) owns Lake target resolution. Interop changes also need host progress, payload
-parity, API review, and the relevant checks in [release](../release.md).
+example check addition, ticks, and strings without host sessions. The [build contract](build-and-link.md) owns Lake
+target resolution. Interop changes also need host progress, payload parity, API review, and the relevant checks in
+[release](../release.md).

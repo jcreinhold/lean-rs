@@ -52,20 +52,20 @@ results. See [production hosting](production-hosting.md).
 
 ## Loader preflight
 
-Check a shipped capability before opening its dylibs:
+`LeanCapability::from_build_manifest` checks a shipped capability before it opens the dylibs: the manifest, the
+toolchain fingerprint, staleness, dependency files, and the primary library's initializer and symbols. A failed check
+returns `ModuleInit`; the message includes the loader code and repair hint. To run the link-free checks without the Lean
+runtime, call `lean_toolchain::manifest_validation::check_static`:
 
 ```rust
-let report = lean_rs::LeanCapabilityPreflight::new(
-    lean_rs::LeanBuiltCapability::manifest_path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")),
-)
-.check();
+let manifest = std::path::Path::new(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"));
+let report = lean_toolchain::manifest_validation::check_static(manifest);
 if let Some(check) = report.first_error() {
     eprintln!("{}: {}", check.code(), check.repair_hint());
 }
 ```
 
-`LeanCapability::from_build_manifest` also uses preflight when it can explain a load failure. Its broad error remains
-`ModuleInit`; the message includes the loader code and repair hint. The source catalogue is
+The source catalogue is
 [`loader.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/loader.rs). All identifiers
 below start with `lean_rs.loader.`.
 
@@ -202,24 +202,8 @@ and fields. `source_len` is bytes.
 
 ### Capturing diagnostics in tests
 
-`DiagnosticCapture` buffers `lean_rs` spans/events on the installing thread and restores the prior subscriber on drop:
-
-```rust
-use lean_rs::{DiagnosticCapture, LeanDiagnosticCode};
-
-#[test]
-fn captures_diagnostic_code() {
-    let capture = DiagnosticCapture::install();
-    tracing::warn!(target: "lean_rs", code = "lean_rs.module_init", "fixture failure");
-    assert!(capture.events().iter().any(|event|
-        event.code == Some(LeanDiagnosticCode::ModuleInit)
-    ));
-}
-```
-
-The guard is `!Send + !Sync`. Default capacity is 256 events; overflow drops the oldest and increments `overflowed()`.
-Use `with_capacity(N)` to change it. While installed, the capture records only targets beginning with `lean_rs`; it does
-not forward other events to the previous subscriber.
+To assert on these spans in a test, install a subscriber for the test thread with `tracing::subscriber::set_default` and
+keep the events whose target starts with `lean_rs`. The crate installs no subscriber of its own.
 
 ### Bounding
 

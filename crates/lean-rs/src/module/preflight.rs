@@ -32,26 +32,20 @@ pub use lean_toolchain::{LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderRe
 /// Layers symbol-table inspection on top of
 /// [`lean_toolchain::manifest_validation::check_static`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanRuntimePreflight {
+pub(crate) struct LeanRuntimePreflight {
     spec: LeanBuiltCapability,
 }
-
-/// Backwards-compatible alias for [`LeanRuntimePreflight`].
-///
-/// The struct was renamed when the static manifest-validation half moved to
-/// `lean-toolchain`; this alias preserves the historical public path.
-pub type LeanCapabilityPreflight = LeanRuntimePreflight;
 
 impl LeanRuntimePreflight {
     /// Create a runtime preflight runner for a build-script capability descriptor.
     #[must_use]
-    pub fn new(spec: LeanBuiltCapability) -> Self {
+    pub(crate) fn new(spec: LeanBuiltCapability) -> Self {
         Self { spec }
     }
 
     /// Check manifest, artifact, toolchain, dependency, and initializer facts.
     #[must_use]
-    pub fn check(&self) -> LeanLoaderReport {
+    pub(crate) fn check(&self) -> LeanLoaderReport {
         let manifest_path = match self.spec.resolved_manifest_path() {
             Ok(path) => path,
             Err(err) => {

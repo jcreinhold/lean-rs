@@ -7,9 +7,9 @@
 //! supported version/digest. The fingerprint is therefore stable across runs
 //! for a given build and cheap to use as a cache key.
 
-// `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`,
-// `LEAN_HEADER_DIGEST`, and `HOST_TRIPLE` are emitted as `pub const` by
-// `build.rs`.
+// `build.rs` emits `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`
+// and `LEAN_HEADER_DIGEST` as `pub const`, and `HOST_TRIPLE` as `pub(crate)`:
+// callers read the triple from `ToolchainFingerprint::host_triple`.
 include!(concat!(env!("OUT_DIR"), "/metadata.rs"));
 
 /// Typed identity of the Lean toolchain this crate was compiled against.

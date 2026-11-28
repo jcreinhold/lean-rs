@@ -49,13 +49,11 @@
 //!   cancellation); payload structs ([`LeanException`],
 //!   [`HostFailure`], [`LeanCancelled`]) have private fields so the
 //!   bounded-message invariant is structural. Every error projects to a
-//!   [`LeanDiagnosticCode`] via `.code()`. The in-process
-//!   [`DiagnosticCapture`] RAII guard lets tests assert on `tracing`
-//!   events without installing a global subscriber.
+//!   [`LeanDiagnosticCode`] via `.code()`.
 //! - [`module`]—load a Lake-built Lean capability and call typed
 //!   exported functions. [`LeanCapability`] is the normal shipped-crate
-//!   surface; [`LeanCapabilityPreflight`] reports package/loader problems
-//!   before `dlopen`; [`LeanLibraryBundle`] anchors dependency dylibs;
+//!   surface and checks its manifest and artifacts before `dlopen`;
+//!   [`LeanLibraryBundle`] anchors dependency dylibs;
 //!   [`LeanLibrary`] is the advanced one-dylib RAII handle; [`LeanModule`]
 //!   proves a module's initializer succeeded; [`LeanCapability::exported`]
 //!   checks C slots but still requires an unsafe value/layout assertion; [`LeanModule::exported_unchecked`] is
@@ -155,17 +153,15 @@ pub use crate::callback::{
     LeanProgressTick, LeanStringEvent,
 };
 pub use crate::error::{
-    CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,
-    LEAN_ERROR_MESSAGE_LIMIT, LeanCancelled, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind,
-    LeanResult, ResourceExhaustedFacts,
+    HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanCancelled, LeanDiagnosticCode, LeanError, LeanException,
+    LeanExceptionKind, LeanResult, ResourceExhaustedFacts,
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{
-    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanCapabilityPreflight, LeanCheckedExportError,
-    LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
-    LeanExportSignature, LeanExportSymbolKind, LeanExported, LeanIo, LeanLibrary, LeanLibraryBundle,
-    LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity, LeanModule,
-    LeanModuleInitializer, LeanRuntimePreflight,
+    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanCheckedExportError, LeanExportAbiRepr,
+    LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi, LeanExportSignature,
+    LeanExportSymbolKind, LeanExported, LeanIo, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanLoaderCheck,
+    LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity, LeanModule, LeanModuleInitializer,
 };
 pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};

@@ -43,15 +43,12 @@
 use std::any::Any;
 use std::fmt;
 
-pub(crate) mod capture;
 pub(crate) mod io;
 pub(crate) mod panic;
 pub(crate) mod redact;
 
 #[cfg(test)]
 mod tests;
-
-pub use self::capture::{CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture};
 
 /// Hard cap on the byte length of any [`LeanError`] message.
 ///

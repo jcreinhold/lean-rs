@@ -13,18 +13,17 @@
 //! path against the workspace fixture.
 
 use lean_rs::{
-    CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DecodeCallResult, DiagnosticCapture, HostFailure, HostStage,
-    LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload,
-    LeanCallbackStatus, LeanDeclaration, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanExported,
-    LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName, LeanProgressCallback, LeanProgressTick, LeanResult,
-    LeanRuntime, LeanStringEvent, LeanThreadGuard, Obj, ObjRef, VERSION,
+    DecodeCallResult, HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanCallbackFlow,
+    LeanCallbackHandle, LeanCallbackPayload, LeanCallbackStatus, LeanDeclaration, LeanDiagnosticCode, LeanError,
+    LeanException, LeanExceptionKind, LeanExported, LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName,
+    LeanProgressCallback, LeanProgressTick, LeanResult, LeanRuntime, LeanStringEvent, LeanThreadGuard, Obj, ObjRef,
+    VERSION,
 };
 
 #[test]
 fn l1_curated_surface_is_reachable_from_crate_root() {
     // Constants resolve as their declared types.
     let _: usize = LEAN_ERROR_MESSAGE_LIMIT;
-    let _: usize = DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY;
     let _: &str = VERSION;
 
     // The compiler walks every type below as a name-only reachability
@@ -57,8 +56,6 @@ fn l1_curated_surface_is_reachable_from_crate_root() {
         _callback_status: LeanCallbackStatus,
         _progress_tick: LeanProgressTick,
         _string_event: LeanStringEvent,
-        _capture: DiagnosticCapture,
-        _event: CapturedEvent,
     ) where
         u64: LeanAbi<'lean> + DecodeCallResult<'lean>,
         (u64,): LeanArgs<'lean>,

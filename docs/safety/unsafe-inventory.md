@@ -5,10 +5,10 @@ comments state the precise obligations; the tables here group those obligations 
 affected entry when a change adds, removes, or reshapes unsafe code. The workspace lint `missing_safety_doc` checks
 public unsafe function documentation; it does **not** verify safety comments on blocks.
 
-The [safety model](../architecture/safety.md) defines the policy. Raw `lean_*` symbols enter only through
-`lean-rs-sys`. `lean-rs` discharges their runtime, object, ABI, loader, and callback obligations. `lean-rs-host`,
-`lean-rs-abi`, and `lean-rs-worker-protocol` forbid unsafe code; `lean-toolchain` and `lean-rs-worker-parent` deny it
-with narrow native-process/descriptor opt-outs.
+The [safety model](../architecture/safety.md) defines the policy. Raw `lean_*` symbols enter only through `lean-rs-sys`.
+`lean-rs` discharges their runtime, object, ABI, loader, and callback obligations. `lean-rs-host`, `lean-rs-abi`, and
+`lean-rs-worker-protocol` forbid unsafe code; `lean-toolchain` and `lean-rs-worker-parent` deny it with narrow
+native-process/descriptor opt-outs.
 
 To locate the current surface, inspect declarations and blocks, then distinguish production code from tests, comments,
 examples, and the fuzz harness:
@@ -207,8 +207,8 @@ constructor shape, and owned/borrowed conventions.
 | `structure.rs`, `tuple.rs` | Expected constructor tag, object arity, and scalar tail. | `ObjView`/`CtorView` check shape and scalar bounds; `take_ctor_objects` acquires child references before the parent is dropped. |
 | `traits.rs` | The caller of `LeanAbi::from_c` supplies a valid value of the implementation's Lean type. | The unsafe `Obj` implementation transfers one owned reference into a handle tied to the runtime lifetime. |
 
-`LeanCReprAbi` restricts C representations through a private sealing trait. Downstream code can implement `LeanAbi`
-for a new Rust type with an `unsafe impl` and a supported C representation. Review each implementation for its actual
+`LeanCReprAbi` restricts C representations through a private sealing trait. Downstream code can implement `LeanAbi` for
+a new Rust type with an `unsafe impl` and a supported C representation. Review each implementation for its actual
 layout, ownership and scalar refinements. In particular, `Obj::from_c` delegates to `Obj::from_owned_raw`; the caller
 establishes pointer validity and ownership before that call. The compile-fail cases `abi_c_representation_is_sealed`,
 `abi_implementation_requires_unsafe` and `abi_raw_decode_requires_unsafe` exercise these distinct boundaries.
@@ -269,15 +269,14 @@ accounting, and inherited descriptors. This is an additional unsafe surface beyo
 | File | Precondition | Invariant |
 | --- | --- | --- |
 | `lean-toolchain/src/process_group.rs` | The owner retains its actual child and group identity until closure; inherited descriptor borrows outlive spawn. | `pre_exec` only performs async-signal-safe descriptor operations. macOS `waitid(WNOWAIT)` observes without reaping; fixed-size libproc buffers are checked. Signals target the still-owned private group. Passive stored-ID observations grant no signal authority. |
-| `lean-toolchain/src/process_group/measured_child.rs` | `MeasuredChild` exclusively owns the actual unreaped child. | `wait4` output is read only after a terminal result for that exact PID; status/accounting have one reaping owner. |
-| `lean-toolchain/src/inherited_pipe.rs` | Supplied private pipe descriptor exceeds standard I/O. | Numeric `fcntl` rejects invalid descriptors, preserves existing descriptor flags, and creates one unique CLOEXEC duplicate; shape/access/nonblocking checks precede use. |
 | `lean-rs-worker-parent/src/pipe.rs` | The parent owns the pipe end throughout both calls. | `fcntl` preserves flags while enabling nonblocking I/O on that end. |
 | `lean-rs-worker-parent/src/supervisor.rs` | Writable POD output buffers for macOS CPU accounting. | `proc_pidinfo` size and Mach timebase are checked before deriving milliseconds; failure yields unavailable accounting. |
 | `lean-rs-worker-child/src/parent_watchdog.rs` | The descriptor named by `LEAN_RS_WORKER_PARENT_LIFELINE` arrived with exec, exceeds standard I/O, and no other handle in this process owns it. | `F_GETFL` shows the descriptor open before `from_raw_fd` adopts it, and `ManuallyDrop` leaves a refused descriptor open. `F_SETFD` changes only its close-on-exec flag. `_exit` ends only this process and runs no destructors, so it never waits on a thread inside Lean. |
 | `lean-rs-worker-child/src/child.rs` | Platform startup code acts only on the current process. | Signal handlers use async-signal-safe writes/exits; signal structures are initialized before installation; resource/core-dump and Linux parent-death settings affect this child. |
 
-Test-only process-control opt-outs occur in the measured-child, worker protocol and worker shutdown regressions. Synthetic object/layout tests and the fuzz entry points have separate input-generation obligations; they do
-not expand the production API. Inspect their local safety comments when changing a harness.
+Test-only process-control opt-outs occur in the worker protocol and worker shutdown regressions. Synthetic object/layout
+tests and the fuzz entry points have separate input-generation obligations; they do not expand the production API.
+Inspect their local safety comments when changing a harness.
 
 ## Sanitizer and leak-check coverage
 

@@ -13,9 +13,9 @@ lean-rs Git repository, as the [generic shim contract](../architecture/callbacks
 ## Build and load
 
 A consumer needs a Lake `lean_lib` shared target and an `@[export]` definition for each Rust-callable entry point. A
-Cargo build script can use `CargoLeanCapability` to build the target and emit a manifest, or use
-`emit_lean_link_directives_checked` and `build_lake_target` for lower-level control. Use the returned artifact paths
-instead of constructing `.lake/build/lib` paths.
+Cargo build script can use `CargoLeanCapability` to build the target and emit a manifest, or
+`emit_lean_link_directives_checked` to print only the link directives. Use the returned artifact paths instead of
+constructing `.lake/build/lib` paths.
 
 The callback examples use a dependency bundle so the shim symbols are visible when the consumer library loads:
 

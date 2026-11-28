@@ -68,7 +68,7 @@ fn main() {
          /// SHA-256 of the resolved `lean.h`, lowercase hex.\n\
          pub const LEAN_HEADER_DIGEST: &str = {header_digest:?};\n\
          /// Cargo `TARGET` triple `lean-toolchain` was built for.\n\
-         pub const HOST_TRIPLE: &str = \"{host_triple}\";",
+         pub(crate) const HOST_TRIPLE: &str = \"{host_triple}\";",
         lean_version = toolchain.lean_version,
         resolved_version = toolchain.resolved_version,
         header_path = toolchain.header_path,

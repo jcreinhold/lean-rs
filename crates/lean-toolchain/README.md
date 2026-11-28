@@ -55,9 +55,9 @@ for the `LeanRsInterop` library; when the workspace has one, the manifest lists 
 goes beside the library, or into `OUT_DIR` when a build script builds without a generated-output key. The helper emits
 deterministic `LEAN_RS_CAPABILITY_<TARGET>_MANIFEST` plus compatibility `LEAN_RS_CAPABILITY_<TARGET>_DYLIB` compile-time
 environment variables. `probe_ready` runs `lake --no-build query` instead and returns `None` when Lake would rebuild the
-library or the manifest differs. `build_lake_target` remains the lower-level escape hatch. Both emit only `cargo:`
-directives on stdout and return typed `LinkDiagnostics` for a missing lakefile, a library Lake does not know, a `lake`
-that cannot start or fails, and an answer they cannot use.
+library or the manifest differs. The helper prints only `cargo:` directives on stdout and returns typed
+`LinkDiagnostics` for a missing lakefile, a library Lake does not know, a `lake` that cannot start or fails, and an
+answer it cannot use.
 
 Use `.lean_sysroot(...)` when a host must build the capability with the same Lean prefix its worker child will use. The
 helper runs that prefix's `bin/lake` with a child-scoped `LEAN_SYSROOT`; it does not mutate the parent process

@@ -152,7 +152,6 @@ Runnable examples under
 - `meta_query`—run a bounded `MetaM` service and branch on every status.
 - `progress`—attach a `LeanProgressSink` and trigger cooperative cancellation.
 - `tour`—the four flows composed end to end in one process.
-- `lake_build_helper`—build a Lake shared-library target through `lean-toolchain`.
 - `long_session_memory`—capture RSS checkpoints for a long-lived session workload.
 
 See the [examples README](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/examples/README.md) for

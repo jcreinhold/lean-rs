@@ -91,40 +91,17 @@ pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 2;
 /// for the same toolchain cheap and idempotent.
 static EMITTED_TOOLCHAIN_PREFIX: OnceLock<PathBuf> = OnceLock::new();
 
-/// Emit Lean link-search, link-lib, and runtime rpath directives plus
-/// matching rerun triggers from a downstream `build.rs`.
-///
-/// On the first call this:
-///
-/// 1. Runs [`discover_toolchain`] with [`DiscoverOptions::default()`].
-/// 2. On success, prints `cargo:rustc-link-search=native=<prefix>/lib/lean`
-///    and `<prefix>/lib`, plus `cargo:rustc-link-lib=dylib=leanshared`.
-/// 3. On macOS or Linux build targets, also prints
-///    `cargo:rustc-link-arg=-Wl,-rpath,<prefix>/lib/lean` so the resulting
-///    binary loads `libleanshared` without `DYLD_FALLBACK_LIBRARY_PATH` /
-///    `LD_LIBRARY_PATH`. Other targets get no rpath directive.
-/// 4. On discovery failure, prints one `cargo:warning=` line with the
-///    formatted diagnostic and returns; the caller's build then fails at
-///    link time with a more specific error from rustc.
-/// 5. Emits `cargo:rerun-if-changed=<header>` and the env-var triggers
-///    discovery consults.
-///
-/// Subsequent calls within the same process are no-ops.
-pub fn emit_lean_link_directives() {
-    if let Err(diagnostic) = emit_lean_link_directives_checked() {
-        println!("cargo:warning={diagnostic}");
-    }
-}
-
 /// Emit Lean link-search, link-lib, and runtime rpath directives, returning
 /// typed diagnostics if the active Lean toolchain cannot be resolved.
 ///
-/// This is the build-script helper to use when the consumer wants `main() ->
-/// Result<_, LinkDiagnostics>` or wants to map discovery failures into its own
-/// error type. It emits the same `cargo:rustc-link-*`, rpath, and rerun
-/// directives as [`emit_lean_link_directives`]. On failure, it still emits the
-/// environment-variable rerun triggers discovery consulted, then returns the
-/// [`LinkDiagnostics`] value instead of degrading it to `cargo:warning=`.
+/// On the first call this runs [`discover_toolchain`] with
+/// [`DiscoverOptions::default()`] and prints
+/// `cargo:rustc-link-search=native=<prefix>/lib/lean` and `<prefix>/lib`,
+/// `cargo:rustc-link-lib=dylib=leanshared`, an rpath to `<prefix>/lib/lean` on
+/// macOS and Linux targets, and `cargo:rerun-if-changed` for the header and
+/// the environment variables discovery reads. On failure it still prints those
+/// environment-variable rerun triggers, then returns the [`LinkDiagnostics`]
+/// value so the build script can map it into its own error type.
 ///
 /// Subsequent successful calls within the same process are no-ops.
 ///
@@ -156,28 +133,6 @@ fn emit_lean_link_directives_checked_with_options(opts: &DiscoverOptions) -> Res
     emit_for(&info);
     drop(EMITTED_TOOLCHAIN_PREFIX.set(info.prefix.clone()));
     Ok(info)
-}
-
-/// Build a Lake `lean_lib`'s shared library from a build script and return its path.
-///
-/// This runs `lake query <target_name>:shared` in `project_root`, the
-/// directory holding `lakefile.lean` or `lakefile.toml`. Lake builds the
-/// library only when it is out of date, then prints its path. Afterwards this
-/// prints `cargo:rerun-if-changed` for each regular file at the top of
-/// `project_root` and each `.lean` file below it, skipping directories whose
-/// names start with `.`. Lake's own output goes to captured pipes, so stdout
-/// carries only Cargo directives. Code outside a build script calls
-/// [`LakeWorkspace::shared_library`] instead.
-///
-/// # Errors
-///
-/// Returns the errors of [`LakeWorkspace::shared_library`], and
-/// [`LinkDiagnostics::LakeOutputUnresolved`] when the source files cannot be
-/// listed.
-pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
-    let library = LakeWorkspace::new(project_root).shared_library(target_name)?;
-    emit_source_triggers(project_root, target_name)?;
-    Ok(library)
 }
 
 /// Build-script helper for shipping a Rust crate with bundled Lean code.
@@ -788,13 +743,13 @@ impl BuiltLeanCapability {
 
 /// Default Cargo environment variable for a Lean capability target.
 #[must_use]
-pub fn capability_env_var(target_name: &str) -> String {
+fn capability_env_var(target_name: &str) -> String {
     format!("LEAN_RS_CAPABILITY_{}_DYLIB", screaming_snake(target_name))
 }
 
 /// Default Cargo environment variable for a Lean capability artifact manifest.
 #[must_use]
-pub fn capability_manifest_env_var(target_name: &str) -> String {
+fn capability_manifest_env_var(target_name: &str) -> String {
     format!("LEAN_RS_CAPABILITY_{}_MANIFEST", screaming_snake(target_name))
 }
 

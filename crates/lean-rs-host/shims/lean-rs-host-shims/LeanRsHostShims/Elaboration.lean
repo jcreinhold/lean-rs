@@ -308,8 +308,8 @@ structure ProofSummary where
   kind            : String
   typeSignature   : String
 
-/-- Soft byte cap on each `ProofSummary` field, mirroring the Rust
-    `LEAN_PROOF_SUMMARY_BYTE_LIMIT` constant. -/
+/-- Soft byte cap on each `ProofSummary` field. The Rust `ProofSummary`
+    docs state the same bound. -/
 private def proofSummaryByteLimit : Nat := 4096
 
 /-- Truncate `s` to at most `proofSummaryByteLimit` UTF-8 bytes, always

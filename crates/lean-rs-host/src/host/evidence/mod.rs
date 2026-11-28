@@ -32,4 +32,4 @@ mod summary;
 
 pub use self::handle::LeanEvidence;
 pub use self::status::{EvidenceStatus, LeanKernelOutcome};
-pub use self::summary::{LEAN_PROOF_SUMMARY_BYTE_LIMIT, ProofSummary};
+pub use self::summary::ProofSummary;

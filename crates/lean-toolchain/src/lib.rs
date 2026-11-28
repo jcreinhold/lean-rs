@@ -3,16 +3,15 @@
 //! Sits one layer above [`lean_rs_abi`], which owns link-free ABI/toolchain metadata. This crate
 //! composes on top: a typed [`ToolchainFingerprint`], a layered [`LinkDiagnostics`] error type,
 //! [`LakeWorkspace`], which asks Lake for import roots and library paths, and build-script
-//! helpers ([`emit_lean_link_directives_checked`], [`build_lake_target`], [`CargoLeanCapability`])
-//! that print consistent link and rerun directives.
+//! helpers ([`emit_lean_link_directives_checked`] and [`CargoLeanCapability`]) that print
+//! consistent link and rerun directives.
 //!
 //! ## Single typed entry point
 //!
 //! [`LEAN_VERSION`], [`LEAN_HEADER_PATH`], [`LEAN_HEADER_DIGEST`], and [`LEAN_RESOLVED_VERSION`]
 //! are resolved by this crate's `build.rs` (probing the active toolchain, degrading to the latest
 //! supported entry when none is installed), so embedders need only one import for build metadata.
-//! Live toolchain identity lives here, not in [`lean_rs_abi`], which is purely static. The
-//! allowlist comes through [`required_symbols`] (no copy).
+//! Live toolchain identity lives here, not in [`lean_rs_abi`], which is purely static.
 //!
 //! ## Layering
 //!
@@ -27,8 +26,6 @@ mod diagnostics;
 mod discover;
 mod fingerprint;
 pub mod host_shim_abi;
-#[cfg(unix)]
-pub mod inherited_pipe;
 mod lake;
 mod limits;
 mod loader;
@@ -38,15 +35,14 @@ pub mod process_group;
 mod source_package;
 
 pub use build_helpers::{
-    BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
-    capability_env_var, capability_manifest_env_var, emit_lean_link_directives, emit_lean_link_directives_checked,
+    BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, emit_lean_link_directives_checked,
     generated_output_key_for_sysroot,
 };
 pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{
-    HOST_TRIPLE, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION, ToolchainFingerprint,
+    LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION, ToolchainFingerprint,
 };
 pub use lake::LakeWorkspace;
 pub use lean_rs_abi::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};
@@ -55,9 +51,9 @@ pub use limits::{
     LEAN_HEARTBEAT_LIMIT_MAX,
 };
 pub use loader::{
-    LOADER_DIAGNOSTIC_TEXT_LIMIT, LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention,
-    LeanExportReturnAbi, LeanExportSignature, LeanExportSymbolKind, LeanLibraryDependency, LeanLoaderCheck,
-    LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity, LeanModuleInitializer, bound_loader_text,
+    LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+    LeanExportSignature, LeanExportSymbolKind, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode,
+    LeanLoaderReport, LeanLoaderSeverity, LeanModuleInitializer,
 };
 pub use manifest_validation::CapabilityManifest;
 pub use source_package::{
@@ -68,29 +64,13 @@ pub use source_package::{
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Curated allowlist of `LEAN_EXPORT` symbols the workspace relies on.
-///
-/// Returns [`lean_rs_abi::REQUIRED_SYMBOLS`] directly—the allowlist lives in
-/// exactly one place. Use this through `lean-toolchain` so consumer crates do
-/// not also need a direct raw-FFI dependency just to enumerate symbol
-/// names.
-#[must_use]
-pub fn required_symbols() -> &'static [&'static str] {
-    lean_rs_abi::REQUIRED_SYMBOLS
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{LEAN_HEADER_DIGEST, LEAN_VERSION, VERSION, required_symbols};
+    use super::{LEAN_HEADER_DIGEST, LEAN_VERSION, VERSION};
 
     #[test]
     fn version_constant_matches_package() {
         assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
-    }
-
-    #[test]
-    fn required_symbols_is_nonempty() {
-        assert!(!required_symbols().is_empty());
     }
 
     #[test]

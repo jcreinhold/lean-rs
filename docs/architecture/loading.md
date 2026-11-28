@@ -18,7 +18,7 @@ manifest containing the primary dylib, declared dependency dylibs, initializer m
 trusted export signatures. `LeanBuiltCapability` is the link-free descriptor shared by the runtime and worker parent.
 
 Declare separately built dependency dylibs through the builder so both loading paths see the same order and visibility
-requirements. `build_lake_target` and raw link directives remain available for custom build systems; the
+requirements. `emit_lean_link_directives_checked` remains available for custom build systems; the
 [shipped-crate template](https://github.com/jcreinhold/lean-rs/tree/main/templates/shipped-lean-crate) demonstrates the
 normal path. Shared build coordination belongs to the [build-and-link contract](build-and-link.md).
 
@@ -37,7 +37,8 @@ protection against malicious libraries or substituted native code.
 keeps the artifacts unchanged through loading and initializers; a storage descriptor alone is not evidence of the loaded
 ABI. Worker sessions follow [Prepared host artifacts](worker-sessions.md#prepared-host-artifacts).
 
-`LeanCapabilityPreflight` and `LeanRuntimePreflight` expose doctor-style checks. `LeanLibrary::open`,
+`LeanCapability::from_build_manifest` runs the loader checks before it opens a dylib, and
+`lean_toolchain::manifest_validation::check_static` runs the link-free half alone. `LeanLibrary::open`,
 `LeanLibrary::open_globally`, direct dylib descriptors, and unchecked exports remain advanced paths whose callers take
 on the corresponding loader or ABI obligations.
 

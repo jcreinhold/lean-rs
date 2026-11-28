@@ -10,8 +10,6 @@
 //!   dylibs anchored for the same lifetime.
 //! - [`LeanModule`]—proof that a named Lean module hosted by a
 //!   [`LeanLibrary`] has been initialized to `IO.ok(())`.
-//! - [`LeanCapabilityPreflight`]—manifest and artifact checks that turn
-//!   package/loader failures into stable repair hints before opening.
 //!
 //! Construction of either type requires a [`crate::LeanRuntime`]
 //! borrow, so use-before-init is structurally impossible. The
@@ -54,10 +52,7 @@ pub use lean_toolchain::{
 };
 pub use library::LeanLibrary;
 pub use loaded::LeanModule;
-pub use preflight::{
-    LeanCapabilityPreflight, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity,
-    LeanRuntimePreflight,
-};
+pub use preflight::{LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity};
 pub use trusted::{
     AuthorizedWorkerSnapshot, HostImportIdentity, HostImportOptions, LoadedHostArtifacts, TrustedBracketedImports,
     TrustedHostCapability, TrustedHostImports, TrustedWorkerCapability, WorkerExportContract,

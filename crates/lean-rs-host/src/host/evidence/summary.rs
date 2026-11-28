@@ -21,20 +21,12 @@ use lean_rs::abi::structure::take_ctor_objects;
 use lean_rs::abi::traits::TryFromLean;
 use lean_rs::error::LeanResult;
 
-/// Soft byte cap the Lean-side summariser applies to each `ProofSummary` field.
-///
-/// Mirrors `proofSummaryByteLimit` in
-/// `fixtures/lean/LeanRsFixture/Elaboration.lean`. Bounded so the Rust side
-/// can pre-size buffers or budget log lines without an extra FFI round-trip.
-pub const LEAN_PROOF_SUMMARY_BYTE_LIMIT: usize = 4 * 1024;
-
 /// Bounded display projection of a kernel-checked Lean declaration.
 ///
 /// Produced by [`crate::LeanSession::summarize_evidence`]. Owns only
 /// `String`s, so it has no `'lean` parameter and is freely cloneable
-/// or stashable. Every field is bounded by
-/// [`LEAN_PROOF_SUMMARY_BYTE_LIMIT`] on the Lean side (UTF-8-safe
-/// truncation at a `Char` boundary).
+/// or stashable. The Lean shim cuts every field to at most 4,096 bytes,
+/// at a character boundary.
 ///
 /// All fields are diagnostic only. Comparing two summaries by field
 /// equality does **not** imply equality of the underlying Lean
@@ -68,8 +60,8 @@ impl ProofSummary {
 
     /// Pretty-printed type expression. Format is the default Lean
     /// `ToString Expr` rendering (deterministic, parseable, not
-    /// pretty in the elaborator-aware sense). Truncated on a
-    /// character boundary at [`LEAN_PROOF_SUMMARY_BYTE_LIMIT`].
+    /// pretty in the elaborator-aware sense). Cut at a character
+    /// boundary to at most 4,096 bytes.
     #[must_use]
     pub fn type_signature(&self) -> &str {
         &self.type_signature
