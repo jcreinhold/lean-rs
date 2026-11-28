@@ -43,11 +43,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lean-rs = "0.12"
-lean-rs-host = "0.12"
+lean-rs = "0.13"
+lean-rs-host = "0.13"
 
 [build-dependencies]
-lean-toolchain = "0.12"
+lean-toolchain = "0.13"
 ```
 
 **`build.rs`**: build your capability with the same shipped-crate helper used by `lean-rs` applications. `lean-rs-host`

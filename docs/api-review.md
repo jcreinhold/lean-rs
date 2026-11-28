@@ -1,14 +1,16 @@
 # Public API Review
 
-[`api-review/*-public.txt`](https://github.com/jcreinhold/lean-rs/tree/main/docs/api-review) contains `cargo public-api --simplified` baselines for the eight crates
-currently gated by [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). Intentional API changes update the matching baseline in the same
-commit. `lean-rs-abi` currently has no committed baseline or CI comparison.
+[`api-review/*-public.txt`](https://github.com/jcreinhold/lean-rs/tree/main/docs/api-review) contains
+`cargo public-api --simplified` baselines for the seven crates currently gated by
+[CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). Intentional API changes update the
+matching baseline in the same commit. `lean-rs-abi` currently has no committed baseline or CI comparison.
 
 ## Regenerate
 
 Use the pinned pair: `cargo-public-api@0.52.0` and `nightly-2026-06-18`. Nightly rustdoc output, including derived
 generic bounds, varies with the toolchain. Update both pins consistently in `ci.yml`, `release.yml`, and
-[`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh), then regenerate all baselines when either changes.
+[`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh), then regenerate all
+baselines when either changes.
 
 ```sh
 cargo install cargo-public-api@0.52.0 --locked
@@ -37,7 +39,8 @@ variants for internal stages of one failure. A reader should be able to explain 
 example. Comments describe current invariants rather than implementation history.
 
 Fallible public functions document their errors. Every public unsafe function documents concrete safety preconditions;
-"see lean.h" is insufficient. Use resolvable rustdoc links and run the [workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md), including
+"see lean.h" is insufficient. Use resolvable rustdoc links and run the
+[workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md), including
 `cargo nextest run --workspace` and doctests. Broad same-process `cargo test` is not the workspace test gate; see
 [testing](testing.md). For a review that changes private documentation, also check:
 

@@ -6,8 +6,6 @@ pub use lean_toolchain::supported_for
 pub mod lean_toolchain::host_shim_abi
 pub fn lean_toolchain::host_shim_abi::checked_binding_fingerprint(&serde_json::value::Value) -> alloc::string::String
 pub fn lean_toolchain::host_shim_abi::expected_checked_bindings() -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub mod lean_toolchain::inherited_pipe
-pub fn lean_toolchain::inherited_pipe::duplicate_inherited_read_pipe(std::os::fd::raw::RawFd) -> std::io::error::Result<std::os::fd::owned::OwnedFd>
 pub mod lean_toolchain::manifest_validation
 pub struct lean_toolchain::manifest_validation::CapabilityManifest
 pub lean_toolchain::manifest_validation::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
@@ -40,24 +38,6 @@ pub fn lean_toolchain::manifest_validation::check_fingerprint(&lean_toolchain::m
 pub fn lean_toolchain::manifest_validation::check_staleness(&std::path::Path, &lean_toolchain::manifest_validation::CapabilityManifest, &mut alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>)
 pub fn lean_toolchain::manifest_validation::check_static(&std::path::Path) -> lean_toolchain::LeanLoaderReport
 pub mod lean_toolchain::process_group
-pub struct lean_toolchain::process_group::MeasuredChild
-impl lean_toolchain::process_group::MeasuredChild
-pub fn lean_toolchain::process_group::MeasuredChild::id(&self) -> u32
-pub fn lean_toolchain::process_group::MeasuredChild::kill(&mut self) -> std::io::error::Result<()>
-pub fn lean_toolchain::process_group::MeasuredChild::spawn(std::process::Command) -> std::io::error::Result<Self>
-pub fn lean_toolchain::process_group::MeasuredChild::take_stderr(&mut self) -> core::option::Option<std::process::ChildStderr>
-pub fn lean_toolchain::process_group::MeasuredChild::take_stdout(&mut self) -> core::option::Option<std::process::ChildStdout>
-pub fn lean_toolchain::process_group::MeasuredChild::try_wait(&mut self) -> std::io::error::Result<core::option::Option<std::process::ExitStatus>>
-pub fn lean_toolchain::process_group::MeasuredChild::usage(&self) -> core::option::Option<&lean_toolchain::process_group::WaitedChildUsage>
-impl core::fmt::Debug for lean_toolchain::process_group::MeasuredChild
-pub fn lean_toolchain::process_group::MeasuredChild::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_toolchain::process_group::MeasuredChild
-impl core::marker::Send for lean_toolchain::process_group::MeasuredChild
-impl core::marker::Sync for lean_toolchain::process_group::MeasuredChild
-impl core::marker::Unpin for lean_toolchain::process_group::MeasuredChild
-impl core::marker::UnsafeUnpin for lean_toolchain::process_group::MeasuredChild
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::MeasuredChild
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::MeasuredChild
 pub struct lean_toolchain::process_group::OwnedCommandGroup
 impl lean_toolchain::process_group::OwnedCommandGroup
 pub fn lean_toolchain::process_group::OwnedCommandGroup::cleanup_pending(&self) -> bool
@@ -79,28 +59,6 @@ impl core::marker::Unpin for lean_toolchain::process_group::OwnedCommandGroup
 impl core::marker::UnsafeUnpin for lean_toolchain::process_group::OwnedCommandGroup
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::OwnedCommandGroup
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::OwnedCommandGroup
-pub struct lean_toolchain::process_group::WaitedChildUsage
-pub lean_toolchain::process_group::WaitedChildUsage::max_rss_bytes: core::option::Option<u64>
-pub lean_toolchain::process_group::WaitedChildUsage::system_cpu_micros: u64
-pub lean_toolchain::process_group::WaitedChildUsage::user_cpu_micros: u64
-pub lean_toolchain::process_group::WaitedChildUsage::wall_millis: u64
-impl core::clone::Clone for lean_toolchain::process_group::WaitedChildUsage
-pub fn lean_toolchain::process_group::WaitedChildUsage::clone(&self) -> lean_toolchain::process_group::WaitedChildUsage
-impl core::cmp::Eq for lean_toolchain::process_group::WaitedChildUsage
-impl core::cmp::PartialEq for lean_toolchain::process_group::WaitedChildUsage
-pub fn lean_toolchain::process_group::WaitedChildUsage::eq(&self, &lean_toolchain::process_group::WaitedChildUsage) -> bool
-impl core::fmt::Debug for lean_toolchain::process_group::WaitedChildUsage
-pub fn lean_toolchain::process_group::WaitedChildUsage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_toolchain::process_group::WaitedChildUsage
-impl core::marker::StructuralPartialEq for lean_toolchain::process_group::WaitedChildUsage
-impl core::marker::Freeze for lean_toolchain::process_group::WaitedChildUsage
-impl core::marker::Send for lean_toolchain::process_group::WaitedChildUsage
-impl core::marker::Sync for lean_toolchain::process_group::WaitedChildUsage
-impl core::marker::Unpin for lean_toolchain::process_group::WaitedChildUsage
-impl core::marker::UnsafeUnpin for lean_toolchain::process_group::WaitedChildUsage
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::WaitedChildUsage
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::WaitedChildUsage
-pub fn lean_toolchain::process_group::current_group_is_singleton() -> std::io::error::Result<bool>
 pub fn lean_toolchain::process_group::group_present(u32) -> std::io::error::Result<bool>
 pub fn lean_toolchain::process_group::spawn_inheriting(std::process::Command, &[std::os::fd::owned::BorrowedFd<'_>]) -> std::io::error::Result<std::process::Child>
 pub enum lean_toolchain::BuiltCapabilityArtifact
@@ -325,27 +283,6 @@ impl core::marker::Unpin for lean_toolchain::LeanLoaderSeverity
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanLoaderSeverity
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLoaderSeverity
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLoaderSeverity
-pub enum lean_toolchain::LeanModuleDiscoveryDiagnostic
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::module: alloc::string::String
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::reason: alloc::string::String
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io::message: &'static str
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io::path: std::path::PathBuf
-pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io::source: std::io::error::Error
-impl core::error::Error for lean_toolchain::LeanModuleDiscoveryDiagnostic
-pub fn lean_toolchain::LeanModuleDiscoveryDiagnostic::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-impl core::fmt::Debug for lean_toolchain::LeanModuleDiscoveryDiagnostic
-pub fn lean_toolchain::LeanModuleDiscoveryDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_toolchain::LeanModuleDiscoveryDiagnostic
-pub fn lean_toolchain::LeanModuleDiscoveryDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_toolchain::LeanModuleDiscoveryDiagnostic
-impl core::marker::Send for lean_toolchain::LeanModuleDiscoveryDiagnostic
-impl core::marker::Sync for lean_toolchain::LeanModuleDiscoveryDiagnostic
-impl core::marker::Unpin for lean_toolchain::LeanModuleDiscoveryDiagnostic
-impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleDiscoveryDiagnostic
-impl !core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleDiscoveryDiagnostic
-impl !core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleDiscoveryDiagnostic
 pub enum lean_toolchain::LeanOptionValue
 pub lean_toolchain::LeanOptionValue::Bool(bool)
 pub lean_toolchain::LeanOptionValue::Nat(u64)
@@ -375,11 +312,17 @@ pub lean_toolchain::LinkDiagnostics::AllowlistFailure::name: &'static str
 pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing
 pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing::path: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing::recovery: &'static str
-pub lean_toolchain::LinkDiagnostics::LakeBuildFailed
-pub lean_toolchain::LinkDiagnostics::LakeBuildFailed::detail: alloc::string::String
-pub lean_toolchain::LinkDiagnostics::LakeBuildFailed::project_root: std::path::PathBuf
-pub lean_toolchain::LinkDiagnostics::LakeBuildFailed::status: alloc::string::String
-pub lean_toolchain::LinkDiagnostics::LakeBuildFailed::target_name: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeAnswerInvalid
+pub lean_toolchain::LinkDiagnostics::LakeAnswerInvalid::command: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeAnswerInvalid::project_root: std::path::PathBuf
+pub lean_toolchain::LinkDiagnostics::LakeAnswerInvalid::reason: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeConfigMissing
+pub lean_toolchain::LinkDiagnostics::LakeConfigMissing::project_root: std::path::PathBuf
+pub lean_toolchain::LinkDiagnostics::LakeFailed
+pub lean_toolchain::LinkDiagnostics::LakeFailed::command: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeFailed::detail: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeFailed::project_root: std::path::PathBuf
+pub lean_toolchain::LinkDiagnostics::LakeFailed::status: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::LakeOutputUnresolved
 pub lean_toolchain::LinkDiagnostics::LakeOutputUnresolved::project_root: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::LakeOutputUnresolved::reason: alloc::string::String
@@ -388,9 +331,9 @@ pub lean_toolchain::LinkDiagnostics::LakeTargetMissing
 pub lean_toolchain::LinkDiagnostics::LakeTargetMissing::project_root: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::LakeTargetMissing::target_name: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::LakeUnavailable
+pub lean_toolchain::LinkDiagnostics::LakeUnavailable::command: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::LakeUnavailable::detail: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::LakeUnavailable::project_root: std::path::PathBuf
-pub lean_toolchain::LinkDiagnostics::LakeUnavailable::target_name: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::MissingHeader
 pub lean_toolchain::LinkDiagnostics::MissingHeader::path: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::MissingLean
@@ -439,25 +382,6 @@ impl core::marker::Unpin for lean_toolchain::SourcePackageError
 impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageError
 impl !core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageError
 impl !core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageError
-pub enum lean_toolchain::SourcePackageManifestPolicy
-pub lean_toolchain::SourcePackageManifestPolicy::AllowPackages
-pub lean_toolchain::SourcePackageManifestPolicy::ZeroPackages
-impl core::clone::Clone for lean_toolchain::SourcePackageManifestPolicy
-pub fn lean_toolchain::SourcePackageManifestPolicy::clone(&self) -> lean_toolchain::SourcePackageManifestPolicy
-impl core::cmp::Eq for lean_toolchain::SourcePackageManifestPolicy
-impl core::cmp::PartialEq for lean_toolchain::SourcePackageManifestPolicy
-pub fn lean_toolchain::SourcePackageManifestPolicy::eq(&self, &lean_toolchain::SourcePackageManifestPolicy) -> bool
-impl core::fmt::Debug for lean_toolchain::SourcePackageManifestPolicy
-pub fn lean_toolchain::SourcePackageManifestPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_toolchain::SourcePackageManifestPolicy
-impl core::marker::StructuralPartialEq for lean_toolchain::SourcePackageManifestPolicy
-impl core::marker::Freeze for lean_toolchain::SourcePackageManifestPolicy
-impl core::marker::Send for lean_toolchain::SourcePackageManifestPolicy
-impl core::marker::Sync for lean_toolchain::SourcePackageManifestPolicy
-impl core::marker::Unpin for lean_toolchain::SourcePackageManifestPolicy
-impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageManifestPolicy
-impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageManifestPolicy
-impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageManifestPolicy
 pub struct lean_toolchain::BuiltLeanCapability
 impl lean_toolchain::BuiltLeanCapability
 pub fn lean_toolchain::BuiltLeanCapability::dylib_path(&self) -> &std::path::Path
@@ -576,6 +500,32 @@ impl core::marker::Unpin for lean_toolchain::GeneratedSourceFile
 impl core::marker::UnsafeUnpin for lean_toolchain::GeneratedSourceFile
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::GeneratedSourceFile
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::GeneratedSourceFile
+pub struct lean_toolchain::LakeWorkspace
+impl lean_toolchain::LakeWorkspace
+pub fn lean_toolchain::LakeWorkspace::built_shared_library(&self, &str) -> core::result::Result<core::option::Option<std::path::PathBuf>, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::built_shared_library_command(&self, &str) -> core::result::Result<std::process::Command, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::lean_num_threads(self, u32) -> Self
+pub fn lean_toolchain::LakeWorkspace::lean_path(&self) -> core::result::Result<alloc::vec::Vec<std::path::PathBuf>, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::lean_path_command(&self) -> core::result::Result<std::process::Command, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_toolchain::LakeWorkspace::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_toolchain::LakeWorkspace::read_built_shared_library(&self, &str, &std::process::Output) -> core::result::Result<core::option::Option<std::path::PathBuf>, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::read_lean_path(&self, &std::process::Output) -> core::result::Result<alloc::vec::Vec<std::path::PathBuf>, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::read_shared_library(&self, &str, &std::process::Output) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::root(&self) -> &std::path::Path
+pub fn lean_toolchain::LakeWorkspace::shared_library(&self, &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::LakeWorkspace::shared_library_command(&self, &str) -> core::result::Result<std::process::Command, lean_toolchain::LinkDiagnostics>
+impl core::clone::Clone for lean_toolchain::LakeWorkspace
+pub fn lean_toolchain::LakeWorkspace::clone(&self) -> lean_toolchain::LakeWorkspace
+impl core::fmt::Debug for lean_toolchain::LakeWorkspace
+pub fn lean_toolchain::LakeWorkspace::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::LakeWorkspace
+impl core::marker::Send for lean_toolchain::LakeWorkspace
+impl core::marker::Sync for lean_toolchain::LakeWorkspace
+impl core::marker::Unpin for lean_toolchain::LakeWorkspace
+impl core::marker::UnsafeUnpin for lean_toolchain::LakeWorkspace
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LakeWorkspace
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LakeWorkspace
 pub struct lean_toolchain::LeanBuiltCapability
 impl lean_toolchain::LeanBuiltCapability
 pub fn lean_toolchain::LeanBuiltCapability::dependencies(self, impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::LeanLibraryDependency>) -> Self
@@ -804,7 +754,6 @@ pub lean_toolchain::SourcePackageMaterializationRequest::crate_version: alloc::s
 pub lean_toolchain::SourcePackageMaterializationRequest::generated_files: alloc::vec::Vec<lean_toolchain::GeneratedSourceFile>
 pub lean_toolchain::SourcePackageMaterializationRequest::include_paths: alloc::vec::Vec<std::path::PathBuf>
 pub lean_toolchain::SourcePackageMaterializationRequest::library_name: alloc::string::String
-pub lean_toolchain::SourcePackageMaterializationRequest::manifest_policy: lean_toolchain::SourcePackageManifestPolicy
 pub lean_toolchain::SourcePackageMaterializationRequest::materialized_package_name: alloc::string::String
 pub lean_toolchain::SourcePackageMaterializationRequest::package_name: alloc::string::String
 pub lean_toolchain::SourcePackageMaterializationRequest::sentinel_files: alloc::vec::Vec<std::path::PathBuf>
@@ -858,7 +807,6 @@ impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageProvenance
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageProvenance
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageProvenance
 pub struct lean_toolchain::ToolchainFingerprint
-pub lean_toolchain::ToolchainFingerprint::fixture_sha256: &'static str
 pub lean_toolchain::ToolchainFingerprint::header_sha256: &'static str
 pub lean_toolchain::ToolchainFingerprint::host_triple: &'static str
 pub lean_toolchain::ToolchainFingerprint::lean_version: &'static str
@@ -905,8 +853,6 @@ impl core::marker::UnsafeUnpin for lean_toolchain::ToolchainInfo
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::ToolchainInfo
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::ToolchainInfo
 pub const lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION: u32
-pub const lean_toolchain::HOST_TRIPLE: &str
-pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
 pub const lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
 pub const lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
 pub const lean_toolchain::LEAN_HEADER_DIGEST: &str
@@ -915,19 +861,10 @@ pub const lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
 pub const lean_toolchain::LEAN_HEARTBEAT_LIMIT_MAX: u64
 pub const lean_toolchain::LEAN_RESOLVED_VERSION: &str
 pub const lean_toolchain::LEAN_VERSION: &str
-pub const lean_toolchain::LOADER_DIAGNOSTIC_TEXT_LIMIT: usize
 pub const lean_toolchain::VERSION: &str
-pub fn lean_toolchain::bound_loader_text(alloc::string::String) -> alloc::string::String
-pub fn lean_toolchain::build_lake_target(&std::path::Path, &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::build_lake_target_quiet(&std::path::Path, &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::capability_env_var(&str) -> alloc::string::String
-pub fn lean_toolchain::capability_manifest_env_var(&str) -> alloc::string::String
 pub fn lean_toolchain::discover_toolchain(&lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
-pub fn lean_toolchain::emit_lean_link_directives()
 pub fn lean_toolchain::emit_lean_link_directives_checked() -> core::result::Result<(), lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::generated_output_key_for_sysroot(&std::path::Path) -> core::result::Result<core::option::Option<&'static str>, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::lean_options_json(&alloc::collections::btree::map::BTreeMap<alloc::string::String, lean_toolchain::LeanOptionValue>) -> alloc::string::String
 pub fn lean_toolchain::materialize_source_package(&lean_toolchain::SourcePackageMaterializationRequest) -> core::result::Result<lean_toolchain::MaterializedSourcePackage, lean_toolchain::SourcePackageError>
-pub fn lean_toolchain::olean_candidate(&[std::path::PathBuf], &str, impl core::ops::function::FnMut(&std::path::Path) -> std::io::error::Result<std::fs::Metadata>) -> core::result::Result<core::option::Option<std::path::PathBuf>, lean_toolchain::LeanModuleDiscoveryDiagnostic>
-pub fn lean_toolchain::required_symbols() -> &'static [&'static str]
 pub fn lean_toolchain::with_materialized_source_package<T, E>(&lean_toolchain::SourcePackageMaterializationRequest, core::time::Duration, impl core::ops::function::Fn() -> bool, impl core::ops::function::FnOnce(lean_toolchain::MaterializedSourcePackage) -> core::result::Result<T, E>) -> core::result::Result<T, E> where E: core::convert::From<lean_toolchain::SourcePackageError>

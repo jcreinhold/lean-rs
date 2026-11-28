@@ -34,7 +34,7 @@ See
 
 ```toml
 [build-dependencies]
-lean-toolchain = "0.12"
+lean-toolchain = "0.13"
 ```
 
 ```rust,ignore

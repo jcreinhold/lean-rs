@@ -9,6 +9,112 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.13.0]
+
+Breaking: upgrade the worker parent and worker child together. The worker protocol moves to version 15, and the public
+items listed below are gone.
+
+### Removed
+
+- The worker pool and capability builder. `lean-rs-worker-parent` loses `LeanWorkerPool`, `LeanWorkerPoolConfig`,
+  `LeanWorkerPoolSnapshot`, `LeanWorkerSessionKey`, `LeanWorkerSessionLease`, `LeanWorkerRestartPolicyClass`,
+  `LeanWorkerCapabilityBuilder` and `LeanWorkerCapability`; the errors `WorkerPoolExhausted`,
+  `WorkerPoolMemoryBudgetExceeded`, `WorkerPoolQueueTimeout`, `LeaseInvalidated` and `CapabilityMetadataMismatch`; the
+  bootstrap codes `CapabilityMetadataMismatch` and `CapabilityPreflight`; and the `LeanWorkerStats` fields
+  `last_capability_load_elapsed`, `last_first_command_elapsed`, `last_warm_command_elapsed` and `stream_requests`. Open
+  a host session through `LeanWorkerHostHandleBuilder`, as the template does with `shims_only`.
+- The JSON and streaming commands: `LeanWorkerJsonCommand`, `LeanWorkerStreamingCommand`,
+  `LeanWorkerSession::{run_json_command, run_streaming_command, run_data_stream}`, the sinks `LeanWorkerDataSink`,
+  `LeanWorkerTypedDataSink` and `LeanWorkerDiagnosticSink`, the types `LeanWorkerDataRow`, `LeanWorkerTypedDataRow`,
+  `LeanWorkerDiagnosticEvent`, `LeanWorkerStreamSummary` and `LeanWorkerTypedStreamSummary`, and the errors
+  `StreamCallbackFailed`, `StreamExportFailed`, `StreamRowMalformed`, `DiagnosticSinkPanic`,
+  `TypedCommandRequestEncode`, `TypedCommandResponseDecode`, `TypedCommandRowDecode` and `TypedCommandSummaryDecode`.
+  The protocol loses `Request::{RunDataStream, JsonCommand}`, `Response::{StreamComplete, StreamExportFailed,
+  StreamCallbackFailed, StreamRowMalformed, JsonCommand}`, `StreamSummary` and `DataRowEmitter::per_stream_counts`.
+  `lean-rs` loses `TrustedWorkerCapability::bind_stream`, `WorkerStreamBinding` and
+  `WorkerExportContract::StringStream`, and the interop shims lose the Lean module `LeanRsInterop.Worker.Stream`.
+- `LeanWorker::{restart, terminate}` and `LeanWorkerHostHandle::{restart, terminate}`. Call `cycle` to replace the child
+  and `shutdown` to stop it.
+- Only the supervisor used `inherit_checked_native_loader_environment`, `LeanWorkerExitObservation` and the
+  `LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT`, `LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT`,
+  `LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING` and `LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT` constants, so they are now
+  crate-private.
+- `lean_rs_worker_child::install_worker_authority`. Pass the authority to `run_worker_child_with_authority`.
+- `WorkerAuthority::use_generated_project_imports`, the worker's `--lean-rs-ready-host-artifacts-generated` flag and
+  version 2 of the host artifact descriptor. See `WorkerAuthority::project_import_roots` under Changed.
+- The host session pool: `SessionPool`, `SessionPoolConfig`, `SessionPoolMemoryPolicy`, `PooledSession`, `PoolStats`,
+  `SessionPoolKeyMissReason` and the `lean_rs_host::host::pool` module. Open sessions directly, or through a worker,
+  which keeps its own pool.
+- Declaration search scores: `DeclarationSearchScope`, `DeclarationSearchBias`,
+  `DeclarationSearchRequest::scope_biases`, `DeclarationSearchRow::{rank, score}`,
+  `DeclarationSearchFacts::after_scope_filter` and `DeclarationSearchTimings::rank_micros`, in `lean-rs`,
+  `lean-rs-host`, and as their `LeanWorkerDeclarationSearch*` forms in the protocol and parent crates.
+- The code that read Lake's files or computed its output paths. `lean-toolchain` loses `olean_candidate`,
+  `LeanModuleDiscoveryDiagnostic`, `SourcePackageManifestPolicy`,
+  `SourcePackageMaterializationRequest::manifest_policy`, `build_lake_target`, `build_lake_target_quiet`, the hidden
+  `CargoLeanCapability::probe_ready_strict` and `LinkDiagnostics::LakeBuildFailed`. Its build script no longer digests
+  the fixture's Lake outputs, so `LAKE_FIXTURE_DIGEST` and `ToolchainFingerprint::fixture_sha256` are gone and artifact
+  manifests drop `toolchain_fingerprint.fixture_sha256`.
+- Other `lean-toolchain` items with no caller outside the crate: the `inherited_pipe` module,
+  `process_group::{MeasuredChild, WaitedChildUsage, current_group_is_singleton}`, `required_symbols`,
+  `emit_lean_link_directives` (use `emit_lean_link_directives_checked`), `capability_env_var`,
+  `capability_manifest_env_var`, `HOST_TRIPLE` (read `ToolchainFingerprint::current().host_triple`),
+  `LOADER_DIAGNOSTIC_TEXT_LIMIT` and `bound_loader_text`.
+- `lean-rs` loses `DiagnosticCapture`, `CapturedEvent` and `DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY`; a test that wants the
+  crate's `tracing` events installs its own subscriber. It loses `LeanRuntimePreflight` and its alias
+  `LeanCapabilityPreflight`: `LeanCapability` checks its manifest and artifacts before `dlopen`, and
+  `lean_toolchain::manifest_validation::check_static` checks a manifest alone. `abi::nat::{from_u64, from_usize}` are
+  crate-private; read a Lean `Nat` with `try_to_u64` or `try_to_usize`.
+- `lean_rs_host::LEAN_PROOF_SUMMARY_BYTE_LIMIT`. The `ProofSummary` docs state the 4,096-byte cap on each field. The
+  `lake_build_helper` example goes too.
+- The `lean-rs-interop-shims` crate, which only copied the interop Lean package into a build root. Its last release,
+  0.12.0, stays on crates.io. The Lean package stays at `crates/lean-rs/shims/lean-rs-interop-shims`, and `lean-rs-host`
+  still bundles a copy.
+
+### Changed
+
+- Worker protocol 14 → 15. Declaration search rows come in the order of how the full name matched the fragment (exact,
+  then prefix, then substring), then by name, so a limit keeps the closest names. An exact match compares case; prefix
+  and substring ignore ASCII case, as the filter does. Each row carries `name_match: Option<DeclarationNameMatchKind>`
+  (`LeanWorkerDeclarationNameMatchKind` in the worker crates), which is `None` when the request had no fragment, and the
+  timings report `sort_micros`.
+- A declaration with the instance attribute has the kind `"instance"` in search rows, and the kind filter matches that
+  label.
+- Each `LeanWorkerRestartReason` says through `is_planned` whether the restart policy or a caller asked for it. Only
+  abnormal restarts count against the restart window. The supervisor itself replaces a child that exited, aborted or
+  lost its session, and reports why with the new reasons `ChildExit`, `RequestFailed`, `SessionMissing` and
+  `StartFailed`. A worker that uses up the window refuses work until the window passes, and
+  `LeanWorkerError::RestartLimitExceeded::retry_after` says how long that is. `LeanWorkerLifecycleSnapshot` gains
+  `abnormal_restarts`, `abnormal_restarts_in_window` and `restart_retry_after`, and `LeanWorkerStats` gains
+  `abnormal_restarts`.
+- `lean-rs` asks Lake for import roots and library paths instead of reading `lake-manifest.json` or computing paths
+  under `.lake`. `LeanHost` asks Lake for a project's roots once; `LeanHost::with_import_roots(self, Vec<PathBuf>)`
+  takes roots the caller already has. `LeanHost::project_library_path(&self, lib: &str) -> LeanResult<PathBuf>` takes
+  only the library name, asks Lake and never builds. The worker child takes a project's roots from
+  `WorkerAuthority::project_import_roots(&self, &Path) -> LeanResult<Option<Vec<PathBuf>>>`, or else runs `lake env`
+  once.
+- A capability manifest sits beside the library Lake built; a build script that sets no `generated_output_key` writes it
+  to `OUT_DIR`. `CargoLeanCapability::probe_ready` runs Lake without building, though Lake may still write its own
+  files.
+- `LinkDiagnostics::LakeUnavailable` names the `command` in place of the target. `LakeFailed` replaces
+  `LakeBuildFailed`. The new `LakeAnswerInvalid` reports Lake output that is not the answer it documents, such as a
+  relative path, and `LakeConfigMissing` a directory with neither `lakefile.lean` nor `lakefile.toml`.
+- The module-query cache key no longer hashes the fixture digest, so entries written by 0.12 miss once.
+- The bundled host shim sources changed, so a worker prepares its host artifacts again after the upgrade.
+- `lean-rs` no longer depends on `tracing-subscriber`. It emits `tracing` events and installs no subscriber.
+
+### Added
+
+- `lean_toolchain::LakeWorkspace` asks Lake about one workspace: `LakeWorkspace::new(root)`, `root` and
+  `lean_num_threads`, and three questions. Each question has a form that runs Lake and a pair that lets the caller run
+  the command under its own time limit and process group: `lean_path`, or `lean_path_command` with `read_lean_path`;
+  `shared_library(lib)`, or `shared_library_command` with `read_shared_library`; and `built_shared_library(lib)`, or
+  `built_shared_library_command` with `read_built_shared_library`, which returns `None` when Lake would have to build
+  the library.
+- `lean_rs_worker_protocol::{WORKER_APPLICATION_INPUT_ENV, PREPARED_HOST_ARTIFACTS_ENV, WORKER_PARENT_LIFELINE_ENV}`
+  name the environment variables the parent sets for a worker child, so a program that starts other processes can remove
+  them.
+
 ## [0.12.0]
 
 Breaking: upgrade the worker parent and worker child together.

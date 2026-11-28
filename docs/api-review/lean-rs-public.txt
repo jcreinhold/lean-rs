@@ -15,8 +15,6 @@ pub use lean_rs::LeanLoaderSeverity
 pub use lean_rs::LeanModuleInitializer
 pub mod lean_rs::abi
 pub mod lean_rs::abi::nat
-pub fn lean_rs::abi::nat::from_u64(&lean_rs::LeanRuntime, u64) -> lean_rs::runtime::obj::Obj<'_>
-pub fn lean_rs::abi::nat::from_usize(&lean_rs::LeanRuntime, usize) -> lean_rs::runtime::obj::Obj<'_>
 pub fn lean_rs::abi::nat::try_to_u64(lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<u64>
 pub fn lean_rs::abi::nat::try_to_usize(lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<usize>
 pub mod lean_rs::abi::structure
@@ -101,12 +99,8 @@ impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::decl
 pub fn lean_rs::host_bridge::declaration_requests::DeclarationInspectionRequest::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::declaration_requests::DeclarationNameMatch
 pub fn lean_rs::host_bridge::declaration_requests::DeclarationNameMatch::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
-impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest
 pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
-impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::module_requests::DeclarationVerificationBatchItem
 pub fn lean_rs::host_bridge::module_requests::DeclarationVerificationBatchItem::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::module_requests::DeclarationVerificationBatchRequest
@@ -601,45 +595,6 @@ impl core::marker::Unpin for lean_rs::error::LeanExceptionKind
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanExceptionKind
-pub struct lean_rs::error::CapturedEvent
-pub lean_rs::error::CapturedEvent::code: core::option::Option<lean_rs::error::LeanDiagnosticCode>
-pub lean_rs::error::CapturedEvent::fields: alloc::vec::Vec<(&'static str, alloc::string::String)>
-pub lean_rs::error::CapturedEvent::level: &'static str
-pub lean_rs::error::CapturedEvent::message: alloc::string::String
-pub lean_rs::error::CapturedEvent::name: &'static str
-pub lean_rs::error::CapturedEvent::span: core::option::Option<alloc::string::String>
-pub lean_rs::error::CapturedEvent::target: alloc::string::String
-impl core::clone::Clone for lean_rs::CapturedEvent
-pub fn lean_rs::CapturedEvent::clone(&self) -> lean_rs::CapturedEvent
-impl core::cmp::Eq for lean_rs::CapturedEvent
-impl core::cmp::PartialEq for lean_rs::CapturedEvent
-pub fn lean_rs::CapturedEvent::eq(&self, &lean_rs::CapturedEvent) -> bool
-impl core::fmt::Debug for lean_rs::CapturedEvent
-pub fn lean_rs::CapturedEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::CapturedEvent
-impl core::marker::Freeze for lean_rs::CapturedEvent
-impl core::marker::Send for lean_rs::CapturedEvent
-impl core::marker::Sync for lean_rs::CapturedEvent
-impl core::marker::Unpin for lean_rs::CapturedEvent
-impl core::marker::UnsafeUnpin for lean_rs::CapturedEvent
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::CapturedEvent
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::CapturedEvent
-pub struct lean_rs::error::DiagnosticCapture
-impl lean_rs::DiagnosticCapture
-pub fn lean_rs::DiagnosticCapture::capacity(&self) -> usize
-pub fn lean_rs::DiagnosticCapture::events(&self) -> alloc::vec::Vec<lean_rs::CapturedEvent>
-pub fn lean_rs::DiagnosticCapture::install() -> Self
-pub fn lean_rs::DiagnosticCapture::overflowed(&self) -> usize
-pub fn lean_rs::DiagnosticCapture::with_capacity(usize) -> Self
-impl core::fmt::Debug for lean_rs::DiagnosticCapture
-pub fn lean_rs::DiagnosticCapture::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::DiagnosticCapture
-impl !core::marker::Send for lean_rs::DiagnosticCapture
-impl !core::marker::Sync for lean_rs::DiagnosticCapture
-impl core::marker::Unpin for lean_rs::DiagnosticCapture
-impl core::marker::UnsafeUnpin for lean_rs::DiagnosticCapture
-impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs::DiagnosticCapture
-impl !core::panic::unwind_safe::UnwindSafe for lean_rs::DiagnosticCapture
 pub struct lean_rs::error::HostFailure
 impl lean_rs::error::HostFailure
 pub fn lean_rs::error::HostFailure::code(&self) -> lean_rs::error::LeanDiagnosticCode
@@ -716,7 +671,6 @@ impl core::marker::Unpin for lean_rs::error::ResourceExhaustedFacts
 impl core::marker::UnsafeUnpin for lean_rs::error::ResourceExhaustedFacts
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::ResourceExhaustedFacts
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::ResourceExhaustedFacts
-pub const lean_rs::error::DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY: usize
 pub const lean_rs::error::LEAN_ERROR_MESSAGE_LIMIT: usize
 pub type lean_rs::error::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>
 pub mod lean_rs::handle
@@ -817,27 +771,6 @@ impl core::marker::Unpin for lean_rs::host_bridge::declaration_requests::Declara
 impl core::marker::UnsafeUnpin for lean_rs::host_bridge::declaration_requests::DeclarationNameMatch
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationNameMatch
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationNameMatch
-pub enum lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::Module
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::Namespace
-impl core::clone::Clone for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::clone(&self) -> lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::cmp::Eq for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::cmp::PartialEq for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::eq(&self, &lean_rs::host_bridge::declaration_requests::DeclarationSearchScope) -> bool
-impl core::fmt::Debug for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::marker::StructuralPartialEq for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchScope::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
-impl core::marker::Freeze for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::marker::Send for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::marker::Sync for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::marker::Unpin for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::marker::UnsafeUnpin for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
 pub struct lean_rs::host_bridge::declaration_requests::DeclarationInspectionBudgets
 pub lean_rs::host_bridge::declaration_requests::DeclarationInspectionBudgets::per_field_bytes: u32
 pub lean_rs::host_bridge::declaration_requests::DeclarationInspectionBudgets::total_bytes: u32
@@ -916,28 +849,6 @@ impl core::marker::Unpin for lean_rs::host_bridge::declaration_requests::Declara
 impl core::marker::UnsafeUnpin for lean_rs::host_bridge::declaration_requests::DeclarationInspectionRequest
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationInspectionRequest
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationInspectionRequest
-pub struct lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::prefix: alloc::string::String
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::scope: lean_rs::host_bridge::declaration_requests::DeclarationSearchScope
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::strict: bool
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::weight: i32
-impl core::clone::Clone for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::clone(&self) -> lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::cmp::Eq for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::cmp::PartialEq for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::eq(&self, &lean_rs::host_bridge::declaration_requests::DeclarationSearchBias) -> bool
-impl core::fmt::Debug for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchBias::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
-impl core::marker::Freeze for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::marker::Send for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::marker::Sync for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::marker::Unpin for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::marker::UnsafeUnpin for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host_bridge::declaration_requests::DeclarationSearchBias
 pub struct lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest
 pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::conclusion_head: core::option::Option<alloc::string::String>
 pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::filter: lean_rs::host_bridge::LeanDeclarationFilter
@@ -947,7 +858,6 @@ pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::limit:
 pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::name_fragment: core::option::Option<alloc::string::String>
 pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::name_match: lean_rs::host_bridge::declaration_requests::DeclarationNameMatch
 pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::required_constants: alloc::vec::Vec<alloc::string::String>
-pub lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::scope_biases: alloc::vec::Vec<lean_rs::host_bridge::declaration_requests::DeclarationSearchBias>
 impl lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest
 pub fn lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest::new(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for lean_rs::host_bridge::declaration_requests::DeclarationSearchRequest
@@ -1615,7 +1525,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::WorkerBindingF
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::module::WorkerBindingFailure
 pub enum lean_rs::module::WorkerExportContract
 pub lean_rs::module::WorkerExportContract::StringIoString
-pub lean_rs::module::WorkerExportContract::StringStream
 pub lean_rs::module::WorkerExportContract::U64Binary
 pub lean_rs::module::WorkerExportContract::U8ToUnit
 impl core::clone::Clone for lean_rs::module::WorkerExportContract
@@ -1796,25 +1705,6 @@ impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
-pub struct lean_rs::module::LeanRuntimePreflight
-impl lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::check(&self) -> lean_toolchain::loader::LeanLoaderReport
-pub fn lean_rs::LeanRuntimePreflight::new(lean_toolchain::built_capability::LeanBuiltCapability) -> Self
-impl core::clone::Clone for lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::clone(&self) -> lean_rs::LeanRuntimePreflight
-impl core::cmp::Eq for lean_rs::LeanRuntimePreflight
-impl core::cmp::PartialEq for lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::eq(&self, &lean_rs::LeanRuntimePreflight) -> bool
-impl core::fmt::Debug for lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanRuntimePreflight
-impl core::marker::Freeze for lean_rs::LeanRuntimePreflight
-impl core::marker::Send for lean_rs::LeanRuntimePreflight
-impl core::marker::Sync for lean_rs::LeanRuntimePreflight
-impl core::marker::Unpin for lean_rs::LeanRuntimePreflight
-impl core::marker::UnsafeUnpin for lean_rs::LeanRuntimePreflight
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntimePreflight
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntimePreflight
 pub struct lean_rs::module::LoadedHostArtifacts<'lean>
 impl<'lean> lean_rs::module::LoadedHostArtifacts<'lean>
 pub fn lean_rs::module::LoadedHostArtifacts<'lean>::host(&self) -> &lean_rs::module::TrustedHostCapability<'lean>
@@ -1883,8 +1773,6 @@ pub struct lean_rs::module::TrustedWorkerCapability<'lean>
 impl<'lean> lean_rs::module::TrustedWorkerCapability<'lean>
 pub fn lean_rs::module::TrustedWorkerCapability<'lean>::bind_binary(&self, &str) -> core::result::Result<lean_rs::module::WorkerBinaryBinding<'lean, '_>, lean_rs::module::WorkerBindingFailure>
 impl<'lean> lean_rs::module::TrustedWorkerCapability<'lean>
-pub fn lean_rs::module::TrustedWorkerCapability<'lean>::bind_stream(&self, &str) -> core::result::Result<lean_rs::module::WorkerStreamBinding<'lean, '_>, lean_rs::module::WorkerBindingFailure>
-impl<'lean> lean_rs::module::TrustedWorkerCapability<'lean>
 pub fn lean_rs::module::TrustedWorkerCapability<'lean>::bind_string_io(&self, &str) -> core::result::Result<lean_rs::module::WorkerStringBinding<'lean, '_>, lean_rs::module::WorkerBindingFailure>
 impl<'lean> lean_rs::module::TrustedWorkerCapability<'lean>
 pub fn lean_rs::module::TrustedWorkerCapability<'lean>::bind_unit(&self, &str) -> core::result::Result<lean_rs::module::WorkerUnitBinding<'lean, '_>, lean_rs::module::WorkerBindingFailure>
@@ -1911,16 +1799,6 @@ impl<'lean, 'cap> core::marker::Unpin for lean_rs::module::WorkerBinaryBinding<'
 impl<'lean, 'cap> core::marker::UnsafeUnpin for lean_rs::module::WorkerBinaryBinding<'lean, 'cap>
 impl<'lean, 'cap> core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::WorkerBinaryBinding<'lean, 'cap>
 impl<'lean, 'cap> core::panic::unwind_safe::UnwindSafe for lean_rs::module::WorkerBinaryBinding<'lean, 'cap>
-pub struct lean_rs::module::WorkerStreamBinding<'lean, 'cap>(_)
-impl lean_rs::module::WorkerStreamBinding<'_, '_>
-pub fn lean_rs::module::WorkerStreamBinding<'_, '_>::call(&self, alloc::string::String, &lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanStringEvent>) -> lean_rs::error::LeanResult<u8>
-impl<'lean, 'cap> core::marker::Freeze for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
-impl<'lean, 'cap> !core::marker::Send for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
-impl<'lean, 'cap> !core::marker::Sync for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
-impl<'lean, 'cap> core::marker::Unpin for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
-impl<'lean, 'cap> core::marker::UnsafeUnpin for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
-impl<'lean, 'cap> core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
-impl<'lean, 'cap> core::panic::unwind_safe::UnwindSafe for lean_rs::module::WorkerStreamBinding<'lean, 'cap>
 pub struct lean_rs::module::WorkerStringBinding<'lean, 'cap>(_)
 impl lean_rs::module::WorkerStringBinding<'_, '_>
 pub fn lean_rs::module::WorkerStringBinding<'_, '_>::call(&self, alloc::string::String) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -2064,7 +1942,6 @@ impl lean_rs::abi::traits::LeanCReprAbi for u8
 pub const u8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
 impl lean_rs::abi::traits::LeanCReprAbi for usize
 pub const usize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
-pub type lean_rs::module::LeanCapabilityPreflight = lean_rs::LeanRuntimePreflight
 pub mod lean_rs::runtime
 pub mod lean_rs::runtime::obj
 pub struct lean_rs::runtime::obj::Obj<'lean>
@@ -2319,45 +2196,6 @@ impl core::marker::Unpin for lean_rs::error::LeanExceptionKind
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanExceptionKind
-pub struct lean_rs::CapturedEvent
-pub lean_rs::CapturedEvent::code: core::option::Option<lean_rs::error::LeanDiagnosticCode>
-pub lean_rs::CapturedEvent::fields: alloc::vec::Vec<(&'static str, alloc::string::String)>
-pub lean_rs::CapturedEvent::level: &'static str
-pub lean_rs::CapturedEvent::message: alloc::string::String
-pub lean_rs::CapturedEvent::name: &'static str
-pub lean_rs::CapturedEvent::span: core::option::Option<alloc::string::String>
-pub lean_rs::CapturedEvent::target: alloc::string::String
-impl core::clone::Clone for lean_rs::CapturedEvent
-pub fn lean_rs::CapturedEvent::clone(&self) -> lean_rs::CapturedEvent
-impl core::cmp::Eq for lean_rs::CapturedEvent
-impl core::cmp::PartialEq for lean_rs::CapturedEvent
-pub fn lean_rs::CapturedEvent::eq(&self, &lean_rs::CapturedEvent) -> bool
-impl core::fmt::Debug for lean_rs::CapturedEvent
-pub fn lean_rs::CapturedEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::CapturedEvent
-impl core::marker::Freeze for lean_rs::CapturedEvent
-impl core::marker::Send for lean_rs::CapturedEvent
-impl core::marker::Sync for lean_rs::CapturedEvent
-impl core::marker::Unpin for lean_rs::CapturedEvent
-impl core::marker::UnsafeUnpin for lean_rs::CapturedEvent
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::CapturedEvent
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::CapturedEvent
-pub struct lean_rs::DiagnosticCapture
-impl lean_rs::DiagnosticCapture
-pub fn lean_rs::DiagnosticCapture::capacity(&self) -> usize
-pub fn lean_rs::DiagnosticCapture::events(&self) -> alloc::vec::Vec<lean_rs::CapturedEvent>
-pub fn lean_rs::DiagnosticCapture::install() -> Self
-pub fn lean_rs::DiagnosticCapture::overflowed(&self) -> usize
-pub fn lean_rs::DiagnosticCapture::with_capacity(usize) -> Self
-impl core::fmt::Debug for lean_rs::DiagnosticCapture
-pub fn lean_rs::DiagnosticCapture::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::DiagnosticCapture
-impl !core::marker::Send for lean_rs::DiagnosticCapture
-impl !core::marker::Sync for lean_rs::DiagnosticCapture
-impl core::marker::Unpin for lean_rs::DiagnosticCapture
-impl core::marker::UnsafeUnpin for lean_rs::DiagnosticCapture
-impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs::DiagnosticCapture
-impl !core::panic::unwind_safe::UnwindSafe for lean_rs::DiagnosticCapture
 pub struct lean_rs::HostFailure
 impl lean_rs::error::HostFailure
 pub fn lean_rs::error::HostFailure::code(&self) -> lean_rs::error::LeanDiagnosticCode
@@ -2659,25 +2497,6 @@ impl core::marker::Unpin for lean_rs::LeanRuntime
 impl core::marker::UnsafeUnpin for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntime
-pub struct lean_rs::LeanRuntimePreflight
-impl lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::check(&self) -> lean_toolchain::loader::LeanLoaderReport
-pub fn lean_rs::LeanRuntimePreflight::new(lean_toolchain::built_capability::LeanBuiltCapability) -> Self
-impl core::clone::Clone for lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::clone(&self) -> lean_rs::LeanRuntimePreflight
-impl core::cmp::Eq for lean_rs::LeanRuntimePreflight
-impl core::cmp::PartialEq for lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::eq(&self, &lean_rs::LeanRuntimePreflight) -> bool
-impl core::fmt::Debug for lean_rs::LeanRuntimePreflight
-pub fn lean_rs::LeanRuntimePreflight::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanRuntimePreflight
-impl core::marker::Freeze for lean_rs::LeanRuntimePreflight
-impl core::marker::Send for lean_rs::LeanRuntimePreflight
-impl core::marker::Sync for lean_rs::LeanRuntimePreflight
-impl core::marker::Unpin for lean_rs::LeanRuntimePreflight
-impl core::marker::UnsafeUnpin for lean_rs::LeanRuntimePreflight
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntimePreflight
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntimePreflight
 pub struct lean_rs::LeanStringEvent
 pub lean_rs::LeanStringEvent::value: alloc::string::String
 impl core::clone::Clone for lean_rs::callback::LeanStringEvent
@@ -2771,7 +2590,6 @@ impl core::marker::Unpin for lean_rs::error::ResourceExhaustedFacts
 impl core::marker::UnsafeUnpin for lean_rs::error::ResourceExhaustedFacts
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::ResourceExhaustedFacts
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::ResourceExhaustedFacts
-pub const lean_rs::DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY: usize
 pub const lean_rs::LEAN_ERROR_MESSAGE_LIMIT: usize
 pub const lean_rs::VERSION: &str
 pub trait lean_rs::DecodeCallResult<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedResult
@@ -2900,5 +2718,4 @@ pub const usize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
 pub trait lean_rs::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
-pub type lean_rs::LeanCapabilityPreflight = lean_rs::LeanRuntimePreflight
 pub type lean_rs::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>

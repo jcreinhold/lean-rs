@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs-sys",
  "lean-toolchain",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.12.0"
+version = "0.13.0"
 
 [[package]]
 name = "lean-rs-fuzz"
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "cc",
  "lean-rs-abi",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs-abi",
  "libc",

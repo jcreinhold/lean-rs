@@ -101,7 +101,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "lean-rs"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs-sys",
  "lean-toolchain",
@@ -113,11 +113,11 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.12.0"
+version = "0.13.0"
 
 [[package]]
 name = "lean-rs-host"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs",
  "lean-toolchain",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "cc",
  "lean-rs-abi",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-child"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs",
  "lean-rs-host",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-parent"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs-worker-protocol",
  "lean-toolchain",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lean-rs-abi",
  "libc",
