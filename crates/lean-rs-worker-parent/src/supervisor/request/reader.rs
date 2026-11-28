@@ -57,6 +57,10 @@ impl LeanWorker {
         self.read_response_with_events(operation, progress, cancellation, None)
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Message is #[non_exhaustive] in lean-rs-worker-protocol; any other message is a protocol error"
+    )]
     pub(super) fn read_response_with_events(
         &mut self,
         operation: &'static str,

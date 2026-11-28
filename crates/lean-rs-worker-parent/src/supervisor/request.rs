@@ -4,13 +4,6 @@
 //! `reader` reads the child's replies, progress, and data rows until the
 //! terminal frame. `operations` holds one typed method per request kind.
 
-#![allow(
-    clippy::wildcard_enum_match_arm,
-    reason = "Response and Message are #[non_exhaustive] across the lean-rs-worker-protocol crate boundary; every \
-              wildcard arm here uniformly converts an unexpected variant into a protocol-level error rather than \
-              enumerating each known variant"
-)]
-
 pub(super) mod operations;
 pub(super) mod reader;
 
@@ -88,7 +81,28 @@ impl LeanWorker {
                     operation,
                     duration: *duration,
                 },
-                _ => {
+                LeanWorkerError::Spawn { .. }
+                | LeanWorkerError::WorkerChildUnresolved { .. }
+                | LeanWorkerError::WorkerChildNotExecutable { .. }
+                | LeanWorkerError::Bootstrap { .. }
+                | LeanWorkerError::CapabilityBuild { .. }
+                | LeanWorkerError::Setup { .. }
+                | LeanWorkerError::Handshake { .. }
+                | LeanWorkerError::Protocol { .. }
+                | LeanWorkerError::Worker { .. }
+                | LeanWorkerError::ChildExited { .. }
+                | LeanWorkerError::ChildPanicOrAbort { .. }
+                | LeanWorkerError::RssHardLimitExceeded { .. }
+                | LeanWorkerError::ProgressPanic { .. }
+                | LeanWorkerError::DataSinkPanic { .. }
+                | LeanWorkerError::CapabilityMetadataMalformed { .. }
+                | LeanWorkerError::CapabilityDoctorMalformed { .. }
+                | LeanWorkerError::RestartLimitExceeded { .. }
+                | LeanWorkerError::UnsupportedRequest { .. }
+                | LeanWorkerError::Wait { .. }
+                | LeanWorkerError::Kill { .. }
+                | LeanWorkerError::WaitTimeout { .. }
+                | LeanWorkerError::ShutdownInProgress { .. } => {
                     self.finish_in_flight();
                     // A failed pipe write kills and reaps the child.
                     if self.child.is_none() && self.pending_startup.is_none() {
@@ -295,7 +309,14 @@ impl LeanWorker {
     fn await_in_flight(&mut self, operation: &'static str) -> Result<InFlightRequest, LeanWorkerError> {
         let mut request = match &self.state {
             WorkerSupervisorState::Busy { request } => request.clone(),
-            _ => {
+            WorkerSupervisorState::Idle { .. }
+            | WorkerSupervisorState::Streaming { .. }
+            | WorkerSupervisorState::Stopping { .. }
+            | WorkerSupervisorState::Killing { .. }
+            | WorkerSupervisorState::Reaping { .. }
+            | WorkerSupervisorState::Crashed { .. }
+            | WorkerSupervisorState::RestartExhausted { .. }
+            | WorkerSupervisorState::Exited { .. } => {
                 return Err(LeanWorkerError::Protocol {
                     message: format!("cannot await {operation} without a dispatched request"),
                 });
@@ -323,7 +344,13 @@ impl LeanWorker {
                     request: request.clone(),
                 };
             }
-            _ => {}
+            WorkerSupervisorState::Idle { .. }
+            | WorkerSupervisorState::Stopping { .. }
+            | WorkerSupervisorState::Killing { .. }
+            | WorkerSupervisorState::Reaping { .. }
+            | WorkerSupervisorState::Crashed { .. }
+            | WorkerSupervisorState::RestartExhausted { .. }
+            | WorkerSupervisorState::Exited { .. } => {}
         }
     }
 

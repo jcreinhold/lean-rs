@@ -42,6 +42,10 @@ impl LeanWorker {
     ///
     /// Returns `LeanWorkerError` if the worker is dead, the protocol fails, or
     /// the child returns a typed worker error.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Response is #[non_exhaustive] in lean-rs-worker-protocol; any other reply is a protocol error"
+    )]
     pub fn health(&mut self) -> Result<(), LeanWorkerError> {
         self.prepare_host_request(false, "health", None, None)?;
         self.send_request("health", Request::Health)?;
@@ -62,6 +66,10 @@ impl LeanWorker {
     ///
     /// Returns `LeanWorkerError` if the worker is dead, fixture loading fails,
     /// or protocol communication fails.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Response is #[non_exhaustive] in lean-rs-worker-protocol; any other reply is a protocol error"
+    )]
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
         let manifest = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true, "load_fixture_capability", None)?;
@@ -84,6 +92,10 @@ impl LeanWorker {
     ///
     /// Returns `LeanWorkerError` if the worker is dead, the export fails, or
     /// protocol communication fails.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Response is #[non_exhaustive] in lean-rs-worker-protocol; any other reply is a protocol error"
+    )]
     pub fn call_fixture_mul(
         &mut self,
         fixture_root: impl AsRef<Path>,
@@ -223,6 +235,10 @@ impl LeanWorker {
         result
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Response is #[non_exhaustive] in lean-rs-worker-protocol; any other reply is a protocol error"
+    )]
     fn open_worker_session_attempt(
         &mut self,
         config: &LeanWorkerSessionConfig,
@@ -787,6 +803,10 @@ impl LeanWorker {
         clippy::needless_pass_by_value,
         reason = "filter is cheap to clone, passed by value matches caller shape"
     )]
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Response is #[non_exhaustive] in lean-rs-worker-protocol; any other reply is a protocol error"
+    )]
     pub(crate) fn worker_list_declarations_strings(
         &mut self,
         filter: LeanWorkerDeclarationFilter,
@@ -987,6 +1007,10 @@ impl LeanWorker {
         self.host_runtime_metadata.as_ref()
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Response is #[non_exhaustive] in lean-rs-worker-protocol; any other reply is a protocol error"
+    )]
     pub(crate) fn worker_capability_metadata(
         &mut self,
         export: &str,
