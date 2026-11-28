@@ -492,6 +492,18 @@ rm -rf "$REPO_ROOT/templates/shipped-lean-crate/lean/.lake" \
 run_gate "cargo fmt --check" \
 	cargo fmt --all --check
 
+# CI's `rust-line-width` job checks the Rust lines each push adds against
+# rustfmt.toml's max_width, which `cargo fmt` does not enforce in string
+# literals and comments. Check every line added since the last release tag.
+check_rust_line_width() {
+	local base
+	base=$(git -C "$REPO_ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null) ||
+		base=0000000000000000000000000000000000000000
+	(cd "$REPO_ROOT" && python3 -B scripts/check_rust_line_width.py "$base")
+}
+
+run_gate "Rust line width since the last release tag" check_rust_line_width
+
 run_gate "cargo clippy --all-targets -- -D warnings" \
 	cargo clippy --workspace --all-targets -- -D warnings
 
