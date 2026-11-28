@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if state != target.join("metadata-qualification/stream-package") {
             return Err("stream shims require the private fixture package".into());
         }
-        let prepared = lean_rs_host::host::prepare_host_artifacts_for_generated_output("lean-4.36.0")?;
+        let prepared = lean_rs_host::host::prepare_host_artifacts()?;
         println!("{}", prepared.manifest_path().display());
         return Ok(());
     }
@@ -96,7 +96,7 @@ fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result
     };
     let built = builder().build_quiet()?;
     let warm = builder()
-        .probe_ready_strict()?
+        .probe_ready()?
         .ok_or("scalar build did not publish a warm cache")?;
     if warm.manifest_path() != built.manifest_path() || warm.dylib_path() != built.dylib_path() {
         return Err("scalar cache selected a different artifact after build".into());
@@ -120,7 +120,7 @@ fn selected_host_artifacts() -> Result<lean_rs_host::host::LeanPreparedHostArtif
         return Err("prepared descriptor exceeds limit".into());
     }
     let selected: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts = serde_json::from_str(&raw)?;
-    if selected.protocol != 2 {
+    if selected.protocol != 1 {
         return Err("unexpected prepared descriptor protocol".into());
     }
     Ok(lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(

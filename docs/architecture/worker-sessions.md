@@ -140,11 +140,17 @@ that generation. Only an omitted ordinary descriptor selects bundled shim discov
 explicit descriptor or a refused grant fails the operation. The application's `WorkerAuthority::host` must
 independently verify the exact manifest, images, initializers and ordered import paths. The launch-time byte comparison
 alone cannot establish immutability. Project manifest reads, native loads and imports still require their ordinary
-application grants, including `use_generated_project_imports` to select generated project output.
+application grants.
 
-The worker binary has runtime-free preparation entries. `--lean-rs-ready-host-artifacts` checks the existing
-host/interop build keys and the exact manifests without materializing, building, loading or publishing anything, and
-`--lean-rs-ready-host-artifacts-generated KEY` checks one generated output slot; a miss exits 75.
+The child takes a project's import roots from `lake env`, dependencies first and the project last, once per host. An
+application that already asked Lake, for example a server that runs `lean_toolchain::LakeWorkspace::lean_path` when it
+starts a worker, returns those roots from `WorkerAuthority::project_import_roots`, and the child uses them as given and
+runs no Lake for them. Either way, `WorkerAuthority::imports` approves the ordered list. A capability session without a
+manifest asks Lake for its library with `lake --no-build query <lib>:shared`; the child never builds a project.
+
+The worker binary has runtime-free preparation entries. `--lean-rs-ready-host-artifacts` runs `lake --no-build query`
+for the host and interop shim libraries and checks the exact manifest, without building, loading or publishing
+anything; Lake may still write its own files there. A stale library or a different manifest exits 75.
 `--lean-rs-prepare-host-artifacts [DEST]` builds the shims and emits one bounded storage descriptor before any
 `LeanRuntime::init` or parent lifeline. Without `DEST` it builds the shims where Cargo unpacked `lean-rs-host`. With
 `DEST`, a directory that must not exist yet, it first writes the shim sources compiled into the worker there and builds

@@ -57,40 +57,57 @@ pub enum LinkDiagnostics {
         /// rendered as `["4.23.0", "4.24.0", "4.24.1"], ["4.25.0", ...], ...`.
         supported_window: String,
     },
-    /// The requested Lake target was not declared in the project's lakefile.
-    LakeTargetMissing {
-        /// Directory expected to contain the project's lakefile.
+    /// The directory has neither `lakefile.lean` nor `lakefile.toml`, so Lake
+    /// has no workspace to answer for.
+    LakeConfigMissing {
+        /// Directory that should hold the lakefile.
         project_root: PathBuf,
-        /// Requested Lake target name.
+    },
+    /// Lake reported that the workspace has no Lean library by this name.
+    LakeTargetMissing {
+        /// Root of the Lake workspace.
+        project_root: PathBuf,
+        /// Requested library name.
         target_name: String,
     },
     /// The `lake` executable could not be started.
     LakeUnavailable {
         /// Directory where the Lake command would have run.
         project_root: PathBuf,
-        /// Requested Lake target name.
-        target_name: String,
+        /// The Lake command line, for example `lake query Foo:shared`.
+        command: String,
         /// One-line process-spawn failure.
         detail: String,
     },
-    /// `lake build <target>:shared` exited unsuccessfully.
-    LakeBuildFailed {
+    /// A Lake command exited unsuccessfully.
+    LakeFailed {
         /// Directory where the Lake command ran.
         project_root: PathBuf,
-        /// Requested Lake target name.
-        target_name: String,
+        /// The Lake command line, for example `lake query Foo:shared`.
+        command: String,
         /// Process exit status rendered for diagnostics.
         status: String,
         /// Bounded one-line stdout/stderr summary from Lake.
         detail: String,
     },
-    /// Lake completed, but `lean-toolchain` could not resolve the expected dylib path.
-    LakeOutputUnresolved {
-        /// Directory expected to contain the Lake project.
+    /// A Lake command succeeded, but its output was not the answer it
+    /// documents, such as a relative path or a missing `LEAN_PATH` line.
+    LakeAnswerInvalid {
+        /// Directory where the Lake command ran.
         project_root: PathBuf,
-        /// Requested Lake target name.
+        /// The Lake command line, for example `lake query Foo:shared`.
+        command: String,
+        /// One-line reason.
+        reason: String,
+    },
+    /// `lean-toolchain` refused a capability's settings or Lake's answer for
+    /// its library, or could not write the capability manifest.
+    LakeOutputUnresolved {
+        /// Root of the Lake workspace.
+        project_root: PathBuf,
+        /// Requested library name.
         target_name: String,
-        /// One-line reason, including the path or manifest field that was missing.
+        /// One-line reason, naming the path that failed.
         reason: String,
     },
 }
@@ -140,36 +157,54 @@ impl fmt::Display for LinkDiagnostics {
                     "lean-toolchain: active Lean toolchain {active} is not in the supported window: {supported_window}"
                 )
             }
+            Self::LakeConfigMissing { project_root } => {
+                write!(
+                    f,
+                    "lean-toolchain: no lakefile.lean or lakefile.toml in {}",
+                    project_root.display()
+                )
+            }
             Self::LakeTargetMissing {
                 project_root,
                 target_name,
             } => {
                 write!(
                     f,
-                    "lean-toolchain: Lake target `{target_name}` is not declared in {}",
+                    "lean-toolchain: Lake has no library `{target_name}` in {}",
                     project_root.display()
                 )
             }
             Self::LakeUnavailable {
                 project_root,
-                target_name,
+                command,
                 detail,
             } => {
                 write!(
                     f,
-                    "lean-toolchain: could not start `lake build {target_name}:shared` in {}: {detail}",
+                    "lean-toolchain: could not start `{command}` in {}: {detail}",
                     project_root.display()
                 )
             }
-            Self::LakeBuildFailed {
+            Self::LakeFailed {
                 project_root,
-                target_name,
+                command,
                 status,
                 detail,
             } => {
                 write!(
                     f,
-                    "lean-toolchain: `lake build {target_name}:shared` failed in {} with {status}: {detail}",
+                    "lean-toolchain: `{command}` failed in {} with {status}: {detail}",
+                    project_root.display()
+                )
+            }
+            Self::LakeAnswerInvalid {
+                project_root,
+                command,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "lean-toolchain: `{command}` in {} gave an answer lean-toolchain cannot use: {reason}",
                     project_root.display()
                 )
             }
@@ -180,7 +215,7 @@ impl fmt::Display for LinkDiagnostics {
             } => {
                 write!(
                     f,
-                    "lean-toolchain: could not resolve Lake output for target `{target_name}` in {}: {reason}",
+                    "lean-toolchain: could not prepare library `{target_name}` in {}: {reason}",
                     project_root.display()
                 )
             }

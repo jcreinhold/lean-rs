@@ -33,7 +33,9 @@ fn fixture_root() -> PathBuf {
 
 fn ensure_fixture_built() {
     let fixture = fixture_root();
-    lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsFixture").expect("fixture Lake target builds");
+    lean_toolchain::LakeWorkspace::new(&fixture)
+        .shared_library("LeanRsFixture")
+        .expect("fixture Lake target builds");
 }
 
 fn worker_config() -> LeanWorkerConfig {

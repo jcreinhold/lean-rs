@@ -12,7 +12,7 @@ use lean_rs::host_bridge::{
 };
 use lean_rs::module::{
     AuthorizedWorkerSnapshot, HostImportOptions, LeanLibrary, LeanModuleInitializer, LoadedHostArtifacts,
-    TrustedHostCapability, TrustedHostImports, TrustedWorkerCapability, WorkerExportContract,
+    TrustedHostCapability, TrustedHostImports, WorkerExportContract,
 };
 use lean_rs::{LeanResult, LeanRuntime};
 use lean_rs_host::host::LeanPreparedHostArtifacts;
@@ -444,15 +444,6 @@ fn matches_ordinary_verification(file: &str, request: &DeclarationVerificationRe
         )
 }
 impl WorkerAuthority for MetadataApp {
-    fn use_generated_project_imports(
-        &self,
-        project: &Path,
-        capability: &TrustedWorkerCapability<'static>,
-    ) -> LeanResult<bool> {
-        let held = self.deployment()?;
-        let d = &held.record;
-        Ok(d.stream && project == d.project && capability.library_path() == d.consumer_image)
-    }
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;

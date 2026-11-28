@@ -67,7 +67,9 @@ fn ensure_fixture_built() {
     if ordinary_typed_selection().is_some() {
         return;
     }
-    lean_toolchain::build_lake_target_quiet(&fixture_root(), "LeanRsFixture").expect("fixture Lake target builds");
+    lean_toolchain::LakeWorkspace::new(fixture_root())
+        .shared_library("LeanRsFixture")
+        .expect("fixture Lake target builds");
 }
 
 fn worker_config() -> LeanWorkerConfig {
@@ -2607,7 +2609,9 @@ fn process_module_query_batch_tiny_cache_still_returns_correct_query() {
 fn process_module_query_handles_module_system_header_through_worker() {
     let root = fixture_root();
     if ordinary_typed_selection().is_none() {
-        lean_toolchain::build_lake_target_quiet(&root, "Fixture").expect("module header fixture builds");
+        lean_toolchain::LakeWorkspace::new(&root)
+            .shared_library("Fixture")
+            .expect("module header fixture builds");
     }
     let opts = LeanWorkerElabOptions::new();
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");

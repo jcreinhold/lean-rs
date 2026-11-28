@@ -175,6 +175,16 @@ jobs:
           actionlint
           shellcheck scripts/lean-release-prefix.sh scripts/publish-workspace.sh scripts/trybuild-linked-fixture-rustc.sh
 
+      - name: SDK sources ask Lake for paths
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.36.0'
+        # Fail if SDK code again reads lake-manifest.json or builds a Lake output path itself.
+        run: |
+          command -v rg >/dev/null || { sudo apt-get update && sudo apt-get install -y ripgrep; }
+          status=0
+          rg -n --type rust -e 'packagesDir' -e '\.lake/build' -e 'join\("build"\)' -e 'lean-rs-generated' \
+            -e "replace\('_', \"__\"\)" crates/*/src || status=$?
+          test "$status" -eq 1
+
       - name: Required SDK worker tests
         if: matrix.lean_version == '4.36.0'
         run: |

@@ -161,10 +161,8 @@ fn ordinary_fixture() -> Option<&'static OrdinaryFixture> {
                 shims.search_paths,
                 [interop_build.join("lib/lean"), host_build.join("lib/lean")]
             );
-            assert_eq!(
-                shims.manifest.parent(),
-                Some(host_build.join("lean-rs-build-cache").as_path())
-            );
+            // The manifest sits beside the library Lake built.
+            assert_eq!(shims.manifest.parent(), Some(host_build.join("lib").as_path()));
             for (pin, path) in shims.images.iter().zip([
                 host_build.join(format!("lib/liblean__rs__host__shims_LeanRsHostShims.{extension}")),
                 interop_build.join(format!("lib/liblean__rs__interop__shims_LeanRsInterop.{extension}")),
@@ -536,7 +534,7 @@ fn open<'h>(host: &'h LeanHost<'static>, load_project: bool) -> lean_rs::LeanRes
     }
     let root_manifest = fixture_root().join(".lake/qualification-manifest.json");
     let project = host
-        .project_library_path("lean_rs_fixture", "LeanRsFixture")
+        .project_library_path("LeanRsFixture")?
         .canonicalize()
         .map_err(|err| lean_rs::error::host_module_init(err.to_string()))?;
     assert!(record.artifact_sha256.contains_key(&root_manifest) && record.artifact_sha256.contains_key(&project));

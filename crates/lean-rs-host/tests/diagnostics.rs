@@ -18,7 +18,6 @@
 mod fixture;
 use std::path::PathBuf;
 
-use lean_rs::module::LeanLibrary;
 use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanRuntime};
 use lean_rs_host::meta::{MetaCallStatus, infer_type};
 use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession};
@@ -67,16 +66,11 @@ fn module_init_code_on_missing_lake_project() {
 #[test]
 fn module_init_code_on_missing_dylib() {
     let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
-    // The lib_name must not match anything Lake built; the dylib path
-    // dispatch in `LakeProject::capability_dylib` produces a name that
-    // doesn't exist on disk, so `libloading::Library::new` fails—that
-    // is the `ModuleInit` family.
-    use std::path::Path;
-    let missing = host.project_library_path("lean_rs_fixture", "DefinitelyMissingLib");
-    assert!(!missing.exists());
-    #[allow(unsafe_code, reason = "fixed missing image under retained fixture custody")]
-    // SAFETY: this fixed path is absent in the qualified fixture root, which this job owns.
-    let err = unsafe { LeanLibrary::open(runtime(), Path::new(&missing)) }.expect_err("missing library");
+    // Lake reports that the fixture has no library by this name, which is
+    // the `ModuleInit` family.
+    let err = host
+        .project_library_path("DefinitelyMissingLib")
+        .expect_err("Lake has no such library");
     assert_eq!(err.code(), LeanDiagnosticCode::ModuleInit, "got {err:?}");
 }
 

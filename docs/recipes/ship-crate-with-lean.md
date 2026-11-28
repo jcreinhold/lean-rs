@@ -1,7 +1,8 @@
 # Ship a crate with Lean code
 
 Use a Cargo build script to build crate-owned Lean source, then open its artifact manifest in process or in an app-owned
-worker child. The template is [`templates/shipped-lean-crate/`](https://github.com/jcreinhold/lean-rs/tree/main/templates/shipped-lean-crate).
+worker child. The template is
+[`templates/shipped-lean-crate/`](https://github.com/jcreinhold/lean-rs/tree/main/templates/shipped-lean-crate).
 
 ## Template and dependencies
 
@@ -17,8 +18,9 @@ The template's build script runs Lake for the packaged demo and the host-owned s
 process. The other two build the application-owned child and open a worker session.
 
 The template depends on the workspace's matching `lean-rs`, `lean-rs-host`, `lean-rs-worker-parent` and
-`lean-rs-worker-child` crates by path, and its build script on `lean-toolchain`. Its `Cargo.toml` also lists the dependencies for the application-owned artifact
-checks. Keep the parent, child, runtime and capability artifacts compatible when packaging them together.
+`lean-rs-worker-child` crates by path, and its build script on `lean-toolchain`. Its `Cargo.toml` also lists the
+dependencies for the application-owned artifact checks. Keep the parent, child, runtime and capability artifacts
+compatible when packaging them together.
 
 ## Build the capability
 
@@ -67,20 +69,20 @@ that trusted metadata.
 
 ## Open in process
 
-The template embeds the manifest and image selected by its build, verifies the expected module and dependency list,
-and writes the image bytes into an application-owned private directory. It uses the matching Lean runtime and
-passes that directory's guard to `TrustedWorkerCapability::load_snapshot`, which keeps the directory until the
-capability drops. The unsafe call admits exactly
-`ship_lean_demo_add` as `WorkerExportContract::U64Binary`. The resulting typed binding runs in the current process.
+The template embeds the manifest and image selected by its build, verifies the expected module and dependency list, and
+writes the image bytes into an application-owned private directory. It uses the matching Lean runtime and passes that
+directory's guard to `TrustedWorkerCapability::load_snapshot`, which keeps the directory until the capability drops. The
+unsafe call admits exactly `ship_lean_demo_add` as `WorkerExportContract::U64Binary`. The resulting typed binding runs
+in the current process.
 [Complete in-process caller](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/main.rs)
 
 ```rust,ignore
 let answer = capability.bind_binary("ship_lean_demo_add")?.call(40, 2)?;
 ```
 
-For generic dispatch, `LeanCapability::from_build_manifest`, `LeanCapability::exported` and
-`LeanExported::call` each require the application's unsafe assertion. Preflight checks artifact metadata and symbol
-presence. The caller establishes that the actual image implements the declared ABI and remains live for every use.
+For generic dispatch, `LeanCapability::from_build_manifest`, `LeanCapability::exported` and `LeanExported::call` each
+require the application's unsafe assertion. Preflight checks artifact metadata and symbol presence. The caller
+establishes that the actual image implements the declared ABI and remains live for every use.
 [Loader contract](../architecture/loading.md#native-ownership-in-010)
 
 Use a compile-time `env!` for paths emitted by this crate's build script. These are local build-artifact paths;
@@ -89,9 +91,11 @@ locations.
 
 ## Open in a worker
 
-Ship an application-owned child. Its `WorkerAuthority` implementation checks the requested manifest bytes, images
-and initializer against the deployment it owns and admits the symbols it serves. The template installs that
-authority with `run_worker_child_with_authority`.
+Ship an application-owned child. Its `WorkerAuthority` implementation checks the requested manifest bytes, images and
+initializer against the deployment it owns and admits the symbols it serves. The template installs that authority with
+`run_worker_child_with_authority`. Its build script also records the import roots `lake env` reports for the project and
+for the host shims. The authority returns the project's roots from `project_import_roots`, so the child runs no Lake,
+and `imports` accepts only that list followed by the shim roots.
 [Worker entrypoint](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/bin/shipped_lean_crate_worker.rs)
 
 Point the builder at that binary and the same manifest:

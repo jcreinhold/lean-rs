@@ -38,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed={}", lean_root.join(input).display());
     }
     let shim_output_key = lean_toolchain::generated_output_key_for_sysroot(&sysroot)?;
+    let lake = |root: &std::path::Path| lean_toolchain::LakeWorkspace::new(root).lean_sysroot(&sysroot);
     let demo = lean_toolchain::CargoLeanCapability::new(&lean_root, "ShipLeanDemo")
         .lean_sysroot(&sysroot)
         .package("ship_lean_demo")
@@ -107,39 +108,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let host = std::path::Path::new(host["manifest_path"].as_str().ok_or("missing host manifest")?)
         .parent()
         .ok_or("missing package root")?;
-    let interop = host.join("shims/lean-rs-interop-shims");
+    // Lake builds the interop shims as a dependency of the host shims.
     let shim = host.join("shims/lean-rs-host-shims");
-    let builder = |root: &std::path::Path, package: &str, target: &str| {
-        let builder = lean_toolchain::CargoLeanCapability::new(root, target)
-            .package(package)
-            .module(target)
-            .lean_sysroot(&sysroot);
-        match shim_output_key {
-            Some(key) => builder.generated_output_key(key),
-            None => builder,
-        }
-    };
-    let interop_built = builder(&interop, "lean_rs_interop_shims", "LeanRsInterop").build_quiet()?;
-    let mut host_builder = builder(&shim, "lean_rs_host_shims", "LeanRsHostShims");
+    let mut host_builder = lean_toolchain::CargoLeanCapability::new(&shim, "LeanRsHostShims")
+        .package("lean_rs_host_shims")
+        .module("LeanRsHostShims")
+        .lean_sysroot(&sysroot);
+    if let Some(key) = shim_output_key {
+        host_builder = host_builder.generated_output_key(key);
+    }
     for sig in lean_toolchain::host_shim_abi::compiled_host_binding_signatures().into_values() {
         host_builder = host_builder.export_signature(sig);
     }
     let built = host_builder.build_quiet()?;
-    // Both shim search paths must name the outputs this build actually selected.
-    // The demo retains its standard Lake layout.
-    let import_path = |built: &lean_toolchain::BuiltLeanCapability| -> Result<_, Box<dyn std::error::Error>> {
-        Ok(built
-            .dylib_path()
-            .parent()
-            .ok_or("missing shim library directory")?
-            .join("lean")
-            .canonicalize()?)
-    };
+    // Record the import roots Lake reports, so the worker runs no Lake.
     let mut record = deployment::Deployment {
         project: lean_root.canonicalize()?,
-        sysroot,
+        project_paths: lake(&lean_root).lean_path()?,
         shim_manifest: built.manifest_path().canonicalize()?,
-        shim_paths: vec![import_path(&interop_built)?, import_path(&built)?],
+        shim_paths: lake(&shim).lean_path()?,
+        sysroot,
         files: Default::default(),
     };
     record.files = record.inventory()?;

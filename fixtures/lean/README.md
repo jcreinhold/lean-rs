@@ -28,8 +28,9 @@ lake build
 
 Lake writes the shared library and serialized `.olean` modules under `.lake/build/`. Its underscore escaping turns
 package `lean_rs_fixture` into `lean__rs__fixture`, giving a shared-library stem `liblean__rs__fixture_LeanRsFixture`
-and initializer `initialize_lean__rs__fixture_LeanRsFixture`. Use the build helpers to discover artifact paths rather
-than hard-coding a platform extension or output subdirectory.
+and initializer `initialize_lean__rs__fixture_LeanRsFixture`. Ask Lake for artifact paths through
+`lean_toolchain::LakeWorkspace` or `CargoLeanCapability` rather than hard-coding a platform extension or output
+subdirectory.
 
 The [lakefile](lakefile.lean) shows the shared-library target shape for a consumer package. For a complete downstream
 example, use [the interop recipe](../../docs/recipes/downstream-interop.md).

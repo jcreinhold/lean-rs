@@ -8,8 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use lean_toolchain::{
-    SourcePackageError, SourcePackageManifestPolicy, SourcePackageMaterializationRequest,
-    materialize_source_package as materialize_with_toolchain,
+    SourcePackageError, SourcePackageMaterializationRequest, materialize_source_package as materialize_with_toolchain,
 };
 use sha2::{Digest, Sha256};
 
@@ -67,7 +66,6 @@ pub fn materialize_source_package(
             PathBuf::from("LeanRsInterop/Worker/Stream.lean"),
             PathBuf::from("c/interop_callback.c"),
         ],
-        manifest_policy: SourcePackageManifestPolicy::ZeroPackages,
     };
     let package = materialize_with_toolchain(&request)?;
     Ok(LeanRsInteropShimsSourcePackage {

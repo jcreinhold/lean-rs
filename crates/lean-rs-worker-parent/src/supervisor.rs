@@ -5339,7 +5339,7 @@ fn fixture_capability_manifest(fixture_root: &Path) -> Result<PathBuf, LeanWorke
             .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
     };
     let failure = |diagnostic| LeanWorkerError::CapabilityBuild { diagnostic };
-    let built = match builder().probe_ready_strict().map_err(failure)? {
+    let built = match builder().probe_ready().map_err(failure)? {
         Some(built) => built,
         None => builder().build_quiet().map_err(failure)?,
     };

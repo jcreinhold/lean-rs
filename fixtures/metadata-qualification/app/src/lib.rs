@@ -212,7 +212,7 @@ impl Record {
     }
     pub fn descriptor(&self) -> lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts {
         serde_json::from_value(serde_json::json!({
-            "protocol": 2,
+            "protocol": 1,
             "shim_manifest_path": self.shim_manifest,
             "shim_manifest_json": self.shim_json,
             "shim_search_paths": self.shim_paths,

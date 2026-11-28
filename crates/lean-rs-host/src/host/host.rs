@@ -12,7 +12,7 @@
 //! and the host → capabilities → session lifetime cascade.
 
 use core::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lean_rs::LeanRuntime;
 use lean_rs::error::LeanResult;
@@ -53,6 +53,18 @@ impl<'lean> LeanHost<'lean> {
         Ok(Self { runtime, project })
     }
 
+    /// Use `roots` as the project's import roots, in Lean's search order, instead of asking Lake.
+    ///
+    /// Without this, the first capability load runs `lake env` in the
+    /// project. A caller that already holds Lake's answer, such as the output
+    /// of [`lean_toolchain::LakeWorkspace::lean_path`], passes it here so the
+    /// host runs Lake no second time. The host uses the roots as given.
+    #[must_use]
+    pub fn with_import_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.project.set_import_roots(roots);
+        self
+    }
+
     /// Load the compiled capability dylib for the named
     /// `(package, lib_name)` pair, initialize its root module, and
     /// prepare the checked host-shim capability used by sessions.
@@ -66,10 +78,10 @@ impl<'lean> LeanHost<'lean> {
     /// # Errors
     ///
     /// Returns [`lean_rs::LeanError::Host`] with stage
-    /// [`lean_rs::HostStage::Load`] if the dylib does not exist or fails
-    /// to open. Missing or signature-mismatched mandatory host shims fail when
-    /// constructing a session; optional host shims degrade to `Unsupported` at
-    /// the corresponding call site.
+    /// [`lean_rs::HostStage::Load`] if Lake has no up-to-date library named
+    /// `lib_name` or the dylib fails to open. Missing or signature-mismatched
+    /// mandatory host shims fail when constructing a session; optional host
+    /// shims degrade to `Unsupported` at the corresponding call site.
     pub fn load_capabilities<'h>(
         &'h self,
         package: &str,
@@ -80,7 +92,7 @@ impl<'lean> LeanHost<'lean> {
         let prepared = prepare_host_artifacts()?;
         let shim = load_shim(&prepared)?;
         let initializer = LeanModuleInitializer::new(package, lib_name);
-        let library = load_project(&self.project.capability_dylib(package, lib_name), &initializer)?;
+        let library = load_project(&self.project.library(lib_name)?, &initializer)?;
         LeanCapabilities::from_prepared_capability(self, &prepared, shim, library, package, lib_name)
     }
 
@@ -108,10 +120,17 @@ impl<'lean> LeanHost<'lean> {
         LeanCapabilities::from_prepared(self, &prepared, shim)
     }
 
-    /// Resolve the project library location to submit to an application loader.
-    #[must_use]
-    pub fn project_library_path(&self, package: &str, lib_name: &str) -> std::path::PathBuf {
-        self.project.capability_dylib(package, lib_name)
+    /// The project library Lake reports for `lib_name`, to submit to an application loader.
+    ///
+    /// The first call for a name runs `lake --no-build query <lib_name>:shared`
+    /// in the project, and later calls reuse the answer. Lake builds nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Host`] if Lake fails, has no library
+    /// named `lib_name`, or would rebuild it.
+    pub fn project_library_path(&self, lib_name: &str) -> LeanResult<PathBuf> {
+        self.project.library(lib_name)
     }
 
     /// The runtime borrow this host was constructed with.

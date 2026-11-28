@@ -80,7 +80,7 @@ mod tests {
                 .expect("fixture shim selection")
                 .manifest
         } else {
-            let selection = crate::host::lake::ShimOutputSelection::resolve(None)
+            let selection = crate::host::lake::ShimOutputSelection::resolve()
                 .expect("supported exact Lean sysroot selects shim outputs");
             crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures(), &selection)
                 .expect("bundled shim capability builds")

@@ -10,8 +10,9 @@ to the latest supported entry when none is installed) to bake the live `LEAN_VER
 `LEAN_HEADER_DIGEST`, and `LEAN_RESOLVED_VERSION`; it re-exports `REQUIRED_SYMBOLS` and the supported-window table from
 the purely static `lean-rs-abi` so metadata consumers depend on neither the raw FFI/link crate nor a probe in `abi`.
 
-`olean_candidate` picks the `.olean` path Lean's `findOLean` would read for a module name. Lake owns the module graph;
-this crate does not rebuild it.
+`LakeWorkspace` asks Lake for a workspace's import roots (`lake env`, dependencies first and the root last) and for a
+library's shared file (`lake query <lib>:shared`, with or without building it). Lake owns the package graph and the
+output layout; this crate reads no `lake-manifest.json` and computes no Lake output path.
 
 Runtime application code usually does not depend on this crate directly: it shows up transitively through `lean-rs`.
 Downstream crates that ship Lean source commonly depend on it from `build.rs`, where `CargoLeanCapability` builds the
@@ -46,13 +47,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`CargoLeanCapability` emits Lean link directives, Cargo rerun triggers, runs `lake build <target>:shared`, resolves the
-built dylib path, writes a JSON artifact manifest, and emits deterministic `LEAN_RS_CAPABILITY_<TARGET>_MANIFEST` plus
-compatibility `LEAN_RS_CAPABILITY_<TARGET>_DYLIB` compile-time environment variables. `build_lake_target` remains
-available as the lower-level escape hatch and also covers Lake targets that depend on the generic
-`lean-rs-interop-shims` package. It reports cache hits and misses on stderr, emits only `cargo:` directives on stdout,
-and returns typed `LinkDiagnostics` for missing `lake`, target lookup failures, Lake build failures, and unresolved
-outputs.
+`CargoLeanCapability` emits Lean link directives and Cargo rerun triggers, runs `lake query <target>:shared`, which
+builds the library when it is out of date and prints its path, and writes a JSON artifact manifest. It also asks Lake
+for the `LeanRsInterop` library; when the workspace has one, the manifest lists it as the first dependency. The
+manifest goes beside the library, or into `OUT_DIR` when a build script builds without a generated-output key. The
+helper emits deterministic `LEAN_RS_CAPABILITY_<TARGET>_MANIFEST` plus compatibility
+`LEAN_RS_CAPABILITY_<TARGET>_DYLIB` compile-time environment variables. `probe_ready` runs `lake --no-build query`
+instead and returns `None` when Lake would rebuild the library or the manifest differs. `build_lake_target` remains the
+lower-level escape hatch. Both emit only `cargo:` directives on stdout and return typed `LinkDiagnostics` for a missing
+lakefile, a library Lake does not know, a `lake` that cannot start or fails, and an answer they cannot use.
 
 Use `.lean_sysroot(...)` when a host must build the capability with the same Lean prefix its worker child will use. The
 helper runs that prefix's `bin/lake` with a child-scoped `LEAN_SYSROOT`; it does not mutate the parent process

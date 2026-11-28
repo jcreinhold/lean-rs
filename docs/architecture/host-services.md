@@ -5,7 +5,8 @@
 in `lean-rs` and forbids unsafe Rust. Applications that only call explicit Lean `@[export]` functions can use `lean-rs`
 directly.
 
-The public API lives in the [crate root](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/lib.rs), public `host` modules, and
+The public API lives in the
+[crate root](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/lib.rs), public `host` modules, and
 [API baseline](../api-review/lean-rs-host-public.txt). This note records the behavioral boundaries rather than
 maintaining a second list of Rust signatures.
 
@@ -21,13 +22,14 @@ let declaration = session.query_declaration("MyProject.example", None)?;
 
 `from_lake_project` validates the root directory. `load_shims_only` prepares the bundled host and generic interop
 libraries without opening a user capability dylib. `load_capabilities(package, lib_name)` also opens and initializes
-that capability's shared library; both names are needed to resolve Lake's artifact naming convention.
+that capability's shared library. Lake reports the library's file for `lib_name`, and the initializer symbol needs both
+names.
 
 `LeanHost<'lean>` borrows the runtime. `LeanCapabilities<'lean, 'h>` borrows the host, and `LeanSession<'lean, 'c>`
 borrows capabilities while owning its imported environment. Semantic handles from `lean-rs` and `LeanEvidence<'lean>`
 retain the runtime lifetime. `PooledSession` additionally borrows its pool. The
-[compile-fail fixtures](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/tests/compile_fail) pin these lifetimes and the `!Send + !Sync`
-contract. All Lean work stays on the thread where the handles were constructed.
+[compile-fail fixtures](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/tests/compile_fail) pin
+these lifetimes and the `!Send + !Sync` contract. All Lean work stays on the thread where the handles were constructed.
 
 ## Service boundaries
 
@@ -47,8 +49,8 @@ there; host methods expose named services rather than arbitrary symbol calls.
 
 The host owns and packages its Lean shims. Sessions resolve mandatory bindings once; unavailable optional operations
 return their documented `Unsupported` outcome. The exact export rows and ABI shapes are defined in
-[`host_shim_abi.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/host_shim_abi.rs) and described in the
-[host capability contract](../lean-rs-host-capability-contract.md).
+[`host_shim_abi.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/host_shim_abi.rs) and
+described in the [host capability contract](../lean-rs-host-capability-contract.md).
 
 ## Checked host ABI metadata
 
@@ -65,8 +67,8 @@ checks remain separate. Only declaration metadata moves below the host layer; op
 
 ## Query and bulk semantics
 
-The [session implementation](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/session.rs) owns dispatch accounting and the following
-bulk behavior:
+The [session implementation](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/session.rs)
+owns dispatch accounting and the following bulk behavior:
 
 | Method | Missing declaration or failed item |
 | --- | --- |
@@ -93,7 +95,8 @@ produces bounded display strings. A `ProofSummary` is diagnostic data, not a pro
 session. `LeanKernelOutcome` contains evidence and is therefore thread-bound; its `EvidenceStatus` projection is plain
 Rust data.
 
-The current bounds are defined in [shared metadata](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/lib.rs) and
+The current bounds are defined in
+[shared metadata](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/lib.rs) and
 [proof summaries](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/evidence/summary.rs):
 
 | Limit | Default | Ceiling |

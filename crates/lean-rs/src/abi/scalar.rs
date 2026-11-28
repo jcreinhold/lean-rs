@@ -285,8 +285,8 @@ impl<'lean> TryFromLean<'lean> for f64 {
 // match these per-arg CRepr types, then dispatches.
 //
 // `Unit` uses `*mut lean_object` (boxed) because Lake encodes `Unit`
-// arguments as `lean_box(0)` at the C boundary—verified against
-// `fixtures/lean/.lake/build/ir/LeanRsFixture/Scalars.c`
+// arguments as `lean_box(0)` at the C boundary—verified against the C
+// that Lake emits for `fixtures/lean/LeanRsFixture/Scalars.lean`
 // (`lean_rs_fixture_unit_id(lean_object*)`).
 
 // SAFETY: Unit uses the scalar sentinel; its decoder consumes the owned boxed result.

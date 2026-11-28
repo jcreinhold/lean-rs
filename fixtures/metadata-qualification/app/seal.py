@@ -306,7 +306,8 @@ def main():
         # Pin the typed capability manifest in the private state. A later SDK
         # build may rewrite the typed host-shim snapshot, so it is not pinned.
         if scalar and manifest == "consumer":
-            assert path.parent == project / ".lake/lean-rs-build-cache"
+            # The SDK writes the manifest beside the library Lake built.
+            assert path.parent == project / ".lake/build/lib"
             assert path.name.startswith("LeanRsFixture-") and path.name.endswith(
                 ".lean-rs-capability.json"
             )
@@ -503,9 +504,8 @@ def main():
         assert len(packages) == 1
         newdir = packages[0]["dir"]
         assert (project / newdir).resolve() == dep
-        project_deps = [
-            project / newdir / ".lake/lean-rs-generated" / key / "lib/lean"
-        ]
+        # `lake env` names each package by its real path.
+        project_deps = [out(dep) / "lean"]
     project_oleans = (
         project / ".lake/build/lib/lean"
         if scalar or broken or (typed and not stream)
@@ -600,7 +600,8 @@ def main():
         directories=sorted(directories),
         interop_image=str(di),
         host_image=str(hi),
-        import_roots=list(map(str, [project_oleans, *project_deps, *shims])),
+        # Lake's order from `lake env`: dependencies, then the project.
+        import_roots=list(map(str, [*project_deps, project_oleans, *shims])),
     )
     rec["ordered_directory_ids"] = [
         (Path(root).stat().st_dev, Path(root).stat().st_ino)

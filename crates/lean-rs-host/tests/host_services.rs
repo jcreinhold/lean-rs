@@ -486,11 +486,9 @@ fn load_capabilities_prepares_checked_host_shims() {
 #[test]
 fn load_capabilities_missing_dylib_is_load_error() {
     let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
-    let missing = host.project_library_path("does_not_exist", "NoSuchLib");
-    assert!(!missing.exists());
-    #[allow(unsafe_code, reason = "absent path under retained fixture custody")]
-    // SAFETY: this test job owns the fixture, and nothing creates this missing image while it runs.
-    let err = unsafe { lean_rs::module::LeanLibrary::open(runtime(), missing) }.expect_err("missing dylib must fail");
+    let err = host
+        .project_library_path("NoSuchLib")
+        .expect_err("Lake has no such library");
     match err {
         LeanError::Host(failure) => {
             assert_eq!(failure.stage(), HostStage::Load);

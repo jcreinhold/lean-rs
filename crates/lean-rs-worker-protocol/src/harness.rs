@@ -426,7 +426,7 @@ fn fixture_capability_manifest(fixture_root: &Path) -> Result<PathBuf, WorkerHar
     let failure = |diagnostic: lean_toolchain::LinkDiagnostics| {
         WorkerHarnessError::CapabilityBuild(format!("{}: {diagnostic}", fixture_root.display()))
     };
-    let built = match builder().probe_ready_strict().map_err(failure)? {
+    let built = match builder().probe_ready().map_err(failure)? {
         Some(built) => built,
         None => builder().build_quiet().map_err(failure)?,
     };

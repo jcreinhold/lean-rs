@@ -1349,8 +1349,12 @@ impl HostAnchor {
         mode: &HostSessionMode,
         prepared: &mut Option<LeanPreparedHostArtifacts>,
     ) -> LeanResult<&'static Self> {
-        let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
         let authority = worker_authority()?;
+        let mut host = LeanHost::from_lake_project(runtime, Path::new(project_root))?;
+        if let Some(roots) = authority.project_import_roots(Path::new(project_root))? {
+            host = host.with_import_roots(roots);
+        }
+        let host = Box::leak(Box::new(host));
         let manifest = match mode {
             HostSessionMode::Capability { manifest_path, .. } => manifest_path.as_deref(),
             HostSessionMode::ShimsOnly => None,
@@ -1365,15 +1369,6 @@ impl HostAnchor {
         let worker_capability = manifest
             .map(|path| load_worker_manifest(runtime, Path::new(path)))
             .transpose()?;
-        let selected;
-        let prepared = if let Some(image) = &worker_capability
-            && authority.use_generated_project_imports(Path::new(project_root), image)?
-        {
-            selected = prepared.clone().for_generated_project(host, image)?;
-            &selected
-        } else {
-            prepared
-        };
         let shim = authority.host(runtime, prepared)?;
         let capabilities = match mode {
             HostSessionMode::Capability {
@@ -1383,7 +1378,7 @@ impl HostAnchor {
             } => {
                 let library = authority.project(
                     runtime,
-                    &host.project_library_path(package, lib_name),
+                    &host.project_library_path(lib_name)?,
                     &lean_rs::module::LeanModuleInitializer::new(package, lib_name),
                 )?;
                 LeanCapabilities::from_prepared_capability(host, prepared, shim, library, package, lib_name)?
@@ -3793,10 +3788,6 @@ mod tests {
         std::fs::write(
             project.join("lakefile.toml"),
             "name = \"snapshot\"\n[[lean_lib]]\nname = \"Snapshot\"\n",
-        )?;
-        std::fs::write(
-            project.join("lake-manifest.json"),
-            r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[],"name":"snapshot","lakeDir":".lake"}"#,
         )?;
         std::fs::write(project.join("Snapshot.lean"), "def Snapshot.value : Nat := 1\n")?;
         let prepared = lean_toolchain::CargoLeanCapability::new(&project, "Snapshot")

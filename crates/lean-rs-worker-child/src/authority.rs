@@ -132,20 +132,18 @@ pub trait WorkerAuthority: Send + Sync {
     fn authorize_worker_string_call(&self, _call: WorkerStringCall<'_>) -> LeanResult<()> {
         Ok(())
     }
-    /// Select generated imports for this exact admitted project capability.
+    /// Supply the project's import roots in Lean's search order, or `None` to ask Lake.
     ///
-    /// Ordinary sessions use default Lake roots unless the application opts in.
-    /// Opt in only if the complete ordered import graph uses the same generated
-    /// output slot as this image. This does not grant import authority.
+    /// With `None`, the worker runs `lake env` in `project` once and uses its
+    /// answer. An application that already ran
+    /// `lean_toolchain::LakeWorkspace::lean_path` for this project returns that
+    /// answer here, so the worker runs Lake no second time. The roots grant no
+    /// import authority: [`Self::imports`] still approves the ordered roots.
     ///
     /// # Errors
-    /// Returns an error if application policy cannot select the import layout.
-    fn use_generated_project_imports(
-        &self,
-        _project: &Path,
-        _capability: &lean_rs::module::TrustedWorkerCapability<'static>,
-    ) -> LeanResult<bool> {
-        Ok(false)
+    /// Returns an error if application policy refuses the project.
+    fn project_import_roots(&self, _project: &Path) -> LeanResult<Option<Vec<PathBuf>>> {
+        Ok(None)
     }
     /// Establish the exact import graph, ordered roots and profile.
     ///

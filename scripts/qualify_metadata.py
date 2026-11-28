@@ -850,7 +850,8 @@ def prepare_stream_package(release, reference=None):
                    cwd=APP, env=env, check=True, stdout=sys.stderr)
     manifest = Path(subprocess.check_output([TARGET / "debug/prepare", root, "--stream-shims"],
                                             cwd=APP, env=env, text=True).strip())
-    directory = host / "shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lean-rs-build-cache"
+    # The SDK writes the shim manifest beside the library Lake built.
+    directory = host / "shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lib"
     require(manifest.parent == root / directory and manifest.resolve(strict=True) == manifest,
             "stream worker prepared a different host package")
     actual = json.loads(manifest.read_bytes())
@@ -1010,14 +1011,14 @@ def stream_descriptor(shim_manifest):
     manifest = shim_manifest.resolve(strict=True)
     require(
         manifest == shim_manifest
-        and manifest.parent == host / output / "lean-rs-build-cache",
+        and manifest.parent == host / output / "lib",
         "select the canonical prepared host manifest",
     )
     with manifest.open("rb") as stream:
         raw = stream.read(64 * 1024 + 1)
     require(len(raw) <= 64 * 1024, "shim manifest exceeds wire bound")
     return {
-        "protocol": 2,
+        "protocol": 1,
         "shim_manifest_path": str(manifest),
         "shim_manifest_json": raw.decode(),
         "shim_search_paths": [
@@ -1385,7 +1386,7 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
         selected = json.loads(record.read_bytes())
         env["LEAN_RS_PREPARED_HOST_ARTIFACTS"] = json.dumps(
             {
-                "protocol": 2,
+                "protocol": 1,
                 "shim_manifest_path": selected["shim_manifest"],
                 "shim_manifest_json": selected["shim_json"],
                 "shim_search_paths": selected["shim_paths"],
@@ -1725,7 +1726,7 @@ def qualify_broken_import(
         host_selection, image_pins = ordinary_host_shim_selection(release, selected)
         typed_descriptor = json.dumps(
             {
-                "protocol": 2,
+                "protocol": 1,
                 "shim_manifest_path": str(manifest),
                 "shim_manifest_json": selected["shim_json"],
                 "shim_search_paths": selected["shim_paths"],

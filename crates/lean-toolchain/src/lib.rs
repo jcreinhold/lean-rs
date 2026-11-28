@@ -2,10 +2,9 @@
 //!
 //! Sits one layer above [`lean_rs_abi`], which owns link-free ABI/toolchain metadata. This crate
 //! composes on top: a typed [`ToolchainFingerprint`], the workspace-only Lake [`LAKE_FIXTURE_DIGEST`], a layered
-//! [`LinkDiagnostics`] error type, and reusable build-script helpers
-//! ([`emit_lean_link_directives_checked`], [`build_lake_target`],
-//! [`build_lake_target_quiet`]) that downstream embedders and higher layers can use to get
-//! consistent link/rerun directives and Lake dylib paths without duplicating policy.
+//! [`LinkDiagnostics`] error type, [`LakeWorkspace`], which asks Lake for import roots and library
+//! paths, and build-script helpers ([`emit_lean_link_directives_checked`], [`build_lake_target`],
+//! [`CargoLeanCapability`]) that print consistent link and rerun directives.
 //!
 //! ## Single typed entry point
 //!
@@ -30,20 +29,18 @@ mod fingerprint;
 pub mod host_shim_abi;
 #[cfg(unix)]
 pub mod inherited_pipe;
-mod lake_packages;
-mod lakefile_toml;
+mod lake;
 mod limits;
 mod loader;
 pub mod manifest_validation;
-mod modules;
 #[cfg(unix)]
 pub mod process_group;
 mod source_package;
 
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
-    build_lake_target_quiet, capability_env_var, capability_manifest_env_var, emit_lean_link_directives,
-    emit_lean_link_directives_checked, generated_output_key_for_sysroot,
+    capability_env_var, capability_manifest_env_var, emit_lean_link_directives, emit_lean_link_directives_checked,
+    generated_output_key_for_sysroot,
 };
 pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;
@@ -52,6 +49,7 @@ pub use fingerprint::{
     HOST_TRIPLE, LAKE_FIXTURE_DIGEST, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION,
     ToolchainFingerprint,
 };
+pub use lake::LakeWorkspace;
 pub use lean_rs_abi::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};
 pub use limits::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
@@ -63,11 +61,9 @@ pub use loader::{
     LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity, LeanModuleInitializer, bound_loader_text,
 };
 pub use manifest_validation::CapabilityManifest;
-pub use modules::{LeanModuleDiscoveryDiagnostic, olean_candidate};
 pub use source_package::{
-    GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageManifestPolicy,
-    SourcePackageMaterializationRequest, SourcePackageProvenance, materialize_source_package,
-    with_materialized_source_package,
+    GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageMaterializationRequest,
+    SourcePackageProvenance, materialize_source_package, with_materialized_source_package,
 };
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.

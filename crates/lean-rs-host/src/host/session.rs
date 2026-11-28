@@ -112,11 +112,10 @@
 //! the Lean-bound worker thread. A progress sink must not call back into
 //! the same session.
 //!
-//! The Rust side passes the `.olean` search path (resolved by
-//! [`crate::host::lake::LakeProject`]) as the first argument to the
-//! profile-aware import shim; the Lean shim only has to call
-//! `Lean.initSearchPath` and `Lean.importModules` on it. Path-layout
-//! knowledge stays in Rust.
+//! The Rust side passes the ordered import roots (the project's roots from
+//! `lake env` or the caller, then the shim roots) as the first argument to
+//! the profile-aware import shim; the Lean shim only has to call
+//! `Lean.initSearchPath` and `Lean.importModules` on them.
 //!
 //! ## Lifetime story
 //!
@@ -545,11 +544,8 @@ fn comparable_roots(roots: &[String]) -> bool {
 
 impl<'lean, 'c> LeanSession<'lean, 'c> {
     pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> Vec<String> {
-        let project_paths = capabilities.keyed_project_search_paths().map_or_else(
-            || capabilities.host().project().olean_search_paths_for_output(None),
-            <[std::path::PathBuf]>::to_vec,
-        );
-        let mut search_paths: Vec<String> = project_paths
+        let mut search_paths: Vec<String> = capabilities
+            .project_search_paths()
             .iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect();

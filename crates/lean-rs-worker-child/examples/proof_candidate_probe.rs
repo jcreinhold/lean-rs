@@ -228,7 +228,7 @@ fn run_warm(counts: &[usize]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::build_lake_target_quiet(&fixture_root(), "LeanRsFixture")?;
+    lean_toolchain::LakeWorkspace::new(fixture_root()).shared_library("LeanRsFixture")?;
     for count in [1, 3, 10] {
         run_cold(count)?;
     }

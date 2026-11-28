@@ -37,7 +37,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let max_imports = env_u64("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", DEFAULT_MAX_IMPORTS);
     let max_rss_kib = env_u64("LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB", DEFAULT_MAX_RSS_KIB);
     let fixture = fixture_root();
-    lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsFixture")?;
+    lean_toolchain::LakeWorkspace::new(&fixture).shared_library("LeanRsFixture")?;
 
     let worker_binary = worker_binary()?;
     let policy = LeanWorkerRestartPolicy::memory_bounded(max_imports, max_rss_kib);

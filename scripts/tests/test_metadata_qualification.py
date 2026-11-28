@@ -186,7 +186,7 @@ class MetadataQualificationTest(unittest.TestCase):
 
     def mock_private_package(self):
         root = qualification.stream_package_root()
-        manifest = root / "crates/lean-rs-host/shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lean-rs-build-cache/host.json"
+        manifest = root / "crates/lean-rs-host/shims/lean-rs-host-shims/.lake/lean-rs-generated/lean-4.36.0/lib/host.json"
 
         def prepare(_release):
             root.mkdir(mode=0o700)

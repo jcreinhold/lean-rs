@@ -7,11 +7,12 @@ use std::process::ExitCode;
 
 use lean_rs_host::host::{
     LeanPreparedHostArtifacts, prepare_host_artifacts, prepare_host_artifacts_in, ready_host_artifacts,
-    ready_host_artifacts_for_generated_output,
 };
 use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
 
 const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
+/// The only descriptor layout this child writes or reads.
+const DESCRIPTOR_PROTOCOL: u32 = 1;
 pub(crate) const PREPARED_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -20,42 +21,31 @@ fn invalid(message: impl Into<String>) -> io::Error {
 
 /// Serve a preparation flag, if the first argument is one, and return its exit code.
 ///
-/// `--lean-rs-ready-host-artifacts` prints the descriptor of shims that are
-/// already built, or exits 75 when they are not. With
-/// `--lean-rs-ready-host-artifacts-generated KEY` it probes that generated
-/// output slot. `--lean-rs-prepare-host-artifacts [DEST]` builds the shims,
-/// in `DEST` when given. This runs before the Lean runtime or the parent
-/// lifeline starts.
+/// `--lean-rs-ready-host-artifacts` prints the descriptor of shims that Lake
+/// reports up to date, or exits 75 when they are not; it builds nothing.
+/// `--lean-rs-prepare-host-artifacts [DEST]` builds the shims, in `DEST`
+/// when given. This runs before the Lean runtime or the parent lifeline
+/// starts.
 pub(crate) fn preparation_mode() -> Option<ExitCode> {
     let arg = std::env::args_os().nth(1)?;
-    let (probe, generated) = if arg == "--lean-rs-ready-host-artifacts" {
-        (true, false)
-    } else if arg == "--lean-rs-ready-host-artifacts-generated" {
-        (true, true)
+    let probe = if arg == "--lean-rs-ready-host-artifacts" {
+        true
     } else if arg == "--lean-rs-prepare-host-artifacts" {
-        (false, false)
+        false
     } else {
         return None;
     };
     let result = (|| -> Result<Option<LeanPreparedHostArtifacts>, Box<dyn std::error::Error>> {
         let args = std::env::args_os().collect::<Vec<_>>();
-        let valid_args = match (probe, generated) {
-            (true, true) => args.len() == 3,
-            (true, false) => args.len() == 2,
-            (false, _) => args.len() == 2 || args.len() == 3,
+        let valid_args = if probe {
+            args.len() == 2
+        } else {
+            args.len() == 2 || args.len() == 3
         };
         if !valid_args {
             return Err(invalid("artifact preparation got the wrong number of arguments").into());
         }
-        if generated {
-            let key = args
-                .get(2)
-                .and_then(|key| key.to_str())
-                .ok_or_else(|| invalid("generated output key must be UTF-8"))?;
-            Ok(ready_host_artifacts_for_generated_output(key)?
-                .map(LeanPreparedHostArtifacts::with_project_generated_output_matching_shims)
-                .transpose()?)
-        } else if probe {
+        if probe {
             Ok(ready_host_artifacts()?)
         } else if let Some(destination) = args.get(2) {
             Ok(Some(prepare_host_artifacts_in(Path::new(destination))?))
@@ -93,7 +83,7 @@ fn descriptor_bytes(prepared: &LeanPreparedHostArtifacts) -> io::Result<Vec<u8>>
             .ok_or_else(|| invalid("artifact descriptor paths must be UTF-8"))
     };
     let dto = LeanWorkerPreparedHostArtifacts {
-        protocol: if prepared.project_uses_generated_output() { 2 } else { 1 },
+        protocol: DESCRIPTOR_PROTOCOL,
         shim_manifest_path: path_string(prepared.manifest_path())?,
         shim_manifest_json: prepared.manifest_json().to_owned(),
         shim_search_paths: prepared
@@ -111,10 +101,7 @@ fn descriptor_bytes(prepared: &LeanPreparedHostArtifacts) -> io::Result<Vec<u8>>
 
 /// Parse the descriptor the parent passed in `LEAN_RS_PREPARED_HOST_ARTIFACTS`.
 ///
-/// The named manifest must still hold the descriptor's bytes. Protocol 2 says
-/// the shims use a generated output slot; project imports still use the
-/// default Lake roots unless `WorkerAuthority::use_generated_project_imports`
-/// selects that slot.
+/// The named manifest must still hold the descriptor's bytes.
 pub(crate) fn from_launch(value: Option<&OsStr>) -> io::Result<Option<LeanPreparedHostArtifacts>> {
     let Some(value) = value else {
         return Ok(None);
@@ -126,7 +113,7 @@ pub(crate) fn from_launch(value: Option<&OsStr>) -> io::Result<Option<LeanPrepar
         return Err(invalid("prepared descriptor exceeds 64 KiB"));
     }
     let dto: LeanWorkerPreparedHostArtifacts = serde_json::from_str(value).map_err(io::Error::other)?;
-    if dto.protocol != 1 && dto.protocol != 2 {
+    if dto.protocol != DESCRIPTOR_PROTOCOL {
         return Err(invalid("unsupported prepared artifact protocol"));
     }
     let prepared = LeanPreparedHostArtifacts::from_snapshot(
@@ -135,15 +122,6 @@ pub(crate) fn from_launch(value: Option<&OsStr>) -> io::Result<Option<LeanPrepar
         dto.shim_search_paths.into_iter().map(PathBuf::from).collect(),
     )
     .map_err(io::Error::other)?;
-    if dto.protocol == 2 {
-        // Refuse a protocol 2 descriptor whose shims name no generated slot.
-        drop(
-            prepared
-                .clone()
-                .with_project_generated_output_matching_shims()
-                .map_err(io::Error::other)?,
-        );
-    }
     let path = prepared.manifest_path();
     if path.canonicalize()? != path || read_bounded(path)? != prepared.manifest_json().as_bytes() {
         return Err(invalid("prepared host manifest differs from its launch snapshot"));
@@ -235,12 +213,8 @@ mod tests {
             let directory = directory.canonicalize().expect("canonical temp");
             let root = |name| {
                 let root = directory.join(name);
-                fs::create_dir_all(root.join(".lake/build/lib/lean")).expect("output directory");
-                fs::write(
-                    root.join(".lake/build/lib/libcap.dylib"),
-                    b"not loaded by metadata tests",
-                )
-                .expect("artifact");
+                fs::create_dir_all(root.join("out/lib/lean")).expect("output directory");
+                fs::write(root.join("out/lib/libcap.dylib"), b"not loaded by metadata tests").expect("artifact");
                 root
             };
             Self {
@@ -251,11 +225,11 @@ mod tests {
             }
         }
         fn manifest(root: &Path, package: &str, module: &str, deps: &[PathBuf]) -> PathBuf {
-            let path = root.join(".lake/capability.json");
+            let path = root.join("out/capability.json");
             fs::write(&path,serde_json::to_vec(&serde_json::json!({
                 "schema_version":lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
-                "primary_dylib":root.join(".lake/build/lib/libcap.dylib"),"package":package,"module":module,
-                "dependencies":deps.iter().map(|root|serde_json::json!({"dylib_path":root.join(".lake/build/lib/libcap.dylib")})).collect::<Vec<_>>(),"exports":[]
+                "primary_dylib":root.join("out/lib/libcap.dylib"),"package":package,"module":module,
+                "dependencies":deps.iter().map(|root|serde_json::json!({"dylib_path":root.join("out/lib/libcap.dylib")})).collect::<Vec<_>>(),"exports":[]
             })).expect("manifest JSON")).expect("manifest");
             path
         }
@@ -269,10 +243,7 @@ mod tests {
             LeanPreparedHostArtifacts::from_snapshot(
                 manifest.clone(),
                 fs::read_to_string(manifest).expect("snapshot"),
-                vec![
-                    self.interop.join(".lake/build/lib/lean"),
-                    self.host.join(".lake/build/lib/lean"),
-                ],
+                vec![self.interop.join("out/lib/lean"), self.host.join("out/lib/lean")],
             )
             .expect("storage descriptor")
         }
@@ -314,35 +285,16 @@ mod tests {
     }
 
     #[test]
-    fn launch_descriptor_cannot_select_generated_project_imports() {
+    fn launch_refuses_a_descriptor_of_another_protocol() {
         use std::os::unix::ffi::OsStrExt as _;
 
         let fixture = Fixture::new();
-        let flat = fixture.prepared();
-        let paths = [&fixture.interop, &fixture.host].map(|root| {
-            let path = root.join(".lake/lean-rs-generated/lean-4.36.0/lib/lean");
-            fs::create_dir_all(&path).expect("generated shim path");
-            path
-        });
-        let generated = LeanPreparedHostArtifacts::from_snapshot(
-            flat.manifest_path().to_owned(),
-            flat.manifest_json().to_owned(),
-            paths.to_vec(),
-        )
-        .expect("generated shim descriptor")
-        .with_project_generated_output_matching_shims()
-        .expect("protocol 2");
-        let bytes = descriptor_bytes(&generated).expect("encode generated descriptor");
-        let explicit = Some(OsStr::from_bytes(&bytes));
-        let launched = from_launch(explicit).expect("launch").expect("explicit snapshot");
-        assert_eq!(launched.shim_search_paths(), paths);
-        assert!(!launched.project_uses_generated_output());
-
-        let flat_bytes = descriptor_bytes(&flat).expect("encode default descriptor");
-        let mut dto: LeanWorkerPreparedHostArtifacts =
-            serde_json::from_slice(&flat_bytes).expect("decode default descriptor");
+        let bytes = descriptor_bytes(&fixture.prepared()).expect("encode descriptor");
+        let mut dto: LeanWorkerPreparedHostArtifacts = serde_json::from_slice(&bytes).expect("decode descriptor");
+        assert_eq!(dto.protocol, DESCRIPTOR_PROTOCOL);
         dto.protocol = 2;
-        let mislabeled = serde_json::to_vec(&dto).expect("encode mislabeled descriptor");
-        assert!(from_launch(Some(OsStr::from_bytes(&mislabeled))).is_err());
+        let other = serde_json::to_vec(&dto).expect("encode other protocol");
+        let error = from_launch(Some(OsStr::from_bytes(&other))).expect_err("other protocol");
+        assert!(error.to_string().contains("unsupported prepared artifact protocol"));
     }
 }

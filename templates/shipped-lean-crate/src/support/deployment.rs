@@ -10,6 +10,8 @@ use std::{
 #[derive(Serialize, Deserialize)]
 pub struct Deployment {
     pub project: PathBuf,
+    /// The project's import roots from `lake env`: dependencies, then the project.
+    pub project_paths: Vec<PathBuf>,
     pub sysroot: PathBuf,
     pub shim_manifest: PathBuf,
     pub shim_paths: Vec<PathBuf>,
@@ -49,8 +51,11 @@ impl Deployment {
             let p = PathBuf::from(image.as_str().ok_or_else(|| io::Error::other("invalid image"))?);
             files.insert(p.clone(), digest(&p)?);
         }
-        let output = self.project.join(".lake/build/lib/lean");
-        for root in std::iter::once(&output).chain(&self.shim_paths) {
+        let output = self
+            .project_paths
+            .last()
+            .ok_or_else(|| io::Error::other("no project import root"))?;
+        for root in self.project_paths.iter().chain(&self.shim_paths) {
             for entry in fs::read_dir(root)? {
                 let entry = entry?;
                 let name = entry.file_name();
@@ -59,7 +64,7 @@ impl Deployment {
                     return Err(io::Error::other("builtin Init shadow"));
                 }
                 if name == "ShipLeanDemo" || name.starts_with("ShipLeanDemo.") {
-                    if root != &output || entry.file_type()?.is_dir() {
+                    if root != output || entry.file_type()?.is_dir() {
                         return Err(io::Error::other("unexpected module location"));
                     }
                     files.insert(entry.path(), digest(&entry.path())?);

@@ -81,7 +81,7 @@ impl WorkerAuthority for Demo {
         }
         // SAFETY: the bundled host and interop images and manifest match the SDK build
         // recorded by this application, which runs no build of them while its worker runs.
-        Ok(unsafe {
+        unsafe {
             LoadedHostArtifacts::load(
                 runtime,
                 p.manifest_path().into(),
@@ -89,7 +89,13 @@ impl WorkerAuthority for Demo {
                 self.0.shim_paths.clone(),
                 (),
             )
-        }?)
+        }
+    }
+    fn project_import_roots(&self, project: &Path) -> LeanResult<Option<Vec<PathBuf>>> {
+        if project.canonicalize().map_err(ioerr)? != self.0.project {
+            return Err(denied());
+        }
+        Ok(Some(self.0.project_paths.clone()))
     }
     fn imports<'cap>(
         &self,
@@ -98,9 +104,7 @@ impl WorkerAuthority for Demo {
         names: Vec<String>,
         options: HostImportOptions,
     ) -> LeanResult<TrustedHostImports<'static, 'cap>> {
-        let expected: Vec<_> = std::iter::once(self.0.project.join(".lake/build/lib/lean"))
-            .chain(self.0.shim_paths.clone())
-            .collect();
+        let expected: Vec<_> = self.0.project_paths.iter().chain(&self.0.shim_paths).cloned().collect();
         if paths.iter().map(PathBuf::from).ne(expected)
             || names != ["ShipLeanDemo"]
             || options != HostImportOptions::default()

@@ -378,7 +378,7 @@ impl<'lean> LeanLibrary<'lean> {
     fn lookup_initializer(&self, name: &InitializerName) -> LeanResult<RawInitializer> {
         // SAFETY: the type parameter spells the canonical Lake
         // initializer signature (`(u8) -> *mut lean_object`), verified
-        // against the Lake-emitted C in `fixtures/lean/.lake/build/ir/`
+        // against the C that Lake emits for `fixtures/lean`
         // for every supported Lean version. `libloading::Library::get`
         // returns a borrowed `Symbol<'_, T>`; copying the raw function
         // pointer out of it via deref is the standard pattern when the

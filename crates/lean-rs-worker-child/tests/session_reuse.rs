@@ -60,7 +60,9 @@ fn ensure_fixture_built() {
     if ordinary_typed_selection().is_some() {
         return;
     }
-    lean_toolchain::build_lake_target_quiet(&fixture_root(), "LeanRsFixture").expect("fixture Lake target builds");
+    lean_toolchain::LakeWorkspace::new(fixture_root())
+        .shared_library("LeanRsFixture")
+        .expect("fixture Lake target builds");
 }
 
 /// `LeanRsFixtureLateExtension` is deliberately its own `lean_lib`, outside the
@@ -73,7 +75,8 @@ fn ensure_late_extension_fixture_built() {
         return;
     }
     ensure_fixture_built();
-    lean_toolchain::build_lake_target_quiet(&fixture_root(), "LeanRsFixtureLateExtension")
+    lean_toolchain::LakeWorkspace::new(fixture_root())
+        .shared_library("LeanRsFixtureLateExtension")
         .expect("late-extension Lake target builds");
 }
 

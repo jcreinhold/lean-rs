@@ -19,22 +19,19 @@ The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile 
 build. Applications ship an app-owned child binary. `LeanWorker` remains available for custom supervision, diagnostics,
 and focused lifecycle tests. `LeanWorkerCapabilityBuilder::check()` reports bootstrap readiness before body commands.
 
-An application can set one UTF-8 value of up to 4096 bytes with `LeanWorkerChild::application_launch_input`.
-The supervisor supplies those same bytes in `LEAN_RS_WORKER_APPLICATION_INPUT` on every launch and removes the
-variable when omitted. The child interprets and validates the data. If the value identifies an external file, the
-application verifies its contents and keeps the file unchanged. A capability pool keeps different launch selections separate
-when application input is present.
+An application can set one UTF-8 value of up to 4096 bytes with `LeanWorkerChild::application_launch_input`. The
+supervisor supplies those same bytes in `LEAN_RS_WORKER_APPLICATION_INPUT` on every launch and removes the variable when
+omitted. The child interprets and validates the data. If the value identifies an external file, the application verifies
+its contents and keeps the file unchanged. A capability pool keeps different launch selections separate when application
+input is present.
 
-## Import workspace
+## Import roots
 
-The capability project owns its dylib and manifest. The import workspace root separately determines Lean's search path:
-its `.lake/build/lib/lean` entry plus the complete `lake-manifest.json` dependency closure. The worker does not merge the
-capability project's dependency closure into that path.
-
-The import workspace defaults to the capability project. Set `import_workspace_root(...)` explicitly when loading a
-capability from one project to work on another. This root is part of pool reuse identity. Capability exports must use
-the host-installed search path; calling `Lean.initSearchPath` or reconstructing it from `LEAN_PATH` would discard the
-selected workspace.
+The capability project owns its dylib and manifest. The project root a session opens sets Lean's search path: the roots
+`lake env` reports for that project, dependencies first and the project last. The child's
+`WorkerAuthority::project_import_roots` can supply that list instead, and `WorkerAuthority::imports` approves it. The
+worker does not add the capability project's dependencies to that path. Capability exports must use the search path the
+host installs; calling `Lean.initSearchPath` or rebuilding it from `LEAN_PATH` would discard the selected roots.
 
 ## Results and failures
 
@@ -43,10 +40,10 @@ success. Typed row decode errors identify the command export, stream, and sequen
 success; [streaming mechanics and measurements](worker-streaming.md) define that contract.
 
 Startup and request deadlines are separate. `LeanWorkerConfig::startup_timeout` covers the child handshake.
-`LeanWorkerConfig::request_timeout`, `LeanWorker::set_request_timeout`, and `LeanWorkerSession::set_request_timeout`
-set the parent watchdog for a request. Timeout retires the child, records
-`LeanWorkerRestartReason::RequestTimeout`, returns `LeanWorkerError::Timeout`, and invalidates the session. Replacement
-failure does not erase pending cleanup ownership; [runtime semantics](worker-runtime.md) govern recovery.
+`LeanWorkerConfig::request_timeout`, `LeanWorker::set_request_timeout`, and `LeanWorkerSession::set_request_timeout` set
+the parent watchdog for a request. Timeout retires the child, records `LeanWorkerRestartReason::RequestTimeout`, returns
+`LeanWorkerError::Timeout`, and invalidates the session. Replacement failure does not erase pending cleanup ownership;
+[runtime semantics](worker-runtime.md) govern recovery.
 
 ## Metadata
 
@@ -55,8 +52,8 @@ failure does not erase pending cleanup ownership; [runtime semantics](worker-run
 version, and diagnostic envelopes. Applications decide how those facts affect compatibility, caches, and support.
 
 Loaded host-runtime metadata is a third contract: it describes manifest-checked host shim bindings and can be required
-before a body runs. It is documented with the [session adapter](worker-sessions.md#loaded-host-runtime-metadata).
-It is separate from capability version metadata and from evidence that a command executed.
+before a body runs. It is documented with the [session adapter](worker-sessions.md#loaded-host-runtime-metadata). It is
+separate from capability version metadata and from evidence that a command executed.
 
 The [capability recipe](../recipes/worker-capability-runner.md) is the normal worked example. The
 [scale and replacement fixtures](../testing.md#worker-fixtures) exercise these generic primitives without adopting

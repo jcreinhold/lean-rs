@@ -1,10 +1,10 @@
 # Versioning and Compatibility
 
-[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) is the source of truth for accepted Lean releases
-and audited `lean.h` digests. The current window starts at 4.30.0 and ends at 4.36.0, including the explicitly listed
-release candidates. Do not infer support for an unlisted release from its version number. The
-[version matrix](../version-matrix.md) summarizes support; the [bump procedure](../bump-toolchain.md) owns changes to
-it.
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) is the
+source of truth for accepted Lean releases and audited `lean.h` digests. The current window starts at 4.30.0 and ends at
+4.36.0, including the explicitly listed release candidates. Do not infer support for an unlisted release from its
+version number. The [version matrix](../version-matrix.md) summarizes support; the
+[bump procedure](../bump-toolchain.md) owns changes to it.
 
 ## Toolchain identity and ABI checks
 
@@ -62,31 +62,35 @@ release-by-release chronology here.
 
 ## CI coverage and platforms
 
-The [CI workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml) runs the head Lean version on `ubuntu-latest` and `macos-latest` by
-default. Its manual `full_matrix` option runs every listed release on both platforms. A support claim must distinguish
-head validation from full-window validation; the default PR run is not a full-window sweep.
+The [CI workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml) runs the head Lean version
+on `ubuntu-latest` and `macos-latest` by default. Its manual `full_matrix` option runs every listed release on both
+platforms. A support claim must distinguish head validation from full-window validation; the default PR run is not a
+full-window sweep.
 
 Supported platforms are x86_64 GNU/Linux and Apple Silicon macOS as exercised by that matrix. Windows, BSD, embedded,
 and WASM have no support commitment. Adding a platform requires its build/link policy and CI coverage, not just a
 conditional compilation fix.
 
-The Rust channel is `stable` in [`rust-toolchain.toml`](https://github.com/jcreinhold/lean-rs/blob/main/rust-toolchain.toml); this follows stable rather than
-pinning an exact compiler release. The MSRV is 1.94 in [`Cargo.toml`](https://github.com/jcreinhold/lean-rs/blob/main/Cargo.toml). Compile-fail diagnostics are
-validated in their dedicated [workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/compile-fail.yml) because wording varies with compiler
-and platform.
+The Rust channel is `stable` in
+[`rust-toolchain.toml`](https://github.com/jcreinhold/lean-rs/blob/main/rust-toolchain.toml); this follows stable rather
+than pinning an exact compiler release. The MSRV is 1.94 in
+[`Cargo.toml`](https://github.com/jcreinhold/lean-rs/blob/main/Cargo.toml). Compile-fail diagnostics are validated in
+their dedicated [workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/compile-fail.yml) because
+wording varies with compiler and platform.
 
 ## Lake naming
 
-All supported Lean releases use the newer Lake convention. The loader and project discovery still probe legacy filenames
-so callers need not encode the naming policy themselves:
+All supported Lean releases use the newer Lake convention. lean-rs asks Lake for a library's file with
+`lake query <lib>:shared` and never builds the file name itself. The loader tries the newer initializer symbol first and
+falls back to the older one:
 
-| Lean range | Shared library | Initializer |
-| --- | --- | --- |
-| Through 4.26 | `lib{LibName}.{dylib,so}` | `initialize_{MangledModule}` |
-| From 4.27 | `lib{escaped_package}_{LibName}.{dylib,so}` | `initialize_{MangledPackage}_{MangledModule}` |
+| Lean range | Initializer |
+| --- | --- |
+| Through 4.26 | `initialize_{MangledModule}` |
+| From 4.27 | `initialize_{MangledPackage}_{MangledModule}` |
 
-Probing the old shape does not extend the supported toolchain window. Use the
-[build/link helpers](build-and-link.md), not hand-built paths.
+The fallback does not extend the supported toolchain window. Use the [build/link helpers](build-and-link.md), not
+hand-built paths.
 
 ## Crate and protocol compatibility
 
