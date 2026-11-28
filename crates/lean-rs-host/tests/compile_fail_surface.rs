@@ -7,8 +7,7 @@
 //!    neither [`Send`] nor [`Sync`], so a Lean-derived value cannot
 //!    travel to another OS thread.
 //! 3. A `LeanSession` cannot outlive the `LeanCapabilities` borrow it
-//!    was opened from, and a `PooledSession` cannot outlive its
-//!    `SessionPool`—each handle borrows its parent and is bounded by it.
+//!    was opened from.
 //!
 //! Each negative case is a standalone `.rs` file with a matching
 //! `.stderr` snapshot. The snapshots capture `rustc` diagnostics, whose
@@ -40,5 +39,4 @@ fn surface_invariants_are_enforced_by_the_type_system() {
     t.compile_fail("tests/compile_fail/handle_outlives_runtime.rs");
     t.compile_fail("tests/compile_fail/runtime_is_not_send_or_sync.rs");
     t.compile_fail("tests/compile_fail/session_outlives_capabilities.rs");
-    t.compile_fail("tests/compile_fail/pooled_session_outlives_pool.rs");
 }

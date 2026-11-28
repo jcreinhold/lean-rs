@@ -37,7 +37,7 @@ them; see the reported diagnostic code and [diagnostics guide](../../../docs/dia
 | --- | --- |
 | `cargo run -p lean-rs-host --example tour` | Composes host open, capability load, import, elaboration, kernel checking, a bulk query, and `Meta.whnf`; prints `name=<stage> elapsed_us=<u64>`. |
 | `cargo run -p lean-rs-host --example lake_build_helper` | Runs a Lake shared-library build through `lean-toolchain`; prints Cargo rerun directives and the resolved `dylib=...` path (`.dylib` on macOS, `.so` on Linux). |
-| `cargo run --release -p lean-rs-host --example long_session_memory` | Emits workload parameters, pool/reuse counters, and RSS checkpoints across imports, warm queries, and drops. |
+| `cargo run --release -p lean-rs-host --example long_session_memory` | Emits workload parameters, import counters, and RSS checkpoints across imports, warm queries, and drops. |
 
 The long-session executable installs a tracing subscriber. Embedding applications configure their own subscriber; set `RUST_LOG=lean_rs=debug` for their structured
 spans. Query/check examples propagate errors and print their diagnostic code; the tour uses direct assertions for its

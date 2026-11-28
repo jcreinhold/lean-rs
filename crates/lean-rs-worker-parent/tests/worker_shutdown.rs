@@ -30,13 +30,12 @@ use lean_rs_worker_protocol::protocol::{
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationFilter, LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo,
-    LeanWorkerDeclarationVerificationBatchResult,
-    LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
-    LeanWorkerDeclarationVerificationStatus, LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions,
-    LeanWorkerImportStats, LeanWorkerModuleCacheStatus, LeanWorkerModuleQueryBatchEnvelope,
-    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
-    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
-    LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationBatchRow,
+    LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationStatus, LeanWorkerDiagnostic,
+    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerModuleCacheStatus,
+    LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
     LeanWorkerSourceCoordinateSpace, LeanWorkerSourceRange,
 };
 use serde_json::value::RawValue;
@@ -271,7 +270,6 @@ fn main() {
 }
 
 fn check_application_launch_input() {
-
     assert_eq!(env::var(INPUT_ENV).as_deref(), Ok("ambient"));
     let executable = env::current_exe().expect("fixture executable");
     let root = env::current_dir().expect("fixture root");

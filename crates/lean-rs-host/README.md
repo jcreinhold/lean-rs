@@ -2,8 +2,8 @@
 
 Standard Lean services for Rust applications embedding Lean 4. Provides the `LeanHost` / `LeanCapabilities` /
 `LeanSession` trio, the kernel-check evidence types (`LeanEvidence`, `LeanKernelOutcome`, `ProofSummary`), the typed
-elaboration diagnostics (`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`, `LeanSeverity`, `LeanPosition`), the
-bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` / `PooledSession` reuse helper.
+elaboration diagnostics (`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`, `LeanSeverity`, `LeanPosition`), and
+the bounded `MetaM` service surface at `lean_rs_host::meta::*`.
 
 Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed FFI crate. The opaque semantic handles `LeanName`,
 `LeanLevel`, `LeanExpr`, and `LeanDeclaration` live on `lean-rs`; this crate consumes them through `use lean_rs::{...}`.

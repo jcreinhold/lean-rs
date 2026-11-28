@@ -974,10 +974,10 @@ fn imports_over_three_profiles_and_a_return(worker: &mut LeanWorker) -> u64 {
 }
 
 /// A full pool evicts the **least recently used** entry and keeps the incoming
-/// one. Pinned because the obvious alternative — `lean-rs-host`'s own
-/// `SessionPool`, which drops the *incoming* entry at capacity — inverts it: the
-/// same sequence under that policy keeps the first profile pooled and answers
-/// the return in three imports rather than four.
+/// one. Pinned because the other simple policy, which drops the *incoming*
+/// entry at capacity, inverts it: the same sequence under that policy keeps the
+/// first profile pooled and answers the return in three imports rather than
+/// four.
 #[test]
 fn a_full_pool_evicts_least_recently_used_and_re_imports() {
     ensure_late_extension_fixture_built();

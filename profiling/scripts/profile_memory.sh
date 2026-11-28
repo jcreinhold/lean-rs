@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]]; then
-	echo "Usage: $0 <long-session|long-session-fresh|long-session-pooled|long-session-steady|long-session-matrix|long-session-bracketed|long-session-derived|worker-cycling|all>"
+	echo "Usage: $0 <long-session|long-session-fresh|long-session-steady|long-session-matrix|long-session-bracketed|long-session-derived|worker-cycling|all>"
 	exit 1
 fi
 
@@ -34,7 +34,6 @@ run_long_session_mode() {
 		LEAN_RS_LONG_SESSION_IMPORTS="${LEAN_RS_LONG_SESSION_IMPORTS:-1}" \
 		LEAN_RS_LONG_SESSION_BULK="${LEAN_RS_LONG_SESSION_BULK:-64}" \
 		LEAN_RS_LONG_SESSION_ELAB="${LEAN_RS_LONG_SESSION_ELAB:-64}" \
-		LEAN_RS_LONG_SESSION_POOL_CAPACITY="${LEAN_RS_LONG_SESSION_POOL_CAPACITY:-1}" \
 		LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY="${LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY:-1}" \
 		LEAN_RS_LONG_SESSION_MAX_RSS_KIB="${LEAN_RS_LONG_SESSION_MAX_RSS_KIB:-1572864}" \
 		"$REPO_ROOT/target/profiling/examples/long_session_memory"
@@ -52,7 +51,6 @@ run_worker_cycling() {
 case "$TARGET" in
 long-session) run_long_session_mode all ;;
 long-session-fresh) run_long_session_mode fresh-import ;;
-long-session-pooled) run_long_session_mode pooled-reuse ;;
 long-session-steady) run_long_session_mode steady-state ;;
 long-session-matrix) run_long_session_mode import-matrix ;;
 long-session-bracketed) run_long_session_mode bracketed-lightweight ;;
@@ -60,7 +58,6 @@ long-session-derived) run_long_session_mode derived-indexes ;;
 worker-cycling) run_worker_cycling ;;
 all)
 	run_long_session_mode fresh-import
-	run_long_session_mode pooled-reuse
 	run_long_session_mode steady-state
 	run_long_session_mode import-matrix
 	run_long_session_mode bracketed-lightweight
@@ -69,7 +66,7 @@ all)
 	;;
 *)
 	echo "Unknown target: $TARGET"
-	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, long-session-bracketed, long-session-derived, worker-cycling, all"
+	echo "Available: long-session, long-session-fresh, long-session-steady, long-session-matrix, long-session-bracketed, long-session-derived, worker-cycling, all"
 	exit 1
 	;;
 esac

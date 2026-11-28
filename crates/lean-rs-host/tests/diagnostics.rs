@@ -202,8 +202,8 @@ fn capture_records_runtime_init_span() {
     // Use it as the anchor that proves the capture infrastructure is
     // wired up end-to-end against the real `lean_rs` instrumentation.
     //
-    // The richer span coverage—`library.open`, `session.import`,
-    // bulk dispatch, pool acquire—is covered by single-test runs at
+    // The richer span coverage—`library.open`, `session.import`, and
+    // bulk dispatch—is covered by single-test runs at
     // `RUST_LOG=lean_rs=trace cargo test -p lean-rs --test diagnostics`
     // and documented in `docs/diagnostics.md`. We do not assert it from
     // the parallel-`cargo test` happy path because callsite Interest

@@ -471,8 +471,8 @@ impl LeanWorkerConfig {
 /// Policy for cycling a worker child before the next request.
 ///
 /// The policy resets retained Lean runtime memory only by restarting the
-/// process. It does not change `lean-rs-host`'s in-process memory model, and it
-/// does not imply that `SessionPool::drain()` can return process-global Lean
+/// process. It does not change `lean-rs-host`'s in-process memory model:
+/// dropping a session in the same process does not return process-global Lean
 /// memory to the OS.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LeanWorkerRestartPolicy {

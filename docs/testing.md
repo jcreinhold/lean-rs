@@ -46,7 +46,7 @@ For a local smoke check that avoids same-process import-heavy targets, use:
 cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci
 cargo test -p lean-rs-profiling parses_import_stats_lines
 cargo check --profile profiling -p lean-rs-host --example long_session_memory
-cargo check --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-child --example memory_cycling --example pool_memory_scheduling
+cargo check --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-child --example memory_cycling
 cargo check --profile profiling -p lean-rs-profiling --bins
 ```
 
@@ -252,9 +252,9 @@ Use this inventory when adding or selecting tests:
 | --- | --- | --- | --- |
 | `lean-rs`, `lean-toolchain`, `lean-rs-worker-protocol` unit tests | cheap/unit | `cargo test -p <crate>` or nextest | No full host-session imports. |
 | `lean-rs-host` unit tests that do not call `LeanCapabilities::session` | cheap/unit | nextest or focused `cargo test` | Same-process host import guard does not affect these. |
-| `crates/lean-rs-host/tests/session_leak_loop.rs` small tests | bounded per-test imports or pool reuse | `cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci` | Each selected test process resets Lean state. |
-| `session_create_drop_loop_long`, `pool_acquire_release_loop_long` | import-heavy diagnostic | ignored plus `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1` | Explicitly budgeted diagnostics; not part of the current ASan job or routine smoke tests. |
-| `crates/lean-rs-host/tests/batching_and_pool.rs` | many host-session service tests | `cargo nextest run -p lean-rs-host --test batching_and_pool --profile ci` | Do not run the whole integration binary through plain `cargo test`; use nextest isolation. |
+| `crates/lean-rs-host/tests/session_leak_loop.rs` small tests | bounded per-test imports | `cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci` | Each selected test process resets Lean state. |
+| `session_create_drop_loop_long` | import-heavy diagnostic | ignored plus `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1` | Explicitly budgeted diagnostics; not part of the current ASan job or routine smoke tests. |
+| `crates/lean-rs-host/tests/batching.rs` | many host-session service tests | `cargo nextest run -p lean-rs-host --test batching --profile ci` | Do not run the whole integration binary through plain `cargo test`; use nextest isolation. |
 | `long_session_memory` example and profiling collectors | profiling-only | `cargo check` locally; default RSS cap is 1,572,864 KiB; tune with `LEAN_RS_LONG_SESSION_MAX_RSS_KIB` | Runtime profiling must be capped and opt-in. |
 | Worker child/parent pool and capability tests | worker process boundary | `cargo test -p lean-rs-worker-child pool`, `cargo test -p lean-rs-worker-child capability_builder`, or nextest | Fresh imports happen in worker children or isolated test processes. |
 

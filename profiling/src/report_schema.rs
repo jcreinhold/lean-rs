@@ -60,11 +60,7 @@ pub struct WorkloadRun {
     #[serde(default)]
     pub admissions: Vec<AdmissionSample>,
     #[serde(default)]
-    pub session_reuse: Vec<SessionReuseSample>,
-    #[serde(default)]
     pub replacements: Vec<ReplacementSample>,
-    #[serde(default)]
-    pub batches: Vec<BatchSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -133,11 +129,6 @@ pub struct TimingSample {
     pub kind: String,
     pub elapsed_ms: f64,
     pub rss_kib: Option<u64>,
-    pub workers: Option<u64>,
-    pub total_child_rss_kib: Option<u64>,
-    pub worker_restarts: Option<u64>,
-    pub max_import_restarts: Option<u64>,
-    pub policy_restarts: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,21 +148,6 @@ pub struct AdmissionSample {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionReuseSample {
-    pub label: String,
-    pub iteration: Option<u64>,
-    pub layer: String,
-    pub key_hits: u64,
-    pub key_misses: u64,
-    pub distinct_keys_seen: u64,
-    pub fresh_imports_avoided: u64,
-    pub miss_empty_pool: u64,
-    pub miss_reuse_disabled: u64,
-    pub miss_no_matching_key: u64,
-    pub last_miss_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplacementSample {
     pub label: String,
     pub iteration: Option<u64>,
@@ -187,24 +163,6 @@ pub struct ReplacementSample {
     pub replacement_reason: Option<String>,
     pub replacement_budget_status: Option<String>,
     pub skipped_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchSample {
-    pub label: String,
-    pub iteration: Option<u64>,
-    pub layer: String,
-    pub workload: String,
-    pub selectors: u64,
-    pub request_delta: u64,
-    pub import_delta: u64,
-    pub elapsed_ms: f64,
-    pub parent_rss_kib: Option<u64>,
-    pub child_rss_kib: Option<u64>,
-    pub result_items: u64,
-    pub item_failures: u64,
-    pub total_truncated: bool,
-    pub worker_frames: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

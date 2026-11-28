@@ -8,8 +8,6 @@
 //! 2. A worker thread that holds a `LeanThreadGuard` for the duration of
 //!    its Lean work can build its own host/capabilities/session chain
 //!    and run host calls independently of other worker threads.
-//! 3. Per-thread `SessionPool` instances live and die with their owning
-//!    worker, never crossing a thread boundary.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
@@ -22,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 use lean_rs::{LeanRuntime, LeanThreadGuard};
-use lean_rs_host::{LeanCapabilities, LeanHost, LeanProgressEvent, LeanProgressSink, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanHost, LeanProgressEvent, LeanProgressSink};
 
 fn fixture_lake_root() -> PathBuf {
     fixture::native_fixture_root()
@@ -169,49 +167,4 @@ fn independent_worker_sessions_run_in_parallel() {
         WORKERS,
         "every query must report progress from Lean"
     );
-}
-
-#[test]
-fn per_worker_session_pool_under_concurrency() {
-    // `SessionPool` is `!Send + !Sync`; the supported deployment is one
-    // pool per worker thread, all anchored to the shared `'static`
-    // runtime. Verify that two workers can drive independent pools
-    // concurrently against the same Lake project.
-    let _ = LeanRuntime::init().expect("main-thread init must succeed");
-    let lake_root = fixture_lake_root();
-
-    const WORKERS: usize = 2;
-    const CHECKOUTS_PER_WORKER: usize = 6;
-    let barrier = std::sync::Arc::new(Barrier::new(WORKERS));
-    let mut handles = Vec::with_capacity(WORKERS);
-    for _ in 0..WORKERS {
-        let barrier = std::sync::Arc::clone(&barrier);
-        let lake_root = lake_root.clone();
-        handles.push(thread::spawn(move || {
-            let runtime = LeanRuntime::init().expect("worker init must succeed");
-            let _guard = LeanThreadGuard::attach(runtime);
-            let host = LeanHost::from_lake_project(runtime, lake_root).expect("host opens");
-            let caps = initialized_fixture(&host);
-            let pool = SessionPool::with_capacity(runtime, 2);
-            barrier.wait();
-            let imports = fixture::native_imports(&caps, "LeanRsFixture.Handles");
-            for _ in 0..CHECKOUTS_PER_WORKER {
-                let mut session = pool
-                    .acquire(&caps, &imports, None, None)
-                    .expect("pool acquire returns a session");
-                let kind = session
-                    .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
-                    .expect("declaration_kind succeeds");
-                drop(kind);
-            }
-            let stats = pool.stats();
-            assert!(
-                stats.acquired >= CHECKOUTS_PER_WORKER as u64,
-                "pool stats must record every acquire",
-            );
-        }));
-    }
-    for handle in handles {
-        handle.join().expect("worker thread must not panic");
-    }
 }

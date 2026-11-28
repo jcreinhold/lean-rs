@@ -37,7 +37,6 @@ long-session)
 	cargo build --profile profiling -p lean-rs-host --example long_session_memory
 	export LEAN_RS_LONG_SESSION_MODE="${LEAN_RS_LONG_SESSION_MODE:-fresh-import}"
 	export LEAN_RS_LONG_SESSION_IMPORTS="${LEAN_RS_LONG_SESSION_IMPORTS:-1}"
-	export LEAN_RS_LONG_SESSION_POOL_CAPACITY="${LEAN_RS_LONG_SESSION_POOL_CAPACITY:-1}"
 	export LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY="${LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY:-1}"
 	export LEAN_RS_LONG_SESSION_MAX_RSS_KIB="${LEAN_RS_LONG_SESSION_MAX_RSS_KIB:-1572864}"
 	record_profile "long-session-${LEAN_RS_LONG_SESSION_MODE:-fresh-import}" \

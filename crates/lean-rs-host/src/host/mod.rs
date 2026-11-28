@@ -24,11 +24,9 @@
 //!   [`evidence::ProofSummary`] projection returned by
 //!   [`LeanSession::summarize_evidence`].
 //!
-//! Two further pieces sit alongside but stay at sub-module paths:
-//! [`meta`] for the optional bounded `MetaM` capability (only
-//! [`LeanSession::run_meta`] touches it), and [`pool`] for the
-//! capacity-bounded [`pool::SessionPool`] / [`pool::PooledSession`]
-//! reuse helper.
+//! [`meta`] sits alongside at its own sub-module path: it holds the
+//! optional bounded `MetaM` capability, which only
+//! [`LeanSession::run_meta`] touches.
 //!
 //! ## Cascade
 //!
@@ -51,7 +49,6 @@ pub mod declaration_search;
 pub mod elaboration;
 pub mod evidence;
 pub mod meta;
-pub mod pool;
 pub mod process;
 
 pub(crate) mod lake;
@@ -90,9 +87,6 @@ pub use self::declaration_search::{
     DeclarationSearchTimings, LeanDerivedWorkFacts,
 };
 pub use self::host::LeanHost;
-pub use self::pool::{
-    PoolStats, PooledSession, SessionPool, SessionPoolConfig, SessionPoolKeyMissReason, SessionPoolMemoryPolicy,
-};
 pub use self::process::{
     DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
     DeclarationVerificationBatchRow, DeclarationVerificationFacts, DeclarationVerificationOutcome,

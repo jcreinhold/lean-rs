@@ -1,8 +1,8 @@
 //! Integration tests for the cooperative cancellation contract.
 //!
 //! Cancellation is a public host-stack behavior, so these tests exercise
-//! it through `LeanCapabilities`, `LeanSession`, and `SessionPool` rather
-//! than through the private check helper.
+//! it through `LeanCapabilities` and `LeanSession` rather than through
+//! the private check helper.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -15,7 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lean_rs::{LeanDiagnosticCode, LeanError, LeanRuntime};
-use lean_rs_host::{LeanCancellationToken, LeanHost, SessionPool};
+use lean_rs_host::{LeanCancellationToken, LeanHost};
 
 fn fixture_lake_root() -> PathBuf {
     fixture::native_fixture_root()
@@ -128,31 +128,4 @@ fn bulk_query_observes_cancellation_from_another_thread() {
         observed_at.duration_since(cancelled_at) < Duration::from_secs(2),
         "cooperative cancellation should be observed at the next per-item check",
     );
-}
-
-#[test]
-fn pool_acquire_cancelled_before_import_does_not_update_stats() {
-    let runtime = runtime();
-    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
-    let caps = fixture::native_capabilities(&host).expect("load caps");
-    let pool = SessionPool::with_capacity(runtime, 1);
-    let token = LeanCancellationToken::new();
-    token.cancel();
-
-    let err = pool
-        .acquire(
-            &caps,
-            &fixture::native_imports(&caps, "LeanRsFixture.Handles"),
-            Some(&token),
-            None,
-        )
-        .expect_err("pre-cancelled acquire should not import");
-
-    assert_cancelled(err);
-    assert_eq!(
-        pool.stats().imports_performed,
-        0,
-        "pre-cancelled acquire must not call Lean.importModules",
-    );
-    assert_eq!(pool.stats().acquired, 0, "pre-cancelled acquire is not an acquire");
 }

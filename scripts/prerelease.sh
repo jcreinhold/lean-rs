@@ -553,10 +553,7 @@ run_nextest() (
 		env_args+=("NEXTEST_TEST_THREADS=1")
 		# The default 8-iteration `session_create_drop_loop_small`
 		# accumulates enough per-import Lean residual to OOM-kill in
-		# a Docker cgroup; reduce to 4, matching the companion
-		# `pool_overflow_eviction_loop_small` default. The dedicated
-		# sanitizer CI job runs the longer `_loop_long` variants
-		# anyway — those are the real leak gate.
+		# a Docker cgroup; reduce to 4.
 		env_args+=("LEAN_RS_LEAK_LOOP_ITERS=4")
 	fi
 	if [[ -n "$LEAN_RS_TEST_REMAINING_FILTER" ]]; then

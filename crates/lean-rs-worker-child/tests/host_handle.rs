@@ -14,7 +14,6 @@ use lean_rs_worker_parent::{
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
 
-
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }

@@ -8,7 +8,7 @@
 //!
 //! This is intentionally an example, not a Criterion bench. The
 //! question is retained resident set size across lifetime boundaries
-//! (`LeanRuntime`, module initializers, `SessionPool`, `LeanSession`,
+//! (`LeanRuntime`, module initializers, `LeanSession`,
 //! and `Obj<'lean>` drops), not per-iteration latency.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::print_stdout)]
@@ -29,7 +29,7 @@ use lean_rs_host::{
     DeclarationInspectionFields, DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest,
     DeclarationVerificationRequest, DeclarationVerificationTarget, LeanBracketedImportRequest, LeanCapabilities,
     LeanDerivedWorkFacts, LeanElabOptions, LeanHost, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
-    LeanProgressEvent, LeanProgressSink, LeanSessionImportProfile, PoolStats, SessionPool, SessionPoolMemoryPolicy,
+    LeanProgressEvent, LeanProgressSink, LeanSessionImportProfile,
 };
 use lean_toolchain::LEAN_VERSION;
 
@@ -38,7 +38,6 @@ const DEFAULT_MAX_RSS_KIB: u64 = 1_572_864;
 const DEFAULT_ROUNDS: usize = 4;
 const DEFAULT_BULK: usize = 64;
 const DEFAULT_ELAB: usize = 64;
-const DEFAULT_POOL_CAPACITY: usize = 1;
 const DEFAULT_CHECKPOINT_EVERY: usize = 1;
 const STEADY_STATE_PAUSE_MS: u64 = 2_000;
 
@@ -46,9 +45,9 @@ const IMPORTS: [&str; 1] = ["LeanRsFixture.Handles"];
 const MIXED_IMPORTS: [&str; 2] = ["LeanRsFixture.Handles", "LeanRsHostShims.Elaboration"];
 
 /// Distinct import *sets*, for the `pooled-distinct` arms. Every other mode
-/// here re-acquires one set, which answers what a repeated profile costs; these
-/// answer what *alternating* profiles cost, which is the workload a session pool
-/// exists for.
+/// here re-imports one set, which answers what a repeated profile costs; these
+/// answer what *alternating* profiles cost, which is the workload the worker
+/// child's session pool exists for.
 const DISTINCT_IMPORT_SETS: [&[&str]; 8] = [
     &["LeanRsFixture.Handles"],
     &["LeanRsFixture.Strings"],
@@ -91,7 +90,6 @@ struct Config {
     rounds: usize,
     bulk: usize,
     elab: usize,
-    pool_capacity: usize,
     checkpoint_every: usize,
     max_rss_kib: Option<u64>,
 }
@@ -99,7 +97,6 @@ struct Config {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     FreshImport,
-    PooledReuse,
     SteadyState,
     ImportMatrix,
     BracketedLightweight,
@@ -113,20 +110,20 @@ enum Mode {
 /// The quantity in question is **Δ = RSS(N live environments) − RSS(1 live,
 /// N−1 dropped)** at equal import count: if dropping a session under
 /// `loadExts := true` reclaims nothing (`Environment.freeRegions` being unsound
-/// there), Δ is ~0 and a session pool costs no memory over today's
-/// drop-and-re-import child while removing every re-import. Δ large refutes
-/// that, and the pool must then stay at today's capacity.
+/// there), Δ is ~0, and keeping N sessions open, as the worker child's session
+/// pool does, costs no memory over dropping and re-importing them. A large Δ
+/// refutes that.
 ///
 /// [`Arm::Alternating`] against [`Arm::Pooled`] at equal rounds is the headline
-/// — the same workload, with and without the pool.
+/// — the same workload, with and without held sessions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Arm {
-    /// Capacity 0: imports N·M, holds 1. Today's child.
+    /// Drop and re-import on every use: imports N·M, holds 1.
     Alternating,
-    /// Capacity N: imports N, holds N. The pool.
+    /// Open each of the N sets once and keep it: imports N, holds N.
     Pooled,
-    /// Capacity 0, truncated at N acquisitions: imports N, holds 1. The control
-    /// that isolates *holding* from *importing*.
+    /// Drop and re-import, stopped after N uses: imports N, holds 1. The
+    /// control that isolates *holding* from *importing*.
     Truncated,
 }
 
@@ -143,7 +140,6 @@ fn main() -> ExitCode {
     println!("rounds_m={}", config.rounds);
     println!("bulk_m={}", config.bulk);
     println!("elab_k={}", config.elab);
-    println!("pool_capacity={}", config.pool_capacity);
     println!("checkpoint_every={}", config.checkpoint_every);
     println!(
         "max_rss_kib={}",
@@ -211,20 +207,14 @@ fn run(config: &Config) -> LeanResult<()> {
 
     match config.mode {
         Mode::FreshImport => {
-            let fresh_stats = run_fresh_import_drop_loop(runtime, &caps, config)?;
-            report_pool_stats("fresh_import_drop", fresh_stats);
+            run_fresh_import_drop_loop(&caps, config)?;
             snapshot("after_fresh_import_drop");
         }
-        Mode::PooledReuse => {
-            let pooled_stats = run_bounded_pool_loop(runtime, &caps, config)?;
-            report_pool_stats("bounded_pool", pooled_stats);
-            snapshot("after_bounded_pool");
-        }
         Mode::SteadyState => {
-            run_steady_state_loop(runtime, &caps, config)?;
+            run_steady_state_loop(&caps, config)?;
         }
         Mode::ImportMatrix => {
-            run_import_matrix(runtime, &caps, config)?;
+            run_import_matrix(&caps, config)?;
         }
         Mode::BracketedLightweight => {
             run_bracketed_lightweight(&caps, config)?;
@@ -233,7 +223,7 @@ fn run(config: &Config) -> LeanResult<()> {
             run_derived_indexes(&caps, config)?;
         }
         Mode::PooledDistinct => {
-            run_pooled_distinct_arm(runtime, &caps, config)?;
+            run_pooled_distinct_arm(&caps, config)?;
             // The arm's whole claim is what is *still held* at this point, so
             // return before the shared teardown snapshots drop it.
             return Ok(());
@@ -241,7 +231,7 @@ fn run(config: &Config) -> LeanResult<()> {
         Mode::All => {}
     }
 
-    snapshot("after_drop_sessions_pools");
+    snapshot("after_drop_sessions");
     thread::sleep(Duration::from_millis(STEADY_STATE_PAUSE_MS));
     snapshot("steady_state_after_pause");
     Ok(())
@@ -256,7 +246,6 @@ impl Config {
             rounds: env_usize("LEAN_RS_LONG_SESSION_ROUNDS", DEFAULT_ROUNDS).max(1),
             bulk: env_usize("LEAN_RS_LONG_SESSION_BULK", DEFAULT_BULK),
             elab: env_usize("LEAN_RS_LONG_SESSION_ELAB", DEFAULT_ELAB),
-            pool_capacity: env_usize("LEAN_RS_LONG_SESSION_POOL_CAPACITY", DEFAULT_POOL_CAPACITY),
             checkpoint_every: env_usize("LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY", DEFAULT_CHECKPOINT_EVERY).max(1),
             max_rss_kib: env_u64_optional("LEAN_RS_LONG_SESSION_MAX_RSS_KIB", DEFAULT_MAX_RSS_KIB),
         }
@@ -274,7 +263,6 @@ impl Mode {
     fn parse(raw: &str) -> Option<Self> {
         match raw {
             "fresh-import" => Some(Self::FreshImport),
-            "pooled-reuse" => Some(Self::PooledReuse),
             "steady-state" => Some(Self::SteadyState),
             "import-matrix" => Some(Self::ImportMatrix),
             "bracketed-lightweight" => Some(Self::BracketedLightweight),
@@ -288,7 +276,6 @@ impl Mode {
     const fn as_str(self) -> &'static str {
         match self {
             Self::FreshImport => "fresh-import",
-            Self::PooledReuse => "pooled-reuse",
             Self::SteadyState => "steady-state",
             Self::ImportMatrix => "import-matrix",
             Self::BracketedLightweight => "bracketed-lightweight",
@@ -324,7 +311,6 @@ fn run_all_children() -> Result<(), Box<dyn std::error::Error>> {
     let exe = std::env::current_exe()?;
     for mode in [
         Mode::FreshImport,
-        Mode::PooledReuse,
         Mode::SteadyState,
         Mode::ImportMatrix,
         Mode::BracketedLightweight,
@@ -357,15 +343,11 @@ fn env_u64_optional(name: &str, default: u64) -> Option<u64> {
     }
 }
 
-fn run_fresh_import_drop_loop(
-    runtime: &'static LeanRuntime,
-    caps: &LeanCapabilities<'static, '_>,
-    config: &Config,
-) -> LeanResult<PoolStats> {
+fn run_fresh_import_drop_loop(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
     let imports = scope(caps, &IMPORTS, lean_rs::module::HostImportOptions::default());
-    let pool = SessionPool::with_memory_policy(runtime, 0, memory_policy(config));
     for iteration in 1..=config.imports {
-        let session = pool.acquire(caps, &imports, None, None)?;
+        enforce_rss_cap(config)?;
+        let session = caps.session(&imports, None, None)?;
         report_import_stats(
             "fresh_import_drop",
             iteration,
@@ -375,53 +357,12 @@ fn run_fresh_import_drop_loop(
         drop(session);
         maybe_checkpoint("fresh_import_drop", iteration, config.checkpoint_every);
     }
-    Ok(pool.stats())
+    Ok(())
 }
 
-fn run_bounded_pool_loop(
-    runtime: &'static LeanRuntime,
-    caps: &LeanCapabilities<'static, '_>,
-    config: &Config,
-) -> LeanResult<PoolStats> {
-    let imports = scope(caps, &IMPORTS, lean_rs::module::HostImportOptions::default());
-    let pool = SessionPool::with_memory_policy(runtime, config.pool_capacity, memory_policy(config));
-    if config.pool_capacity > 0 {
-        let mut warm = Vec::with_capacity(config.pool_capacity);
-        for iteration in 1..=config.pool_capacity {
-            let session = pool.acquire(caps, &imports, None, None)?;
-            report_import_stats(
-                "bounded_pool_warm",
-                iteration,
-                LeanSessionImportProfile::default().label(),
-                session.import_stats(),
-            );
-            warm.push(session);
-        }
-        drop(warm);
-    }
-    snapshot("after_bounded_pool_warm");
-
-    for iteration in 1..=config.imports {
-        let session = pool.acquire(caps, &imports, None, None)?;
-        drop(session);
-        maybe_checkpoint("bounded_pool", iteration, config.checkpoint_every);
-    }
-    println!("bounded_pool_len={}", pool.len());
-    Ok(pool.stats())
-}
-
-fn run_steady_state_loop(
-    runtime: &'static LeanRuntime,
-    caps: &LeanCapabilities<'static, '_>,
-    config: &Config,
-) -> LeanResult<()> {
-    let pool = SessionPool::with_memory_policy(
-        runtime,
-        config.pool_capacity,
-        memory_policy(config).max_fresh_imports(1),
-    );
-    let mut session = pool.acquire(
-        caps,
+fn run_steady_state_loop(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
+    enforce_rss_cap(config)?;
+    let mut session = caps.session(
         &scope(caps, &MIXED_IMPORTS, lean_rs::module::HostImportOptions::default()),
         None,
         None,
@@ -464,15 +405,10 @@ fn run_steady_state_loop(
     snapshot("after_elaboration");
 
     drop(session);
-    report_pool_stats("mixed_pool_before_drop", pool.stats());
     Ok(())
 }
 
-fn run_import_matrix(
-    _runtime: &'static LeanRuntime,
-    caps: &LeanCapabilities<'static, '_>,
-    config: &Config,
-) -> LeanResult<()> {
+fn run_import_matrix(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
     for mode in [
         LeanImportProfileMode::FullSession(LeanSessionImportProfile::ExportedPublic),
         LeanImportProfileMode::FullSession(LeanSessionImportProfile::Server),
@@ -481,7 +417,7 @@ fn run_import_matrix(
         LeanImportProfileMode::ExportedNoExts,
     ] {
         for iteration in 1..=config.imports {
-            enforce_matrix_rss_cap(config)?;
+            enforce_rss_cap(config)?;
             let profiler_options = import_profiler_options(mode, iteration);
             let scope = scope(caps, &IMPORTS, mode.native_options(&profiler_options));
             match caps.profiling_session(&scope, mode, &profiler_options) {
@@ -509,45 +445,43 @@ fn run_import_matrix(
 /// One arm of the Δ comparison; see [`Arm`]. Each arm runs in its own process
 /// (the mode's parent forks them), because the number being read is whole-process
 /// RSS and no arm may inherit another's imports.
-fn run_pooled_distinct_arm(
-    runtime: &'static LeanRuntime,
-    caps: &LeanCapabilities<'static, '_>,
-    config: &Config,
-) -> LeanResult<()> {
+fn run_pooled_distinct_arm(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
     let arm = config.arm.unwrap_or(Arm::Truncated);
     let distinct = config.imports.clamp(1, DISTINCT_IMPORT_SETS.len());
-    let (capacity, acquisitions) = match arm {
-        Arm::Alternating => (0, distinct.saturating_mul(config.rounds)),
-        Arm::Pooled => (distinct, distinct.saturating_mul(config.rounds)),
-        Arm::Truncated => (0, distinct),
+    let uses = match arm {
+        Arm::Alternating | Arm::Pooled => distinct.saturating_mul(config.rounds),
+        Arm::Truncated => distinct,
     };
     println!(
-        "arm={} distinct_sets={distinct} rounds={} capacity={capacity} acquisitions={acquisitions}",
+        "arm={} distinct_sets={distinct} rounds={} uses={uses}",
         arm.as_str(),
         config.rounds,
     );
 
-    // The pool's own fresh-import ceiling would otherwise fire mid-arm and turn
-    // a memory measurement into an error path.
-    let policy = SessionPoolMemoryPolicy::disabled().max_fresh_imports(acquisitions as u64);
-    let pool = SessionPool::with_memory_policy(runtime, capacity, policy);
-
-    // One session outlives the loop so the "1 live" in the capacity-0 arms is a
-    // live environment and not a hopeful reading of a freed one. It is released
-    // *before* the next acquire, not after: a checked-out session is not in the
-    // pool, so holding it across the acquire would make every hit a miss and
-    // silently turn the pooled arm into another capacity-0 arm.
-    let mut held = None;
     let scopes = DISTINCT_IMPORT_SETS
         .iter()
         .take(distinct)
         .map(|names| scope(caps, names, lean_rs::module::HostImportOptions::default()))
         .collect::<Vec<_>>();
-    let rotation = scopes.iter().cycle();
-    for (iteration, imports) in (1..=acquisitions).zip(rotation) {
-        drop(held.take());
-        let session = pool.acquire(caps, imports, None, None)?;
-        held = Some(session);
+    let mut held = Vec::with_capacity(distinct);
+    let mut imports_performed = 0usize;
+    for (iteration, (set, imports)) in (1..=uses).zip(scopes.iter().enumerate().cycle()) {
+        match arm {
+            // After the first round, the pooled arm reuses the session it holds.
+            Arm::Pooled if set < held.len() => {}
+            Arm::Pooled => {
+                held.push(caps.session(imports, None, None)?);
+                imports_performed = imports_performed.saturating_add(1);
+            }
+            // The other arms keep only the latest session, so "1 live" names a
+            // live environment and not a hopeful reading of a freed one. Each
+            // drops it before the next import.
+            Arm::Alternating | Arm::Truncated => {
+                held.clear();
+                held.push(caps.session(imports, None, None)?);
+                imports_performed = imports_performed.saturating_add(1);
+            }
+        }
         maybe_checkpoint(
             &format!("pooled_distinct_{}", arm.as_str()),
             iteration,
@@ -555,14 +489,12 @@ fn run_pooled_distinct_arm(
         );
     }
 
-    report_pool_stats(&format!("pooled_distinct_{}", arm.as_str()), pool.stats());
     snapshot("pooled_distinct_before_pause");
     // macOS compresses idle pages, so a sample taken the instant the loop ends
     // reads high relative to a settled process. Every arm pays the same pause.
     thread::sleep(Duration::from_millis(STEADY_STATE_PAUSE_MS));
 
-    let imports_performed = pool.stats().imports_performed;
-    let live = if capacity == 0 { 1 } else { capacity };
+    let live = held.len();
     match rss_kib() {
         Ok(kib) => println!(
             "arm_result={} live_environments={live} imports_performed={imports_performed} rss_kib={kib}",
@@ -623,7 +555,7 @@ fn run_pooled_distinct_arms() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if let (Some(alternating), Some(pooled)) = (rss_of(Arm::Alternating), rss_of(Arm::Pooled)) {
-        // The headline: the same workload with and without the pool.
+        // The headline: the same workload with and without held sessions.
         println!(
             "pooled_distinct_saved_kib={}",
             i128::from(alternating).saturating_sub(i128::from(pooled))
@@ -655,7 +587,7 @@ fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Conf
             .bracketed_import_scope(roots, IMPORTS.iter().map(|s| (*s).into()).collect())
     };
     for iteration in 1..=config.imports {
-        enforce_matrix_rss_cap(config)?;
+        enforce_rss_cap(config)?;
         snapshot(&format!("bracketed_before_dispatch_{iteration}"));
         let sink = BracketedCheckpointSink { iteration };
         let result =
@@ -674,7 +606,7 @@ fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Conf
 }
 
 fn run_derived_indexes(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
-    enforce_matrix_rss_cap(config)?;
+    enforce_rss_cap(config)?;
     let mut session = caps.session(
         &scope(
             caps,
@@ -875,26 +807,17 @@ impl LeanProgressSink for BracketedCheckpointSink {
     }
 }
 
-fn memory_policy(config: &Config) -> SessionPoolMemoryPolicy {
-    let fresh_imports = config.imports.max(config.pool_capacity) as u64;
-    let mut policy = SessionPoolMemoryPolicy::disabled().max_fresh_imports(fresh_imports);
-    if let Some(limit) = config.max_rss_kib {
-        policy = policy.max_rss_kib(limit);
-    }
-    policy
-}
-
-fn enforce_matrix_rss_cap(config: &Config) -> LeanResult<()> {
+fn enforce_rss_cap(config: &Config) -> LeanResult<()> {
     let Some(limit) = config.max_rss_kib else {
         return Ok(());
     };
     match rss_kib() {
         Ok(current) if current >= limit => Err(lean_rs::__host_internals::host_resource_exhausted(format!(
-            "import matrix refused fresh import: current RSS {current} KiB reached max_rss_kib={limit}"
+            "refused fresh import: current RSS {current} KiB reached max_rss_kib={limit}"
         ))),
         Ok(_) => Ok(()),
         Err(err) => Err(lean_rs::__host_internals::host_resource_exhausted(format!(
-            "import matrix refused fresh import: RSS sample unavailable while max_rss_kib={limit}: {err}"
+            "refused fresh import: RSS sample unavailable while max_rss_kib={limit}: {err}"
         ))),
     }
 }
@@ -1029,32 +952,6 @@ fn rss_kib() -> std::io::Result<u64> {
         .output()?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text.trim().parse::<u64>().unwrap_or(0))
-}
-
-fn report_pool_stats(label: &str, stats: PoolStats) {
-    println!(
-        "pool_stats={label} imports_performed={} reused={} acquired={} released_to_pool={} released_dropped={} drains={} drained={}",
-        stats.imports_performed,
-        stats.reused,
-        stats.acquired,
-        stats.released_to_pool,
-        stats.released_dropped,
-        stats.drains,
-        stats.drained
-    );
-    println!(
-        "session_reuse={label} iteration=0 layer=host key_hits={} key_misses={} distinct_keys_seen={} fresh_imports_avoided={} miss_empty_pool={} miss_reuse_disabled={} miss_no_matching_key={} last_miss_reason={}",
-        stats.key_hits,
-        stats.key_misses,
-        stats.distinct_keys_seen,
-        stats.fresh_imports_avoided,
-        stats.miss_empty_pool,
-        stats.miss_reuse_disabled,
-        stats.miss_no_matching_key,
-        stats
-            .last_miss_reason
-            .map_or("none", lean_rs_host::SessionPoolKeyMissReason::label)
-    );
 }
 
 fn report_import_stats(label: &str, iteration: usize, profile_mode: &str, stats: &LeanImportStats) {

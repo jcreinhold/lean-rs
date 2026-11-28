@@ -4,8 +4,8 @@
 //! crate shipped by [`lean-rs`](https://docs.rs/lean-rs). It owns:
 //!
 //! - The high-level [`LeanHost`] / [`LeanCapabilities`] / [`LeanSession`]
-//!   trio, plus the [`SessionPool`] / [`PooledSession`] reuse helper and
-//!   [`LeanProgressSink`] for live progress from long-running calls.
+//!   trio, plus [`LeanProgressSink`] for live progress from long-running
+//!   calls.
 //! - The host-defined evidence / kernel-outcome / elaboration / meta
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
@@ -45,9 +45,8 @@ pub use crate::host::{
     DeclarationVerificationTarget, LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult,
     LeanBracketedRejectedOperation, LeanCapabilities, LeanDeclarationFilter, LeanDerivedWorkFacts, LeanHost,
     LeanHostRuntimeMetadata, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
-    LeanSession, LeanSessionImportProfile, LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope,
-    ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
-    ProofPositionSelector, ProofPositionSummary, SessionPool, SessionPoolConfig, SessionPoolKeyMissReason,
-    SessionPoolMemoryPolicy, SessionStats,
+    LeanSession, LeanSessionImportProfile, LeanSourceRange, ProofAttemptEnvelope, ProofAttemptOutcome,
+    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
+    ProofPositionSummary, SessionStats,
 };
 pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

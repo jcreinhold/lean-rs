@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::common::results_dir;
 use crate::report_schema::{
-    AdmissionSample, BaselineMode, BatchSample, KeyValue, PerformanceReport, ReplacementSample, SessionReuseSample,
-    TimingSample, WorkloadRun,
+    AdmissionSample, BaselineMode, KeyValue, PerformanceReport, ReplacementSample, TimingSample, WorkloadRun,
 };
 
 /// Write JSON and Markdown artifacts for a collected profiling report.
@@ -219,31 +218,20 @@ fn render_markdown(report: &PerformanceReport) -> String {
             let _ = writeln!(out);
             let _ = writeln!(out, "### {}", run.name);
             let _ = writeln!(out);
-            let _ = writeln!(
-                out,
-                "| Label | Iteration | Kind | Elapsed ms | RSS KiB | Workers | Total child RSS KiB | Restarts | Max-import restarts | Policy restarts |"
-            );
-            let _ = writeln!(
-                out,
-                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
-            );
+            let _ = writeln!(out, "| Label | Iteration | Kind | Elapsed ms | RSS KiB |");
+            let _ = writeln!(out, "| --- | ---: | --- | ---: | ---: |");
             for timing in visible_timings(&run.timings) {
                 let iteration = timing
                     .iteration
                     .map_or_else(|| String::from("-"), |value| value.to_string());
                 let _ = writeln!(
                     out,
-                    "| {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
+                    "| {} | {} | {} | {:.3} | {} |",
                     timing.label,
                     iteration,
                     timing.kind,
                     timing.elapsed_ms,
                     format_optional_u64(timing.rss_kib),
-                    format_optional_u64(timing.workers),
-                    format_optional_u64(timing.total_child_rss_kib),
-                    format_optional_u64(timing.worker_restarts),
-                    format_optional_u64(timing.max_import_restarts),
-                    format_optional_u64(timing.policy_restarts)
                 );
             }
         }
@@ -334,91 +322,6 @@ fn render_markdown(report: &PerformanceReport) -> String {
                     format_optional_u64(admission.rss_before_admission_kib),
                     format_optional_u64(admission.rss_after_open_kib),
                     admission.refusal_reason.as_deref().unwrap_or("-")
-                );
-            }
-        }
-    }
-
-    let reuse_workloads: Vec<_> = report
-        .workloads
-        .iter()
-        .filter(|run| !run.session_reuse.is_empty())
-        .collect();
-    if !reuse_workloads.is_empty() {
-        let _ = writeln!(out);
-        let _ = writeln!(out, "## Session Reuse Keys");
-        for run in reuse_workloads {
-            let _ = writeln!(out);
-            let _ = writeln!(out, "### {}", run.name);
-            let _ = writeln!(out);
-            let _ = writeln!(
-                out,
-                "| Label | Iteration | Layer | Key hits | Key misses | Distinct keys | Fresh imports avoided | Empty misses | Reuse-disabled misses | No-match misses | Last miss |"
-            );
-            let _ = writeln!(
-                out,
-                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
-            );
-            for sample in visible_session_reuse(&run.session_reuse) {
-                let iteration = sample
-                    .iteration
-                    .map_or_else(|| String::from("-"), |value| value.to_string());
-                let _ = writeln!(
-                    out,
-                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
-                    sample.label,
-                    iteration,
-                    sample.layer,
-                    sample.key_hits,
-                    sample.key_misses,
-                    sample.distinct_keys_seen,
-                    sample.fresh_imports_avoided,
-                    sample.miss_empty_pool,
-                    sample.miss_reuse_disabled,
-                    sample.miss_no_matching_key,
-                    sample.last_miss_reason.as_deref().unwrap_or("-")
-                );
-            }
-        }
-    }
-
-    let batch_workloads: Vec<_> = report.workloads.iter().filter(|run| !run.batches.is_empty()).collect();
-    if !batch_workloads.is_empty() {
-        let _ = writeln!(out);
-        let _ = writeln!(out, "## Warm Batch Workloads");
-        for run in batch_workloads {
-            let _ = writeln!(out);
-            let _ = writeln!(out, "### {}", run.name);
-            let _ = writeln!(out);
-            let _ = writeln!(
-                out,
-                "| Label | Iteration | Layer | Workload | Selectors | Request delta | Import delta | Elapsed ms | Parent RSS KiB | Child RSS KiB | Result items | Item failures | Total truncated | Worker frames |"
-            );
-            let _ = writeln!(
-                out,
-                "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |"
-            );
-            for sample in visible_batches(&run.batches) {
-                let iteration = sample
-                    .iteration
-                    .map_or_else(|| String::from("-"), |value| value.to_string());
-                let _ = writeln!(
-                    out,
-                    "| {} | {} | {} | {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
-                    sample.label,
-                    iteration,
-                    sample.layer,
-                    sample.workload,
-                    sample.selectors,
-                    sample.request_delta,
-                    sample.import_delta,
-                    sample.elapsed_ms,
-                    format_optional_u64(sample.parent_rss_kib),
-                    format_optional_u64(sample.child_rss_kib),
-                    sample.result_items,
-                    sample.item_failures,
-                    sample.total_truncated,
-                    format_optional_u64(sample.worker_frames),
                 );
             }
         }
@@ -639,29 +542,7 @@ fn visible_admissions(admissions: &[AdmissionSample]) -> Vec<&AdmissionSample> {
     visible
 }
 
-fn visible_session_reuse(samples: &[SessionReuseSample]) -> Vec<&SessionReuseSample> {
-    const HEAD: usize = 20;
-    const TAIL: usize = 5;
-    if samples.len() <= HEAD + TAIL {
-        return samples.iter().collect();
-    }
-    let mut visible: Vec<_> = samples.iter().take(HEAD).collect();
-    visible.extend(samples.iter().skip(samples.len().saturating_sub(TAIL)));
-    visible
-}
-
 fn visible_replacements(samples: &[ReplacementSample]) -> Vec<&ReplacementSample> {
-    const HEAD: usize = 20;
-    const TAIL: usize = 5;
-    if samples.len() <= HEAD + TAIL {
-        return samples.iter().collect();
-    }
-    let mut visible: Vec<_> = samples.iter().take(HEAD).collect();
-    visible.extend(samples.iter().skip(samples.len().saturating_sub(TAIL)));
-    visible
-}
-
-fn visible_batches(samples: &[BatchSample]) -> Vec<&BatchSample> {
     const HEAD: usize = 20;
     const TAIL: usize = 5;
     if samples.len() <= HEAD + TAIL {
@@ -704,8 +585,8 @@ fn compacted_region_bytes(stats: &crate::report_schema::ImportStatsSample) -> u6
 #[cfg(test)]
 mod tests {
     use crate::report_schema::{
-        AdmissionSample, BaselineMode, BatchSample, EnvPair, ImportStatsSample, PerformanceReport, ReplacementSample,
-        ReportMetadata, SessionReuseSample, TimingSample, WorkloadRun,
+        AdmissionSample, BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReplacementSample,
+        ReportMetadata, TimingSample, WorkloadRun,
     };
 
     use super::render_markdown;
@@ -755,9 +636,7 @@ mod tests {
                 derived_work: Vec::new(),
                 timings: Vec::new(),
                 admissions: Vec::new(),
-                session_reuse: Vec::new(),
                 replacements: Vec::new(),
-                batches: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),
@@ -806,11 +685,6 @@ mod tests {
                     kind: "cold".to_owned(),
                     elapsed_ms: 10.0,
                     rss_kib: Some(1000),
-                    workers: None,
-                    total_child_rss_kib: None,
-                    worker_restarts: None,
-                    max_import_restarts: None,
-                    policy_restarts: None,
                 }],
                 admissions: vec![AdmissionSample {
                     label: "worker_session_open".to_owned(),
@@ -826,9 +700,7 @@ mod tests {
                     rss_after_open_kib: Some(1000),
                     refusal_reason: None,
                 }],
-                session_reuse: Vec::new(),
                 replacements: Vec::new(),
-                batches: Vec::new(),
                 key_values: vec![
                     crate::report_schema::KeyValue {
                         key: "max_rss_kib".to_owned(),
@@ -857,119 +729,6 @@ mod tests {
     }
 
     #[test]
-    fn report_renders_session_reuse_table() {
-        let report = PerformanceReport {
-            metadata: ReportMetadata {
-                timestamp_utc: "now".to_owned(),
-                platform: "test".to_owned(),
-                git_commit: "abc".to_owned(),
-                git_branch: "main".to_owned(),
-                lean_version: "test".to_owned(),
-                tooling: "test".to_owned(),
-            },
-            baseline_mode: BaselineMode::Quick,
-            workloads: vec![WorkloadRun {
-                name: "worker-cycling".to_owned(),
-                command: "cmd".to_owned(),
-                env: Vec::<EnvPair>::new(),
-                exit_success: true,
-                exit_code: Some(0),
-                wall_time_ms: 1.0,
-                status: Some("ok".to_owned()),
-                peak_rss_kib: None,
-                checkpoints: Vec::new(),
-                import_stats: Vec::new(),
-                derived_work: Vec::new(),
-                timings: Vec::new(),
-                admissions: Vec::new(),
-                session_reuse: vec![SessionReuseSample {
-                    label: "bounded_reuse_no_cycle".to_owned(),
-                    iteration: Some(2),
-                    layer: "worker".to_owned(),
-                    key_hits: 1,
-                    key_misses: 1,
-                    distinct_keys_seen: 1,
-                    fresh_imports_avoided: 1,
-                    miss_empty_pool: 1,
-                    miss_reuse_disabled: 0,
-                    miss_no_matching_key: 0,
-                    last_miss_reason: None,
-                }],
-                replacements: Vec::new(),
-                batches: Vec::new(),
-                key_values: Vec::new(),
-                stdout_path: "stdout".to_owned(),
-                stderr_path: "stderr".to_owned(),
-            }],
-            profiles: Vec::new(),
-            notes: Vec::new(),
-        };
-
-        let markdown = render_markdown(&report);
-        assert!(markdown.contains("## Session Reuse Keys"));
-        assert!(markdown.contains("Fresh imports avoided"));
-        assert!(markdown.contains("| bounded_reuse_no_cycle | 2 | worker | 1 | 1 | 1 | 1 | 1 | 0 | 0 | - |"));
-    }
-
-    #[test]
-    fn report_renders_warm_batch_table() {
-        let report = PerformanceReport {
-            metadata: ReportMetadata {
-                timestamp_utc: "now".to_owned(),
-                platform: "test".to_owned(),
-                git_commit: "abc".to_owned(),
-                git_branch: "main".to_owned(),
-                lean_version: "test".to_owned(),
-                tooling: "test".to_owned(),
-            },
-            baseline_mode: BaselineMode::Quick,
-            workloads: vec![WorkloadRun {
-                name: "worker-cycling".to_owned(),
-                command: "cmd".to_owned(),
-                env: Vec::<EnvPair>::new(),
-                exit_success: true,
-                exit_code: Some(0),
-                wall_time_ms: 1.0,
-                status: Some("ok".to_owned()),
-                peak_rss_kib: None,
-                checkpoints: Vec::new(),
-                import_stats: Vec::new(),
-                derived_work: Vec::new(),
-                timings: Vec::new(),
-                admissions: Vec::new(),
-                session_reuse: Vec::new(),
-                replacements: Vec::new(),
-                batches: vec![BatchSample {
-                    label: "warm_module_query_batch".to_owned(),
-                    iteration: Some(2),
-                    layer: "worker".to_owned(),
-                    workload: "process_module_query_batch".to_owned(),
-                    selectors: 2,
-                    request_delta: 1,
-                    import_delta: 0,
-                    elapsed_ms: 4.25,
-                    parent_rss_kib: Some(120_000),
-                    child_rss_kib: Some(700_000),
-                    result_items: 2,
-                    item_failures: 0,
-                    total_truncated: false,
-                    worker_frames: None,
-                }],
-                key_values: Vec::new(),
-                stdout_path: "stdout".to_owned(),
-                stderr_path: "stderr".to_owned(),
-            }],
-            profiles: Vec::new(),
-            notes: Vec::new(),
-        };
-
-        let markdown = render_markdown(&report);
-        assert!(markdown.contains("## Warm Batch Workloads"));
-        assert!(markdown.contains("Worker frames"));
-        assert!(markdown.contains("| warm_module_query_batch | 2 | worker | process_module_query_batch | 2 | 1 | 0 | 4.250 | 120000 | 700000 | 2 | 0 | false | - |"));
-    }
-
-    #[test]
     fn report_renders_replacement_table() {
         let report = PerformanceReport {
             metadata: ReportMetadata {
@@ -995,7 +754,6 @@ mod tests {
                 derived_work: Vec::new(),
                 timings: Vec::new(),
                 admissions: Vec::new(),
-                session_reuse: Vec::new(),
                 replacements: vec![ReplacementSample {
                     label: "worker_session_open".to_owned(),
                     iteration: Some(2),
@@ -1012,7 +770,6 @@ mod tests {
                     replacement_budget_status: Some("synchronous-no-overlap".to_owned()),
                     skipped_reason: None,
                 }],
-                batches: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),

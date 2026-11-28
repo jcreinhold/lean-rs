@@ -36,21 +36,18 @@ Run `./profiling/scripts/profile_memory.sh <workload>` with one of:
 | Workload | Question measured |
 | --- | --- |
 | `long-session-fresh` | Retention after fresh same-process imports. |
-| `long-session-pooled` | Reuse after one warm import. |
 | `long-session-steady` | Query/elaboration work after one import. |
 | `long-session-matrix` | Exported/server/private profiles, explicit full-private compatibility, and no-extension diagnostics. |
 | `long-session-bracketed` | One closed metadata query without extensions, followed by `freeRegions`. |
 | `long-session-derived` | Source-range, pretty-printing, proof-search, parser/elaborator, snapshot, and lazy discriminator work. |
 | `worker-cycling` | Child replacement under a small import budget. |
-| `pool-memory` | Pool admission, RSS ceilings, and warm reuse. |
-| `mathlib-scale` | Pool fixture with a fixed mathlib-style module list. |
 
 `long-session` runs the same-process modes in separate child processes, preventing retained imports from one mode from
 contaminating another. Full sessions load extensions and cannot safely free compacted regions. The bracketed workload
 returns only owned serialized data before freeing regions. Lazy discriminator initialization is derived-index work over
 already imported data, not lazy `.olean` loading or unloading.
 
-The wrappers default to one Lean thread and a 1,572,864 KiB RSS guard. Worker/pool recaptures can set every policy value
+The wrappers default to one Lean thread and a 1,572,864 KiB RSS guard. Worker recaptures can set every policy value
 explicitly:
 
 ```sh
@@ -58,12 +55,6 @@ LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
 LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
 LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
 ./profiling/scripts/profile_memory.sh worker-cycling
-
-LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
-./profiling/scripts/profile_memory.sh pool-memory
 ```
 
 Increase fresh-import counts only after reviewing the previous peak:
@@ -92,15 +83,10 @@ state and does not replace cycling.
 | `bracketed_import_stats=...` | Import attribution plus `free_regions_ran=true` after the no-extension bracket. |
 | `query_derived_work=...` | **Lean Derived Work**: which query phases initialized derived structures. |
 | `admission=...` | **Import Admission**: cold attempts, admissions/refusals, import-like requests, observed concurrent opens, and RSS before/after. |
-| `session_reuse=...` | **Session Reuse Keys**: hits/misses, distinct keys, avoided imports, and miss reasons. |
-| `replacement=...` | **Worker Replacement**: attempts/outcomes and spawn, load, import, first/warm command, and total timing. |
-| `batch=...` | **Warm Batch Workloads**: selectors, request/import deltas, bounded outcomes, truncation, timing, and parent/child RSS. |
+| `replacement=...` | **Worker Replacement**: attempts/outcomes and spawn, import, and total timing. |
 
-Reuse keys preserve import order and session-safety facts; they are not result-cache keys. A pool refusal can be
-expected when a distinct cold key exceeds the configured capacity. Replacement is synchronous
-(`synchronous-no-overlap`); prewarming needs evidence that the total RSS budget admits overlap. Warm batches reduce
-session/request churn and do not reclaim memory. `worker_frames=unavailable` is explicit because protocol frame counters
-are not exposed.
+Replacement is synchronous (`synchronous-no-overlap`); prewarming needs evidence that the total RSS budget admits
+overlap.
 
 A local macOS aarch64/Lean 4.31.0-rc1 bracketed probe for one `LeanRsFixture.Handles` import reported
 `bracketed_after_lean_import_1=1010720 KiB`, `bracketed_after_query_before_free_1=1032032 KiB`,

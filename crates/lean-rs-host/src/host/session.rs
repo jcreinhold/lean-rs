@@ -90,9 +90,8 @@
 //! accumulates dispatch events (one FFI call per typed query, plus
 //! per-item counts for the bulk methods) and the wall time spent inside
 //! `.call(...)`. Snapshot via [`LeanSession::stats`]; reset by dropping
-//! the session. `import` itself is **not** counted as a query FFI call
-//!—pool reuse vs. fresh import is tracked at the
-//! [`crate::host::pool::SessionPool`] level instead.
+//! the session. `import` itself is **not** counted as a query FFI call;
+//! [`LeanSession::import_stats`] reports what the import cost.
 //!
 //! ## Cancellation
 //!
@@ -175,11 +174,8 @@ use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
 /// Rust-side argument marshaling, name lookup, and result decoding so
 /// the number is comparable across singular and bulk paths.
 ///
-/// `import` is **not** counted: import vs. reuse is tracked at the
-/// [`crate::host::pool::SessionPool`] level. Construction of a session
-/// always pays for one import, and that cost is reported by
-/// [`crate::host::pool::PoolStats::imports_performed`] when the session
-/// flows through a pool.
+/// `import` is **not** counted. Construction of a session always pays
+/// for one import, and [`LeanSession::import_stats`] reports its cost.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SessionStats {
     /// Number of typed query FFI calls dispatched through this session,
@@ -736,46 +732,6 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 roots,
             )))
         })
-    }
-
-    /// Wrap a previously-imported `Lean.Environment` as a fresh
-    /// [`LeanSession`] over `capabilities`.
-    ///
-    /// Crate-private; only [`crate::host::pool::SessionPool::acquire`]
-    /// calls this to recycle a pooled environment under a new
-    /// capability borrow. The returned session's [`SessionStats`] start
-    /// at zero—accumulated counters from the previous owner do not
-    /// leak across pool checkouts.
-    pub(crate) fn from_environment_with_import_stats(
-        capabilities: &'c LeanCapabilities<'lean, 'c>,
-        scope: &TrustedHostImports<'lean, 'c>,
-        environment: HostEnvironment<'lean>,
-        import_stats: LeanImportStats,
-        extension_registry_epoch: u64,
-    ) -> LeanResult<Self> {
-        let shims = HostShimBindings::resolve(capabilities.shim_capability())
-            .map_err(|err| lean_rs::__host_internals::host_module_init(err.to_string()))?;
-        Ok(Self {
-            capabilities,
-            shims,
-            imports: scope.clone(),
-            environment,
-            import_stats,
-            extension_registry_epoch,
-            stats: Cell::new(SessionStats::default()),
-        })
-    }
-
-    /// Consume the session and return its owned `Lean.Environment`.
-    ///
-    /// Crate-private; only [`crate::host::pool::SessionPool`] uses this
-    /// to reclaim the environment when a [`crate::host::pool::PooledSession`]
-    /// drops. The returned `Obj<'lean>` carries one Lean refcount, which
-    /// the pool is responsible for either pushing back into the free
-    /// list (in which case `Drop` runs later when the pool itself
-    /// drops) or releasing immediately (when at capacity).
-    pub(crate) fn into_environment(self) -> HostEnvironment<'lean> {
-        self.environment
     }
 
     /// Snapshot of this session's accumulated dispatch metrics.

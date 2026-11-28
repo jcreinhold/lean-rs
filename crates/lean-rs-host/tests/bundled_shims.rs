@@ -47,8 +47,8 @@ fn host_loads_with_no_consumer_shim_require() {
 ///
 /// `Environment.extensions` is sized once, at import, and the growth path is
 /// `private`, so an environment that outlives a later `registerEnvExtension`
-/// can never be repaired. The stamp is how the pool and the worker child
-/// notice. It sums three public append-only registries
+/// can never be repaired. The stamp is how the worker child's session pool
+/// notices. It sums three public append-only registries
 /// (`persistentEnvExtensionsRef`, `scopedEnvExtensionsRef`, and the builtin
 /// attribute count), so it must be *stable* across an import that registers
 /// nothing and must *move* across one that registers something.

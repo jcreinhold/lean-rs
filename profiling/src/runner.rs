@@ -8,9 +8,8 @@ use lean_toolchain::LEAN_VERSION;
 
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
-    AdmissionSample, BaselineMode, BatchSample, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue,
-    PerformanceReport, ProfileArtifact, ReplacementSample, ReportMetadata, RssCheckpoint, SessionReuseSample,
-    TimingSample, WorkloadRun,
+    AdmissionSample, BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport,
+    ProfileArtifact, ReplacementSample, ReportMetadata, RssCheckpoint, TimingSample, WorkloadRun,
 };
 use crate::report_writer::write_report;
 
@@ -39,7 +38,6 @@ pub fn collect(mode: BaselineMode) -> Result<(PathBuf, PathBuf), Box<dyn Error>>
     };
 
     report.workloads.push(run_long_session("fresh-import")?);
-    report.workloads.push(run_long_session("pooled-reuse")?);
     report.workloads.push(run_long_session("steady-state")?);
     report.workloads.push(run_long_session("import-matrix")?);
     report.workloads.push(run_long_session("bracketed-lightweight")?);
@@ -66,24 +64,6 @@ pub fn collect(mode: BaselineMode) -> Result<(PathBuf, PathBuf), Box<dyn Error>>
             "session",
             "--",
             "host::session::query_declarations_bulk/16",
-            "--warm-up-time",
-            "1",
-            "--measurement-time",
-            "3",
-            "--sample-size",
-            "20",
-        ],
-    )?);
-    report.workloads.push(run_criterion(
-        "host-session-reuse-hit",
-        &[
-            "bench",
-            "-p",
-            "lean-rs-host",
-            "--bench",
-            "session",
-            "--",
-            "host::pool::session_reuse_hit",
             "--warm-up-time",
             "1",
             "--measurement-time",
@@ -172,7 +152,6 @@ fn run_long_session(mode: &str) -> Result<WorkloadRun, Box<dyn Error>> {
     env.push(env_pair("LEAN_RS_LONG_SESSION_IMPORTS", "1"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_BULK", "64"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_ELAB", "64"));
-    env.push(env_pair("LEAN_RS_LONG_SESSION_POOL_CAPACITY", "1"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY", "1"));
     env.push(env_pair(
         "LEAN_RS_LONG_SESSION_MAX_RSS_KIB",
@@ -332,9 +311,7 @@ fn run_command_path(
         derived_work: parsed.derived_work,
         timings: parsed.timings,
         admissions: parsed.admissions,
-        session_reuse: parsed.session_reuse,
         replacements: parsed.replacements,
-        batches: parsed.batches,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -360,9 +337,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut derived_work = Vec::new();
     let mut timings = Vec::new();
     let mut admissions = Vec::new();
-    let mut session_reuse = Vec::new();
     let mut replacements = Vec::new();
-    let mut batches = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -405,14 +380,8 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         if let Some(sample) = parse_admission(&line_pairs) {
             admissions.push(sample);
         }
-        if let Some(sample) = parse_session_reuse(&line_pairs) {
-            session_reuse.push(sample);
-        }
         if let Some(sample) = parse_replacement(&line_pairs) {
             replacements.push(sample);
-        }
-        if let Some(sample) = parse_batch(&line_pairs) {
-            batches.push(sample);
         }
     }
 
@@ -445,9 +414,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         derived_work,
         timings,
         admissions,
-        session_reuse,
         replacements,
-        batches,
         peak_rss_kib,
     }
 }
@@ -505,20 +472,13 @@ fn parse_derived_work(pairs: &[(String, String)]) -> Option<DerivedWorkSample> {
 }
 
 fn parse_timing(pairs: &[(String, String)]) -> Option<TimingSample> {
-    let label = value(pairs, "session_open_timing")
-        .or_else(|| value(pairs, "pool_request_timing"))?
-        .to_owned();
+    let label = value(pairs, "session_open_timing")?.to_owned();
     Some(TimingSample {
         label,
         iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
         kind: value(pairs, "kind").unwrap_or("unknown").to_owned(),
         elapsed_ms: value(pairs, "elapsed_ms")?.parse::<f64>().ok()?,
         rss_kib: parse_u64(pairs, "rss_kib"),
-        workers: parse_u64(pairs, "workers"),
-        total_child_rss_kib: parse_u64(pairs, "total_child_rss_kib"),
-        worker_restarts: parse_u64(pairs, "worker_restarts"),
-        max_import_restarts: parse_u64(pairs, "max_import_restarts"),
-        policy_restarts: parse_u64(pairs, "policy_restarts"),
     })
 }
 
@@ -539,25 +499,6 @@ fn parse_admission(pairs: &[(String, String)]) -> Option<AdmissionSample> {
         rss_before_admission_kib: parse_u64(pairs, "rss_before_admission_kib"),
         rss_after_open_kib: parse_u64(pairs, "rss_after_open_kib"),
         refusal_reason,
-    })
-}
-
-fn parse_session_reuse(pairs: &[(String, String)]) -> Option<SessionReuseSample> {
-    let label = value(pairs, "session_reuse")?.to_owned();
-    let last_miss_reason =
-        value(pairs, "last_miss_reason").and_then(|value| if value == "none" { None } else { Some(value.to_owned()) });
-    Some(SessionReuseSample {
-        label,
-        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
-        layer: value(pairs, "layer").unwrap_or("unknown").to_owned(),
-        key_hits: parse_u64(pairs, "key_hits")?,
-        key_misses: parse_u64(pairs, "key_misses")?,
-        distinct_keys_seen: parse_u64(pairs, "distinct_keys_seen")?,
-        fresh_imports_avoided: parse_u64(pairs, "fresh_imports_avoided")?,
-        miss_empty_pool: parse_u64(pairs, "miss_empty_pool")?,
-        miss_reuse_disabled: parse_u64(pairs, "miss_reuse_disabled").unwrap_or(0),
-        miss_no_matching_key: parse_u64(pairs, "miss_no_matching_key")?,
-        last_miss_reason,
     })
 }
 
@@ -584,25 +525,6 @@ fn parse_replacement(pairs: &[(String, String)]) -> Option<ReplacementSample> {
         replacement_reason,
         replacement_budget_status,
         skipped_reason,
-    })
-}
-
-fn parse_batch(pairs: &[(String, String)]) -> Option<BatchSample> {
-    Some(BatchSample {
-        label: value(pairs, "batch")?.to_owned(),
-        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
-        layer: value(pairs, "layer").unwrap_or("unknown").to_owned(),
-        workload: value(pairs, "workload").unwrap_or("unknown").to_owned(),
-        selectors: parse_u64(pairs, "selectors")?,
-        request_delta: parse_u64(pairs, "request_delta")?,
-        import_delta: parse_u64(pairs, "import_delta")?,
-        elapsed_ms: value(pairs, "elapsed_ms")?.parse::<f64>().ok()?,
-        parent_rss_kib: parse_u64(pairs, "parent_rss_kib"),
-        child_rss_kib: parse_u64(pairs, "child_rss_kib"),
-        result_items: parse_u64(pairs, "result_items")?,
-        item_failures: parse_u64(pairs, "item_failures")?,
-        total_truncated: parse_bool(pairs, "total_truncated")?,
-        worker_frames: parse_u64(pairs, "worker_frames"),
     })
 }
 
@@ -677,9 +599,7 @@ struct ParsedOutput {
     derived_work: Vec<DerivedWorkSample>,
     timings: Vec<TimingSample>,
     admissions: Vec<AdmissionSample>,
-    session_reuse: Vec<SessionReuseSample>,
     replacements: Vec<ReplacementSample>,
-    batches: Vec<BatchSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -786,27 +706,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_session_reuse_lines() {
-        let parsed = parse_key_values(
-            "session_reuse=pooled-reuse iteration=2 layer=host key_hits=1 key_misses=1 distinct_keys_seen=1 fresh_imports_avoided=1 miss_empty_pool=1 miss_reuse_disabled=0 miss_no_matching_key=0 last_miss_reason=none",
-            "",
-        );
-        assert_eq!(parsed.session_reuse.len(), 1);
-        let sample = first(&parsed.session_reuse);
-        assert_eq!(sample.label, "pooled-reuse");
-        assert_eq!(sample.iteration, Some(2));
-        assert_eq!(sample.layer, "host");
-        assert_eq!(sample.key_hits, 1);
-        assert_eq!(sample.key_misses, 1);
-        assert_eq!(sample.distinct_keys_seen, 1);
-        assert_eq!(sample.fresh_imports_avoided, 1);
-        assert_eq!(sample.miss_empty_pool, 1);
-        assert_eq!(sample.miss_reuse_disabled, 0);
-        assert_eq!(sample.miss_no_matching_key, 0);
-        assert_eq!(sample.last_miss_reason, None);
-    }
-
-    #[test]
     fn parses_replacement_lines() {
         let parsed = parse_key_values(
             "replacement=worker_session_open iteration=2 kind=cold replacement_attempts=1 replacement_successes=1 replacement_failures=0 replacement_budget_admitted=1 replacement_budget_skipped=0 spawn_handshake_ms=12.500 session_open_import_ms=90.250 replacement_total_ms=15.000 replacement_reason=max_imports replacement_budget_status=synchronous-no-overlap skipped_reason=none",
@@ -831,30 +730,6 @@ mod tests {
             Some("synchronous-no-overlap")
         );
         assert_eq!(sample.skipped_reason, None);
-    }
-
-    #[test]
-    fn parses_batch_lines() {
-        let parsed = parse_key_values(
-            "batch=warm_module_query_batch iteration=2 layer=worker-pool workload=process_module_query_batch selectors=2 request_delta=1 import_delta=0 elapsed_ms=4.250 parent_rss_kib=120000 child_rss_kib=700000 result_items=2 item_failures=0 total_truncated=false worker_frames=unavailable",
-            "",
-        );
-        assert_eq!(parsed.batches.len(), 1);
-        let sample = first(&parsed.batches);
-        assert_eq!(sample.label, "warm_module_query_batch");
-        assert_eq!(sample.iteration, Some(2));
-        assert_eq!(sample.layer, "worker-pool");
-        assert_eq!(sample.workload, "process_module_query_batch");
-        assert_eq!(sample.selectors, 2);
-        assert_eq!(sample.request_delta, 1);
-        assert_eq!(sample.import_delta, 0);
-        assert_float_eq(sample.elapsed_ms, 4.25);
-        assert_eq!(sample.parent_rss_kib, Some(120_000));
-        assert_eq!(sample.child_rss_kib, Some(700_000));
-        assert_eq!(sample.result_items, 2);
-        assert_eq!(sample.item_failures, 0);
-        assert!(!sample.total_truncated);
-        assert_eq!(sample.worker_frames, None);
     }
 
     #[test]

@@ -104,10 +104,6 @@ impl LakeProject {
         Ok(Self { root })
     }
 
-    pub(crate) fn root(&self) -> &Path {
-        &self.root
-    }
-
     /// On-disk path to the compiled capability dylib for the
     /// `(package, lean_lib_name)` pair.
     ///

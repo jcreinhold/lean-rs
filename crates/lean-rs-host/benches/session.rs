@@ -1,12 +1,13 @@
 //! Session-level benchmarks for `lean_rs::host`: bulk environment
-//! query, bulk introspection, elaboration, bounded `MetaM` (`whnf`), and `SessionPool`
-//! reuse. Each workload names the user-visible code path it represents.
+//! query, bulk introspection, elaboration, bounded `MetaM` (`whnf`), and
+//! cached module queries. Each workload names the user-visible code path
+//! it represents.
 //!
-//! All four workloads share one process and one `LeanRuntime`—Lean's
+//! All workloads share one process and one `LeanRuntime`—Lean's
 //! initialiser is `OnceLock`-cached and re-running it inside `b.iter`
-//! would measure only the cached fast-path. Per-bench session and pool
-//! construction happens once outside `b.iter`, so the recorded numbers
-//! reflect the steady-state hot path, not import cost.
+//! would measure only the cached fast-path. Each bench builds its session
+//! once, outside `b.iter`, so the recorded numbers reflect the
+//! steady-state hot path, not import cost.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
 
@@ -21,7 +22,7 @@ use lean_rs::LeanRuntime;
 use lean_rs_host::host::process::{ModuleQueryCachePolicy, ModuleQueryOutputBudgets, ModuleQuerySelector};
 use lean_rs_host::meta::LeanMetaOptions;
 use lean_rs_host::meta::whnf;
-use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanProgressEvent, LeanProgressSink, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanProgressEvent, LeanProgressSink};
 
 // -- fixture bring-up ---------------------------------------------------
 
@@ -368,38 +369,9 @@ fn bench_module_query_batch_cached_decode(c: &mut Criterion, caps: &LeanCapabili
     });
 }
 
-// -- SessionPool reuse hit ----------------------------------------------
-//
-// Workload: `host::pool::session_reuse_hit`—`SessionPool::acquire`
-// (crates/lean-rs/src/host/pool.rs:130+) on a warm pool. After a
-// warm-up acquire+drop, the free list holds one entry; each measured
-// iteration is a hot-cache LIFO pop, drop returns it. Imports are
-// performed once outside the measurement so the recorded cost is the
-// pool's bookkeeping + session re-binding, not Lean import work.
-
-fn bench_session_pool_reuse_hit(c: &mut Criterion, runtime: &'static LeanRuntime, caps: &LeanCapabilities<'_, '_>) {
-    let pool = SessionPool::with_capacity(runtime, 1);
-    let imports = fixed_fixture::imports(caps, "LeanRsFixture.Handles");
-
-    // Warm the pool: one acquire + drop seeds the free list with a
-    // ready-to-reuse environment.
-    drop(pool.acquire(caps, &imports, None, None).expect("warm-up acquire"));
-
-    c.bench_function("host::pool::session_reuse_hit", |b| {
-        b.iter(|| {
-            let sess = pool
-                .acquire(black_box(caps), black_box(&imports), None, None)
-                .expect("acquire");
-            black_box(&sess);
-            drop(sess);
-        });
-    });
-}
-
 // -- harness ------------------------------------------------------------
 
 fn criterion_benchmarks(c: &mut Criterion) {
-    let runtime = LeanRuntime::init().expect("Lean runtime initialises");
     let host = fixture_host();
     let caps = fixed_fixture::capabilities(&host).expect("capabilities load");
 
@@ -411,7 +383,6 @@ fn criterion_benchmarks(c: &mut Criterion) {
     bench_elaborate(c, &caps);
     bench_run_meta_whnf(c, &caps);
     bench_module_query_batch_cached_decode(c, &caps);
-    bench_session_pool_reuse_hit(c, runtime, &caps);
 }
 
 criterion_group!(benches, criterion_benchmarks);

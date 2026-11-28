@@ -1,8 +1,0 @@
-error[E0515]: cannot return value referencing local variable `pool`
- --> tests/compile_fail/pooled_session_outlives_pool.rs:9:5
-  |
-9 |     pool.acquire(caps, imports, None, None).expect("session")
-  |     ----^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |     |
-  |     returns a value referencing data owned by the current function
-  |     `pool` is borrowed here
