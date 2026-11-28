@@ -929,6 +929,30 @@ fn derived_declaration_work_tracks_requested_fields() {
 }
 
 #[test]
+fn search_rows_report_an_instance_as_instance() {
+    let host = LeanHost::from_lake_project(runtime(), fixture::native_fixture_root()).expect("host opens cleanly");
+    let caps = fixture::native_capabilities(&host).expect("fixture capability loads");
+    let mut session = caps
+        .session(
+            &fixture_service_imports(&caps, "LeanRsFixture.SourceRanges"),
+            None,
+            None,
+        )
+        .expect("fixture session opens");
+    for (name, kind) in [("instAddNat", "instance"), ("Nat.add", "definition")] {
+        let mut search = DeclarationSearchRequest::new(name);
+        search.include_source = false;
+        let result = session.search_declarations(&search, None).expect("search succeeds");
+        let row = result
+            .declarations
+            .iter()
+            .find(|row| row.name == name)
+            .unwrap_or_else(|| panic!("search finds {name}"));
+        assert_eq!(row.kind, kind, "{name}");
+    }
+}
+
+#[test]
 fn bracketed_import_query_result_surface_cannot_carry_lean_handles() {
     fn assert_owned<T: Send + Sync + 'static>() {}
 

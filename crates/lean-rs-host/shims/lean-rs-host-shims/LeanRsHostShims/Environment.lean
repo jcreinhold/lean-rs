@@ -737,6 +737,12 @@ private def declarationKindOf : ConstantInfo → String
   | .ctorInfo   _ => "constructor"
   | .recInfo    _ => "recursor"
 
+/-- The kind a search row reports. The instance attribute wins over the stored
+    constant kind, so an instance reports `instance`, never `definition` or
+    `theorem`. -/
+private def searchRowKind (env : Environment) (name : Name) (info : ConstantInfo) : String :=
+  if Lean.Meta.isInstanceCore env name then "instance" else declarationKindOf info
+
 private def reportBracketProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
   if handle == 0 || trampoline == 0 then
     pure none
@@ -988,7 +994,7 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
     let nameString := name.toString
     let some nameMatch := nameMatch? request nameString | continue
     afterName := afterName + 1
-    let kind := declarationKindOf info
+    let kind := searchRowKind env name info
     if request.kind.any (· != kind) then
       continue
     afterKind := afterKind + 1

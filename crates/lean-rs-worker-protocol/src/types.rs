@@ -416,6 +416,7 @@ pub enum LeanWorkerDeclarationNameMatchKind {
 pub struct LeanWorkerDeclarationSearch {
     pub name_fragment: Option<String>,
     pub name_match: LeanWorkerDeclarationNameMatch,
+    /// Keep only rows of this kind, as [`LeanWorkerDeclarationSearchRow::kind`] reports it.
     pub kind: Option<String>,
     pub required_constants: Vec<String>,
     pub conclusion_head: Option<String>,
@@ -457,6 +458,8 @@ pub struct LeanWorkerDeclarationFlags {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationSearchRow {
     pub name: String,
+    /// The constant's kind, such as `definition` or `theorem`. A declaration
+    /// with the instance attribute reports `instance`.
     pub kind: String,
     pub module: Option<String>,
     pub source: Option<LeanWorkerSourceRange>,

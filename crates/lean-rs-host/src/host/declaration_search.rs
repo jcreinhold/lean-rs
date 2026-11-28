@@ -40,6 +40,8 @@ pub enum DeclarationNameMatchKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationSearchRow {
     pub name: String,
+    /// The constant's kind, such as `definition` or `theorem`. A declaration
+    /// with the instance attribute reports `instance`.
     pub kind: String,
     pub module: Option<String>,
     pub source: Option<LeanSourceRange>,
