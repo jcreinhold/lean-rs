@@ -43,19 +43,7 @@ filter = """
         test(=repeated_identical_opens_do_not_grow_the_child)
         | test(=alternating_two_pooled_profiles_does_not_grow_the_child)
     ))
-    | (binary(=pool) & (
-        test(=memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted)
-        | test(=per_worker_rss_policy_invalidates_old_lease_before_work)
-        | test(=rss_snapshot_records_available_samples_on_supported_platforms)
-    ))
     | (binary(=supervisor) & test(=rss_policy_restarts_or_records_unavailable_sample))
-    | (binary(=capability_builder) & (
-        test(=app_owned_worker_child_locator_accepts_explicit_binary)
-        | test(=manifest_backed_builder_uses_manifest_capability_identity)
-        | test(=stale_fingerprint_is_reported_by_bootstrap_preflight)
-        | test(=handshake_failure_is_a_bootstrap_diagnostic)
-        | test(=restart_policy_override_is_applied_during_builder_startup)
-    ))
     | binary(=loader_regressions)
 ))
 """

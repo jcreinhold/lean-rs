@@ -9,7 +9,7 @@ TARGET="${1:-}"
 RESULTS_DIR="$REPO_ROOT/profiling_results"
 
 if [[ -z "$TARGET" ]]; then
-	echo "Usage: $0 <long-session|worker-cycling|pool-memory|mathlib-scale>"
+	echo "Usage: $0 <long-session|worker-cycling>"
 	exit 1
 fi
 
@@ -49,17 +49,9 @@ worker-cycling)
 	export LEAN_RS_WORKER_MEMORY_MAX_IMPORTS="${LEAN_RS_WORKER_MEMORY_MAX_IMPORTS:-2}"
 	record_profile "worker-cycling" "$REPO_ROOT/target/profiling/examples/memory_cycling"
 	;;
-pool-memory)
-	cargo build --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-child --example pool_memory_scheduling
-	record_profile "pool-memory" "$REPO_ROOT/target/profiling/examples/pool_memory_scheduling"
-	;;
-mathlib-scale)
-	cargo build --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-child --example mathlib_scale_probe
-	record_profile "mathlib-scale" "$REPO_ROOT/target/profiling/examples/mathlib_scale_probe"
-	;;
 *)
 	echo "Unknown target: $TARGET"
-	echo "Available: long-session, worker-cycling, pool-memory, mathlib-scale"
+	echo "Available: long-session, worker-cycling"
 	exit 1
 	;;
 esac

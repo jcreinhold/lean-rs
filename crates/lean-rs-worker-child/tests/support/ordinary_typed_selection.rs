@@ -13,7 +13,6 @@ pub(super) struct OrdinaryTypedSelection {
     pub(super) fixture: PathBuf,
     pub(super) json_manifest: PathBuf,
     pub(super) sysroot: PathBuf,
-    pub(super) foreign_workspace: Option<PathBuf>,
     pub(super) prepared: Option<lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts>,
 }
 
@@ -44,14 +43,6 @@ fn parse_selection(raw: &str, needs_prepared: bool) -> OrdinaryTypedSelection {
         &selected.json_manifest,
     ] {
         assert_eq!(path.canonicalize().expect("canonical typed input"), *path);
-    }
-    if let Some(workspace) = &selected.foreign_workspace {
-        assert!(!needs_prepared, "foreign workspace requires the interop fixture");
-        assert_ne!(*workspace, selected.fixture);
-        assert_eq!(
-            *workspace,
-            workspace.canonicalize().expect("canonical foreign workspace")
-        );
     }
     checked_worker(&selected.worker, &selected.worker_sha256);
     selected

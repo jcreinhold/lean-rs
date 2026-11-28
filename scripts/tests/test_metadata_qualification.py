@@ -269,7 +269,7 @@ class MetadataQualificationTest(unittest.TestCase):
         run.assert_called_once()
 
     def run_typed_selection(
-        self, *, live_pid=False, extra_json_worker=False, direct_tests=()
+        self, *, live_pid=False, extra_worker=False, direct_tests=()
     ):
         manifest = self.mock_private_package()
         broken = self.fixtures / "broken-import"
@@ -334,7 +334,7 @@ class MetadataQualificationTest(unittest.TestCase):
                 )
                 self.assertIn(target, command)
                 started, grants = counts
-                if extra_json_worker:
+                if extra_worker:
                     started += 1
                     grants += 1
                 with audit.open("w") as stream:
@@ -345,10 +345,7 @@ class MetadataQualificationTest(unittest.TestCase):
                             name
                         ):
                             granted = (event,) * per_worker[index]
-                        elif event in (
-                            qualification.JSON_GRANT,
-                            qualification.ADAPTER_IMPORT_GRANT,
-                        ):
+                        elif event == qualification.ADAPTER_IMPORT_GRANT:
                             granted = (event,) if index < grants else ()
                         else:
                             granted = qualification.ORDINARY_MIXED_GRANTS.get(
@@ -410,9 +407,10 @@ class MetadataQualificationTest(unittest.TestCase):
                         emit_host_selection=True,
                         run_typed=True,
                     )
-            elif extra_json_worker:
+            elif extra_worker:
+                first_grant = qualification.ORDINARY_AUDITED_TESTS[0][3].decode()
                 with self.assertRaisesRegex(
-                    ValueError, "wrong started worker / authorize-consumer-load counts"
+                    ValueError, f"wrong started worker / {first_grant} counts"
                 ):
                     qualification.qualify_broken_import(
                         self.target,
@@ -438,7 +436,7 @@ class MetadataQualificationTest(unittest.TestCase):
                         for _, _, counts, _ in qualification.ORDINARY_AUDITED_TESTS
                     ),
                 )
-        if live_pid or extra_json_worker:
+        if live_pid or extra_worker:
             host_builder.assert_not_called()
             scalar.assert_not_called()
         else:
@@ -451,7 +449,7 @@ class MetadataQualificationTest(unittest.TestCase):
             6
             if live_pid
             else 7
-            if extra_json_worker
+            if extra_worker
             else 6 + len(qualification.ORDINARY_AUDITED_TESTS),
         )
         return seen, output.getvalue()
@@ -506,16 +504,6 @@ class MetadataQualificationTest(unittest.TestCase):
         self.assertNotIn(
             "test(=process_module_query_batch_changed_session_imports_rebuilds)",
             selection,
-        )
-        pool_cases = (
-            "import_profile_partitions_pool_session_keys",
-            "import_workspace_root_partitions_pool_session_keys",
-            "explicit_cycle_invalidates_only_the_current_lease",
-            "queue_wait_timeout_is_typed_when_pool_is_full",
-            "per_worker_rss_policy_invalidates_old_lease_before_work",
-            "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
-            "memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted",
-            "rss_snapshot_records_available_samples_on_supported_platforms",
         )
         meta_cases = (
             "infer_type_returns_rendered_type_for_known_term",
@@ -612,9 +600,6 @@ class MetadataQualificationTest(unittest.TestCase):
             "a_staleness_eviction_does_not_disable_the_reuse_hint",
         )
         audited_filters = [
-            "(binary(=pool) & (test(=compatible_session_key_reuses_one_worker)))",
-            "(binary(=typed_command) & (test(=typed_json_command_decodes_response)))",
-            *(f"(binary(=pool) & (test(={name})))" for name in pool_cases),
             *(f"(binary(=typed_session) & (test(={name})))" for name in meta_cases),
             *(
                 f"(binary(={target}) & (test(={name})))"
@@ -714,7 +699,7 @@ class MetadataQualificationTest(unittest.TestCase):
         ]
         self.assertEqual(
             remaining,
-            f"not (package(=lean-rs-worker-child) & ((binary(=capability_builder) & ({builder_filter})) | {selection} | {' | '.join(audited_filters + scalar_filters)}))",
+            f"not (package(=lean-rs-worker-child) & ((binary(=host_handle) & ({builder_filter})) | {selection} | {' | '.join(audited_filters + scalar_filters)}))",
         )
 
     def test_direct_transitive_replaces_only_the_matching_host_test(self):
@@ -794,18 +779,13 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(audit, marker, prefix=())
 
-    def test_typed_group_extra_pool_worker_keeps_state_and_skips_json_smoke(self):
-        self.run_typed_selection(extra_json_worker=True)
+    def test_typed_group_extra_worker_keeps_state_and_skips_later_cases(self):
+        self.run_typed_selection(extra_worker=True)
 
-    def test_json_pool_policy_checks_closure_of_start_without_manifest_grant(self):
-        case = "per_worker_rss_policy_invalidates_old_lease_before_work"
-        counts = next(
-            counts
-            for _, name, counts in qualification.ORDINARY_JSON_TESTS
-            if name == case
-        )
+    def test_ungranted_replacement_must_close_before_the_next_case(self):
+        case = "parent_can_cancel_long_worker_request_at_progress_boundary"
         audit = (
-            b"51 worker-started\n51 verified-deployment\n51 authorize-consumer-load\n"
+            b"51 worker-started\n51 verified-deployment\n51 authorize-adapter-handles\n"
             b"52 worker-started\n"
         )
 
@@ -818,7 +798,10 @@ class MetadataQualificationTest(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "52 remains; keeping fixture state"),
         ):
             qualification.check_typed_children_closed(
-                audit, case=case, expected_counts=counts
+                audit,
+                case=case,
+                expected_counts=((2, 1),),
+                grant_event=qualification.ADAPTER_IMPORT_GRANT,
             )
         probe.assert_any_call(52, 0)
 
@@ -871,35 +854,10 @@ class MetadataQualificationTest(unittest.TestCase):
         ):
             qualification.check_host_builder_children_closed(good, expected)
 
-    def test_legacy_provider_preflight_refuses_stale_outputs_and_broken_aliases(self):
-        provider = self.target / "provider"
-        root = provider / ".lake/build/lib/lean"
-        root.parent.mkdir(parents=True)
-        qualification.require_no_legacy_provider_shadow(provider)
-
-        root.symlink_to(provider / "missing")
-        with self.assertRaisesRegex(ValueError, "would shadow the pinned provider"):
-            qualification.require_no_legacy_provider_shadow(provider)
-        self.assertTrue(root.is_symlink())
-        root.unlink()
-
-        root.mkdir()
-        (root / "LeanRsInterop.olean").touch()
-        with self.assertRaisesRegex(ValueError, "would shadow the pinned provider"):
-            qualification.require_no_legacy_provider_shadow(provider)
-        self.assertTrue((root / "LeanRsInterop.olean").is_file())
-
-    def test_foreign_and_signature_cases_get_separate_seals_without_rebuilding_provider(
-        self,
-    ):
-        project = self.sdk / "fixtures/interop-worker"
-        project.mkdir(parents=True, exist_ok=True)
+    def test_stream_runs_one_cohort_on_the_pinned_images(self):
         release = self.target
         manifest = self.target / "shim.json"
-        regular = "successful_stream_delivers_rows_with_per_stream_sequences"
-        missing, wrong = qualification.INTEROP_SIGNATURE_CASES
-        foreign = list(qualification.INTEROP_FOREIGN_IMPORT_CASES)
-        legacy = qualification.INTEROP_LEGACY_CASE
+        cases = [name for _, name in qualification.INTEROP_TESTS]
         assets = qualification.stream_package_root()
         assets.mkdir(parents=True)
         manifest.write_text("{}")
@@ -911,25 +869,19 @@ class MetadataQualificationTest(unittest.TestCase):
             patch.object(qualification, "run_stream_group") as run,
         ):
             qualification.qualify_stream(
-                release, qualification.DARWIN_ARM64_PINS, manifest,
-                [regular, foreign[0], missing, legacy, *foreign[1:], wrong], pinned_selection=pinned,
+                release, qualification.DARWIN_ARM64_PINS, manifest, None, pinned_selection=pinned,
             )
-        self.assertEqual(
-            [args[3] for args, _ in run.call_args_list],
-            [[regular], foreign, (missing,), (wrong,), [legacy]],
-        )
-        self.assertEqual([kwargs["build_provider"] for _, kwargs in run.call_args_list],
-                         [True, False, False, False, False])
-        for _, kwargs in run.call_args_list:
-            self.assertEqual(kwargs["image_pins"], original_images + isolated_images)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[3], cases)
+        self.assertEqual(run.call_args.kwargs["image_pins"], original_images + isolated_images)
         self.assertFalse(assets.exists())
         assets.mkdir()
         with (
             patch.object(qualification, "prepare_stream_package", return_value=(assets.stat(), manifest, [])),
-            patch.object(qualification, "run_stream_group", side_effect=ValueError("first did not close")) as run,
-            self.assertRaisesRegex(ValueError, "first did not close"),
+            patch.object(qualification, "run_stream_group", side_effect=ValueError("cohort did not close")) as run,
+            self.assertRaisesRegex(ValueError, "cohort did not close"),
         ):
-            qualification.qualify_stream(release, qualification.DARWIN_ARM64_PINS, manifest, [missing, wrong])
+            qualification.qualify_stream(release, qualification.DARWIN_ARM64_PINS, manifest, cases[:1])
         run.assert_called_once()
         self.assertTrue(assets.is_dir())
 
@@ -954,7 +906,7 @@ class MetadataQualificationTest(unittest.TestCase):
             patch.object(qualification, "run_stream_group", return_value=descriptor),
         ):
             selection = qualification.qualify_stream(
-                self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"],
+                self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE],
                 prepared_package=(owner, manifest, pins), retain_for_workspace=True,
             )
         self.assertTrue(root.is_dir())
@@ -1009,15 +961,15 @@ class MetadataQualificationTest(unittest.TestCase):
         ) as run:
             manifest.write_text("changed")
             with self.assertRaisesRegex(ValueError, "manifest changed"):
-                qualification.qualify_stream(self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"])
+                qualification.qualify_stream(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
             run.assert_not_called()
             self.assertTrue(note.exists())
             manifest.write_text("{}")
             with self.assertRaisesRegex(ValueError, "closure unknown"):
-                qualification.qualify_stream(self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"])
+                qualification.qualify_stream(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
             self.assertFalse(note.exists())
             with self.assertRaises(FileNotFoundError):
-                qualification.qualify_stream(self.target, {}, manifest, ["successful_stream_delivers_rows_with_per_stream_sequences"])
+                qualification.qualify_stream(self.target, {}, manifest, [qualification.HOST_HANDLE_IMPORT_CASE])
             run.assert_called_once()
             build.assert_not_called()
         self.assertTrue(root.is_dir())
@@ -1047,31 +999,28 @@ class MetadataQualificationTest(unittest.TestCase):
         probe.assert_not_called()
 
     def test_metadata_audit_refuses_a_grant_for_another_interop_case(self):
-        for target, name in qualification.INTEROP_METADATA_TESTS:
-            with self.subTest(target=target, name=name):
-                grant = f"authorize-fixed-metadata-{name}".encode()
-                audit = (
-                    b"51 worker-started\n51 verified-deployment\n51 " + grant + b"\n"
-                )
-                with patch.object(
-                    qualification.os, "kill", side_effect=ProcessLookupError
-                ) as probe:
-                    qualification.check_typed_children_closed(
-                        audit, case=name, expected_counts=((1, 1),), grant_event=grant
-                    )
-                probe.assert_called_once_with(51, 0)
-                with (
-                    patch.object(qualification.os, "kill") as probe,
-                    self.assertRaisesRegex(ValueError, "wrong started worker"),
-                ):
-                    qualification.check_typed_children_closed(
-                        audit
-                        + b"51 authorize-fixed-stream-malformed_row_json_is_typed\n",
-                        case=name,
-                        expected_counts=((1, 1),),
-                        grant_event=grant,
-                    )
-                probe.assert_not_called()
+        name = "runtime_and_capability_metadata_are_separate"
+        grant = f"authorize-fixed-metadata-{name}".encode()
+        audit = b"51 worker-started\n51 verified-deployment\n51 " + grant + b"\n"
+        with patch.object(
+            qualification.os, "kill", side_effect=ProcessLookupError
+        ) as probe:
+            qualification.check_typed_children_closed(
+                audit, case=name, expected_counts=((1, 1),), grant_event=grant
+            )
+        probe.assert_called_once_with(51, 0)
+        with (
+            patch.object(qualification.os, "kill") as probe,
+            self.assertRaisesRegex(ValueError, "wrong started worker"),
+        ):
+            qualification.check_typed_children_closed(
+                audit
+                + b"51 authorize-fixed-doctor-doctor_reports_pass_warning_and_error_diagnostics\n",
+                case=name,
+                expected_counts=((1, 1),),
+                grant_event=grant,
+            )
+        probe.assert_not_called()
 
     def test_module_query_audit_refuses_an_unexpected_term_grant(self):
         audit = (

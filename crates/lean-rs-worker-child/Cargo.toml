@@ -10,7 +10,6 @@ include = [
   "LICENSE-APACHE",
   "LICENSE-MIT",
   "README.md",
-  "benches/**/*.rs",
   "build.rs",
   "examples/**/*.rs",
   "src/**/*.rs",
@@ -42,12 +41,8 @@ sha2 = { workspace = true }
 libc = "0.2"
 
 [dev-dependencies]
-ciborium = "0.2"
-criterion = { workspace = true }
-dhat = "0.3"
 lean-rs-worker-parent = { workspace = true }
 lean-rs-worker-protocol = { workspace = true, features = ["harness"] }
-rmp-serde = "1"
 tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]
@@ -58,14 +53,6 @@ rustix = { version = "1.1.6", features = ["process"] }
 [[bin]]
 name = "lean-rs-worker-child"
 path = "src/bin/lean-rs-worker-child.rs"
-
-[[bench]]
-harness = false
-name = "row_payload"
-
-[[bench]]
-harness = false
-name = "worker_capability"
 
 [lints]
 workspace = true

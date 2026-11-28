@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broken_import =
         match profile.as_deref() {
             Some(
-                "--typed-session" | "--interop-stream" | "--interop-legacy" | "--scalar-entry" | "--optional-whnf",
+                "--typed-session" | "--interop-stream" | "--scalar-entry" | "--optional-whnf",
             ) if env::args().len() == 3 => false,
             Some(
                 "--broken-import"
@@ -44,8 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ) if env::args().len() == 3 => true,
             _ => return Err("unknown metadata qualification profile".into()),
         };
-    let legacy = profile.as_deref() == Some("--interop-legacy");
-    let stream = legacy || profile.as_deref() == Some("--interop-stream");
+    let stream = profile.as_deref() == Some("--interop-stream");
     let scalar = profile.as_deref() == Some("--scalar-entry");
     let optional_whnf = profile.as_deref() == Some("--optional-whnf");
     let expected_state = if optional_whnf {
@@ -71,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if broken_import {
         return prepare_broken_import(app, &state, &sysroot, generated_output_key, profile.as_deref());
     }
-    prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream, legacy)
+    prepare_typed_session(app, sdk, &state, &sysroot, generated_output_key, stream)
 }
 
 fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -186,7 +185,6 @@ fn prepare_typed_session(
     sysroot: &Path,
     key: &str,
     stream: bool,
-    legacy: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let optional_whnf = state == app.join("target/optional-whnf");
     let shim = if optional_whnf {
@@ -195,9 +193,7 @@ fn prepare_typed_session(
         // Reuse the same run's normal prepared shims.
         selected_host_artifacts()?
     };
-    let expected_project = if legacy {
-        state.join("legacy")
-    } else if stream {
+    let expected_project = if stream {
         sdk.join("target/metadata-qualification/stream-package/fixtures/interop-worker")
     } else if optional_whnf {
         sdk.join("fixtures/lean")
@@ -219,12 +215,7 @@ fn prepare_typed_session(
     {
         return Err("typed fixture is not the job-owned private checkout fixture".into());
     }
-    let (image_dir, stem) = if legacy {
-        (
-            ".lake/build/lib".into(),
-            "lean__rs__interop__consumer_LeanRsInteropConsumer",
-        )
-    } else if stream {
+    let (image_dir, stem) = if stream {
         (
             format!(".lake/lean-rs-generated/{key}/lib"),
             "lean__rs__interop__consumer_LeanRsInteropConsumer",
@@ -247,21 +238,6 @@ fn prepare_typed_session(
     {
         return Err("typed state is not a private job directory".into());
     }
-    if legacy {
-        let record = serde_json::json!({
-            "typed_session": true, "stream": true, "verification": false, "legacy_interop": true,
-            "generated_output_key": key, "project": project, "sysroot": sysroot, "consumer_image": image,
-            "shim_manifest": shim.manifest_path(), "shim_json": shim.manifest_json(),
-            "shim_paths": shim.shim_search_paths(),
-        });
-        fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
-        return seal(app, state);
-    }
-    let foreign_workspace = match env::var("LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE").as_deref() {
-        Err(env::VarError::NotPresent) => None,
-        Ok("1") if stream => Some(build_foreign_workspace(state, sysroot)?),
-        _ => return Err("invalid foreign workspace preparation selection".into()),
-    };
     let fingerprint = ToolchainFingerprint::current();
     let manifest_path = state.join(if stream {
         "worker-stream-capability.json"
@@ -269,34 +245,18 @@ fn prepare_typed_session(
         "worker-json-capability.json"
     });
     let shim_json: serde_json::Value = serde_json::from_str(shim.manifest_json())?;
-    let signature_probe = match env::var("LEAN_RS_TEST_SIGNATURE_PROBE") {
-        Ok(case) => Some(case),
-        Err(env::VarError::NotPresent) => None,
-        Err(err) => return Err(err.into()),
-    };
-    let negative_rows = if let Some(case) = signature_probe.as_deref() {
-        if !stream {
-            return Err("signature probe requires the sealed interop profile".into());
-        }
-        Some(stream_cases::negative_signature_rows(case).ok_or("unknown signature probe")?)
-    } else {
-        None
-    };
     let mut seen = std::collections::BTreeSet::new();
     let (package, module, dependencies, signatures) = if stream {
         (
             "lean_rs_interop_consumer",
             "LeanRsInteropConsumer",
             shim_json["dependencies"].clone(),
-            negative_rows.unwrap_or_else(|| {
-                stream_cases::CASES
-                    .iter()
-                    .flat_map(|(_, exports)| exports.signatures())
-                    .map(|(signature, _)| signature)
-                    .filter(|signature| seen.insert(signature.symbol().to_owned()))
-                    .map(|sig| sig.to_json())
-                    .collect::<Vec<_>>()
-            }),
+            stream_cases::CASES
+                .iter()
+                .flat_map(|(_, exports)| exports.signatures())
+                .filter(|signature| seen.insert(signature.symbol().to_owned()))
+                .map(|sig| sig.to_json())
+                .collect::<Vec<_>>(),
         )
     } else {
         (
@@ -333,8 +293,6 @@ fn prepare_typed_session(
     let record = serde_json::json!({
         "broken_import": false, "typed_session": true, "stream": stream, "verification": false,
         "optional_whnf": optional_whnf,
-        "signature_probe": signature_probe,
-        "foreign_workspace": foreign_workspace,
         "consumer_manifest": manifest_path, "consumer_json": manifest,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": image,
@@ -343,29 +301,6 @@ fn prepare_typed_session(
     });
     fs::write(state.join("prepared.json"), serde_json::to_vec(&record)?)?;
     seal(app, state)
-}
-
-fn build_foreign_workspace(state: &Path, sysroot: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let project = state.join("foreign");
-    fs::DirBuilder::new().mode(0o700).create(&project)?;
-    fs::create_dir(project.join("B"))?;
-    fs::write(
-        project.join("lakefile.lean"),
-        "import Lake\nopen Lake DSL\npackage audited_workspace\nlean_lib B\n",
-    )?;
-    fs::write(project.join("B.lean"), "import B.Mod\n")?;
-    fs::write(project.join("B/Mod.lean"), "def B.Mod.externalValue : Nat := 7\n")?;
-    fs::write(project.join("lean-toolchain"), "leanprover/lean4:v4.36.0\n")?;
-    if !std::process::Command::new(sysroot.join("bin/lake"))
-        .args(["--no-cache", "--fail-fast", "build", "B.Mod"])
-        .current_dir(&project)
-        .stdin(std::process::Stdio::null())
-        .status()?
-        .success()
-    {
-        return Err("expected the selected Lean to build the separate B.Mod".into());
-    }
-    Ok(project)
 }
 
 fn prepare_broken_import(

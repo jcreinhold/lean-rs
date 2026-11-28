@@ -20,8 +20,8 @@ use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceCont
 use std::path::Path;
 
 use metadata_qualification::{
-    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, LEGACY_INTEROP_CASE, MODULE_SYNTAX_IMPORTS, Record,
-    STREAM_MANIFEST_NAME, audit, foreign_import_case, module_syntax_case,
+    EXPORT, Held, JSON_COMMAND_EXPORT, JSON_MANIFEST_NAME, MODULE_SYNTAX_IMPORTS, Record, STREAM_MANIFEST_NAME, audit,
+    module_syntax_case,
 };
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
@@ -456,7 +456,7 @@ impl WorkerAuthority for MetadataApp {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || d.legacy_interop || path != d.consumer_manifest {
+        if d.broken_import || path != d.consumer_manifest {
             return Err(denied());
         }
         let root = if d.scalar_entry {
@@ -486,7 +486,7 @@ impl WorkerAuthority for MetadataApp {
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>> {
         let held = self.deployment()?;
         let d = &held.record;
-        if d.broken_import || d.legacy_interop || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
+        if d.broken_import || path != d.consumer_manifest || bytes != d.consumer_json.as_bytes() {
             return Err(denied());
         }
         let contracts = if d.scalar_entry {
@@ -512,56 +512,32 @@ impl WorkerAuthority for MetadataApp {
             ]
         } else if d.stream {
             let requested = std::env::var("LEAN_RS_METADATA_STREAM_CASE").map_err(|_| denied())?;
-            if foreign_import_case(&requested) != d.foreign_workspace.is_some() {
-                return Err(denied());
-            }
             let manifest: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| denied())?;
             let signatures = manifest
                 .get("exports")
                 .and_then(serde_json::Value::as_array)
                 .ok_or_else(denied)?;
-            if let Some(case) = d.signature_probe.as_deref() {
-                let rows = stream_cases::negative_signature_rows(case).ok_or_else(denied)?;
-                if requested != case || *signatures != rows {
+            let (_, exports) = stream_cases::CASES
+                .iter()
+                .find(|(names, _)| names.contains(&requested.as_str()))
+                .ok_or_else(denied)?;
+            let event = match exports {
+                stream_cases::Exports::Metadata => "authorize-fixed-metadata",
+                stream_cases::Exports::Doctor | stream_cases::Exports::MalformedMetadataAndDoctor => {
+                    "authorize-fixed-doctor"
+                }
+                stream_cases::Exports::NoExports => "admit-fixed-no-exports",
+            };
+            let mut contracts = Vec::new();
+            for signature in exports.signatures() {
+                if !signatures.contains(&signature.to_json()) {
                     return Err(denied());
                 }
-                // This is the genuine ABI from the sealed fixture, not the
-                // deliberately absent or contradictory manifest metadata.
-                audit(&format!("authorize-fixed-signature-probe-{requested}"));
-                vec![(stream_cases::JSON_COMMAND.into(), WorkerExportContract::StringIoString)]
-            } else {
-                let (_, exports) = stream_cases::CASES
-                    .iter()
-                    .find(|(names, _)| names.contains(&requested.as_str()))
-                    .ok_or_else(denied)?;
-                let event = match exports {
-                    stream_cases::Exports::Metadata => "authorize-fixed-metadata",
-                    stream_cases::Exports::Doctor | stream_cases::Exports::MalformedMetadataAndDoctor => {
-                        "authorize-fixed-doctor"
-                    }
-                    stream_cases::Exports::NoExports => "admit-fixed-no-exports",
-                    stream_cases::Exports::Json | stream_cases::Exports::MalformedJson => "authorize-fixed-json",
-                    stream_cases::Exports::Shape(_, _) => "authorize-fixed-shape",
-                    stream_cases::Exports::Streams(_) | stream_cases::Exports::StreamAndJson(_) => {
-                        "authorize-fixed-stream"
-                    }
-                };
-                let mut contracts = Vec::new();
-                for (signature, streaming) in exports.signatures() {
-                    if !signatures.contains(&signature.to_json()) {
-                        return Err(denied());
-                    }
-                    let contract = if streaming {
-                        WorkerExportContract::StringStream
-                    } else {
-                        WorkerExportContract::StringIoString
-                    };
-                    contracts.push((signature.symbol().to_owned(), contract));
-                }
-                // With NoExports this records image admission only; the attested table is empty.
-                audit(&format!("{event}-{requested}"));
-                contracts
+                contracts.push((signature.symbol().to_owned(), WorkerExportContract::StringIoString));
             }
+            // With NoExports this records image admission only; the attested table is empty.
+            audit(&format!("{event}-{requested}"));
+            contracts
         } else {
             let export = if d.typed_session {
                 if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1") {
@@ -576,8 +552,6 @@ impl WorkerAuthority for MetadataApp {
         };
         // SAFETY: Held checks the exact sealed images, initializer and runtime.
         // Each named interop case selects only its exact genuine contracts.
-        // A negative signature probe grants the real String ABI; the SDK still
-        // checks the deliberately invalid metadata before symbol binding.
         Ok(unsafe { AuthorizedWorkerSnapshot::attest(runtime, path.into(), bytes.to_vec(), contracts, held.clone()) })
     }
     fn host(
@@ -596,7 +570,7 @@ impl WorkerAuthority for MetadataApp {
             }
             return Err(denied());
         }
-        if !d.broken_import && !d.legacy_interop && (!d.typed_session || d.stream) {
+        if !d.broken_import && (!d.typed_session || d.stream) {
             held.check_interop_visibility(true).map_err(ioerr)?;
         }
         if !d.broken_import {
@@ -661,21 +635,6 @@ impl WorkerAuthority for MetadataApp {
         requested: &LeanModuleInitializer,
     ) -> LeanResult<(LeanLibrary<'static>, LeanModuleInitializer)> {
         let held = self.deployment()?;
-        if held.record.legacy_interop {
-            let expected = LeanModuleInitializer::new("lean_rs_interop_consumer", "LeanRsInteropConsumer");
-            if std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() != Ok(LEGACY_INTEROP_CASE)
-                || path != held.record.consumer_image
-                || requested != &expected
-            {
-                return Err(denied());
-            }
-            held.check_interop_visibility(true).map_err(ioerr)?;
-            // SAFETY: Held checked the exact direct native image, pinned provider and runtime.
-            // Only this initializer is returned; neither manifest reads nor exports are authorized.
-            let library = unsafe { LeanLibrary::open(runtime, path) }?;
-            audit(&format!("admit-fixed-direct-interop-{LEGACY_INTEROP_CASE}"));
-            return Ok((library, expected));
-        }
         let expected = LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture");
         if held.record.broken_import
             || !held.record.typed_session

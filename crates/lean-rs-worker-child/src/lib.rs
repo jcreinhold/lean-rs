@@ -33,9 +33,8 @@ mod parent_watchdog;
 /// ```
 ///
 /// Parent processes should depend on `lean-rs-worker-parent` for the
-/// supervisor surface (`LeanWorker`, `LeanWorkerCapabilityBuilder`,
-/// `LeanWorkerPool`). This function is only the child-side binary entry
-/// point.
+/// supervisor surface (`LeanWorker`, `LeanWorkerHostHandleBuilder`). This
+/// function is only the child-side binary entry point.
 pub fn run_worker_child_stdio() -> std::process::ExitCode {
     if let Some(exit) = host_artifacts::preparation_mode() {
         return exit;

@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]]; then
-	echo "Usage: $0 <long-session|long-session-fresh|long-session-pooled|long-session-steady|long-session-matrix|long-session-bracketed|long-session-derived|worker-cycling|pool-memory|mathlib-scale|all>"
+	echo "Usage: $0 <long-session|long-session-fresh|long-session-pooled|long-session-steady|long-session-matrix|long-session-bracketed|long-session-derived|worker-cycling|all>"
 	exit 1
 fi
 
@@ -23,9 +23,7 @@ build_host_example() {
 build_worker_examples() {
 	cargo build --profile profiling -p lean-rs-worker-child \
 		--bin lean-rs-worker-child \
-		--example memory_cycling \
-		--example pool_memory_scheduling \
-		--example mathlib_scale_probe
+		--example memory_cycling
 }
 
 run_long_session_mode() {
@@ -51,22 +49,6 @@ run_worker_cycling() {
 		"$REPO_ROOT/target/profiling/examples/memory_cycling"
 }
 
-run_pool_memory() {
-	echo "=== pool-memory ==="
-	build_worker_examples
-	LEAN_RS_POOL_MEMORY_MAX_WORKERS="${LEAN_RS_POOL_MEMORY_MAX_WORKERS:-1}" \
-		LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB="${LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB:-1572864}" \
-		LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB="${LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB:-1572864}" \
-		LEAN_RS_POOL_MEMORY_MAX_IMPORTS="${LEAN_RS_POOL_MEMORY_MAX_IMPORTS:-1}" \
-		"$REPO_ROOT/target/profiling/examples/pool_memory_scheduling"
-}
-
-run_mathlib_scale() {
-	echo "=== mathlib-scale ==="
-	build_worker_examples
-	"$REPO_ROOT/target/profiling/examples/mathlib_scale_probe"
-}
-
 case "$TARGET" in
 long-session) run_long_session_mode all ;;
 long-session-fresh) run_long_session_mode fresh-import ;;
@@ -76,8 +58,6 @@ long-session-matrix) run_long_session_mode import-matrix ;;
 long-session-bracketed) run_long_session_mode bracketed-lightweight ;;
 long-session-derived) run_long_session_mode derived-indexes ;;
 worker-cycling) run_worker_cycling ;;
-pool-memory) run_pool_memory ;;
-mathlib-scale) run_mathlib_scale ;;
 all)
 	run_long_session_mode fresh-import
 	run_long_session_mode pooled-reuse
@@ -86,11 +66,10 @@ all)
 	run_long_session_mode bracketed-lightweight
 	run_long_session_mode derived-indexes
 	run_worker_cycling
-	run_pool_memory
 	;;
 *)
 	echo "Unknown target: $TARGET"
-	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, long-session-bracketed, long-session-derived, worker-cycling, pool-memory, mathlib-scale, all"
+	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, long-session-bracketed, long-session-derived, worker-cycling, all"
 	exit 1
 	;;
 esac

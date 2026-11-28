@@ -56,7 +56,6 @@ pub fn collect(mode: BaselineMode) -> Result<(PathBuf, PathBuf), Box<dyn Error>>
             "Skipped worker-cycling max_imports=2 candidate because max_imports=1 peak RSS exceeded the 70% widening threshold ({WORKER_POLICY_WIDEN_THRESHOLD_KIB} KiB of {LOCAL_RSS_CAP_KIB} KiB).",
         ));
     }
-    report.workloads.push(run_pool_memory()?);
     report.workloads.push(run_criterion(
         "host-query-declarations-bulk-16",
         &[
@@ -153,8 +152,6 @@ fn build_profiling_binaries() -> Result<(), Box<dyn Error>> {
             "lean-rs-worker-child",
             "--example",
             "memory_cycling",
-            "--example",
-            "pool_memory_scheduling",
         ]);
     let output = command.output()?;
     if output.status.success() {
@@ -195,22 +192,6 @@ fn run_worker_cycling(max_imports: u64) -> Result<WorkloadRun, Box<dyn Error>> {
     ));
     let binary = profiling_example("memory_cycling");
     run_binary(&format!("worker-cycling-max-imports-{max_imports}"), &binary, &[], env)
-}
-
-fn run_pool_memory() -> Result<WorkloadRun, Box<dyn Error>> {
-    let mut env = default_env();
-    env.push(env_pair("LEAN_RS_POOL_MEMORY_MAX_WORKERS", "1"));
-    env.push(env_pair(
-        "LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB",
-        &LOCAL_RSS_CAP_KIB.to_string(),
-    ));
-    env.push(env_pair(
-        "LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB",
-        &LOCAL_RSS_CAP_KIB.to_string(),
-    ));
-    env.push(env_pair("LEAN_RS_POOL_MEMORY_MAX_IMPORTS", "1"));
-    let binary = profiling_example("pool_memory_scheduling");
-    run_binary("pool-memory", &binary, &[], env)
 }
 
 fn run_criterion(name: &str, args: &[&str]) -> Result<WorkloadRun, Box<dyn Error>> {
@@ -598,10 +579,7 @@ fn parse_replacement(pairs: &[(String, String)]) -> Option<ReplacementSample> {
         replacement_budget_admitted: parse_u64(pairs, "replacement_budget_admitted")?,
         replacement_budget_skipped: parse_u64(pairs, "replacement_budget_skipped")?,
         spawn_handshake_ms: parse_f64(pairs, "spawn_handshake_ms"),
-        capability_load_ms: parse_f64(pairs, "capability_load_ms"),
         session_open_import_ms: parse_f64(pairs, "session_open_import_ms"),
-        first_command_ms: parse_f64(pairs, "first_command_ms"),
-        warm_command_ms: parse_f64(pairs, "warm_command_ms"),
         replacement_total_ms: parse_f64(pairs, "replacement_total_ms"),
         replacement_reason,
         replacement_budget_status,
@@ -831,7 +809,7 @@ mod tests {
     #[test]
     fn parses_replacement_lines() {
         let parsed = parse_key_values(
-            "replacement=worker_session_open iteration=2 kind=cold replacement_attempts=1 replacement_successes=1 replacement_failures=0 replacement_budget_admitted=1 replacement_budget_skipped=0 spawn_handshake_ms=12.500 capability_load_ms=0.000 session_open_import_ms=90.250 first_command_ms=unavailable warm_command_ms=3.750 replacement_total_ms=15.000 replacement_reason=max_imports replacement_budget_status=synchronous-no-overlap skipped_reason=none",
+            "replacement=worker_session_open iteration=2 kind=cold replacement_attempts=1 replacement_successes=1 replacement_failures=0 replacement_budget_admitted=1 replacement_budget_skipped=0 spawn_handshake_ms=12.500 session_open_import_ms=90.250 replacement_total_ms=15.000 replacement_reason=max_imports replacement_budget_status=synchronous-no-overlap skipped_reason=none",
             "",
         );
         assert_eq!(parsed.replacements.len(), 1);
@@ -845,10 +823,7 @@ mod tests {
         assert_eq!(sample.replacement_budget_admitted, 1);
         assert_eq!(sample.replacement_budget_skipped, 0);
         assert_eq!(sample.spawn_handshake_ms, Some(12.5));
-        assert_eq!(sample.capability_load_ms, Some(0.0));
         assert_eq!(sample.session_open_import_ms, Some(90.25));
-        assert_eq!(sample.first_command_ms, None);
-        assert_eq!(sample.warm_command_ms, Some(3.75));
         assert_eq!(sample.replacement_total_ms, Some(15.0));
         assert_eq!(sample.replacement_reason.as_deref(), Some("max_imports"));
         assert_eq!(

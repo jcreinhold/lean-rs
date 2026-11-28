@@ -15,26 +15,7 @@ const LIFELINE_ENV: &str = "LEAN_RS_WORKER_PARENT_LIFELINE";
 /// count while the owner is still running does not prevent a later spawn.
 /// Cleanup ownership is established before spawn and survives loss of the last client.
 #[derive(Clone, Debug, Default)]
-pub struct LeanWorkerProcessTracker(Arc<Processes>, Option<Arc<ProcessAttempt>>);
-
-#[derive(Debug, Default)]
-struct ProcessAttempt {
-    active: AtomicUsize,
-}
-
-/// Exact process-scope accounting for one caller-defined launch attempt.
-///
-/// The observation is additional to the caller's tracker. It does not own or
-/// signal a process and becomes closed only after every launch made through
-/// its derived tracker has confirmed its exit.
-#[derive(Debug)]
-pub(crate) struct LeanWorkerProcessAttempt(Arc<ProcessAttempt>);
-
-impl LeanWorkerProcessAttempt {
-    pub(crate) fn closed(&self) -> bool {
-        self.0.active.load(Ordering::Acquire) == 0
-    }
-}
+pub struct LeanWorkerProcessTracker(Arc<Processes>);
 
 #[derive(Debug, Default)]
 struct Processes {
@@ -69,7 +50,6 @@ impl LeanWorkerExitObservation {
 struct PendingChild {
     child: Child,
     exit: LeanWorkerExitObservation,
-    attempt: Option<Arc<ProcessAttempt>>,
 }
 
 #[derive(Debug)]
@@ -116,16 +96,6 @@ impl LeanWorkerProcessTracker {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Derive a tracker which preserves this ownership domain while also
-    /// recording only launches made through the derived value.
-    pub(crate) fn observe_attempt(&self) -> (Self, LeanWorkerProcessAttempt) {
-        let attempt = Arc::new(ProcessAttempt::default());
-        (
-            Self(Arc::clone(&self.0), Some(Arc::clone(&attempt))),
-            LeanWorkerProcessAttempt(attempt),
-        )
     }
 
     /// Number of reserved launches and children whose exit is not yet confirmed.
@@ -182,9 +152,6 @@ impl LeanWorkerProcessTracker {
                 *reaper = Some(start(self.clone())?);
             }
             self.0.active.fetch_add(1, Ordering::AcqRel);
-            if let Some(attempt) = &self.1 {
-                attempt.active.fetch_add(1, Ordering::AcqRel);
-            }
             // Publish the reservation before allowing the reaper to decide to exit.
             drop(reaper);
         }
@@ -210,7 +177,7 @@ impl LeanWorkerProcessTracker {
         pending.retain_mut(|owned| match owned.child.try_wait() {
             Ok(Some(status)) => {
                 owned.exit.confirm(status);
-                self.release_for(owned.attempt.as_ref());
+                self.release();
                 false
             }
             Ok(None) => {
@@ -230,13 +197,6 @@ impl LeanWorkerProcessTracker {
     }
 
     fn release(&self) {
-        self.release_for(self.1.as_ref());
-    }
-
-    fn release_for(&self, attempt: Option<&Arc<ProcessAttempt>>) {
-        if let Some(attempt) = attempt {
-            attempt.active.fetch_sub(1, Ordering::AcqRel);
-        }
         if self.0.active.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.wake();
         }
@@ -363,7 +323,6 @@ impl Drop for OwnedChild {
                 .push(PendingChild {
                     child,
                     exit: self.exit.clone(),
-                    attempt: self.tracker.1.clone(),
                 });
             self.tracker.wake();
         }

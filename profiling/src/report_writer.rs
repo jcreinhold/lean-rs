@@ -263,11 +263,11 @@ fn render_markdown(report: &PerformanceReport) -> String {
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
-                "| Label | Iteration | Kind | Attempts | Successes | Failures | Budget admitted | Budget skipped | Spawn+handshake ms | Capability load ms | Session import ms | First command ms | Warm command ms | Replacement total ms | Reason | Budget status | Skipped reason |"
+                "| Label | Iteration | Kind | Attempts | Successes | Failures | Budget admitted | Budget skipped | Spawn+handshake ms | Session import ms | Replacement total ms | Reason | Budget status | Skipped reason |"
             );
             let _ = writeln!(
                 out,
-                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
             );
             for sample in visible_replacements(&run.replacements) {
                 let iteration = sample
@@ -275,7 +275,7 @@ fn render_markdown(report: &PerformanceReport) -> String {
                     .map_or_else(|| String::from("-"), |value| value.to_string());
                 let _ = writeln!(
                     out,
-                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                     sample.label,
                     iteration,
                     sample.kind,
@@ -285,10 +285,7 @@ fn render_markdown(report: &PerformanceReport) -> String {
                     sample.replacement_budget_admitted,
                     sample.replacement_budget_skipped,
                     format_optional_f64(sample.spawn_handshake_ms),
-                    format_optional_f64(sample.capability_load_ms),
                     format_optional_f64(sample.session_open_import_ms),
-                    format_optional_f64(sample.first_command_ms),
-                    format_optional_f64(sample.warm_command_ms),
                     format_optional_f64(sample.replacement_total_ms),
                     sample.replacement_reason.as_deref().unwrap_or("-"),
                     sample.replacement_budget_status.as_deref().unwrap_or("-"),
@@ -517,22 +514,12 @@ fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
     } else {
         1
     };
-    let pool = report.workloads.iter().find(|run| run.name == "pool-memory");
-    let max_workers = pool
-        .and_then(|run| key_value(&run.key_values, "max_workers"))
-        .unwrap_or("1");
-    let per_worker_rss = pool
-        .and_then(|run| key_value(&run.key_values, "per_worker_rss_ceiling_kib"))
-        .unwrap_or_else(|| key_value(&worker_one.key_values, "max_rss_kib").unwrap_or("1572864"));
-    let total_child_rss = pool
-        .and_then(|run| key_value(&run.key_values, "max_total_child_rss_kib"))
-        .unwrap_or(per_worker_rss);
 
     let _ = writeln!(out, "## Worker Policy Summary");
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "Local recommendation under the {cap_kib} KiB RSS budget: `LeanWorkerRestartPolicy::memory_bounded({recommended_max_imports}, {cap_kib})` with `LeanWorkerPoolConfig::new({max_workers}).per_worker_rss_ceiling_kib({per_worker_rss}).max_total_child_rss_kib({total_child_rss})`."
+        "Local recommendation under the {cap_kib} KiB RSS budget: `LeanWorkerRestartPolicy::memory_bounded({recommended_max_imports}, {cap_kib})`."
     );
     let _ = writeln!(
         out,
@@ -882,7 +869,7 @@ mod tests {
             },
             baseline_mode: BaselineMode::Quick,
             workloads: vec![WorkloadRun {
-                name: "pool-memory".to_owned(),
+                name: "worker-cycling".to_owned(),
                 command: "cmd".to_owned(),
                 env: Vec::<EnvPair>::new(),
                 exit_success: true,
@@ -898,7 +885,7 @@ mod tests {
                 session_reuse: vec![SessionReuseSample {
                     label: "bounded_reuse_no_cycle".to_owned(),
                     iteration: Some(2),
-                    layer: "worker-pool".to_owned(),
+                    layer: "worker".to_owned(),
                     key_hits: 1,
                     key_misses: 1,
                     distinct_keys_seen: 1,
@@ -921,7 +908,7 @@ mod tests {
         let markdown = render_markdown(&report);
         assert!(markdown.contains("## Session Reuse Keys"));
         assert!(markdown.contains("Fresh imports avoided"));
-        assert!(markdown.contains("| bounded_reuse_no_cycle | 2 | worker-pool | 1 | 1 | 1 | 1 | 1 | 0 | 0 | - |"));
+        assert!(markdown.contains("| bounded_reuse_no_cycle | 2 | worker | 1 | 1 | 1 | 1 | 1 | 0 | 0 | - |"));
     }
 
     #[test]
@@ -937,7 +924,7 @@ mod tests {
             },
             baseline_mode: BaselineMode::Quick,
             workloads: vec![WorkloadRun {
-                name: "pool-memory".to_owned(),
+                name: "worker-cycling".to_owned(),
                 command: "cmd".to_owned(),
                 env: Vec::<EnvPair>::new(),
                 exit_success: true,
@@ -955,7 +942,7 @@ mod tests {
                 batches: vec![BatchSample {
                     label: "warm_module_query_batch".to_owned(),
                     iteration: Some(2),
-                    layer: "worker-pool".to_owned(),
+                    layer: "worker".to_owned(),
                     workload: "process_module_query_batch".to_owned(),
                     selectors: 2,
                     request_delta: 1,
@@ -979,7 +966,7 @@ mod tests {
         let markdown = render_markdown(&report);
         assert!(markdown.contains("## Warm Batch Workloads"));
         assert!(markdown.contains("Worker frames"));
-        assert!(markdown.contains("| warm_module_query_batch | 2 | worker-pool | process_module_query_batch | 2 | 1 | 0 | 4.250 | 120000 | 700000 | 2 | 0 | false | - |"));
+        assert!(markdown.contains("| warm_module_query_batch | 2 | worker | process_module_query_batch | 2 | 1 | 0 | 4.250 | 120000 | 700000 | 2 | 0 | false | - |"));
     }
 
     #[test]
@@ -1019,10 +1006,7 @@ mod tests {
                     replacement_budget_admitted: 1,
                     replacement_budget_skipped: 0,
                     spawn_handshake_ms: Some(12.0),
-                    capability_load_ms: Some(0.0),
                     session_open_import_ms: Some(90.5),
-                    first_command_ms: None,
-                    warm_command_ms: Some(3.25),
                     replacement_total_ms: Some(15.0),
                     replacement_reason: Some("max_imports".to_owned()),
                     replacement_budget_status: Some("synchronous-no-overlap".to_owned()),
@@ -1040,6 +1024,6 @@ mod tests {
         let markdown = render_markdown(&report);
         assert!(markdown.contains("## Worker Replacement"));
         assert!(markdown.contains("Spawn+handshake ms"));
-        assert!(markdown.contains("| worker_session_open | 2 | cold | 1 | 1 | 0 | 1 | 0 | 12.000 | 0.000 | 90.500 | - | 3.250 | 15.000 | max_imports | synchronous-no-overlap | - |"));
+        assert!(markdown.contains("| worker_session_open | 2 | cold | 1 | 1 | 0 | 1 | 0 | 12.000 | 90.500 | 15.000 | max_imports | synchronous-no-overlap | - |"));
     }
 }

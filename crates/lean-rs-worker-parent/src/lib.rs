@@ -2,11 +2,10 @@
 //!
 //! [`LeanWorker`] is the public process-boundary supervisor. It hides child
 //! spawning, pipe management, protocol framing, child exit parsing, and
-//! cleanup behind a small lifecycle API. Sessions, capability builders, and
-//! the local worker pool sit on top of it. The wire types it speaks come
-//! from [`lean_rs_worker_protocol`] and are re-exported on this crate's
-//! public surface so callers do not need a second crate dependency for the
-//! common path.
+//! cleanup behind a small lifecycle API. Sessions and the host handle builder
+//! sit on top of it. The wire types it speaks come from
+//! [`lean_rs_worker_protocol`] and are re-exported here, so callers need no
+//! second crate dependency for the common path.
 //!
 //! This crate does not link `libleanshared`. The worker child runtime that
 //! does is published separately as [`lean-rs-worker-child`](https://docs.rs/lean-rs-worker-child).
@@ -18,26 +17,19 @@
 
 mod capability;
 mod pipe;
-mod pool;
 mod process;
 mod session;
 mod supervisor;
 
 pub use capability::{
     LeanWorkerBootstrapCheck, LeanWorkerBootstrapDiagnosticCode, LeanWorkerBootstrapReport,
-    LeanWorkerBootstrapSeverity, LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild,
-    LeanWorkerHostHandle, LeanWorkerHostHandleBuilder, LeanWorkerModuleCacheLimits,
-};
-pub use pool::{
-    LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,
-    LeanWorkerSessionLease,
+    LeanWorkerBootstrapSeverity, LeanWorkerChild, LeanWorkerHostHandle, LeanWorkerHostHandleBuilder,
+    LeanWorkerModuleCacheLimits,
 };
 pub use process::{LeanWorkerExitObservation, LeanWorkerProcessTracker};
 pub use session::{
-    LeanWorkerCancellationToken, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
-    LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressEvent, LeanWorkerProgressSink,
-    LeanWorkerRuntimeMetadata, LeanWorkerSession, LeanWorkerSessionConfig, LeanWorkerStreamSummary,
-    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
+    LeanWorkerCancellationToken, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata,
+    LeanWorkerSession, LeanWorkerSessionConfig,
 };
 /// Replace a child's environment with a checked snapshot of the parent environment,
 /// including the command's explicit additions and removals.

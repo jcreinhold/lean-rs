@@ -128,22 +128,15 @@ fn report_admission(
 fn report_replacement(iteration: u64, kind: &str, stats: &lean_rs_worker_parent::LeanWorkerStats) {
     let timing = stats.last_replacement_timing.as_ref();
     println!(
-        "replacement=worker_session_open iteration={iteration} kind={kind} replacement_attempts={} replacement_successes={} replacement_failures={} replacement_budget_admitted={} replacement_budget_skipped={} spawn_handshake_ms={} capability_load_ms={} session_open_import_ms={} first_command_ms={} warm_command_ms={} replacement_total_ms={} replacement_reason={} replacement_budget_status={} skipped_reason={}",
+        "replacement=worker_session_open iteration={iteration} kind={kind} replacement_attempts={} replacement_successes={} replacement_failures={} replacement_budget_admitted={} replacement_budget_skipped={} spawn_handshake_ms={} session_open_import_ms={} replacement_total_ms={} replacement_reason={} replacement_budget_status={} skipped_reason={}",
         stats.replacement_attempts,
         stats.replacement_successes,
         stats.replacement_failures,
         stats.replacement_budget_admitted,
         stats.replacement_budget_skipped,
         timing.map_or_else(|| "unavailable".to_owned(), |value| duration_ms(value.spawn_handshake)),
-        timing.map_or_else(|| "unavailable".to_owned(), |value| duration_ms(value.capability_load)),
         stats
             .last_session_open_import_elapsed
-            .map_or_else(|| "unavailable".to_owned(), duration_ms),
-        stats
-            .last_first_command_elapsed
-            .map_or_else(|| "unavailable".to_owned(), duration_ms),
-        stats
-            .last_warm_command_elapsed
             .map_or_else(|| "unavailable".to_owned(), duration_ms),
         timing.map_or_else(
             || "unavailable".to_owned(),

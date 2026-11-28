@@ -33,12 +33,10 @@ use lean_rs_worker_protocol::types::{
 use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
 use crate::capability::LeanWorkerBootstrapDiagnosticCode;
-use crate::session::LeanWorkerDataSinkTarget;
 use crate::session::{
-    LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerDiagnosticSink, LeanWorkerProgressSink,
-    LeanWorkerRawDataRow, LeanWorkerRawDataSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig,
-    LeanWorkerSessionMode, LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row,
-    report_parent_diagnostic, report_parent_progress,
+    LeanWorkerCancellationToken, LeanWorkerProgressSink, LeanWorkerRawDataRow, LeanWorkerRawDataSink,
+    LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig, LeanWorkerSessionMode, check_cancelled, elapsed_event,
+    report_parent_data_row, report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -506,8 +504,7 @@ impl LeanWorkerRestartPolicy {
     ///
     /// Use only for short-lived tests, benchmarks, or hosts that enforce a
     /// process memory boundary elsewhere. Long-running Lean hosts should use
-    /// [`Self::memory_bounded`] and pair it with `LeanWorkerPoolConfig` total
-    /// and per-worker RSS budgets, because fresh imports retain Lean
+    /// [`Self::memory_bounded`], because fresh imports retain Lean
     /// process-global state until the child exits.
     #[must_use]
     pub fn disabled() -> Self {
@@ -603,8 +600,8 @@ impl LeanWorkerRestartPolicy {
     /// The limit is enforced after the old child reaches a terminal state and
     /// before a replacement is spawned. Exhaustion returns
     /// [`LeanWorkerError::RestartLimitExceeded`] and leaves the supervisor
-    /// without an accepted child; create a new worker or pool entry to apply a
-    /// fresh restart window.
+    /// without an accepted child; create a new worker to apply a fresh restart
+    /// window.
     #[must_use]
     pub fn max_restarts_per_window(mut self, max_restarts: u64, window: Duration) -> Self {
         self.restart_intensity = RestartIntensityLimit {
@@ -783,15 +780,12 @@ impl LeanWorkerRestartReason {
 /// Timing facts for the most recent synchronous worker replacement.
 ///
 /// These are observability facts only. A replacement remains a process cycle
-/// hidden behind supervisor or pool policy; callers do not receive child
+/// hidden behind supervisor policy; callers do not receive child
 /// identities or lifecycle handles.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LeanWorkerReplacementTiming {
     pub spawn_handshake: Duration,
-    pub capability_load: Duration,
     pub session_open_import: Duration,
-    pub first_command: Option<Duration>,
-    pub warm_command: Option<Duration>,
     pub replacement_total: Duration,
     pub replacement_reason: String,
     pub replacement_budget_status: String,
@@ -860,18 +854,10 @@ pub struct LeanWorkerStats {
     pub last_replacement_skipped_reason: Option<String>,
     /// Most recent worker spawn and protocol-handshake elapsed time.
     pub last_spawn_handshake_elapsed: Option<Duration>,
-    /// Most recent capability build/load phase elapsed time observed by a capability builder.
-    pub last_capability_load_elapsed: Option<Duration>,
     /// Most recent host-session open/import elapsed time.
     pub last_session_open_import_elapsed: Option<Duration>,
-    /// Most recent first command elapsed time after opening or replacing a worker.
-    pub last_first_command_elapsed: Option<Duration>,
-    /// Most recent warm command elapsed time on an already-open worker.
-    pub last_warm_command_elapsed: Option<Duration>,
     /// Lean-native import attribution for the most recent opened host session, if any.
     pub last_import_stats: Option<LeanWorkerImportStats>,
-    /// Streaming requests that entered a worker child.
-    pub stream_requests: u64,
     /// Streaming requests that reached terminal success.
     pub stream_successes: u64,
     /// Streaming requests that failed after entering the child.
@@ -1190,56 +1176,10 @@ pub enum LeanWorkerError {
     ProgressPanic { message: String },
     /// A parent-side data sink panicked while handling a worker row.
     DataSinkPanic { message: String },
-    /// A parent-side diagnostic sink panicked while handling a worker diagnostic.
-    DiagnosticSinkPanic { message: String },
-    /// A streaming export returned a nonzero downstream status byte.
-    StreamExportFailed { status: u8 },
-    /// The in-child string callback helper returned a callback failure status.
-    StreamCallbackFailed { status: u8, description: String },
-    /// A streaming callback emitted a malformed row envelope.
-    StreamRowMalformed { message: String },
     /// A capability metadata export returned malformed JSON.
     CapabilityMetadataMalformed { message: String },
-    /// Capability metadata did not match the caller's requested expectation.
-    CapabilityMetadataMismatch {
-        export: String,
-        expected: Box<LeanWorkerCapabilityMetadata>,
-        actual: Box<LeanWorkerCapabilityMetadata>,
-    },
     /// A capability doctor export returned malformed JSON.
     CapabilityDoctorMalformed { message: String },
-    /// A typed command request could not be serialized as JSON.
-    TypedCommandRequestEncode { export: String, message: String },
-    /// A typed non-streaming command response could not be decoded.
-    TypedCommandResponseDecode { export: String, message: String },
-    /// A typed streaming command row payload could not be decoded.
-    TypedCommandRowDecode {
-        export: String,
-        stream: String,
-        sequence: u64,
-        message: String,
-    },
-    /// A typed streaming command terminal summary could not be decoded.
-    TypedCommandSummaryDecode { export: String, message: String },
-    /// A pool session lease was invalidated by a worker lifecycle transition.
-    LeaseInvalidated { reason: String },
-    /// A local worker pool cannot admit another distinct session key.
-    WorkerPoolExhausted {
-        max_workers: usize,
-        resource: Box<LeanWorkerResourceExhaustedFacts>,
-    },
-    /// A local worker pool cannot admit work without exceeding its RSS budget.
-    WorkerPoolMemoryBudgetExceeded {
-        current_kib: u64,
-        limit_kib: u64,
-        last_import_stats: Option<Box<LeanWorkerImportStats>>,
-        resource: Box<LeanWorkerResourceExhaustedFacts>,
-    },
-    /// Waiting for local worker-pool admission exceeded the configured limit.
-    WorkerPoolQueueTimeout {
-        waited: Duration,
-        resource: Box<LeanWorkerResourceExhaustedFacts>,
-    },
     /// A supervising policy refused to restart the worker again in its current window.
     RestartLimitExceeded { restarts: u64, window: Duration },
     /// The public supervisor does not support the requested operation.
@@ -1310,70 +1250,11 @@ impl fmt::Display for LeanWorkerError {
             Self::Cancelled { operation, .. } => write!(f, "worker operation {operation} was cancelled"),
             Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
             Self::DataSinkPanic { message } => write!(f, "worker data sink panicked: {message}"),
-            Self::DiagnosticSinkPanic { message } => {
-                write!(f, "worker diagnostic sink panicked: {message}")
-            }
-            Self::StreamExportFailed { status } => write!(f, "streaming export returned status {status}"),
-            Self::StreamCallbackFailed { status, description } => {
-                write!(f, "streaming callback failed with status {status}: {description}")
-            }
-            Self::StreamRowMalformed { message } => write!(f, "streaming export emitted malformed row: {message}"),
             Self::CapabilityMetadataMalformed { message } => {
                 write!(f, "capability metadata export returned malformed JSON: {message}")
             }
-            Self::CapabilityMetadataMismatch { export, .. } => {
-                write!(f, "capability metadata from {export} did not match expectation")
-            }
             Self::CapabilityDoctorMalformed { message } => {
                 write!(f, "capability doctor export returned malformed JSON: {message}")
-            }
-            Self::TypedCommandRequestEncode { export, message } => {
-                write!(f, "typed worker command {export} request JSON encode failed: {message}")
-            }
-            Self::TypedCommandResponseDecode { export, message } => {
-                write!(
-                    f,
-                    "typed worker command {export} response JSON decode failed: {message}"
-                )
-            }
-            Self::TypedCommandRowDecode {
-                export,
-                stream,
-                sequence,
-                message,
-            } => {
-                write!(
-                    f,
-                    "typed worker command {export} row decode failed at stream {stream} sequence {sequence}: {message}"
-                )
-            }
-            Self::TypedCommandSummaryDecode { export, message } => {
-                write!(
-                    f,
-                    "typed worker command {export} terminal summary decode failed: {message}"
-                )
-            }
-            Self::LeaseInvalidated { reason } => write!(f, "worker pool lease was invalidated: {reason}"),
-            Self::WorkerPoolExhausted { max_workers, .. } => {
-                write!(
-                    f,
-                    "worker pool cannot admit another session key; max_workers={max_workers}"
-                )
-            }
-            Self::WorkerPoolMemoryBudgetExceeded {
-                current_kib,
-                limit_kib,
-                last_import_stats,
-                ..
-            } => {
-                write!(
-                    f,
-                    "worker pool cannot admit work within RSS budget; current_kib={current_kib} limit_kib={limit_kib}; {}",
-                    import_stats_diagnostic(last_import_stats.as_deref())
-                )
-            }
-            Self::WorkerPoolQueueTimeout { waited, .. } => {
-                write!(f, "worker pool admission timed out after {waited:?}")
             }
             Self::RestartLimitExceeded { restarts, window } => {
                 write!(
@@ -1419,21 +1300,8 @@ impl std::error::Error for LeanWorkerError {
             | Self::Cancelled { .. }
             | Self::ProgressPanic { .. }
             | Self::DataSinkPanic { .. }
-            | Self::DiagnosticSinkPanic { .. }
-            | Self::StreamExportFailed { .. }
-            | Self::StreamCallbackFailed { .. }
-            | Self::StreamRowMalformed { .. }
             | Self::CapabilityMetadataMalformed { .. }
-            | Self::CapabilityMetadataMismatch { .. }
             | Self::CapabilityDoctorMalformed { .. }
-            | Self::TypedCommandRequestEncode { .. }
-            | Self::TypedCommandResponseDecode { .. }
-            | Self::TypedCommandRowDecode { .. }
-            | Self::TypedCommandSummaryDecode { .. }
-            | Self::LeaseInvalidated { .. }
-            | Self::WorkerPoolExhausted { .. }
-            | Self::WorkerPoolMemoryBudgetExceeded { .. }
-            | Self::WorkerPoolQueueTimeout { .. }
             | Self::RestartLimitExceeded { .. }
             | Self::UnsupportedRequest { .. }
             | Self::WaitTimeout { .. }
@@ -1451,10 +1319,7 @@ impl LeanWorkerError {
         match self {
             Self::Timeout { resource, .. }
             | Self::RssHardLimitExceeded { resource, .. }
-            | Self::Cancelled { resource, .. }
-            | Self::WorkerPoolExhausted { resource, .. }
-            | Self::WorkerPoolMemoryBudgetExceeded { resource, .. }
-            | Self::WorkerPoolQueueTimeout { resource, .. } => Some(resource.as_ref()),
+            | Self::Cancelled { resource, .. } => Some(resource.as_ref()),
             Self::Spawn { .. }
             | Self::Kill { .. }
             | Self::WorkerChildUnresolved { .. }
@@ -1469,18 +1334,8 @@ impl LeanWorkerError {
             | Self::ChildPanicOrAbort { .. }
             | Self::ProgressPanic { .. }
             | Self::DataSinkPanic { .. }
-            | Self::DiagnosticSinkPanic { .. }
-            | Self::StreamExportFailed { .. }
-            | Self::StreamCallbackFailed { .. }
-            | Self::StreamRowMalformed { .. }
             | Self::CapabilityMetadataMalformed { .. }
-            | Self::CapabilityMetadataMismatch { .. }
             | Self::CapabilityDoctorMalformed { .. }
-            | Self::TypedCommandRequestEncode { .. }
-            | Self::TypedCommandResponseDecode { .. }
-            | Self::TypedCommandRowDecode { .. }
-            | Self::TypedCommandSummaryDecode { .. }
-            | Self::LeaseInvalidated { .. }
             | Self::RestartLimitExceeded { .. }
             | Self::UnsupportedRequest { .. }
             | Self::WaitTimeout { .. }
@@ -2137,43 +1992,6 @@ impl LeanWorker {
         self.stats.clone()
     }
 
-    /// `session_open_import_elapsed` is `None` when the builder opened no
-    /// session — the ordinary case now that opening one is reserved for a
-    /// metadata check. The first real session open records its own timing
-    /// through [`open_worker_session`](Self::open_worker_session), which is the
-    /// more representative sample anyway: it carries the caller's imports,
-    /// where a bootstrap open carried the builder's placeholder set.
-    pub(crate) fn record_capability_open_timing(
-        &mut self,
-        capability_load_elapsed: Duration,
-        session_open_import_elapsed: Option<Duration>,
-    ) {
-        self.stats.last_capability_load_elapsed = Some(capability_load_elapsed);
-        if let Some(elapsed) = session_open_import_elapsed {
-            self.stats.last_session_open_import_elapsed = Some(elapsed);
-        }
-        if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
-            timing.capability_load = capability_load_elapsed;
-            if let Some(elapsed) = session_open_import_elapsed {
-                timing.session_open_import = elapsed;
-            }
-        }
-    }
-
-    pub(crate) fn record_command_timing(&mut self, first_command_after_open: bool, elapsed: Duration) {
-        if first_command_after_open {
-            self.stats.last_first_command_elapsed = Some(elapsed);
-            if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
-                timing.first_command = Some(elapsed);
-            }
-        } else {
-            self.stats.last_warm_command_elapsed = Some(elapsed);
-            if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
-                timing.warm_command = Some(elapsed);
-            }
-        }
-    }
-
     /// Return policy-facing lifecycle facts for this supervisor.
     #[must_use]
     pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
@@ -2296,10 +2114,6 @@ impl LeanWorker {
         self.restart_with_reason(LeanWorkerRestartReason::Explicit)
     }
 
-    pub(crate) fn cycle_with_restart_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
-        self.restart_with_reason(reason)
-    }
-
     /// Restart this worker using its original configuration.
     ///
     /// This is an explicit lifecycle operation. Prompt 58 adds policy-driven
@@ -2391,88 +2205,6 @@ impl LeanWorker {
             Err(LeanWorkerError::ChildPanicOrAbort { exit }) => Ok(exit),
             Err(err) => Err(err),
         }
-    }
-
-    #[doc(hidden)]
-    /// Emit synthetic worker data rows through the private protocol for row sink tests.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LeanWorkerError` if the worker is dead, the sink panics,
-    /// cancellation is observed, or protocol communication fails.
-    pub fn __emit_test_rows(
-        &mut self,
-        streams: Vec<String>,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        data: Option<&dyn LeanWorkerDataSink>,
-    ) -> Result<u64, LeanWorkerError> {
-        const OPERATION: &str = "emit_test_rows";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false, OPERATION, cancellation)?;
-        self.send_request_cancellable(Request::EmitTestRows { streams }, OPERATION, cancellation)?;
-        self.record_request(false);
-        match self.read_response_with_events(
-            OPERATION,
-            None,
-            cancellation,
-            data.map(LeanWorkerDataSinkTarget::Value),
-            None,
-        )? {
-            Response::RowsComplete { count } => Ok(count),
-            other => Err(unexpected_response(OPERATION, &other)),
-        }
-    }
-
-    #[doc(hidden)]
-    /// Emit synthetic data rows and then let the fake child exit without a terminal response.
-    ///
-    /// # Errors
-    ///
-    /// Returns the terminal worker failure observed after tentative row delivery.
-    pub fn __emit_test_rows_then_exit(
-        &mut self,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        data: Option<&dyn LeanWorkerDataSink>,
-    ) -> Result<(), LeanWorkerError> {
-        const OPERATION: &str = "emit_test_rows_then_exit";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false, OPERATION, cancellation)?;
-        self.send_request_cancellable(Request::EmitTestRowsThenExit, OPERATION, cancellation)?;
-        self.record_request(false);
-        let response = self.read_response_with_events(
-            OPERATION,
-            None,
-            cancellation,
-            data.map(LeanWorkerDataSinkTarget::Value),
-            None,
-        )?;
-        Err(unexpected_response(OPERATION, &response))
-    }
-
-    #[doc(hidden)]
-    /// Emit synthetic data rows and then abort the fake child before terminal success.
-    ///
-    /// # Errors
-    ///
-    /// Returns the terminal worker failure observed after tentative row delivery.
-    pub fn __emit_test_rows_then_panic(
-        &mut self,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        data: Option<&dyn LeanWorkerDataSink>,
-    ) -> Result<(), LeanWorkerError> {
-        const OPERATION: &str = "emit_test_rows_then_panic";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false, OPERATION, cancellation)?;
-        self.send_request_cancellable(Request::EmitTestRowsThenPanic, OPERATION, cancellation)?;
-        self.record_request(false);
-        let response = self.read_response_with_events(
-            OPERATION,
-            None,
-            cancellation,
-            data.map(LeanWorkerDataSinkTarget::Value),
-            None,
-        )?;
-        Err(unexpected_response(OPERATION, &response))
     }
 
     /// How many session keys the reuse hint may remember.
@@ -3125,13 +2857,7 @@ impl LeanWorker {
         )?;
         self.record_request(false);
         let collector = DeclarationNameCollector::default();
-        let response = self.read_response_with_events(
-            OPERATION,
-            progress,
-            cancellation,
-            Some(LeanWorkerDataSinkTarget::Raw(&collector)),
-            None,
-        )?;
+        let response = self.read_response_with_events(OPERATION, progress, cancellation, Some(&collector))?;
         if let Some(message) = collector.decode_error.lock().ok().and_then(|guard| guard.clone()) {
             return Err(LeanWorkerError::Protocol { message });
         }
@@ -3281,87 +3007,6 @@ impl LeanWorker {
         )
     }
 
-    pub(crate) fn worker_run_data_stream(
-        &mut self,
-        export: &str,
-        request: &serde_json::Value,
-        rows: &dyn LeanWorkerDataSink,
-        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
-        self.worker_run_data_stream_with_sink(
-            export,
-            request,
-            LeanWorkerDataSinkTarget::Value(rows),
-            diagnostics,
-            cancellation,
-            progress,
-        )
-    }
-
-    pub(crate) fn worker_run_data_stream_raw(
-        &mut self,
-        export: &str,
-        request: &serde_json::Value,
-        rows: &dyn LeanWorkerRawDataSink,
-        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
-        self.worker_run_data_stream_with_sink(
-            export,
-            request,
-            LeanWorkerDataSinkTarget::Raw(rows),
-            diagnostics,
-            cancellation,
-            progress,
-        )
-    }
-
-    fn worker_run_data_stream_with_sink(
-        &mut self,
-        export: &str,
-        request: &serde_json::Value,
-        rows: LeanWorkerDataSinkTarget<'_>,
-        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
-        const OPERATION: &str = "worker_run_data_stream";
-        check_cancelled(OPERATION, cancellation)?;
-        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
-            message: format!("worker data-stream request JSON encode failed: {err}"),
-        })?;
-        self.prepare_host_request(false, OPERATION, cancellation, progress)?;
-        self.send_request_cancellable(
-            Request::RunDataStream {
-                export: export.to_owned(),
-                request_json,
-                progress: progress.is_some(),
-            },
-            OPERATION,
-            cancellation,
-        )?;
-        self.record_request(false);
-        self.stats.stream_requests = self.stats.stream_requests.saturating_add(1);
-        match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows), diagnostics)? {
-            Response::StreamComplete { summary } => Ok(summary.into()),
-            Response::StreamExportFailed { status_byte } => {
-                Err(LeanWorkerError::StreamExportFailed { status: status_byte })
-            }
-            Response::StreamCallbackFailed {
-                status_byte,
-                description,
-            } => Err(LeanWorkerError::StreamCallbackFailed {
-                status: status_byte,
-                description,
-            }),
-            Response::StreamRowMalformed { message } => Err(LeanWorkerError::StreamRowMalformed { message }),
-            other => Err(unexpected_response(OPERATION, &other)),
-        }
-    }
-
     pub(crate) fn worker_host_runtime_metadata(
         &mut self,
         cancellation: Option<&LeanWorkerCancellationToken>,
@@ -3447,33 +3092,6 @@ impl LeanWorker {
                 Response::CapabilityDoctorMalformed { message } => {
                     Err(LeanWorkerError::CapabilityDoctorMalformed { message })
                 }
-                other => Err(unexpected_response(operation, &other)),
-            },
-        )
-    }
-
-    #[expect(
-        clippy::wildcard_enum_match_arm,
-        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
-    )]
-    pub(crate) fn worker_json_command(
-        &mut self,
-        export: &str,
-        request_json: String,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<String, LeanWorkerError> {
-        self.round_trip(
-            "worker_json_command",
-            Request::JsonCommand {
-                export: export.to_owned(),
-                request_json,
-            },
-            false,
-            cancellation,
-            progress,
-            |response, operation| match response {
-                Response::JsonCommand { response_json } => Ok(response_json),
                 other => Err(unexpected_response(operation, &other)),
             },
         )
@@ -3988,10 +3606,7 @@ impl LeanWorker {
         stats.last_spawn_handshake_elapsed = Some(spawn_handshake);
         stats.last_replacement_timing = Some(LeanWorkerReplacementTiming {
             spawn_handshake,
-            capability_load: stats.last_capability_load_elapsed.unwrap_or_default(),
             session_open_import: Duration::ZERO,
-            first_command: stats.last_first_command_elapsed,
-            warm_command: stats.last_warm_command_elapsed,
             replacement_total: replacement_started.elapsed(),
             replacement_reason: reason,
             replacement_budget_status: "synchronous-no-overlap".to_owned(),
@@ -4066,7 +3681,7 @@ impl LeanWorker {
     }
 
     fn read_response(&mut self, operation: &'static str) -> Result<Response, LeanWorkerError> {
-        self.read_response_with_events(operation, None, None, None, None)
+        self.read_response_with_events(operation, None, None, None)
     }
 
     fn read_response_with_progress(
@@ -4075,7 +3690,7 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<Response, LeanWorkerError> {
-        self.read_response_with_events(operation, progress, cancellation, None, None)
+        self.read_response_with_events(operation, progress, cancellation, None)
     }
 
     /// Run one Request/Response round-trip and project the response into a
@@ -4132,8 +3747,7 @@ impl LeanWorker {
         operation: &'static str,
         progress: Option<&dyn LeanWorkerProgressSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
-        data: Option<LeanWorkerDataSinkTarget<'_>>,
-        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
+        data: Option<&dyn LeanWorkerRawDataSink>,
     ) -> Result<Response, LeanWorkerError> {
         let started = self.request_started.take().unwrap_or_else(Instant::now);
         let operation_deadline = cancellation.and_then(LeanWorkerCancellationToken::deadline);
@@ -4509,14 +4123,6 @@ impl LeanWorker {
                                 None,
                             )),
                         });
-                    }
-                }
-                Message::Diagnostic(diagnostic) => {
-                    self.mark_current_request_streaming();
-                    if let Err(err) = report_parent_diagnostic(diagnostics, diagnostic.into()) {
-                        self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                        self.shutdown_child(ShutdownIntent::KillOnly)?;
-                        return Err(err);
                     }
                 }
                 Message::Response(response) => {
@@ -5660,7 +5266,7 @@ mod tests {
         let scope = super::LeanWorkerCancellationToken::new().with_deadline(deadline);
         // The policy recycles before dispatch. The replacement shell never sends READY.
         let error = worker
-            .worker_json_command("fixture", "{}".to_owned(), Some(&scope), None)
+            .worker_capability_metadata("fixture", &serde_json::json!({}), Some(&scope), None)
             .expect_err("READY must not receive the normal five-second timeout");
         assert!(
             matches!(
@@ -5691,10 +5297,17 @@ mod tests {
         use std::time::Instant;
 
         // Answer the first complete request, then hold the second unanswered.
-        let response =
-            lean_rs_worker_protocol::protocol::Frame::new(super::Message::Response(super::Response::JsonCommand {
-                response_json: "{}".to_owned(),
-            }));
+        let metadata = super::LeanWorkerCapabilityMetadata {
+            commands: Vec::new(),
+            capabilities: Vec::new(),
+            lean_version: None,
+            extra: None,
+        };
+        let response = lean_rs_worker_protocol::protocol::Frame::new(super::Message::Response(
+            super::Response::CapabilityMetadata {
+                metadata: metadata.clone(),
+            },
+        ));
         let script = r"import sys, time
 def request():
     n = int.from_bytes(sys.stdin.buffer.read(4), 'big')
@@ -5717,7 +5330,7 @@ time.sleep(60)";
         let later = now.checked_add(Duration::from_secs(5)).expect("short test deadline");
         let expired = token.with_deadline(now).with_deadline(later);
         let request = |worker: &mut super::LeanWorker, scope: &LeanWorkerCancellationToken| {
-            worker.worker_json_command("fixture", "{}".to_owned(), Some(scope), None)
+            worker.worker_capability_metadata("fixture", &serde_json::json!({}), Some(scope), None)
         };
         let error = request(&mut worker, &expired).expect_err("expired before dispatch");
         assert!(matches!(error, LeanWorkerError::Timeout { resource, .. } if !resource.work_entered_child));
@@ -5738,7 +5351,7 @@ time.sleep(60)";
         let started = Instant::now();
         let end = started.checked_add(budget).expect("short test deadline");
         let scope = token.with_deadline(end);
-        assert_eq!(request(&mut worker, &scope).expect("first frame answered"), "{}");
+        assert_eq!(request(&mut worker, &scope).expect("first frame answered"), metadata);
         let remaining = end.saturating_duration_since(Instant::now());
         assert!(remaining < budget && !remaining.is_zero());
         let error = request(&mut worker, &scope).expect_err("second frame never answered");
@@ -5751,7 +5364,7 @@ time.sleep(60)";
             .confirmed_request_stop_since(&checkpoint)
             .expect("original child reaped");
         assert_eq!(receipt.process_id(), pid);
-        assert_eq!(receipt.operation(), "worker_json_command");
+        assert_eq!(receipt.operation(), "worker_capability_metadata");
         assert!(!child_exists(pid));
         expired.cancel();
         assert!(scope.is_cancelled());

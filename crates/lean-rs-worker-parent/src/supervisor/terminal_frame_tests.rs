@@ -60,7 +60,7 @@ while True:
     if operation == 'terminate':
         emit('terminating.frame')
         break
-    emit('health.frame' if operation == 'health' else 'json.frame')
+    emit('health.frame' if operation == 'health' else 'metadata.frame')
 ";
 
 struct Fixture {
@@ -100,9 +100,9 @@ impl Fixture {
             ("health.frame", Response::HealthOk),
             ("terminating.frame", Response::Terminating),
             (
-                "json.frame",
-                Response::JsonCommand {
-                    response_json: "fixture-ok".to_owned(),
+                "metadata.frame",
+                Response::CapabilityMetadata {
+                    metadata: fixture_metadata(),
                 },
             ),
         ] {
@@ -141,8 +141,17 @@ impl Drop for Fixture {
     }
 }
 
-fn command(worker: &mut LeanWorker) -> Result<String, LeanWorkerError> {
-    worker.worker_json_command("fixture", "{}".to_owned(), None, None)
+fn fixture_metadata() -> LeanWorkerCapabilityMetadata {
+    LeanWorkerCapabilityMetadata {
+        commands: Vec::new(),
+        capabilities: Vec::new(),
+        lean_version: Some("fixture-ok".to_owned()),
+        extra: None,
+    }
+}
+
+fn command(worker: &mut LeanWorker) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
+    worker.worker_capability_metadata("fixture", &serde_json::json!({}), None, None)
 }
 
 fn pid(worker: &LeanWorker) -> u32 {
@@ -221,25 +230,28 @@ fn configured_deadline_rejects_dequeued_success_and_restarts() {
 
     assert!(terminal_observed, "the real terminal must reach the receive boundary");
     assert!(
-        matches!(&result, Err(LeanWorkerError::Timeout { operation: "worker_json_command", duration, resource })
+        matches!(&result, Err(LeanWorkerError::Timeout { operation: "worker_capability_metadata", duration, resource })
             if *duration == configured_timeout && resource.work_entered_child),
         "{result:?}"
     );
     let receipt = receipt.expect("the original request's child was reaped");
-    assert_eq!(receipt.operation(), "worker_json_command");
+    assert_eq!(receipt.operation(), "worker_capability_metadata");
     assert_eq!(receipt.request_id(), request_id.0);
     assert_eq!(receipt.worker_generation(), original_generation.0);
     assert_eq!(receipt.process_id(), original_pid);
     assert_eq!(restarts, 1);
     assert_ne!(successor_generation, original_generation);
     assert_ne!(successor_pid, original_pid);
-    assert_eq!(next.expect("a new request succeeds on the successor"), "fixture-ok");
+    assert_eq!(
+        next.expect("a new request succeeds on the successor"),
+        fixture_metadata()
+    );
     assert!(stopped.is_ok(), "{stopped:?}");
 
     let events = fixture.events();
     let command_pids: Vec<_> = events
         .iter()
-        .filter(|event| event.op == "json_command")
+        .filter(|event| event.op == "capability_metadata")
         .map(|event| event.pid)
         .collect();
     assert_eq!(command_pids, [original_pid, successor_pid], "{events:?}");
@@ -289,7 +301,7 @@ fn stale_terminal_cannot_complete_or_redispatch_the_current_command() {
         assert!(unused_tag.is_none(), "reader must deliver a terminal frame");
         assert!(
             matches!(result, Err(LeanWorkerError::Protocol { ref message })
-            if message == &format!("worker sent stale worker_json_command frame {expected_error}")),
+            if message == &format!("worker sent stale worker_capability_metadata frame {expected_error}")),
             "{result:?}"
         );
         assert!(pending, "stale reader must fence the live owner");
@@ -301,7 +313,10 @@ fn stale_terminal_cannot_complete_or_redispatch_the_current_command() {
             matches!(stopped, Ok(ref report) if report.outcome == LeanWorkerShutdownOutcome::KillOnly),
             "{stopped:?}; {events:?}"
         );
-        let calls: Vec<_> = events.iter().filter(|event| event.op == "json_command").collect();
+        let calls: Vec<_> = events
+            .iter()
+            .filter(|event| event.op == "capability_metadata")
+            .collect();
         assert_eq!(calls.len(), 1, "all generations: {events:?}");
         assert_eq!(
             calls.first().expect("one command reached the live worker").pid,

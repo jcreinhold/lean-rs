@@ -178,14 +178,12 @@ def package_contents(version: str, package_dir: pathlib.Path) -> None:
             "Cargo.toml",
             "README.md",
             "build.rs",
-            "benches/row_payload.rs",
-            "benches/worker_capability.rs",
-            "examples/worker_capability_runner.rs",
+            "examples/memory_cycling.rs",
             "src/bin/lean-rs-worker-child.rs",
             "src/child.rs",
             "src/lib.rs",
+            "tests/host_handle.rs",
             "tests/loader_regressions.rs",
-            "tests/typed_command.rs",
         ],
     }
 

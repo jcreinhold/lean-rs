@@ -7,8 +7,9 @@
 )]
 
 use std::env;
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -16,18 +17,20 @@ use std::time::Duration;
 use std::process::Command;
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerConfig,
-    LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDeclarationVerificationBatchItem,
-    LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationTarget, LeanWorkerError,
-    LeanWorkerHostRuntimeExpectation, LeanWorkerHostRuntimeMetadata, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerSessionConfig, LeanWorkerShutdownOutcome,
-    LeanWorkerSorryPolicy,
+    LeanWorker, LeanWorkerCancellationToken, LeanWorkerChild, LeanWorkerConfig,
+    LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationTarget, LeanWorkerError, LeanWorkerHostHandleBuilder,
+    LeanWorkerHostRuntimeExpectation, LeanWorkerHostRuntimeMetadata, LeanWorkerProgressEvent, LeanWorkerProgressSink,
+    LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerSession, LeanWorkerSessionConfig,
+    LeanWorkerShutdownOutcome, LeanWorkerSorryPolicy,
 };
 use lean_rs_worker_protocol::protocol::{
-    DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
+    DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, ProgressTick, Request, Response, read_frame,
+    write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationBatchResult,
+    LeanWorkerDeclarationFilter, LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo,
+    LeanWorkerDeclarationVerificationBatchResult,
     LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
     LeanWorkerDeclarationVerificationStatus, LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions,
     LeanWorkerImportStats, LeanWorkerModuleCacheStatus, LeanWorkerModuleQueryBatchEnvelope,
@@ -36,7 +39,6 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
     LeanWorkerSourceCoordinateSpace, LeanWorkerSourceRange,
 };
-use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
 
 const FAKE_CHILD_ENV: &str = "LEAN_RS_WORKER_PARENT_FAKE_CHILD";
@@ -50,7 +52,7 @@ const FAKE_IMPORT_RESIDUE_BYTES: u64 = 1_000;
 // Import-light conformance harness for the worker-parent runtime model.
 //
 // The test binary re-enters itself as a fake worker child through `FAKE_CHILD_ENV`, speaks
-// deterministic worker-protocol frames, and never opens a Lean session or fixture capability.
+// deterministic worker-protocol frames, and never opens a Lean session.
 // `RuntimeTraceEvent` below names the model-level observations these tests protect. Real
 // Lean integration still belongs in the worker-child tests. Exact command:
 //
@@ -142,24 +144,20 @@ fn main() {
             host_metadata_unobserved_protocol_failure_has_no_terminal_refusal,
         ),
         (
-            "capability_builder_requires_host_metadata_before_first_export",
-            capability_builder_requires_host_metadata_before_first_export,
+            "host_handle_requires_host_metadata_before_first_session",
+            host_handle_requires_host_metadata_before_first_session,
         ),
         (
-            "capability_builder_revalidates_host_metadata_after_replacement",
-            capability_builder_revalidates_host_metadata_after_replacement,
-        ),
-        (
-            "capability_pool_does_not_reuse_unguarded_session_for_required_contract",
-            capability_pool_does_not_reuse_unguarded_session_for_required_contract,
+            "host_handle_revalidates_host_metadata_after_replacement",
+            host_handle_revalidates_host_metadata_after_replacement,
         ),
         (
             "stale_warm_session_keeps_import_count_backstop",
             stale_warm_session_keeps_import_count_backstop,
         ),
         (
-            "failed_header_then_streaming_reopens_session",
-            failed_header_then_streaming_reopens_session,
+            "failed_header_then_name_listing_reopens_session",
+            failed_header_then_name_listing_reopens_session,
         ),
         (
             "actual_session_miss_recycles_once_but_warm_reuse_does_not",
@@ -174,24 +172,20 @@ fn main() {
             conformance_terminal_success_has_one_terminal_outcome,
         ),
         (
-            "conformance_stream_rows_are_tentative_until_terminal_success",
-            conformance_stream_rows_are_tentative_until_terminal_success,
+            "conformance_name_rows_complete_with_one_terminal_outcome",
+            conformance_name_rows_complete_with_one_terminal_outcome,
         ),
         (
-            "conformance_stream_child_exit_after_rows_discards_tentative_rows",
-            conformance_stream_child_exit_after_rows_discards_tentative_rows,
+            "conformance_name_rows_then_child_exit_fail_the_request",
+            conformance_name_rows_then_child_exit_fail_the_request,
         ),
         (
-            "conformance_stream_child_crash_after_rows_discards_tentative_rows",
-            conformance_stream_child_crash_after_rows_discards_tentative_rows,
+            "conformance_name_rows_then_child_abort_fail_the_request",
+            conformance_name_rows_then_child_abort_fail_the_request,
         ),
         (
-            "conformance_stream_timeout_after_rows_discards_tentative_rows",
-            conformance_stream_timeout_after_rows_discards_tentative_rows,
-        ),
-        (
-            "conformance_stream_cancellation_after_rows_discards_tentative_rows",
-            conformance_stream_cancellation_after_rows_discards_tentative_rows,
+            "conformance_name_rows_then_silence_time_out",
+            conformance_name_rows_then_silence_time_out,
         ),
         (
             "conformance_silent_worker_cancellation_reaps_only_owned_child",
@@ -202,8 +196,8 @@ fn main() {
             conformance_silent_worker_deadline_is_not_renewed_by_polling,
         ),
         (
-            "conformance_stream_backpressure_is_bounded_and_observable",
-            conformance_stream_backpressure_is_bounded_and_observable,
+            "conformance_slow_progress_sink_backpressure_is_bounded_and_observable",
+            conformance_slow_progress_sink_backpressure_is_bounded_and_observable,
         ),
         (
             "conformance_explicit_shutdown_gracefully_reaps_child",
@@ -236,22 +230,6 @@ fn main() {
         (
             "conformance_restart_limit_exhaustion_is_typed_terminal_outcome",
             conformance_restart_limit_exhaustion_is_typed_terminal_outcome,
-        ),
-        (
-            "conformance_pool_lease_drop_releases_capacity_once",
-            conformance_pool_lease_drop_releases_capacity_once,
-        ),
-        (
-            "conformance_pool_explicit_release_decrements_capacity_once",
-            conformance_pool_explicit_release_decrements_capacity_once,
-        ),
-        (
-            "conformance_pool_idle_replacement_preserves_capacity_accounting",
-            conformance_pool_idle_replacement_preserves_capacity_accounting,
-        ),
-        (
-            "conformance_pool_admission_refusal_is_explicit",
-            conformance_pool_admission_refusal_is_explicit,
         ),
         (
             "import_residue_accumulates_over_a_generation_and_resets_on_the_cycle",
@@ -293,7 +271,6 @@ fn main() {
 }
 
 fn check_application_launch_input() {
-    use lean_rs_worker_parent::LeanWorkerHostHandleBuilder;
 
     assert_eq!(env::var(INPUT_ENV).as_deref(), Ok("ambient"));
     let executable = env::current_exe().expect("fixture executable");
@@ -385,63 +362,6 @@ fn run_fake_child(mode: &str) {
                 write_frame(&mut stdout, Message::Response(Response::HealthOk), MAX_FRAME_BYTES)
                     .expect("fake child writes health response");
             }
-            Request::EmitTestRows { .. } if mode == "hang_on_emit" => sleep_forever(),
-            Request::EmitTestRows { streams } if mode == "rows_then_hang" => {
-                let mut emitter = DataRowEmitter::default();
-                for stream in streams {
-                    let payload = RawValue::from_string(format!(r#"{{"stream":"{stream}"}}"#))
-                        .expect("fake child builds JSON row payload");
-                    let row = emitter.next(stream, payload);
-                    write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES)
-                        .expect("fake child writes data row");
-                }
-                sleep_forever();
-            }
-            Request::EmitTestRows { streams } if mode == "slow_send_and_response" && streams.is_empty() => {
-                // Acknowledge the setup request, then delay reading the large request on this child only.
-                write_frame(
-                    &mut stdout,
-                    Message::Response(Response::RowsComplete { count: 0 }),
-                    MAX_FRAME_BYTES,
-                )
-                .expect("fake child acknowledges slow read setup");
-                thread::sleep(Duration::from_millis(200));
-            }
-            Request::EmitTestRows { streams } => {
-                if mode == "slow_send_and_response" {
-                    thread::sleep(Duration::from_millis(200));
-                }
-                let mut emitter = DataRowEmitter::default();
-                for stream in streams {
-                    let payload = RawValue::from_string(format!(r#"{{"stream":"{stream}"}}"#))
-                        .expect("fake child builds JSON row payload");
-                    let row = emitter.next(stream, payload);
-                    write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES)
-                        .expect("fake child writes data row");
-                }
-                write_frame(
-                    &mut stdout,
-                    Message::Response(Response::RowsComplete { count: emitter.count() }),
-                    MAX_FRAME_BYTES,
-                )
-                .expect("fake child writes row terminal response");
-            }
-            Request::EmitTestRowsThenExit => {
-                let mut emitter = DataRowEmitter::default();
-                let payload = RawValue::from_string(r#"{"stream":"rows"}"#.to_owned())
-                    .expect("fake child builds JSON row payload");
-                let row = emitter.next("rows", payload);
-                write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES).expect("fake child writes data row");
-                return;
-            }
-            Request::EmitTestRowsThenPanic => {
-                let mut emitter = DataRowEmitter::default();
-                let payload = RawValue::from_string(r#"{"stream":"rows"}"#.to_owned())
-                    .expect("fake child builds JSON row payload");
-                let row = emitter.next("rows", payload);
-                write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES).expect("fake child writes data row");
-                std::process::abort();
-            }
             Request::OpenHostSession {
                 imports,
                 import_profile,
@@ -520,8 +440,28 @@ fn run_fake_child(mode: &str) {
                     MAX_FRAME_BYTES,
                 )
                 .expect("fake child writes session-open response");
+                if mode == "slow_send_and_response" {
+                    // Stop reading for a while, so the parent's next large
+                    // request fills the pipe and its send must wait.
+                    thread::sleep(Duration::from_millis(200));
+                }
+            }
+            Request::ProcessModuleQueryBatch { .. } if mode == "query_hang" => sleep_forever(),
+            Request::ProcessModuleQueryBatch { .. } if mode == "progress_then_hang" => {
+                write_progress(&mut stdout, 1);
+                sleep_forever();
             }
             Request::ProcessModuleQueryBatch { source, selectors, .. } => {
+                match mode {
+                    "slow_send_and_response" => thread::sleep(Duration::from_millis(200)),
+                    "many_progress" => {
+                        // Four times the parent reader's 64-event buffer.
+                        for current in 0..256 {
+                            write_progress(&mut stdout, current);
+                        }
+                    }
+                    _ => {}
+                }
                 if mode.starts_with("header_") {
                     let recycle = mode == "header_always_recycle"
                         || (mode == "header_budget" && last_header.as_ref().is_some_and(|old| old != &source));
@@ -605,26 +545,42 @@ fn run_fake_child(mode: &str) {
                 )
                 .expect("fake child writes module query batch response");
             }
-            Request::ListDeclarationsStrings { .. } | Request::RunDataStream { .. } if mode == "header_failure" => {
+            Request::ListDeclarationsStrings { .. } if mode == "header_failure" => {
                 let response = if last_session.is_none() {
                     Response::Error {
                         code: "test.session_missing".to_owned(),
                         message: "must reopen active session".to_owned(),
                     }
-                } else if matches!(request, Request::ListDeclarationsStrings { .. }) {
-                    Response::RowsComplete { count: 0 }
                 } else {
-                    Response::StreamComplete {
-                        summary: lean_rs_worker_protocol::protocol::StreamSummary::new(
-                            0,
-                            std::collections::BTreeMap::default(),
-                            Duration::ZERO,
-                            None,
-                        ),
-                    }
+                    Response::RowsComplete { count: 0 }
                 };
                 write_frame(&mut stdout, Message::Response(response), MAX_FRAME_BYTES)
-                    .expect("write streaming response");
+                    .expect("write name listing response");
+            }
+            Request::ListDeclarationsStrings { .. } => {
+                let names: &[&str] = match mode {
+                    "names_then_exit" | "names_then_abort" | "names_then_hang" => &["Fake.first"],
+                    _ => &["Fake.first", "Fake.second", "Fake.third"],
+                };
+                let mut emitter = DataRowEmitter::default();
+                for name in names {
+                    let payload = RawValue::from_string(serde_json::to_string(name).expect("encode fake name"))
+                        .expect("fake child builds JSON row payload");
+                    let row = emitter.next("names", payload);
+                    write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES)
+                        .expect("fake child writes data row");
+                }
+                match mode {
+                    "names_then_exit" => return,
+                    "names_then_abort" => std::process::abort(),
+                    "names_then_hang" => sleep_forever(),
+                    _ => write_frame(
+                        &mut stdout,
+                        Message::Response(Response::RowsComplete { count: emitter.count() }),
+                        MAX_FRAME_BYTES,
+                    )
+                    .expect("fake child writes row terminal response"),
+                }
             }
             Request::VerifyDeclarationBatch { request, .. } => {
                 let rows = request
@@ -785,6 +741,15 @@ fn sleep_forever() -> ! {
     }
 }
 
+fn write_progress(stdout: &mut impl Write, current: u64) {
+    write_frame(
+        stdout,
+        Message::ProgressTick(ProgressTick::new("fake", current, None)),
+        MAX_FRAME_BYTES,
+    )
+    .expect("fake child writes progress tick");
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RuntimeTraceEvent {
     GenerationStarted(u64),
@@ -796,21 +761,10 @@ enum RuntimeTraceEvent {
         generation: u64,
         request: &'static str,
     },
-    StreamRowObserved {
-        generation: u64,
-        request: &'static str,
-        stream: String,
-        sequence: u64,
-    },
     TerminalOutcomeObserved {
         generation: u64,
         request: &'static str,
         outcome: RuntimeTerminalOutcome,
-    },
-    BackpressureObserved {
-        generation: u64,
-        request: &'static str,
-        waits: u64,
     },
     TimeoutObserved {
         generation: u64,
@@ -839,33 +793,12 @@ enum RuntimeTraceEvent {
     ChildReaped {
         generation: u64,
     },
-    LeaseGranted {
-        active_workers: usize,
-        warm_leases: usize,
-    },
-    LeaseDropped {
-        active_workers: usize,
-        warm_leases: usize,
-    },
-    LeaseReleased {
-        active_workers: usize,
-        warm_leases: usize,
-    },
-    IdleReplacementObserved {
-        policy_restarts: u64,
-        worker_restarts: u64,
-    },
-    AdmissionRefused {
-        reason: &'static str,
-    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RuntimeTerminalOutcome {
     Response(&'static str),
     Timeout,
-    Cancelled,
-    ChildExited,
     ChildPanicOrAbort,
     RestartLimitExceeded,
     ShutdownInProgress,
@@ -902,16 +835,46 @@ fn assert_single_terminal(trace: &[RuntimeTraceEvent], generation: u64, request:
     }
 }
 
+fn shims_config() -> LeanWorkerSessionConfig {
+    LeanWorkerSessionConfig::shims_only("/fake-project", ["Init"])
+}
+
+fn query_batch(
+    session: &mut LeanWorkerSession<'_>,
+    source: &str,
+    cancellation: Option<&LeanWorkerCancellationToken>,
+    progress: Option<&dyn LeanWorkerProgressSink>,
+) -> Result<LeanWorkerModuleQueryBatchOutcome, LeanWorkerError> {
+    session.process_module_query_batch(
+        source,
+        &[],
+        &LeanWorkerOutputBudgets::default(),
+        &LeanWorkerElabOptions::default(),
+        cancellation,
+        progress,
+    )
+}
+
+fn list_names(
+    worker: &mut LeanWorker,
+    cancellation: Option<&LeanWorkerCancellationToken>,
+) -> Result<Vec<String>, LeanWorkerError> {
+    let mut session = worker.open_session(&shims_config(), None, None)?;
+    session.list_declarations_strings(&LeanWorkerDeclarationFilter::default(), cancellation, None)
+}
+
 fn send_and_response_share_deadline_and_replacement_remains_usable() -> Result<(), String> {
     let mut worker = fake_worker_with_config("slow_send_and_response", |config| {
         config.request_timeout(Duration::from_millis(300))
     })
     .map_err(|error| error.to_string())?;
-    worker
-        .__emit_test_rows(Vec::new(), None, None)
-        .map_err(|error| error.to_string())?;
-    // Larger than the pipe buffer, so sending waits for the child to read.
-    let result = worker.__emit_test_rows(vec!["x".repeat(256 * 1024)], None, None);
+    let result = {
+        let mut session = worker
+            .open_session(&shims_config(), None, None)
+            .map_err(|error| error.to_string())?;
+        // Larger than the pipe buffer, so sending waits for the child to read.
+        query_batch(&mut session, &"x".repeat(256 * 1024), None, None)
+    };
     if !matches!(result, Err(LeanWorkerError::Timeout { .. })) {
         return Err(format!("send and response did not share deadline: {result:?}"));
     }
@@ -982,240 +945,75 @@ fn conformance_terminal_success_has_one_terminal_outcome() -> Result<(), String>
     Ok(())
 }
 
-fn conformance_stream_rows_are_tentative_until_terminal_success() -> Result<(), String> {
+fn conformance_name_rows_complete_with_one_terminal_outcome() -> Result<(), String> {
     let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
     let generation = worker.lifecycle_snapshot().worker_generation;
-    let sink = RecordingSink::default();
-    let mut trace = request_trace(generation, "emit_test_rows");
-    let count = worker
-        .__emit_test_rows(
-            vec!["left".to_owned(), "right".to_owned(), "left".to_owned()],
-            None,
-            Some(&sink),
-        )
-        .map_err(|err| err.to_string())?;
-    assert_eq!(count, 3);
-
-    let rows = sink.rows();
-    let observed: Vec<(String, u64)> = rows.into_iter().map(|row| (row.stream, row.sequence)).collect();
-    assert_eq!(
-        observed,
-        vec![("left".to_owned(), 0), ("right".to_owned(), 0), ("left".to_owned(), 1),]
-    );
-    for (stream, sequence) in observed {
-        trace.push(RuntimeTraceEvent::StreamRowObserved {
-            generation,
-            request: "emit_test_rows",
-            stream,
-            sequence,
-        });
-    }
+    let mut trace = request_trace(generation, "list_declarations_strings");
+    let names = list_names(&mut worker, None).map_err(|err| err.to_string())?;
+    assert_eq!(names, ["Fake.first", "Fake.second", "Fake.third"]);
     trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
         generation,
-        request: "emit_test_rows",
+        request: "list_declarations_strings",
         outcome: RuntimeTerminalOutcome::Response("rows_complete"),
     });
-    assert_eq!(worker.stats().requests, 1);
-    assert_eq!(worker.stats().data_rows_delivered, 3);
-    assert_single_terminal(&trace, generation, "emit_test_rows")?;
-    drop(worker);
+    let stats = worker.stats();
+    assert_eq!(stats.data_rows_delivered, 3);
+    assert_eq!(stats.stream_successes, 1);
+    assert_eq!(stats.stream_failures, 0);
+    assert_single_terminal(&trace, generation, "list_declarations_strings")?;
     Ok(())
 }
 
-fn conformance_stream_child_exit_after_rows_discards_tentative_rows() -> Result<(), String> {
-    let mut worker = fake_worker_observing_child_death("normal").map_err(|err| err.to_string())?;
-    let generation = worker.lifecycle_snapshot().worker_generation;
-    let sink = RecordingSink::default();
-    let mut trace = request_trace(generation, "emit_test_rows_then_exit");
-    let err = worker
-        .__emit_test_rows_then_exit(None, Some(&sink))
-        .expect_err("fake child should exit before terminal stream success");
-    match err {
+fn conformance_name_rows_then_child_exit_fail_the_request() -> Result<(), String> {
+    let mut worker = fake_worker_observing_child_death("names_then_exit").map_err(|err| err.to_string())?;
+    let error = list_names(&mut worker, None).expect_err("child exits before its terminal response");
+    match error {
         LeanWorkerError::ChildExited { exit } => assert!(exit.success),
-        other => return Err(format!("expected child-exited stream failure, got {other:?}")),
+        other => return Err(format!("expected child exit after one row, got {other:?}")),
     }
-    let rows = sink.rows();
-    assert_eq!(rows.len(), 1);
-    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
-    trace.push(RuntimeTraceEvent::StreamRowObserved {
-        generation,
-        request: "emit_test_rows_then_exit",
-        stream: first_row.stream.clone(),
-        sequence: first_row.sequence,
-    });
-    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
-        generation,
-        request: "emit_test_rows_then_exit",
-        outcome: RuntimeTerminalOutcome::ChildExited,
-    });
     let stats = worker.stats();
     assert_eq!(stats.data_rows_delivered, 1);
     assert_eq!(stats.stream_failures, 1);
-    assert_single_terminal(&trace, generation, "emit_test_rows_then_exit")?;
-    drop(worker);
     Ok(())
 }
 
-fn conformance_stream_child_crash_after_rows_discards_tentative_rows() -> Result<(), String> {
-    let mut worker = fake_worker_observing_child_death("normal").map_err(|err| err.to_string())?;
-    let generation = worker.lifecycle_snapshot().worker_generation;
-    let sink = RecordingSink::default();
-    let mut trace = request_trace(generation, "emit_test_rows_then_panic");
-    let err = worker
-        .__emit_test_rows_then_panic(None, Some(&sink))
-        .expect_err("fake child should abort before terminal stream success");
-    match err {
+fn conformance_name_rows_then_child_abort_fail_the_request() -> Result<(), String> {
+    let mut worker = fake_worker_observing_child_death("names_then_abort").map_err(|err| err.to_string())?;
+    let error = list_names(&mut worker, None).expect_err("child aborts before its terminal response");
+    match error {
         LeanWorkerError::ChildPanicOrAbort { exit } => assert!(!exit.success),
-        other => return Err(format!("expected child-panic stream failure, got {other:?}")),
+        other => return Err(format!("expected child abort after one row, got {other:?}")),
     }
-    let rows = sink.rows();
-    assert_eq!(rows.len(), 1);
-    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
-    trace.push(RuntimeTraceEvent::StreamRowObserved {
-        generation,
-        request: "emit_test_rows_then_panic",
-        stream: first_row.stream.clone(),
-        sequence: first_row.sequence,
-    });
-    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
-        generation,
-        request: "emit_test_rows_then_panic",
-        outcome: RuntimeTerminalOutcome::ChildPanicOrAbort,
-    });
     let stats = worker.stats();
     assert_eq!(stats.data_rows_delivered, 1);
     assert_eq!(stats.stream_failures, 1);
-    assert_single_terminal(&trace, generation, "emit_test_rows_then_panic")?;
-    drop(worker);
     Ok(())
 }
 
-fn conformance_stream_timeout_after_rows_discards_tentative_rows() -> Result<(), String> {
-    let mut worker = fake_worker("rows_then_hang").map_err(|err| err.to_string())?;
-    let generation = worker.lifecycle_snapshot().worker_generation;
-    let old_pid = worker
-        .__child_pid_for_test()
-        .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
-    let sink = RecordingSink::default();
-    let mut trace = request_trace(generation, "emit_test_rows");
-    let err = worker
-        .__emit_test_rows(vec!["rows".to_owned()], None, Some(&sink))
-        .expect_err("fake child should hang after tentative rows");
-    match err {
-        LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "emit_test_rows"),
-        other => return Err(format!("expected timeout after stream rows, got {other:?}")),
+fn conformance_name_rows_then_silence_time_out() -> Result<(), String> {
+    let mut worker = fake_worker("names_then_hang").map_err(|err| err.to_string())?;
+    let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
+    let error = list_names(&mut worker, None).expect_err("child falls silent after one row");
+    match error {
+        LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "worker_list_declarations_strings"),
+        other => return Err(format!("expected timeout after one row, got {other:?}")),
     }
-    let rows = sink.rows();
-    assert_eq!(rows.len(), 1);
-    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
-    trace.push(RuntimeTraceEvent::StreamRowObserved {
-        generation,
-        request: "emit_test_rows",
-        stream: first_row.stream.clone(),
-        sequence: first_row.sequence,
-    });
-    trace.push(RuntimeTraceEvent::TimeoutObserved {
-        generation,
-        request: "emit_test_rows",
-    });
-    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
-        generation,
-        request: "emit_test_rows",
-        outcome: RuntimeTerminalOutcome::Timeout,
-    });
     assert_reaped(old_pid)?;
     let stats = worker.stats();
     assert_eq!(stats.data_rows_delivered, 1);
     assert_eq!(stats.stream_failures, 1);
     assert_eq!(stats.timeout_restarts, 1);
-    assert_single_terminal(&trace, generation, "emit_test_rows")?;
-    drop(worker);
-    Ok(())
-}
-
-fn conformance_stream_cancellation_after_rows_discards_tentative_rows() -> Result<(), String> {
-    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
-    let generation = worker.lifecycle_snapshot().worker_generation;
-    let old_pid = worker
-        .__child_pid_for_test()
-        .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
-    let cancellation = LeanWorkerCancellationToken::new();
-    let sink = CancellingSink::new(cancellation.clone());
-    let mut trace = request_trace(generation, "emit_test_rows");
-    let err = worker
-        .__emit_test_rows(
-            vec!["rows".to_owned(), "late".to_owned()],
-            Some(&cancellation),
-            Some(&sink),
-        )
-        .expect_err("sink cancellation should interrupt stream after the first row");
-    match err {
-        LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "emit_test_rows"),
-        other => return Err(format!("expected cancellation after stream row, got {other:?}")),
-    }
-    let rows = sink.rows();
-    assert_eq!(rows.len(), 1);
-    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
-    trace.push(RuntimeTraceEvent::StreamRowObserved {
-        generation,
-        request: "emit_test_rows",
-        stream: first_row.stream.clone(),
-        sequence: first_row.sequence,
-    });
-    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
-        generation,
-        request: "emit_test_rows",
-        outcome: RuntimeTerminalOutcome::Cancelled,
-    });
-    assert_reaped(old_pid)?;
-    let stats = worker.stats();
-    assert_eq!(stats.data_rows_delivered, 1);
-    assert_eq!(stats.stream_failures, 1);
-    assert_eq!(stats.cancelled_restarts, 1);
-    assert_single_terminal(&trace, generation, "emit_test_rows")?;
-    drop(worker);
-    Ok(())
-}
-
-fn conformance_stream_backpressure_is_bounded_and_observable() -> Result<(), String> {
-    // Four times the reader's 64-event buffer is enough to force backpressure;
-    // this is a conformance check, not a throughput benchmark. Hosted macOS can
-    // heavily coalesce each one-millisecond sink sleep. Keep a finite, generous
-    // hang backstop rather than interpreting timer scheduling as protocol failure.
-    // The dedicated timeout tests retain their short deadlines.
-    let mut worker = fake_worker_with_config("normal", |config| config.request_timeout(Duration::from_secs(120)))
-        .map_err(|err| err.to_string())?;
-    let generation = worker.lifecycle_snapshot().worker_generation;
-    let sink = SlowSink::new(Duration::from_millis(1));
-    let streams = (0..256).map(|_| "rows".to_owned()).collect::<Vec<_>>();
-    let count = worker
-        .__emit_test_rows(streams, None, Some(&sink))
-        .map_err(|err| err.to_string())?;
-    assert_eq!(count, 256);
-    assert_eq!(sink.rows().len(), 256);
-    let stats = worker.stats();
-    let trace = [RuntimeTraceEvent::BackpressureObserved {
-        generation,
-        request: "emit_test_rows",
-        waits: stats.backpressure_waits,
-    }];
-    assert!(
-        stats.backpressure_waits > 0,
-        "slow sink should force the bounded reader buffer to report backpressure"
-    );
-    assert_eq!(stats.stream_successes, 1);
-    assert_eq!(stats.stream_failures, 0);
-    assert!(trace.contains(&RuntimeTraceEvent::BackpressureObserved {
-        generation,
-        request: "emit_test_rows",
-        waits: stats.backpressure_waits,
-    }));
-    drop(worker);
     Ok(())
 }
 
 fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("rows_then_hang", |config| {
+    struct Started(std::sync::mpsc::Sender<()>);
+    impl LeanWorkerProgressSink for Started {
+        fn report(&self, _event: LeanWorkerProgressEvent) {
+            self.0.send(()).expect("signal first progress tick");
+        }
+    }
+    let mut worker = fake_worker_with_config("progress_then_hang", |config| {
         config.request_timeout(Duration::from_secs(5))
     })
     .map_err(|err| err.to_string())?;
@@ -1226,12 +1024,6 @@ fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(),
     let cancellation = LeanWorkerCancellationToken::new();
     let token = cancellation.clone();
     let (sender, receiver) = std::sync::mpsc::channel();
-    struct Started(std::sync::mpsc::Sender<()>);
-    impl LeanWorkerDataSink for Started {
-        fn report(&self, _row: LeanWorkerDataRow) {
-            self.0.send(()).expect("signal first row");
-        }
-    }
     let canceller = thread::spawn(move || {
         receiver
             .recv_timeout(Duration::from_secs(2))
@@ -1241,9 +1033,13 @@ fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(),
         token.cancel();
     });
     let started = std::time::Instant::now();
-    let error = worker
-        .__emit_test_rows(vec!["started".to_owned()], Some(&cancellation), Some(&Started(sender)))
-        .expect_err("silent child must observe cancellation before its request deadline");
+    let error = {
+        let mut session = worker
+            .open_session(&shims_config(), None, None)
+            .map_err(|err| err.to_string())?;
+        query_batch(&mut session, "", Some(&cancellation), Some(&Started(sender)))
+            .expect_err("silent child must observe cancellation before its request deadline")
+    };
     canceller.join().map_err(|_| "canceller thread panicked".to_owned())?;
     assert!(
         matches!(error, LeanWorkerError::Cancelled { .. }),
@@ -1258,7 +1054,7 @@ fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(),
         .confirmed_request_stop_since(&checkpoint)
         .ok_or("cancellation lost direct-worker exit")?;
     assert_eq!(receipt.process_id(), old_pid);
-    assert_eq!(receipt.operation(), "emit_test_rows");
+    assert_eq!(receipt.operation(), "worker_process_module_query_batch");
     assert_ne!(worker.__child_pid_for_test(), Some(old_pid));
     assert_eq!(worker.stats().cancelled_restarts, 1);
     worker.health().map_err(|err| err.to_string())?;
@@ -1270,14 +1066,19 @@ fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(),
 fn conformance_silent_worker_deadline_is_not_renewed_by_polling() -> Result<(), String> {
     for token_present in [false, true] {
         let timeout = Duration::from_millis(180);
-        let mut worker = fake_worker_with_config("rows_then_hang", |config| config.request_timeout(timeout))
+        let mut worker = fake_worker_with_config("query_hang", |config| config.request_timeout(timeout))
             .map_err(|err| err.to_string())?;
         let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
         let token = LeanWorkerCancellationToken::new();
-        let started = std::time::Instant::now();
-        let error = worker
-            .__emit_test_rows(Vec::new(), token_present.then_some(&token), None)
-            .expect_err("silent child must reach original request deadline");
+        let (started, error) = {
+            let mut session = worker
+                .open_session(&shims_config(), None, None)
+                .map_err(|err| err.to_string())?;
+            let started = std::time::Instant::now();
+            let error = query_batch(&mut session, "", token_present.then_some(&token), None)
+                .expect_err("silent child must reach original request deadline");
+            (started, error)
+        };
         assert!(matches!(error, LeanWorkerError::Timeout { duration, .. } if duration == timeout));
         assert!(started.elapsed() >= timeout);
         assert!(
@@ -1288,6 +1089,37 @@ fn conformance_silent_worker_deadline_is_not_renewed_by_polling() -> Result<(), 
         assert_eq!(worker.stats().timeout_restarts, 1);
         assert_eq!(worker.stats().cancelled_restarts, 0);
     }
+    Ok(())
+}
+
+fn conformance_slow_progress_sink_backpressure_is_bounded_and_observable() -> Result<(), String> {
+    struct SlowSink(AtomicU64);
+    impl LeanWorkerProgressSink for SlowSink {
+        fn report(&self, _event: LeanWorkerProgressEvent) {
+            thread::sleep(Duration::from_millis(1));
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    // Hosted macOS can coalesce each one-millisecond sleep heavily. Keep a
+    // finite, generous backstop rather than read timer scheduling as a
+    // protocol failure; the timeout tests keep their short deadlines.
+    let mut worker = fake_worker_with_config("many_progress", |config| {
+        config.request_timeout(Duration::from_secs(120))
+    })
+    .map_err(|err| err.to_string())?;
+    let sink = SlowSink(AtomicU64::new(0));
+    let outcome = {
+        let mut session = worker
+            .open_session(&shims_config(), None, None)
+            .map_err(|err| err.to_string())?;
+        query_batch(&mut session, "", None, Some(&sink)).map_err(|err| err.to_string())?
+    };
+    assert!(matches!(outcome, LeanWorkerModuleQueryBatchOutcome::Ok { .. }));
+    assert_eq!(sink.0.load(Ordering::Relaxed), 256);
+    assert!(
+        worker.stats().backpressure_waits > 0,
+        "a slow sink should fill the reader's bounded buffer"
+    );
     Ok(())
 }
 
@@ -1438,15 +1270,18 @@ fn request_stop_receipt_matches_checkpoint_across_replacement() -> Result<(), St
 }
 
 fn newer_request_shadows_older_stop_receipt() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("hang_on_emit", |config| {
+    let mut worker = fake_worker_with_config("query_hang", |config| {
         config.request_timeout(Duration::from_millis(300))
     })
     .map_err(|error| error.to_string())?;
     let checkpoint = worker.request_checkpoint();
-    assert!(matches!(
-        worker.__emit_test_rows(vec!["x".repeat(256 * 1024)], None, None),
-        Err(LeanWorkerError::Timeout { .. })
-    ));
+    let result = {
+        let mut session = worker
+            .open_session(&shims_config(), None, None)
+            .map_err(|error| error.to_string())?;
+        query_batch(&mut session, &"x".repeat(256 * 1024), None, None)
+    };
+    assert!(matches!(result, Err(LeanWorkerError::Timeout { .. })));
     assert!(worker.confirmed_request_stop_since(&checkpoint).is_some());
     worker.health().map_err(|error| error.to_string())?;
     assert!(
@@ -1592,197 +1427,50 @@ fn conformance_restart_limit_exhaustion_is_typed_terminal_outcome() -> Result<()
     Ok(())
 }
 
-fn conformance_pool_lease_drop_releases_capacity_once() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("lease-drop")?;
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let builder = fixture.builder("normal", ["Init"])?;
-
-    let before = pool.snapshot();
-    assert_eq!(before.active_workers, 0);
-    assert_eq!(before.warm_leases, 0);
-
-    {
-        let lease = pool.acquire_lease(builder.clone()).map_err(|err| err.to_string())?;
-        let snapshot = lease.snapshot();
-        let trace = [RuntimeTraceEvent::LeaseGranted {
-            active_workers: snapshot.active_workers,
-            warm_leases: snapshot.warm_leases,
-        }];
-        assert_eq!(snapshot.active_workers, 1);
-        assert_eq!(snapshot.warm_leases, 0);
-        assert!(trace.contains(&RuntimeTraceEvent::LeaseGranted {
-            active_workers: 1,
-            warm_leases: 0,
-        }));
-    }
-
-    let after_drop = pool.snapshot();
-    let trace = [RuntimeTraceEvent::LeaseDropped {
-        active_workers: after_drop.active_workers,
-        warm_leases: after_drop.warm_leases,
-    }];
-    assert_eq!(after_drop.active_workers, 0);
-    assert_eq!(after_drop.warm_leases, 1);
-    assert!(trace.contains(&RuntimeTraceEvent::LeaseDropped {
-        active_workers: 0,
-        warm_leases: 1,
-    }));
-
-    {
-        let lease = pool.acquire_lease(builder).map_err(|err| err.to_string())?;
-        let snapshot = lease.snapshot();
-        assert_eq!(snapshot.active_workers, 1);
-        assert_eq!(
-            snapshot.workers, 1,
-            "dropping the first lease should not leave a second active accounting slot"
-        );
-    }
-    assert_eq!(pool.snapshot().key_hits, 1);
-
-    Ok(())
-}
-
-fn conformance_pool_explicit_release_decrements_capacity_once() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("lease-release")?;
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let builder = fixture.builder("normal", ["Init"])?;
-
-    {
-        let lease = pool.acquire_lease(builder).map_err(|err| err.to_string())?;
-        let snapshot = lease.snapshot();
-        assert_eq!(snapshot.active_workers, 1);
-        assert_eq!(snapshot.warm_leases, 0);
-        lease.release();
-    }
-
-    let after_release = pool.snapshot();
-    let trace = [RuntimeTraceEvent::LeaseReleased {
-        active_workers: after_release.active_workers,
-        warm_leases: after_release.warm_leases,
-    }];
-    assert_eq!(after_release.active_workers, 0);
-    assert_eq!(after_release.warm_leases, 1);
-    assert!(trace.contains(&RuntimeTraceEvent::LeaseReleased {
-        active_workers: 0,
-        warm_leases: 1,
-    }));
-    Ok(())
-}
-
-fn conformance_pool_idle_replacement_preserves_capacity_accounting() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("idle-replacement")?;
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).idle_cycle_after(Duration::ZERO));
-    let builder = fixture.builder("normal", ["Init"])?;
-
-    {
-        let lease = pool.acquire_lease(builder.clone()).map_err(|err| err.to_string())?;
-        let snapshot = lease.snapshot();
-        assert_eq!(snapshot.active_workers, 1);
-        assert_eq!(snapshot.worker_restarts, 0);
-    }
-
-    let warm_snapshot = pool.snapshot();
-    assert_eq!(warm_snapshot.active_workers, 0);
-    assert_eq!(warm_snapshot.warm_leases, 1);
-
-    {
-        let lease = pool.acquire_lease(builder).map_err(|err| err.to_string())?;
-        let snapshot = lease.snapshot();
-        assert_eq!(snapshot.active_workers, 1);
-        assert_eq!(snapshot.workers, 1);
-        assert_eq!(snapshot.policy_restarts, 1);
-        assert_eq!(snapshot.worker_restarts, 1);
-        assert_eq!(snapshot.idle_restarts, 1);
-        let trace = [RuntimeTraceEvent::IdleReplacementObserved {
-            policy_restarts: snapshot.policy_restarts,
-            worker_restarts: snapshot.worker_restarts,
-        }];
-        assert!(trace.contains(&RuntimeTraceEvent::IdleReplacementObserved {
-            policy_restarts: 1,
-            worker_restarts: 1,
-        }));
-    }
-
-    let after_drop = pool.snapshot();
-    assert_eq!(after_drop.active_workers, 0);
-    assert_eq!(after_drop.warm_leases, 1);
-    assert_eq!(after_drop.policy_restarts, 1);
-    Ok(())
-}
-
-fn conformance_pool_admission_refusal_is_explicit() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("admission-refusal")?;
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    let first = fixture.builder("normal", ["Init"])?;
-    let second = fixture.builder("normal", ["Std"])?;
-
-    {
-        let first_lease = pool.acquire_lease(first).map_err(|err| err.to_string())?;
-        assert_eq!(first_lease.snapshot().workers, 1);
-    }
-    let err = pool
-        .acquire_lease(second)
-        .expect_err("distinct session key should be refused when capacity is full");
-    match err {
-        LeanWorkerError::WorkerPoolExhausted { max_workers, resource } => {
-            assert_eq!(max_workers, 1);
-            assert_eq!(resource.cause, "worker_pool_max_workers");
-            assert!(!resource.work_entered_child);
-        }
-        other => return Err(format!("expected explicit pool exhaustion, got {other:?}")),
-    }
-    let snapshot = pool.snapshot();
-    let trace = [RuntimeTraceEvent::AdmissionRefused { reason: "max_workers" }];
-    assert_eq!(snapshot.cold_open_refusals, 1);
-    assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
-    assert!(trace.contains(&RuntimeTraceEvent::AdmissionRefused { reason: "max_workers" }));
-    Ok(())
-}
-
 /// The residue bound end to end against a child that reports region bytes:
 /// the running sum is what the parent acts on, and it is a *generation*
 /// quantity, so the replacement child starts from zero even though
 /// `LeanWorkerStats` is carried forward across the restart.
 fn import_residue_accumulates_over_a_generation_and_resets_on_the_cycle() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("import-residue")?;
+    let project = FakeProject::new("import-residue")?;
     // Three imports' worth. The check runs *before* a request, so the cycle
     // lands on the open after the running sum reaches the limit, never on the
     // import that carried it there.
     let limit = FAKE_IMPORT_RESIDUE_BYTES * 3;
-    let mut capability = fixture
+    let mut handle = project
         .builder("residue_reporting", ["Init"])?
         .restart_policy(LeanWorkerRestartPolicy::default().max_import_residue_bytes(limit))
         .open()
         .map_err(|err| err.to_string())?;
 
-    // Opening the capability already imported once.
-    let opened = capability.lifecycle_snapshot();
+    // Opening the handle already imported once.
+    let opened = handle.lifecycle_snapshot();
     assert_eq!(opened.import_residue_bytes, FAKE_IMPORT_RESIDUE_BYTES);
     assert_eq!(opened.import_residue_limit_bytes, Some(limit));
     assert_eq!(opened.worker_generation, 0);
 
     for import in ["A", "B"] {
-        let _session = capability
+        let _session = handle
             .open_session_with_imports([import], None, None)
             .map_err(|err| err.to_string())?;
     }
-    let charged = capability.lifecycle_snapshot();
+    let charged = handle.lifecycle_snapshot();
     assert_eq!(charged.import_residue_bytes, limit);
     assert_eq!(charged.worker_generation, 0, "reaching the limit is not itself a cycle");
-    assert_eq!(capability.stats().import_residue_restarts, 0);
+    assert_eq!(handle.stats().import_residue_restarts, 0);
 
     // The next open is admitted only after the child is replaced, and the import
     // it then performs is the new generation's first and only charge.
-    let _session = capability
+    let _session = handle
         .open_session_with_imports(["C"], None, None)
         .map_err(|err| err.to_string())?;
-    let cycled = capability.lifecycle_snapshot();
+    let cycled = handle.lifecycle_snapshot();
     assert_eq!(cycled.worker_generation, 1);
     assert_eq!(
         cycled.import_residue_bytes, FAKE_IMPORT_RESIDUE_BYTES,
         "the budget is per generation, even though lifetime stats carry forward"
     );
-    let stats = capability.stats();
+    let stats = handle.stats();
     assert_eq!(stats.import_residue_restarts, 1);
     assert_eq!(stats.imports, 4, "the lifetime import count spans both generations");
     assert_eq!(
@@ -1803,8 +1491,8 @@ fn import_residue_accumulates_over_a_generation_and_resets_on_the_cycle() -> Res
 /// modules but no region bytes. The byte bound can never fire, so it must be
 /// visible in the stats and the count backstop must still bound the child.
 fn a_child_that_reports_no_region_bytes_is_counted_and_still_bounded() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("import-residue-unusable")?;
-    let mut capability = fixture
+    let project = FakeProject::new("import-residue-unusable")?;
+    let mut handle = project
         .builder("normal", ["Init"])?
         .restart_policy(
             LeanWorkerRestartPolicy::default()
@@ -1815,11 +1503,11 @@ fn a_child_that_reports_no_region_bytes_is_counted_and_still_bounded() -> Result
         .map_err(|err| err.to_string())?;
 
     for import in ["A", "B", "C"] {
-        let _session = capability
+        let _session = handle
             .open_session_with_imports([import], None, None)
             .map_err(|err| err.to_string())?;
     }
-    let snapshot = capability.lifecycle_snapshot();
+    let snapshot = handle.lifecycle_snapshot();
     assert_eq!(snapshot.import_residue_bytes, 0, "nothing to accumulate");
     assert_eq!(snapshot.worker_generation, 1, "the count backstop cycled the child");
     assert_eq!(
@@ -1829,88 +1517,62 @@ fn a_child_that_reports_no_region_bytes_is_counted_and_still_bounded() -> Result
             .map(LeanWorkerRestartReason::stable_cause),
         Some("max_imports")
     );
-    let stats = capability.stats();
+    let stats = handle.stats();
     assert_eq!(stats.import_residue_restarts, 0);
     assert_eq!(
         stats.import_stats_unusable, 4,
-        "every import — the capability's own plus the three here — reported modules with no bytes attributed to them"
+        "every import — the handle's own plus the three here — reported modules with no bytes attributed to them"
     );
     Ok(())
 }
 
 fn stale_warm_session_keeps_import_count_backstop() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("session-count")?;
-    let mut capability = fixture
+    let project = FakeProject::new("session-count")?;
+    let mut handle = project
         .builder("session_count", ["Init"])?
         .request_timeout(Duration::from_secs(5))
         .restart_policy(LeanWorkerRestartPolicy::default().max_imports(1))
         .open()
         .map_err(|err| err.to_string())?;
     {
-        let _session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+        let _session = handle.open_session(None, None).map_err(|err| err.to_string())?;
     };
-    assert_eq!(capability.stats().restarts, 0, "warm reuse above count cap");
+    assert_eq!(handle.stats().restarts, 0, "warm reuse above count cap");
     {
-        let _session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+        let _session = handle.open_session(None, None).map_err(|err| err.to_string())?;
     };
     assert_eq!(
-        capability.stats().max_import_restarts,
+        handle.stats().max_import_restarts,
         1,
         "actual stale miss still enforces count"
     );
     Ok(())
 }
 
-fn failed_header_then_streaming_reopens_session() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("header-streaming")?;
-    let mut capability = fixture
+fn failed_header_then_name_listing_reopens_session() -> Result<(), String> {
+    let project = FakeProject::new("header-name-listing")?;
+    let mut handle = project
         .builder("header_failure", ["Init"])?
         .request_timeout(Duration::from_secs(5))
         .open()
         .map_err(|err| err.to_string())?;
     {
-        let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
-        for stream in [false, true] {
-            let error = session
-                .process_module_query_batch(
-                    "bad",
-                    &[],
-                    &LeanWorkerOutputBudgets::default(),
-                    &LeanWorkerElabOptions::default(),
-                    None,
-                    None,
-                )
-                .expect_err("invalid source");
+        let mut session = handle.open_session(None, None).map_err(|err| err.to_string())?;
+        for _ in 0..2 {
+            let error = query_batch(&mut session, "bad", None, None).expect_err("invalid source");
             assert!(error.to_string().contains("original bad import diagnostic"));
-            if stream {
-                session
-                    .run_data_stream(
-                        "fake",
-                        &serde_json::json!({}),
-                        &RecordingSink::default(),
-                        None,
-                        None,
-                        None,
-                    )
-                    .map_err(|err| err.to_string())?;
-            } else {
-                session
-                    .list_declarations_strings(
-                        &lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::default(),
-                        None,
-                        None,
-                    )
-                    .map_err(|err| err.to_string())?;
-            }
+            session
+                .list_declarations_strings(&LeanWorkerDeclarationFilter::default(), None, None)
+                .map_err(|err| err.to_string())?;
         }
     }
-    assert_eq!(capability.stats().restarts, 2);
+    assert_eq!(handle.stats().restarts, 2);
     Ok(())
 }
 
 fn actual_session_miss_recycles_once_but_warm_reuse_does_not() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("session-budget")?;
-    let mut capability = fixture
+    let project = FakeProject::new("session-budget")?;
+    let mut handle = project
         .builder("session_budget", ["Init"])?
         .request_timeout(Duration::from_secs(5))
         .restart_policy(LeanWorkerRestartPolicy::default().max_import_residue_bytes(1000))
@@ -1918,25 +1580,25 @@ fn actual_session_miss_recycles_once_but_warm_reuse_does_not() -> Result<(), Str
         .map_err(|err| err.to_string())?;
     for import in ["Init", "Init", "Other", "Other"] {
         {
-            let _session = capability
+            let _session = handle
                 .open_session_with_imports([import], None, None)
                 .map_err(|err| err.to_string())?;
         };
     }
-    assert_eq!(capability.stats().restarts, 1);
+    assert_eq!(handle.stats().restarts, 1);
     Ok(())
 }
 
 fn exercise_header_sources(mode: &str, sources: &[&str]) -> Result<u64, String> {
-    let fixture = FakeCapabilityFixture::new("header-memory")?;
-    let mut capability = fixture
+    let project = FakeProject::new("header-memory")?;
+    let mut handle = project
         .builder(mode, ["Init"])?
         .request_timeout(Duration::from_secs(5))
         .restart_policy(LeanWorkerRestartPolicy::default().max_import_residue_bytes(1000))
         .open()
         .map_err(|err| err.to_string())?;
     {
-        let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+        let mut session = handle.open_session(None, None).map_err(|err| err.to_string())?;
         for source in sources {
             let result = session.process_module_query_batch(
                 source,
@@ -1959,7 +1621,7 @@ fn exercise_header_sources(mode: &str, sources: &[&str]) -> Result<u64, String> 
             }
         }
     }
-    Ok(capability.stats().restarts)
+    Ok(handle.stats().restarts)
 }
 
 fn header_budget_reuses_warm_and_retries_distinct_once() -> Result<(), String> {
@@ -1980,12 +1642,12 @@ fn header_recycle_is_retried_only_once() -> Result<(), String> {
 }
 
 fn declaration_outline_batch_selector_reaches_parent_session_path() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("declaration-outline")?;
-    let mut capability = fixture
+    let project = FakeProject::new("declaration-outline")?;
+    let mut handle = project
         .builder("normal", ["Init"])?
         .open()
         .map_err(|err| err.to_string())?;
-    let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+    let mut session = handle.open_session(None, None).map_err(|err| err.to_string())?;
 
     let outcome = session
         .process_module_query_batch(
@@ -2023,12 +1685,12 @@ fn declaration_outline_batch_selector_reaches_parent_session_path() -> Result<()
 }
 
 fn declaration_verification_batch_reaches_parent_session_path() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("declaration-verification-batch")?;
-    let mut capability = fixture
+    let project = FakeProject::new("declaration-verification-batch")?;
+    let mut handle = project
         .builder("normal", ["Init"])?
         .open()
         .map_err(|err| err.to_string())?;
-    let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+    let mut session = handle.open_session(None, None).map_err(|err| err.to_string())?;
 
     let request = LeanWorkerDeclarationVerificationBatchRequest {
         source: "theorem checked : True := by\n  trivial\n".to_owned(),
@@ -2068,12 +1730,12 @@ fn declaration_verification_batch_reaches_parent_session_path() -> Result<(), St
 }
 
 fn command_message_diagnostics_selector_reaches_parent_session_path() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("command-message")?;
-    let mut capability = fixture
+    let project = FakeProject::new("command-message")?;
+    let mut handle = project
         .builder("normal", ["Init"])?
         .open()
         .map_err(|err| err.to_string())?;
-    let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+    let mut session = handle.open_session(None, None).map_err(|err| err.to_string())?;
 
     let outcome = session
         .process_module_query_batch(
@@ -2108,61 +1770,38 @@ fn command_message_diagnostics_selector_reaches_parent_session_path() -> Result<
     Ok(())
 }
 
-struct FakeCapabilityFixture {
+/// A scratch project root for tests that open sessions through a host handle.
+///
+/// The root holds the wrapper scripts that start this test binary as a fake
+/// child in a chosen mode, and it is the `LEAN_SYSROOT` that child sees.
+struct FakeProject {
     root: PathBuf,
-    manifest: PathBuf,
 }
 
-impl FakeCapabilityFixture {
+impl FakeProject {
     fn new(name: &str) -> Result<Self, String> {
         let root = env::temp_dir().join(format!(
             "lean-rs-worker-parent-{name}-{}-{}",
             std::process::id(),
             thread_id_suffix()
         ));
-        let lib_dir = root.join(".lake").join("build").join("lib");
-        std::fs::create_dir_all(&lib_dir).map_err(|err| format!("create fake capability lib dir: {err}"))?;
-        let dylib = lib_dir.join(if cfg!(target_os = "macos") {
-            "libFakeConformance.dylib"
-        } else {
-            "libFakeConformance.so"
-        });
-        std::fs::write(&dylib, b"fake dylib placeholder")
-            .map_err(|err| format!("write fake capability dylib: {err}"))?;
-        let manifest = root.join("fake-capability.json");
-        std::fs::write(
-            &manifest,
-            format!(
-                r#"{{"schema_version":2,"primary_dylib":{},"package":"fake_conformance","module":"FakeConformance","exports":[]}}"#,
-                serde_json::to_string(&dylib).map_err(|err| format!("encode fake dylib path: {err}"))?
-            ),
-        )
-        .map_err(|err| format!("write fake capability manifest: {err}"))?;
-        Ok(Self { root, manifest })
+        std::fs::create_dir_all(&root).map_err(|err| format!("create fake project root: {err}"))?;
+        Ok(Self { root })
     }
 
-    fn builder<const N: usize>(&self, mode: &str, imports: [&str; N]) -> Result<LeanWorkerCapabilityBuilder, String> {
-        let executable = self.fake_child_wrapper(mode)?;
-        LeanWorkerCapabilityBuilder::from_built_capability(&LeanBuiltCapability::manifest_path(&self.manifest), imports)
-            .map_err(|err| err.to_string())
-            .map(|builder| {
-                builder
-                    .worker_child(LeanWorkerChild::for_toolchain(executable, &self.root))
-                    .startup_timeout(Duration::from_secs(1))
-                    .request_timeout(Duration::from_millis(80))
-                    .shutdown_timeout(Duration::from_millis(80))
-            })
-    }
-
-    fn fake_child_wrapper(&self, mode: &str) -> Result<PathBuf, String> {
+    fn builder<const N: usize>(&self, mode: &str, imports: [&str; N]) -> Result<LeanWorkerHostHandleBuilder, String> {
         let current_exe = env::current_exe().map_err(|err| format!("resolve current test executable: {err}"))?;
         let wrapper = self.root.join(wrapper_name(mode));
         write_fake_child_wrapper(&wrapper, &current_exe, mode)?;
-        Ok(wrapper)
+        Ok(LeanWorkerHostHandleBuilder::shims_only(&self.root, imports)
+            .worker_child(LeanWorkerChild::for_toolchain(wrapper, &self.root))
+            .startup_timeout(Duration::from_secs(1))
+            .request_timeout(Duration::from_millis(80))
+            .shutdown_timeout(Duration::from_millis(80)))
     }
 }
 
-impl Drop for FakeCapabilityFixture {
+impl Drop for FakeProject {
     fn drop(&mut self) {
         drop(std::fs::remove_dir_all(&self.root));
     }
@@ -2232,76 +1871,6 @@ fn shell_quote_path(path: &std::path::Path) -> String {
 #[cfg(unix)]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-#[derive(Default)]
-struct RecordingSink(std::sync::Mutex<Vec<LeanWorkerDataRow>>);
-
-impl RecordingSink {
-    fn rows(&self) -> Vec<LeanWorkerDataRow> {
-        self.0.lock().expect("recording sink mutex is not poisoned").clone()
-    }
-}
-
-impl LeanWorkerDataSink for RecordingSink {
-    fn report(&self, row: LeanWorkerDataRow) {
-        self.0.lock().expect("recording sink mutex is not poisoned").push(row);
-    }
-}
-
-struct CancellingSink {
-    rows: std::sync::Mutex<Vec<LeanWorkerDataRow>>,
-    cancellation: LeanWorkerCancellationToken,
-}
-
-impl CancellingSink {
-    fn new(cancellation: LeanWorkerCancellationToken) -> Self {
-        Self {
-            rows: std::sync::Mutex::new(Vec::new()),
-            cancellation,
-        }
-    }
-
-    fn rows(&self) -> Vec<LeanWorkerDataRow> {
-        self.rows.lock().expect("cancelling sink mutex is not poisoned").clone()
-    }
-}
-
-impl LeanWorkerDataSink for CancellingSink {
-    fn report(&self, row: LeanWorkerDataRow) {
-        {
-            self.rows
-                .lock()
-                .expect("cancelling sink mutex is not poisoned")
-                .push(row);
-        }
-        self.cancellation.cancel();
-    }
-}
-
-struct SlowSink {
-    rows: std::sync::Mutex<Vec<LeanWorkerDataRow>>,
-    delay: Duration,
-}
-
-impl SlowSink {
-    fn new(delay: Duration) -> Self {
-        Self {
-            rows: std::sync::Mutex::new(Vec::new()),
-            delay,
-        }
-    }
-
-    fn rows(&self) -> Vec<LeanWorkerDataRow> {
-        self.rows.lock().expect("slow sink mutex is not poisoned").clone()
-    }
-}
-
-impl LeanWorkerDataSink for SlowSink {
-    fn report(&self, row: LeanWorkerDataRow) {
-        thread::sleep(self.delay);
-        self.rows.lock().expect("slow sink mutex is not poisoned").push(row);
-    }
 }
 
 fn assert_reaped(pid: u32) -> Result<(), String> {
@@ -2402,9 +1971,7 @@ fn process_state(_pid: u32) -> Result<ProcessState, String> {
 fn public_worker_handles_keep_unwind_safety() {
     fn assert_unwind_safe<T: std::panic::UnwindSafe + std::panic::RefUnwindSafe>() {}
     assert_unwind_safe::<LeanWorker>();
-    assert_unwind_safe::<lean_rs_worker_parent::LeanWorkerCapability>();
     assert_unwind_safe::<lean_rs_worker_parent::LeanWorkerHostHandle>();
-    assert_unwind_safe::<LeanWorkerPool>();
 }
 
 fn expected_host_runtime() -> LeanWorkerHostRuntimeExpectation {
@@ -2458,38 +2025,33 @@ fn host_metadata_is_revalidated_after_recycle() -> Result<(), String> {
     worker.try_shutdown().map_err(|e| e.to_string())?;
     Ok(())
 }
-fn capability_builder_requires_host_metadata_before_first_export() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("capability-first-host-metadata")?;
-    let result = fixture
+fn host_handle_requires_host_metadata_before_first_session() -> Result<(), String> {
+    let project = FakeProject::new("handle-first-host-metadata")?;
+    let result = project
         .builder("host_metadata_bad", ["Init"])?
         .require_host_runtime(expected_host_runtime())
-        .validate_metadata("fake_capability_metadata", serde_json::json!({}))
         .open();
-    let error = result.err().ok_or("mismatched host runtime exposed a capability")?;
+    let error = result.err().ok_or("mismatched host runtime exposed a host handle")?;
     assert!(error.to_string().contains("host runtime compatibility"), "{error}");
-    assert!(
-        !fixture.root.join("capability-export-dispatched").exists(),
-        "no downstream export after cold ABI refusal"
-    );
     Ok(())
 }
 
-fn capability_builder_revalidates_host_metadata_after_replacement() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("capability-replacement-host-metadata")?;
-    let mut capability = fixture
+fn host_handle_revalidates_host_metadata_after_replacement() -> Result<(), String> {
+    let project = FakeProject::new("handle-replacement-host-metadata")?;
+    let mut handle = project
         .builder("host_metadata_ok", ["Init"])?
         .require_host_runtime(expected_host_runtime())
         .open()
         .map_err(|error| error.to_string())?;
-    let wrapper = fixture.root.join(wrapper_name("host_metadata_ok"));
+    let wrapper = project.root.join(wrapper_name("host_metadata_ok"));
     write_fake_child_wrapper(
         &wrapper,
         &env::current_exe().map_err(|error| error.to_string())?,
         "host_metadata_bad",
     )?;
-    capability.cycle().map_err(|error| error.to_string())?;
-    let checkpoint = capability.request_checkpoint();
-    let result = capability
+    handle.cycle().map_err(|error| error.to_string())?;
+    let checkpoint = handle.request_checkpoint();
+    let result = handle
         .open_session_with_imports(["Std"], None, None)
         .and_then(|mut session| {
             session.capability_metadata("fake_capability_metadata", &serde_json::json!({}), None, None)
@@ -2497,37 +2059,18 @@ fn capability_builder_revalidates_host_metadata_after_replacement() -> Result<()
     let error = result.err().ok_or("replacement bypassed required host runtime")?;
     assert!(error.to_string().contains("host runtime compatibility"), "{error}");
     assert!(
-        !fixture.root.join("capability-export-dispatched").exists(),
+        !project.root.join("capability-export-dispatched").exists(),
         "no export after replacement ABI refusal"
     );
     assert_eq!(
-        capability.host_session_refusal_since(&checkpoint),
+        handle.host_session_refusal_since(&checkpoint),
         Some("worker_host_runtime_metadata")
     );
     assert!(
-        capability.confirmed_request_stop_since(&checkpoint).is_none(),
+        handle.confirmed_request_stop_since(&checkpoint).is_none(),
         "pre-body refusal does not claim process exit"
     );
-    capability.try_shutdown().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn capability_pool_does_not_reuse_unguarded_session_for_required_contract() -> Result<(), String> {
-    let fixture = FakeCapabilityFixture::new("capability-host-metadata-reuse")?;
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
-    drop(
-        pool.acquire_lease(fixture.builder("normal", ["Init"])?)
-            .map_err(|error| error.to_string())?,
-    );
-    let result = pool.acquire_lease(
-        fixture
-            .builder("host_metadata_bad", ["Init"])?
-            .require_host_runtime(expected_host_runtime()),
-    );
-    assert!(
-        matches!(result, Err(LeanWorkerError::WorkerPoolExhausted { .. })),
-        "required contract must not reuse an unguarded warm slot"
-    );
+    handle.try_shutdown().map_err(|error| error.to_string())?;
     Ok(())
 }
 

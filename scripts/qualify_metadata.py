@@ -109,36 +109,6 @@ ORDINARY_SESSION_REUSE_TESTS = (
 ORDINARY_APP_TEST_COUNT = len(ORDINARY_TYPED_TESTS) + len(ORDINARY_SESSION_REUSE_TESTS)
 # Allowed (started workers, manifest grants). A policy replacement can reach
 # READY without opening a session. The Rust cases still check the policy result.
-ORDINARY_JSON_TESTS = (
-    ("pool", "compatible_session_key_reuses_one_worker", ((1, 1),)),
-    ("typed_command", "typed_json_command_decodes_response", ((1, 1),)),
-    ("pool", "import_profile_partitions_pool_session_keys", ((1, 1),)),
-    ("pool", "import_workspace_root_partitions_pool_session_keys", ((1, 1),)),
-    ("pool", "explicit_cycle_invalidates_only_the_current_lease", ((2, 2),)),
-    ("pool", "queue_wait_timeout_is_typed_when_pool_is_full", ((1, 1),)),
-    (
-        "pool",
-        "per_worker_rss_policy_invalidates_old_lease_before_work",
-        ((1, 1), (2, 1)),
-    ),
-    # If the renewed child goes idle before reassignment, it is replaced again
-    # before that intermediate child can receive a session.
-    (
-        "pool",
-        "idle_policy_invalidates_lease_and_fresh_lease_can_continue",
-        ((2, 2), (3, 2)),
-    ),
-    (
-        "pool",
-        "memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted",
-        ((1, 1), (2, 2)),
-    ),
-    (
-        "pool",
-        "rss_snapshot_records_available_samples_on_supported_platforms",
-        ((2, 2),),
-    ),
-)
 ORDINARY_META_TESTS = (
     ("typed_session", "infer_type_returns_rendered_type_for_known_term", ((1, 1),)),
     ("typed_session", "whnf_reduces_known_term", ((1, 1),)),
@@ -364,7 +334,6 @@ ORDINARY_VERIFICATION_BATCH_TESTS = (
         ((1, 1),),
     ),
 )
-JSON_GRANT = b"authorize-consumer-load"
 META_TERM_GRANT = b"authorize-fixed-meta-term"
 MODULE_QUERY_GRANT = b"authorize-fixed-module-query"
 PROOF_GRANT = b"authorize-fixed-proof-attempt"
@@ -380,46 +349,9 @@ ORDINARY_WIDE_REUSE_CASES = frozenset(
         "a_reused_session_carries_no_state_from_the_previous_one",
     }
 )
-SDK_SHAPE_GRANTS_BY_WORKER = {
-    "metadata_doctor_and_version_use_generic_capability_shapes": (1,),
-    "streaming_commands_use_builder_and_typed_facade": (1, 1, 1, 1),
-    "timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes": (
-        1,
-        0,
-        1,
-        0,
-        1,
-    ),
-    "worker_cycle_leaves_shape_fixture_usable": (1, 1),
-}
-SCALE_SHAPE_TESTS = {
-    "mathlib_scale_fixture_runs_through_pool_lease_and_typed_command": (
-        "mathlib_scale_fixture",
-        (1,),
-    ),
-    "mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly": (
-        "mathlib_scale_fixture",
-        (1, 0, 1, 0, 1),
-    ),
-}
 ORDINARY_GRANTS_BY_WORKER = {
-    **{name: grants for name, (_, grants) in SCALE_SHAPE_TESTS.items()},
-    **SDK_SHAPE_GRANTS_BY_WORKER,
-    "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker": (1, 1),
-    "cancellation_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
-    "timeout_invalidates_current_lease_but_future_lease_can_continue": (1, 1),
-    "request_timeout_cycles_child_and_invalidates_session": (1, 0),
-    "cancellation_during_backpressure_invalidates_lease": (1, 0),
-    "typed_streaming_command_row_decode_error_names_stream_and_sequence": (1, 0),
-    "row_sink_cancellation_cycles_child_and_invalidates_session": (1, 0),
     "a_mispredicted_reuse_restarts_before_the_actual_import": (3, 2),
     "a_capacity_eviction_clears_the_snapshot_cache": (2, 2),
-}
-
-POOL_BATCH_GRANTS = {
-    "lease_module_query_batch_reuses_one_warm_session": 3,
-    "lease_module_query_batch_preserves_item_level_budget_failures": 1,
-    "lease_module_query_batch_pre_cancelled_token_sends_no_request": 0,
 }
 ORDINARY_MIXED_GRANTS = {
     "attempt_proof_bad_candidate_returns_diagnostics_and_session_survives": (
@@ -435,7 +367,6 @@ ORDINARY_AUDITED_TESTS = (
     *(
         (target, name, counts, event)
         for cases, event in (
-            (ORDINARY_JSON_TESTS, JSON_GRANT),
             (ORDINARY_META_TESTS, META_TERM_GRANT),
             (ORDINARY_ADAPTER_TESTS, ADAPTER_IMPORT_GRANT),
             (ORDINARY_ADAPTER_KERNEL_TESTS, ORDINARY_ADAPTER_KERNEL_GRANT),
@@ -789,7 +720,7 @@ def typed_audit(events):
 
 
 def check_typed_children_closed(
-    data, *, case=None, expected_counts=(), grant_event=JSON_GRANT, grant_order=None
+    data, *, case=None, expected_counts=(), grant_event=None, grant_order=None
 ):
     started = []
     admitted = set()
@@ -810,14 +741,9 @@ def check_typed_children_closed(
             or event == grant_event
             or event.startswith(
                 (
-                    b"authorize-fixed-stream-",
                     b"authorize-fixed-metadata-",
                     b"authorize-fixed-doctor-",
-                    b"authorize-fixed-signature-probe-",
-                    b"authorize-fixed-json-",
-                    b"authorize-fixed-shape-",
                     b"admit-fixed-no-exports-",
-                    b"admit-fixed-direct-interop-",
                 )
             )
         ):
@@ -833,8 +759,7 @@ def check_typed_children_closed(
             (len(started), len(granted)) in expected_counts
             and len(started) == len(workers)
             and set(started) == workers
-            and admitted == set(grant_pids) <= workers
-            and (grant_event != JSON_GRANT or len(granted) == len(admitted)),
+            and admitted == set(grant_pids) <= workers,
             f"{case}: wrong started worker / {grant_event.decode()} counts",
         )
         expected = grant_order or ORDINARY_MIXED_GRANTS.get(
@@ -858,63 +783,6 @@ def check_typed_children_closed(
         raise ValueError(f"typed worker PID {pid} remains; keeping fixture state")
 
 
-STREAM_TESTS = (
-    ("streaming_runner", "successful_stream_delivers_rows_with_per_stream_sequences"),
-    ("typed_command", "typed_streaming_command_decodes_rows_and_summary"),
-    (
-        "typed_command",
-        "typed_streaming_command_row_decode_error_names_stream_and_sequence",
-    ),
-    ("typed_command", "typed_streaming_command_summary_decode_error_is_typed"),
-    ("typed_command", "raw_row_streaming_remains_available"),
-    ("streaming_runner", "row_sink_cancellation_cycles_child_and_invalidates_session"),
-    ("streaming_runner", "diagnostic_sink_panic_is_typed"),
-    ("streaming_runner", "malformed_row_json_is_typed"),
-    ("streaming_runner", "missing_stream_or_payload_is_typed"),
-    ("streaming_runner", "nonzero_export_status_is_typed"),
-    ("streaming_runner", "callback_status_error_is_typed"),
-    ("streaming_runner", "large_stream_records_live_forwarding_throughput_and_rss"),
-    (
-        "typed_command",
-        "helper_chunked_stream_delivers_rows_diagnostics_progress_and_metadata",
-    ),
-    ("typed_command", "helper_chunked_stream_reports_bounded_chunk_errors"),
-    ("typed_command", "helper_completion_order_stream_uses_same_typed_surface"),
-    (
-        "typed_command",
-        "typed_streaming_command_decodes_large_payload_from_performance_path",
-    ),
-    ("streaming_runner", "row_before_child_panic_is_delivered_before_terminal_failure"),
-    ("streaming_runner", "request_timeout_cycles_child_and_invalidates_session"),
-    ("observability_backpressure", "pool_and_lease_snapshots_record_stream_throughput"),
-    (
-        "observability_backpressure",
-        "slow_sink_applies_bounded_backpressure_without_losing_rows",
-    ),
-    (
-        "observability_backpressure",
-        "cancellation_during_backpressure_invalidates_lease",
-    ),
-    (
-        "observability_backpressure",
-        "fatal_exit_after_buffered_rows_records_failure_without_commit",
-    ),
-    ("pool", "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker"),
-    ("pool", "cancellation_invalidates_current_lease_but_future_lease_can_continue"),
-    ("pool", "timeout_invalidates_current_lease_but_future_lease_can_continue"),
-    ("typed_command", "typed_json_command_decode_error_is_typed"),
-)
-
-
-INTEROP_METADATA_TESTS = (
-    ("capability_builder", "builder_opens_worker_capability_and_validates_metadata"),
-    ("capability_builder", "metadata_mismatch_is_reported_by_bootstrap_check"),
-    ("capability_builder", "metadata_validation_failure_is_typed"),
-    ("pool", "metadata_mismatch_is_typed"),
-)
-INTEROP_METADATA_CASES = frozenset(name for _, name in INTEROP_METADATA_TESTS)
-PORTABLE_POOL_RECOVERY = "failed_validator_releases_pool_slot_before_fresh_key"
-PORTABLE_POOL_AUTHORITY = "builder_opens_worker_capability_and_validates_metadata"
 NO_EXPORTS_CASE = "missing_metadata_and_doctor_exports_are_typed_worker_errors"
 INTEROP_DOCTOR_EVENTS = {
     "runtime_and_capability_metadata_are_separate": "authorize-fixed-metadata",
@@ -922,60 +790,11 @@ INTEROP_DOCTOR_EVENTS = {
     "malformed_metadata_and_doctor_json_are_typed": "authorize-fixed-doctor",
     NO_EXPORTS_CASE: "admit-fixed-no-exports",
 }
-INTEROP_SIGNATURE_CASES = (
-    "manifest_missing_worker_export_signature_fails_before_dispatch",
-    "manifest_wrong_worker_export_signature_fails_before_dispatch",
-)
-INTEROP_BUILDER_IMPORT_CASES = (
-    "capability_builder_session_import_profile_reaches_child_import",
-    "open_session_with_imports_overrides_builder_imports",
-)
-INTEROP_FOREIGN_IMPORT_CASES = {
-    "manifest_capability_import_workspace_root_imports_external_workspace_only": (
-        "admit-fixed-no-exports",
-        (2, 2),
-    ),
-    "pooled_manifest_capability_reuses_external_import_workspace_session": (
-        "authorize-fixed-shape",
-        (1, 1),
-    ),
-    "external_import_workspace_root_preserves_timeout_and_fatal_errors": (
-        "authorize-fixed-shape",
-        (2, 2),
-    ),
-}
-INTEROP_LEGACY_CASE = (
-    "no_manifest_worker_session_rejects_worker_command_as_checked_binding"
-)
+HOST_HANDLE_IMPORT_CASE = "session_import_profile_reaches_child_import"
 INTEROP_TESTS = (
-    *STREAM_TESTS,
-    *((target, name) for name, (target, _) in SCALE_SHAPE_TESTS.items()),
-    *INTEROP_METADATA_TESTS,
-    *(("pool", name) for name in POOL_BATCH_GRANTS),
-    ("pool", "distinct_session_key_respects_fixed_pool_limit"),
     *(("metadata_doctor", name) for name in INTEROP_DOCTOR_EVENTS),
-    *(
-        ("capability_builder", name)
-        for name in (*INTEROP_SIGNATURE_CASES, *INTEROP_BUILDER_IMPORT_CASES)
-    ),
-    *(("capability_builder", name) for name in INTEROP_FOREIGN_IMPORT_CASES),
-    ("capability_builder", INTEROP_LEGACY_CASE),
-    *(("worker_shape_fixture", name) for name in SDK_SHAPE_GRANTS_BY_WORKER),
+    ("host_handle", HOST_HANDLE_IMPORT_CASE),
 )
-
-
-STREAM_READY_REPLACEMENT = {
-    "typed_streaming_command_row_decode_error_names_stream_and_sequence",
-    "row_sink_cancellation_cycles_child_and_invalidates_session",
-    "request_timeout_cycles_child_and_invalidates_session",
-    "cancellation_during_backpressure_invalidates_lease",
-}
-
-STREAM_REACQUIRE = {
-    "child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker",
-    "cancellation_invalidates_current_lease_but_future_lease_can_continue",
-    "timeout_invalidates_current_lease_but_future_lease_can_continue",
-}
 
 
 def stream_package_root():
@@ -1085,23 +904,9 @@ def qualify_stream(
     if pinned_selection is not None:
         image_pins = [*pinned_selection[1], *isolated_pins]
     selected = cases or [name for _, name in INTEROP_TESTS]
-    regular = [
-        name
-        for name in selected
-        if name not in INTEROP_SIGNATURE_CASES
-        and name not in INTEROP_FOREIGN_IMPORT_CASES
-        and name != INTEROP_LEGACY_CASE
-    ]
-    foreign = [name for name in selected if name in INTEROP_FOREIGN_IMPORT_CASES]
-    probes = [(name,) for name in selected if name in INTEROP_SIGNATURE_CASES]
-    legacy = [INTEROP_LEGACY_CASE] if INTEROP_LEGACY_CASE in selected else []
-    cohorts = [group for group in (regular, foreign, *probes, legacy) if group]
-    descriptor = None
-    for index, cohort in enumerate(cohorts):
-        descriptor = run_stream_group(release, profile, manifest, cohort, image_pins=image_pins,
-                                      build_provider=index == 0, bookended_release=bookended_release)
+    descriptor = run_stream_group(release, profile, manifest, selected, image_pins=image_pins,
+                                  bookended_release=bookended_release)
     if retain_for_workspace:
-        require(descriptor is not None, "workspace tests require a verified stream cohort")
         return json.dumps({
             "prefix": str(release),
             "manifest": descriptor["shim_manifest_path"],
@@ -1198,66 +1003,6 @@ def workspace_tests(expression):
         remove_owned_state(root, owner)
 
 
-def require_no_legacy_provider_shadow(provider):
-    require(
-        not os.path.lexists(provider / ".lake/build/lib/lean"),
-        "legacy interop test needs a clean bundled provider: ordinary .lake/build/lib/lean would shadow the pinned provider",
-    )
-
-
-def build_legacy_interop_project(run, release, state, provider):
-    project = state / "legacy"
-    project.mkdir(mode=0o700)
-    (project / "lean-toolchain").write_text("leanprover/lean4:v4.36.0\n")
-    source = json.dumps(str(stream_package_root() / "fixtures/interop-shims"), ensure_ascii=False)
-    dependency = json.dumps(str(provider), ensure_ascii=False)
-    (project / "lakefile.lean").write_text(
-        f"""import Lake
-open Lake DSL
-
-package «lean_rs_interop_consumer»
-
-require «lean_rs_interop_shims» from {dependency} with
-  (Lean.mkNameMap String).insert `leanRsGeneratedShims "true"
-
-@[default_target]
-lean_lib «LeanRsInteropConsumer» where
-  srcDir := {source}
-  leanOptions := #[
-    ⟨`autoImplicit, false⟩,
-    ⟨`maxSynthPendingDepth, .ofNat 3⟩,
-    ⟨`pp.unicode.fun, true⟩,
-  ]
-  defaultFacets := #[LeanLib.sharedFacet]
-"""
-    )
-    lake = release / "bin/lake"
-    run(
-        [
-            lake,
-            "--no-cache",
-            "--no-build",
-            "-KleanRsGeneratedShims=true",
-            "build",
-            "LeanRsInterop:shared",
-        ],
-        provider,
-    )
-    run(
-        [
-            lake,
-            "--no-cache",
-            "--fail-fast",
-            "-R",
-            "-KleanRsGeneratedShims=true",
-            "build",
-            "LeanRsInteropConsumer:shared",
-        ],
-        project,
-    )
-    require_no_legacy_provider_shadow(provider)
-
-
 def stream_descriptor(shim_manifest):
     bundle = stream_package_root() / "crates/lean-rs-host/shims"
     host, interop = bundle / "lean-rs-host-shims", bundle / "lean-rs-interop-shims"
@@ -1288,18 +1033,8 @@ def run_stream_group(
     cases,
     *,
     image_pins,
-    build_provider=True,
     bookended_release=False,
 ):
-    legacy = INTEROP_LEGACY_CASE in cases
-    require(not legacy or len(cases) == 1, "legacy interop requires its own seal")
-    probes = [name for name in cases if name in INTEROP_SIGNATURE_CASES]
-    require(not probes or len(cases) == 1, "each signature probe requires its own seal")
-    foreign = any(name in INTEROP_FOREIGN_IMPORT_CASES for name in cases)
-    require(
-        not foreign or all(name in INTEROP_FOREIGN_IMPORT_CASES for name in cases),
-        "foreign imports require their own seal",
-    )
     project = stream_package_root() / "fixtures/interop-worker"
     require(project.resolve(strict=True) == project, "aliased stream project")
     require(
@@ -1311,8 +1046,6 @@ def run_stream_group(
     host, interop = (
         bundle / name for name in ("lean-rs-host-shims", "lean-rs-interop-shims")
     )
-    if legacy:
-        require_no_legacy_provider_shadow(interop)
     descriptor = stream_descriptor(shim_manifest)
     parent = TARGET / "metadata-qualification"
     require(parent == parent.resolve(strict=True), "aliased fixture directory")
@@ -1342,43 +1075,26 @@ def run_stream_group(
     # The typed workers have closed and this job holds the qualification lock.
     # The probe and image checks detect changes; they do not block writes.
     verify_provider(image_pins)
-    if build_provider and not legacy:
-        lake = release / "bin/lake"
-        run(
-            [lake, "--no-cache", "--no-build", "-KleanRsGeneratedShims=true", "build", "LeanRsInterop:shared"],
-            interop,
-        )
-        run(
-            [
-                lake,
-                "--no-cache",
-                "--fail-fast",
-                "-R",
-                "-KleanRsGeneratedShims=true",
-                "build",
-                "LeanRsInteropConsumer:shared",
-            ],
-            project,
-        )
-    verify_provider(image_pins)
-    if legacy:
-        build_legacy_interop_project(run, release, state, interop)
-        verify_provider(image_pins)
-    cargo = ["cargo", "build", "--locked", "--offline", "-j1", "--config", stream_cargo_patch()]
-    if probes:
-        env["LEAN_RS_TEST_SIGNATURE_PROBE"] = probes[0]
-    if foreign:
-        env["LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE"] = "1"
+    lake = release / "bin/lake"
+    run(
+        [lake, "--no-cache", "--no-build", "-KleanRsGeneratedShims=true", "build", "LeanRsInterop:shared"],
+        interop,
+    )
     run(
         [
-            TARGET / "debug/prepare",
-            state,
-            "--interop-legacy" if legacy else "--interop-stream",
+            lake,
+            "--no-cache",
+            "--fail-fast",
+            "-R",
+            "-KleanRsGeneratedShims=true",
+            "build",
+            "LeanRsInteropConsumer:shared",
         ],
-        APP,
+        project,
     )
-    env.pop("LEAN_RS_TEST_PREPARE_FOREIGN_WORKSPACE", None)
-    env.pop("LEAN_RS_TEST_SIGNATURE_PROBE", None)
+    verify_provider(image_pins)
+    cargo = ["cargo", "build", "--locked", "--offline", "-j1", "--config", stream_cargo_patch()]
+    run([TARGET / "debug/prepare", state, "--interop-stream"], APP)
     record = state / "deployment.json"
     env.update(
         LEAN_RS_METADATA_ORDINARY_TYPED="1",
@@ -1392,23 +1108,16 @@ def run_stream_group(
     launch = {
         "worker": str(worker),
         "worker_sha256": fixture_worker_digest(worker),
-        "fixture": str(state / "legacy" if legacy else project),
+        "fixture": str(project),
         "sysroot": str(release),
+        "json_manifest": str(state / "worker-stream-capability.json"),
     }
-    if legacy:
-        env["LEAN_RS_TEST_DIRECT_INTEROP"] = json.dumps(launch)
-    else:
-        launch["json_manifest"] = str(state / "worker-stream-capability.json")
-        if foreign:
-            launch["foreign_workspace"] = str(state / "foreign")
-        env["LEAN_RS_TEST_ORDINARY_STREAM"] = json.dumps(launch)
+    env["LEAN_RS_TEST_ORDINARY_STREAM"] = json.dumps(launch)
     select_nextest_runner(env, profile)
     selected = {name: target for target, name in INTEROP_TESTS}
-    for name in cases or selected:
-        pool_recovery = name == PORTABLE_POOL_RECOVERY
-        target = "capability_builder" if pool_recovery else selected[name]
-        authority = PORTABLE_POOL_AUTHORITY if pool_recovery else name
-        env["LEAN_RS_METADATA_STREAM_CASE"] = authority
+    for name in cases:
+        target = selected[name]
+        env["LEAN_RS_METADATA_STREAM_CASE"] = name
         run(
             [
                 "cargo",
@@ -1425,54 +1134,17 @@ def run_stream_group(
                 "lean-rs-worker-child",
                 "--test",
                 target,
-                *(["--run-ignored", "only"] if pool_recovery else []),
                 "-E",
-                scoped_tests(target, (f"qualified_pool::{name}" if pool_recovery else name,)),
+                scoped_tests(target, (name,)),
             ],
             SDK,
         )
-        counts = (2, 2) if pool_recovery else (1, 1)
-        if name == INTEROP_LEGACY_CASE:
-            marker = "admit-fixed-direct-interop"
-        elif name in INTEROP_FOREIGN_IMPORT_CASES:
-            marker, counts = INTEROP_FOREIGN_IMPORT_CASES[name]
-        elif name in INTEROP_SIGNATURE_CASES:
-            marker = "authorize-fixed-signature-probe"
-        elif name in POOL_BATCH_GRANTS or name in INTEROP_BUILDER_IMPORT_CASES:
-            marker = "admit-fixed-no-exports"
-        elif name in INTEROP_DOCTOR_EVENTS:
-            marker = INTEROP_DOCTOR_EVENTS[name]
-        elif name in SDK_SHAPE_GRANTS_BY_WORKER or name in SCALE_SHAPE_TESTS:
-            marker = "authorize-fixed-shape"
-        elif pool_recovery or name in INTEROP_METADATA_CASES:
-            marker = "authorize-fixed-metadata"
-        elif name in {
-            "typed_json_command_decode_error_is_typed",
-            "distinct_session_key_respects_fixed_pool_limit",
-        }:
-            marker = "authorize-fixed-json"
-        else:
-            marker = "authorize-fixed-stream"
-        grant_event = f"{marker}-{authority}".encode()
-        grant_order = None
-        if name in POOL_BATCH_GRANTS:
-            grant_order = (grant_event,) + (BATCH_GRANT,) * POOL_BATCH_GRANTS[name]
-            counts = (1, 1 + POOL_BATCH_GRANTS[name])
-        elif name in SCALE_SHAPE_TESTS:
-            _, shape_grants = SCALE_SHAPE_TESTS[name]
-            counts = (len(shape_grants), sum(shape_grants))
-        elif shape_grants := SDK_SHAPE_GRANTS_BY_WORKER.get(name):
-            counts = (len(shape_grants), sum(shape_grants))
-        elif name in STREAM_READY_REPLACEMENT:
-            counts = (2, 1)
-        elif name in STREAM_REACQUIRE:
-            counts = (2, 2)
+        marker = INTEROP_DOCTOR_EVENTS.get(name, "admit-fixed-no-exports")
         check_typed_children_closed(
             typed_audit(events),
             case=name,
-            expected_counts=(counts,),
-            grant_event=grant_event,
-            grant_order=grant_order,
+            expected_counts=((1, 1),),
+            grant_event=f"{marker}-{name}".encode(),
         )
         events.unlink()
     remove_owned_state(state, owner)
@@ -1740,7 +1412,7 @@ def launch_host_builder(case, mode, project, state, release, profile, run, env, 
             "-p",
             "lean-rs-worker-child",
             "--test",
-            "session_adapter" if case == GOOD_WORKER_TEST else "capability_builder",
+            "session_adapter" if case == GOOD_WORKER_TEST else "host_handle",
             "-E",
             f"test(={case})",
         ],
@@ -2102,7 +1774,7 @@ def qualify_broken_import(
                 ]
             )
             broken = scoped_tests(
-                "capability_builder",
+                "host_handle",
                 (
                     BROKEN_IMPORT_TEST,
                     *(
@@ -2157,7 +1829,7 @@ def main():
     )
     stream.add_argument("shim_manifest", type=Path)
     stream.add_argument(
-        "--case", action="append", choices=[*(name for _, name in INTEROP_TESTS), PORTABLE_POOL_RECOVERY]
+        "--case", action="append", choices=[name for _, name in INTEROP_TESTS]
     )
     args = parser.parse_args()
     if args.command == "workspace-tests":

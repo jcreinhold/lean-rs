@@ -124,13 +124,6 @@ pub const JSON_COMMAND_EXPORT: &str = "lean_rs_interop_consumer_worker_json_comm
 pub const STREAM_MANIFEST_NAME: &str = "worker-stream-capability.json";
 pub const JSON_MANIFEST_NAME: &str = "worker-json-capability.json";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
-pub const LEGACY_INTEROP_CASE: &str = "no_manifest_worker_session_rejects_worker_command_as_checked_binding";
-pub const FOREIGN_ISOLATION_CASE: &str = "manifest_capability_import_workspace_root_imports_external_workspace_only";
-pub const FOREIGN_POOL_CASE: &str = "pooled_manifest_capability_reuses_external_import_workspace_session";
-pub const FOREIGN_FAULT_CASE: &str = "external_import_workspace_root_preserves_timeout_and_fatal_errors";
-pub fn foreign_import_case(case: &str) -> bool {
-    matches!(case, FOREIGN_ISOLATION_CASE | FOREIGN_POOL_CASE | FOREIGN_FAULT_CASE)
-}
 
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
 type R<T> = io::Result<T>;
@@ -153,14 +146,6 @@ pub struct Record {
     pub optional_whnf: bool,
     #[serde(default)]
     pub stream: bool,
-    #[serde(default)]
-    pub signature_probe: Option<String>,
-    #[serde(default)]
-    pub foreign_workspace: Option<PathBuf>,
-    #[serde(default)]
-    pub legacy_interop: bool,
-    #[serde(default)]
-    legacy_provider_root: Option<PathBuf>,
     pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]
@@ -325,7 +310,7 @@ impl Record {
         }
         let default = lean_rs::module::HostImportOptions::default();
         let allowed = match std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() {
-            Ok("capability_builder_session_import_profile_reaches_child_import") => {
+            Ok("session_import_profile_reaches_child_import") => {
                 names == [MODULE]
                     && (*options == default
                         || *options
@@ -334,54 +319,9 @@ impl Record {
                                 ..default
                             })
             }
-            Ok("open_session_with_imports_overrides_builder_imports") => {
-                let rollup = "LeanRsInteropConsumer.olean";
-                let missing = "LeanRsInteropConsumer/DefinitelyDoesNotExist.olean";
-                *options == default
-                    && (names == [MODULE]
-                        || (names == ["LeanRsInteropConsumer"]
-                            && self
-                                .import_roots
-                                .first()
-                                .is_some_and(|root| self.files.contains_key(&root.join(rollup))))
-                        || (names == ["LeanRsInteropConsumer.DefinitelyDoesNotExist"]
-                            && self.verification_roots().iter().all(|root| {
-                                fs::symlink_metadata(Path::new(root).join(missing))
-                                    .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
-                            })))
-            }
             _ => return None,
         };
         Some(require(allowed, "wrong sealed interop builder import or profile"))
-    }
-
-    fn check_foreign_imports(
-        &self,
-        workspace: &Path,
-        paths: &[String],
-        names: &[String],
-        options: &lean_rs::module::HostImportOptions,
-    ) -> R<()> {
-        let case = std::env::var("LEAN_RS_METADATA_STREAM_CASE");
-        let isolation = case.as_deref() == Ok(FOREIGN_ISOLATION_CASE);
-        let foreign_path = workspace.join(".lake/build/lib/lean");
-        let foreign_paths = paths
-            .iter()
-            .map(Path::new)
-            .eq(std::iter::once(foreign_path.as_path()).chain(self.shim_paths.iter().map(PathBuf::as_path)));
-        let native_paths = paths
-            .iter()
-            .map(Path::new)
-            .eq(self.import_roots.iter().map(PathBuf::as_path));
-        let allowed = if isolation {
-            (foreign_paths && (names == ["B.Mod"] || names == [MODULE])) || (native_paths && names == ["B.Mod"])
-        } else {
-            matches!(case.as_deref(), Ok(FOREIGN_POOL_CASE | FOREIGN_FAULT_CASE)) && foreign_paths && names == ["B.Mod"]
-        };
-        require(
-            allowed && *options == Default::default(),
-            "wrong sealed foreign workspace imports",
-        )
     }
 
     pub fn check_order(
@@ -390,28 +330,6 @@ impl Record {
         names: &[String],
         options: &lean_rs::module::HostImportOptions,
     ) -> R<()> {
-        if self.legacy_interop {
-            let provider = self
-                .legacy_provider_root
-                .as_deref()
-                .ok_or_else(|| err("missing legacy provider root"))?;
-            let (project, shims) = self
-                .import_roots
-                .split_first()
-                .ok_or_else(|| err("missing direct import root"))?;
-            return require(
-                std::env::var("LEAN_RS_METADATA_STREAM_CASE").as_deref() == Ok(LEGACY_INTEROP_CASE)
-                    && names == [MODULE]
-                    && *options == Default::default()
-                    && paths.iter().map(Path::new).eq([project.as_path(), provider]
-                        .into_iter()
-                        .chain(shims.iter().map(PathBuf::as_path))),
-                "wrong direct interop import or ordered roots",
-            );
-        }
-        if let Some(workspace) = self.foreign_workspace.as_deref() {
-            return self.check_foreign_imports(workspace, paths, names, options);
-        }
         let expected: &[&str] = if self.broken_import {
             &["Demo.Broken"]
         } else if self.typed_session && !self.stream {
@@ -616,7 +534,7 @@ impl Held {
         }
         require(found, "selected libleanshared absent")?;
         require(
-            d.broken_import || d.legacy_interop || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
+            d.broken_import || fs::read_to_string(&d.consumer_manifest)? == d.consumer_json,
             "consumer manifest or initializer differs",
         )?;
         require(
@@ -635,16 +553,6 @@ impl Held {
                     path.display()
                 )));
             }
-        }
-        if d.legacy_interop {
-            let provider = d
-                .legacy_provider_root
-                .as_ref()
-                .ok_or_else(|| err("missing legacy provider root"))?;
-            require(
-                fs::symlink_metadata(provider).is_err_and(|error| error.kind() == io::ErrorKind::NotFound),
-                "ordinary Lake import root would shadow the pinned provider",
-            )?;
         }
         let mut buffer = vec![0; VERIFY_BUFFER_SIZE];
         let mut checked = BTreeSet::new();

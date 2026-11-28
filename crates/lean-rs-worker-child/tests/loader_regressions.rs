@@ -28,7 +28,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn template_target_debug() -> PathBuf {
-    // Match capability_builder's target so both test binaries share Cargo's outputs.
+    // One package-owned target lets Cargo reuse the template's outputs across test runs.
     Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("shipped-template")
         .join("debug")
@@ -99,7 +99,7 @@ fn shipped_template_launches_with_clean_loader_environment() {
         .expect("stripped-loader-env shipped-lean-crate worker example starts");
     let stdout = assert_success(output, "stripped-loader-env shipped-lean-crate worker example");
     assert!(
-        stdout.contains("worker capability opened"),
+        stdout.contains("worker host session opened"),
         "worker template should open through the app-owned child, stdout={stdout:?}",
     );
 
@@ -119,7 +119,7 @@ fn shipped_template_launches_with_clean_loader_environment() {
         "worker startup diagnostic should name the rejected override, stderr={stderr:?}",
     );
     assert!(
-        !String::from_utf8_lossy(&output.stdout).contains("worker capability opened"),
+        !String::from_utf8_lossy(&output.stdout).contains("worker host session opened"),
         "worker must not open on the rejected override",
     );
 }
