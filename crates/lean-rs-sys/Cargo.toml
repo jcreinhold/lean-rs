@@ -1,7 +1,7 @@
 [package]
 authors.workspace = true
 categories = ["api-bindings", "external-ffi-bindings"]
-description = "Raw FFI bindings for the Lean 4 C ABI. See `lean-rs` for the safe front door."
+description = "Raw FFI bindings for the Lean 4 C ABI. The lean-rs crate is the safe layer above them."
 documentation = "https://docs.rs/lean-rs-sys"
 edition.workspace = true
 include = [

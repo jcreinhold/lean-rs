@@ -9,18 +9,6 @@ current release supports. `.claude/skills/release-lean-rs/SKILL.md` describes ho
 
 ## [Unreleased]
 
-### Changed
-
-- Documentation moved. `docs/architecture.md` states the goal, the requirements, who owns what, and each invariant with
-  the tests that check it; the README covers installation, one example and the version matrix; `AGENTS.md` holds the
-  rules for agents working in this repository; and the `release-lean-rs` and `bump-toolchain` skills hold the release
-  and toolchain procedures. The mdbook under `docs/`, its CI build, the Pages workflow, `CONTRIBUTING.md` and the host
-  examples README are gone.
-- Each crate's README now says what the crate does and where it sits, and links to the version matrix. Cargo packages
-  the README with each crate, so all eight crates need a patch release.
-- The `lean-rs-sys` and `lean-toolchain` build scripts no longer cite a removed doc when the active `lean.h` is outside
-  the supported window.
-
 ## [0.13.0]
 
 Breaking: upgrade the worker parent and worker child together. The worker protocol moves to version 15, and the public
@@ -114,6 +102,14 @@ items listed below are gone.
 - The module-query cache key no longer hashes the fixture digest, so entries written by 0.12 miss once.
 - The bundled host shim sources changed, so a worker prepares its host artifacts again after the upgrade.
 - `lean-rs` no longer depends on `tracing-subscriber`. It emits `tracing` events and installs no subscriber.
+- Documentation moved. `docs/architecture.md` states the goal, the requirements, who owns what, and each invariant with
+  the tests that check it; the README covers installation, one example and the version matrix; `AGENTS.md` holds the
+  rules for agents working in this repository; and the `release-lean-rs` and `bump-toolchain` skills hold the release
+  and toolchain procedures. The mdbook under `docs/`, its CI build, the Pages workflow, `CONTRIBUTING.md` and the host
+  examples README are gone.
+- Each crate's README and crates.io description now say what the crate does. The READMEs link to the version matrix.
+- The `lean-rs-sys` and `lean-toolchain` build scripts no longer cite a removed doc when the active `lean.h` is outside
+  the supported window.
 
 ### Added
 
