@@ -38,8 +38,7 @@
 //! init is structurally impossible.
 //!
 //! Worker threads that did not start inside Lean must be attached for
-//! the duration of their Lean work via [`LeanThreadGuard::attach`];
-//! see `docs/architecture/concurrency.md` for the contract.
+//! the duration of their Lean work via [`LeanThreadGuard::attach`].
 //!
 //! ## Module map
 //!

@@ -1,12 +1,8 @@
 //! Wire-stable, serde-derived value types crossing the worker process boundary.
 //!
 //! These types are the single representation of every shape that flows through
-//! the worker IPC. The earlier triple-layer split (host type → `pub(crate)`
-//! wire type → public worker mirror) collapsed once it became clear that the
-//! worker's "different abstraction" from the host is process supervision—
-//! not data shape—so the wire format and the public surface are the same
-//! concern. See `docs/architecture/worker-processes.md` for the boundary
-//! contract.
+//! the worker IPC. The worker differs from the host in process supervision, not
+//! in data shape, so the wire format and the public surface are the same types.
 //!
 //! Conversion from opaque host types (`LeanExpr`, `LeanName`, …) into these
 //! value types lives in the worker child runtime next to the Lean calls that

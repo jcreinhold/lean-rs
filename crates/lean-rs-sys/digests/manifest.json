@@ -1,5 +1,5 @@
 {
-  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by docs and `scripts/test-all-toolchains.sh`. To add a row, follow `docs/bump-toolchain.md`. Lower bound is 4.30.0 \u2014 4.27.0\u20134.29.1 were dropped on 2026-07-28 because their libleanshared does not export the CollectAxioms.collectAndGet symbol the compiled lean-rs-host shim dylib references, so the mandatory host shim fails dlopen there (4.26.0 was dropped earlier, on 2026-07-19, for shim build failures).",
+  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by `scripts/test-all-toolchains.sh`. To add a row, follow the repository's `bump-toolchain` skill. Lower bound is 4.30.0 \u2014 4.27.0\u20134.29.1 were dropped on 2026-07-28 because their libleanshared does not export the CollectAxioms.collectAndGet symbol the compiled lean-rs-host shim dylib references, so the mandatory host shim fails dlopen there (4.26.0 was dropped earlier, on 2026-07-19, for shim build failures).",
   "captured_on": "aarch64-apple-darwin",
   "captured_date": "2026-05-30",
   "entries": [

@@ -37,8 +37,8 @@ set -euo pipefail
 # -- defaults ---------------------------------------------------------------
 
 # The default mirrors `.github/workflows/release.yml::env.LEAN_VERSION_HEAD`.
-# Bumping the supported window requires editing both in lockstep — see
-# `docs/bump-toolchain.md`.
+# Bumping the supported window requires editing both in lockstep; see
+# the `bump-toolchain` skill.
 DEFAULT_LEAN_VERSION="4.36.0"
 
 LEAN_VERSION="$DEFAULT_LEAN_VERSION"
@@ -376,7 +376,7 @@ run_gate() {
 # `libleanshared.so: cannot open shared object file`, and a stale
 # `release.yml` verify matrix dirties the tree at the repin step and
 # fails `cargo package`. Both only surface after push/tag — catch them
-# here instead. See `docs/bump-toolchain.md` step 5.
+# here instead. See the `bump-toolchain` skill.
 check_head_consistency() {
 	local supported="$REPO_ROOT/crates/lean-rs-abi/src/supported.rs"
 	local head

@@ -7,8 +7,8 @@
 #
 # Empty output and exit status 0 = every required symbol resolves.
 # Missing symbols are printed and exit status is 1. Stop and resolve the
-# ABI change before extending the supported window; see
-# docs/bump-toolchain.md. Do not add missing-symbol exceptions.
+# ABI change before extending the supported window; see the
+# bump-toolchain skill. Do not add missing-symbol exceptions.
 
 set -euo pipefail
 

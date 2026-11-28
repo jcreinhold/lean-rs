@@ -250,8 +250,7 @@ fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 // elaborator runs against the cached `Elaboration` environment; the
 // measurement reflects warm steady-state cost. `elaborate` accumulates
 // session state across calls, so the first call in a fresh session is
-// systematically slower than the steady-state number recorded here—
-// see `docs/performance/baseline.md` for the caveat.
+// systematically slower than the steady-state number recorded here.
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps

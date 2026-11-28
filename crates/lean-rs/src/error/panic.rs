@@ -1,7 +1,6 @@
 //! Panic boundary for Rust closures invoked from Lean.
 //!
-//! Rust panics must not unwind across C or Lean frames (see
-//! `docs/architecture/safety.md`, "Panic discipline"). The
+//! Rust panics must not unwind across C or Lean frames. The
 //! [`catch_callback_panic`] helper wraps a closure that may be called by
 //! Lean, contains any panic via [`std::panic::catch_unwind`], and renders
 //! the payload as a [`LeanError::Host`] with [`super::HostStage::CallbackPanic`]

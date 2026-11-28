@@ -8,8 +8,8 @@
 //! sessions resolve checked host-shim bindings once and dispatch subsequent
 //! calls without per-call `dlsym`.
 //!
-//! See `docs/architecture/host-services.md` for the full classification
-//! and the host → capabilities → session lifetime cascade.
+//! A session borrows its capabilities, and the capabilities borrow the
+//! host.
 
 use core::fmt;
 use std::path::{Path, PathBuf};

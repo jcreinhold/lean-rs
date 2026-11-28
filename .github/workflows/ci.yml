@@ -95,7 +95,7 @@ jobs:
           # generic types with a `T: PartialEq` bound (via nightly rustdoc),
           # diverging from the committed docs/api-review baselines on toolchain
           # churn alone. Bumping the pin means regenerating the baselines in the
-          # same commit (see docs/api-review.md).
+          # same commit (see AGENTS.md).
           tool: cargo-nextest,cargo-public-api@0.52.0
 
       - name: Set up workflow linters
@@ -296,7 +296,7 @@ jobs:
         # across nightlies. The baselines below are generated with this exact
         # nightly (+ cargo-public-api@0.52.0); bumping it means regenerating
         # every baseline in the same commit. Keep in lockstep with release.yml
-        # and scripts/prerelease.sh. See docs/api-review.md.
+        # and scripts/prerelease.sh. See AGENTS.md.
         run: rustup toolchain install nightly-2026-06-18 --profile minimal
 
       - name: Public-API diff vs committed baselines

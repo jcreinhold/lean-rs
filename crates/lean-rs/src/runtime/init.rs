@@ -1,8 +1,7 @@
 //! Process-once Lean runtime initialization.
 //!
 //! The exact `lean_*` symbols and the order they are invoked are
-//! intentionally not part of the public surface; see
-//! `docs/architecture/safety.md`.
+//! intentionally not part of the public surface.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment naming the invariant. The blanket allow exists
@@ -29,9 +28,7 @@ use crate::error::{LeanError, LeanResult};
 /// `'static` borrow once the Lean runtime is up. Every later handle
 /// (`Obj<'lean>`, `LeanExpr<'lean>`, `LeanSession<'lean, '_>`, …) carries
 /// a `'lean` lifetime tied to this borrow, so a value derived from Lean
-/// cannot outlive the runtime that produced it. This is the
-/// type-system anchor for the `'lean` cascade described in
-/// `docs/architecture/host-services.md`.
+/// cannot outlive the runtime that produced it.
 ///
 /// Neither [`Send`] nor [`Sync`]. The Lean runtime is per-thread, and
 /// shipping a Lean-derived handle to another OS thread is a soundness

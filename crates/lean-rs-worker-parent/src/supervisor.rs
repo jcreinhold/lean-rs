@@ -271,8 +271,7 @@ pub(crate) const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::fro
 ///   is now `@[export]`'d from `Lean.Compiler.NameDemangling`); a worker
 ///   child embeds a minimal Lean and cannot guarantee that callback's
 ///   transitive module dependencies are initialized when user code panics.
-///   Disabling the backtrace removes that dependency entirely. See
-///   `docs/architecture/worker-processes.md` for the boundary argument.
+///   Disabling the backtrace removes that dependency entirely.
 ///
 /// Both are safe defaults—explicit `.env()` entries supplied here override
 /// them, in case a caller knows the dependency is satisfied and wants a

@@ -6,8 +6,7 @@
 # memory. Process parallelism is capped against memory, not CPU count,
 # so the suite stays under developer-machine memory budgets.
 #
-# See `docs/testing.md` for the full rationale and for the local
-# developer workflow.
+# `AGENTS.md` describes how to run the tests.
 
 [profile.default]
 # Run two independent test processes. A full Lean import can retain

@@ -1,7 +1,6 @@
 //! High-level surface for hosting Lean capabilities.
 //!
-//! Sits on top of the [`lean_rs::module`] dispatch primitives. The four-piece
-//! structure is pinned by `docs/architecture/host-services.md`:
+//! Sits on top of the [`lean_rs::module`] dispatch primitives, in four pieces:
 //!
 //! - `lean-rs` handles ([`lean_rs::handle::LeanName`],
 //!   [`lean_rs::handle::LeanLevel`], [`lean_rs::handle::LeanExpr`],

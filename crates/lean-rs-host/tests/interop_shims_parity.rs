@@ -2,8 +2,7 @@
 //! verbatim copy of the canonical package payload under `crates/lean-rs/`.
 //!
 //! The host vendors its own copy because a published crate's `Cargo.toml`
-//! `include` cannot reach outside its own directory (see
-//! `docs/architecture/callbacks.md#generic-shim-package`). The repository's
+//! `include` cannot reach outside its own directory. The repository's
 //! fixtures and examples build the canonical copy. Two copies drift without a
 //! guard, so this test checks that they hold the same files with the same
 //! bytes.

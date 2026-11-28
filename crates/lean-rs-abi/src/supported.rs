@@ -9,10 +9,10 @@
 //! always bump the header between releases—header-identical releases share
 //! one entry), and the set of [`REQUIRED_SYMBOLS`](crate::REQUIRED_SYMBOLS)
 //! that are absent from this toolchain. Runtime layout assumptions in
-//! `lean-rs-sys` are checked against this same window (see
-//! `docs/architecture/compatibility.md`).
+//! `lean-rs-sys` are checked against this same window.
 //!
-//! See `docs/bump-toolchain.md` for the procedure to extend the window.
+//! The repository's `bump-toolchain` skill
+//! (`.claude/skills/bump-toolchain/SKILL.md`) changes the window.
 
 /// One ABI-equivalence class in the supported toolchain window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl SupportedToolchain {
 /// The supported Lean toolchain window.
 ///
 /// Ordered by the first `versions` entry. To add a new toolchain, follow
-/// the checklist in `docs/bump-toolchain.md`.
+/// the repository's `bump-toolchain` skill.
 // Lower bound of the window is **4.30.0**. Releases 4.27.0–4.29.1 were
 // dropped on 2026-07-28: their `libleanshared` does not export
 // `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`,

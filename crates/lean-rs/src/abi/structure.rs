@@ -36,8 +36,7 @@
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment naming the invariant; the blanket allow keeps the
-// unsafe surface inside the smallest scope that compiles, per
-// `docs/architecture/safety.md`.
+// unsafe surface inside the smallest scope that compiles.
 #![allow(unsafe_code)]
 
 use core::mem::MaybeUninit;

@@ -28,8 +28,7 @@
 //!   (`LeanObjectRepr` and friends). These types are intentionally not
 //!   re-exported.
 //!
-//! See `crates/lean-rs-sys/README.md` for the supported Lean version window
-//! and `docs/bump-toolchain.md` for the procedure to extend it.
+//! `lean_rs_abi::SUPPORTED_TOOLCHAINS` lists the supported Lean releases.
 
 #![allow(unsafe_code)]
 #![allow(non_camel_case_types)]

@@ -37,7 +37,7 @@ sha2 = { workspace = true }
 # sets `RLIMIT_CORE` to 0 and exits at once on `SIGABRT`, so an abort does not
 # wait on a core-dump handler such as apport; `parent_watchdog` reads the
 # parent's lifeline pipe; `host_artifacts` opens installed artifacts with
-# `O_NOFOLLOW`. See `docs/architecture/worker-processes.md`.
+# `O_NOFOLLOW`.
 libc = "0.2"
 
 [dev-dependencies]

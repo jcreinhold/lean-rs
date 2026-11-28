@@ -78,7 +78,7 @@
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
 // single unchecked-front-door site that resolves and dispatches
-// user-typed Lean exports, per `docs/architecture/safety.md`.
+// user-typed Lean exports.
 #![allow(unsafe_code)]
 // The public surface intentionally references `pub(crate)` items
 // (`Obj`) inside trait method signatures. Soundness is enforced by
@@ -543,8 +543,7 @@ macro_rules! impl_arity {
             pub unsafe fn call(&self, $($a: $A),*) -> LeanResult<R::Output> {
                 // Debug-only: catch worker threads that forgot to construct
                 // a `LeanThreadGuard` before invoking Lean code. Compiles
-                // to a no-op in release. See
-                // `docs/architecture/concurrency.md`.
+                // to a no-op in release.
                 crate::runtime::thread::debug_assert_attached("LeanExported::call");
                 let _span = tracing::trace_span!(
                     target: "lean_rs",

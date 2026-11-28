@@ -145,7 +145,7 @@ fn session_leak_loop_import_stats_reports_explicit_full_private_compat() {
 /// Long session lifecycle loop: an explicit leak diagnostic, run by hand
 /// with `--include-ignored` and `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1`.
 #[test]
-#[ignore = "long-running leak diagnostic; see docs/testing.md"]
+#[ignore = "long-running leak diagnostic; also needs LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1"]
 fn session_create_drop_loop_long() {
     if !import_heavy_diagnostics_enabled() {
         return;

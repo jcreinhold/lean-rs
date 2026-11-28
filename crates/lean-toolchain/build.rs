@@ -114,8 +114,7 @@ fn resolve_toolchain_metadata(manifest_dir: &Path, docs_rs: bool) -> ToolchainMe
             panic!(
                 "lean-toolchain: lean.h at {} has digest {} but no entry in \
                  SUPPORTED_TOOLCHAINS matches. The supported window is:\n  - {}\n\
-                 Either install a supported Lean toolchain, or follow \
-                 docs/bump-toolchain.md to add this one.",
+                 Install a supported Lean toolchain.",
                 header_path.display(),
                 actual_digest,
                 window_summary(),

@@ -7,7 +7,7 @@
 # Example: check-lean-header.sh 4.29.1 4.30.0
 #
 # Empty output = the declarations are unchanged. This does not establish
-# ABI compatibility or symbol availability; follow docs/bump-toolchain.md.
+# ABI compatibility or symbol availability; follow the bump-toolchain skill.
 # Non-empty output = review the changes before extending the window.
 
 set -euo pipefail

@@ -1,8 +1,6 @@
 # Workspace-level cargo config. Sets env vars that should apply to
 # every cargo invocation: `cargo test`, `cargo nextest run`,
 # `cargo run --example`, etc.
-#
-# See `docs/testing.md` for the rationale behind each variable.
 
 [profile.dev]
 debug = "line-tables-only"

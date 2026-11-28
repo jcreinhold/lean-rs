@@ -7,11 +7,10 @@
 //! them for an external test harness—and only when the `fuzzing`
 //! feature is enabled.
 //!
-//! Per `docs/architecture/safety.md`'s "fuzz arbitrary raw
-//! pointers" non-goal, every entry point takes a `*mut lean_object`
-//! that the caller must have produced from a real `lean-rs-sys`
-//! allocator. The wrappers do not validate provenance; they only
-//! observe that decoders return either `Ok(_)` or
+//! Fuzzing arbitrary raw pointers is not a goal: every entry point takes
+//! a `*mut lean_object` that the caller must have produced from a real
+//! `lean-rs-sys` allocator. The wrappers do not validate provenance;
+//! they only observe that decoders return either `Ok(_)` or
 //! `Err(LeanError::Host(stage = Conversion))`.
 //!
 //! The `Drop` of every wrapped `Obj<'lean>` runs `lean_dec`, so the

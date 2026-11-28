@@ -17,8 +17,7 @@
 
 // SAFETY DOC: each `unsafe { ... }` block carries its own `// SAFETY:`
 // comment. The blanket allow keeps the unsafe surface in the smallest
-// `pub(crate)` scope that compiles, per the safety model in
-// `docs/architecture/safety.md`.
+// `pub(crate)` scope that compiles.
 #![allow(unsafe_code)]
 
 use std::cell::Cell;
@@ -68,8 +67,7 @@ pub(crate) fn debug_assert_attached(stage: &'static str) {
     debug_assert!(
         ATTACH_DEPTH.with(|d| d.get()) >= 1,
         "lean-rs: {stage} invoked on a thread that is not attached to the Lean runtime; \
-         construct a `lean_rs::LeanThreadGuard` on this thread first \
-         (see docs/architecture/concurrency.md)",
+         construct a `lean_rs::LeanThreadGuard` on this thread first",
     );
 }
 

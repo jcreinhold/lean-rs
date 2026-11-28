@@ -4,8 +4,8 @@
 //! snapshot pins the rejection messages so an accidental `impl Send` or
 //! `impl Sync` anywhere in the handle chain gets caught at CI time.
 //!
-//! Coverage: the full set of public handles per
-//! `docs/architecture/concurrency.md`.
+//! Coverage: the runtime and thread guard, the host stack, the semantic
+//! handles and the kernel evidence.
 
 use lean_rs::{LeanDeclaration, LeanExpr, LeanLevel, LeanName, LeanRuntime, LeanThreadGuard};
 use lean_rs_host::{LeanCapabilities, LeanEvidence, LeanHost, LeanSession};

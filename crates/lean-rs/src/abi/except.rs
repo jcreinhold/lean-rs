@@ -11,8 +11,7 @@
 //! ```
 //!
 //! `Except<E, T>` is **a value type, not part of the `LeanError`
-//! boundary** (see the "Error model" section of
-//! `docs/architecture/host-services.md`). Runtime / host failures cross as
+//! boundary**. Runtime / host failures cross as
 //! `LeanError::LeanException`; application-level success-or-error
 //! semantics cross as values. A Lean function returning
 //! `IO (Except E T)` therefore decodes as `LeanResult<Result<T, E>>`

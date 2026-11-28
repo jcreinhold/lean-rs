@@ -10,7 +10,7 @@ name: Release
 # gates without uploading or creating a release.
 #
 # `CARGO_REGISTRY_TOKEN` must be set in the repository secrets before the first
-# tag push (see `docs/release.md`). The token is a scoped publish token from
+# tag push (see the `release-lean-rs` skill). The token is a scoped publish token from
 # <https://crates.io/settings/tokens>.
 
 on:
@@ -39,7 +39,7 @@ env:
   # Head of the supported Lean window. The publish job runs once
   # against this version. CI dispatch owns the full compatibility sweep.
   # Bumping the window: update this AND the matrix in `verify` AND
-  # `crates/lean-rs-abi/src/supported.rs`. See `docs/bump-toolchain.md`.
+  # `crates/lean-rs-abi/src/supported.rs`. See the `bump-toolchain` skill.
   LEAN_VERSION_HEAD: "4.36.0"
 
 jobs:
@@ -52,10 +52,8 @@ jobs:
         # Release-gate matrix: head Lean × both supported OSes (2 cells).
         # The full SUPPORTED_TOOLCHAINS sweep runs on demand via
         # `ci.yml`'s `workflow_dispatch` with `full_matrix: true`.
-        # Rationale: runner cost; trailing-edge breakages tend to
-        # surface in the docs/release.md known-issues list rather
-        # than as silent regressions, and the version-window
-        # SUPPORTED_TOOLCHAINS table is the source of truth.
+        # Rationale: runner cost. The SUPPORTED_TOOLCHAINS table is the
+        # source of truth for the window.
         os: [ubuntu-latest, macos-latest]
         lean_version: ["4.36.0"]
     steps:
@@ -146,11 +144,9 @@ jobs:
         working-directory: crates/lean-rs/fuzz
         # `ASAN_OPTIONS=detect_leaks=0` disables LeakSanitizer, which
         # ASan turns on by default on Linux. Lean's shared runtime
-        # intentionally retains process-global allocations at shutdown
-        # (the same reason `docs/safety/unsafe-inventory.md` excludes
-        # Lean from Linux ASan instrumentation); LSan flags those at
-        # process exit and the binary terminates non-zero before any
-        # actual fuzz finding can be reported. libFuzzer's own
+        # intentionally retains process-global allocations at shutdown;
+        # LSan flags those at process exit and the binary terminates
+        # non-zero before any actual fuzz finding can be reported. libFuzzer's own
         # `-detect_leaks=0` flag does not turn off this exit-time
         # check — it only disables libFuzzer's intra-run leak loop.
         # The goal of this gate is ABI-decode coverage in the Rust
@@ -279,7 +275,7 @@ jobs:
       # reproducible: the auto-derived `StructuralPartialEq` bound on generic
       # types changes across nightlies, and the committed baselines are
       # generated with this exact nightly (+ cargo-public-api@0.52.0). Keep in
-      # lockstep with ci.yml and scripts/prerelease.sh. See docs/api-review.md.
+      # lockstep with ci.yml and scripts/prerelease.sh. See AGENTS.md.
       - name: Install Rust nightly (for cargo-public-api)
         run: rustup toolchain install nightly-2026-06-18 --profile minimal
 

@@ -2,9 +2,8 @@
 //!
 //! Runs **once per process** and prints per-stage wall-clock for the
 //! three cold paths Criterion cannot honestly measure: runtime init,
-//! library open, and module initializer. Repeated invocation (via a
-//! shell loop or `hyperfine`) provides variance; see
-//! `docs/performance/baseline.md` for the commands.
+//! library open, and module initializer. Run it repeatedly, in a shell
+//! loop or with `hyperfine`, to see the variance.
 //!
 //! Output format: one `name=<workload> elapsed_us=<u64>` line per
 //! stage, suitable for `grep`/`awk` post-processing.

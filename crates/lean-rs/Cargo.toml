@@ -65,8 +65,7 @@ sha2 = { workspace = true }
 dhat = "0.3"
 # Criterion drives the steady-state hot-path and session-path baselines
 # under `benches/`. Cold paths (runtime init, library open, module init)
-# are once-per-process and live in `examples/cold_probe.rs` instead —
-# see `docs/performance/baseline.md` for the rationale.
+# run once per process, so they live in `examples/cold_probe.rs` instead.
 criterion = { workspace = true }
 # Examples under `examples/` install a `tracing_subscriber::fmt`
 # sink so `RUST_LOG=lean_rs=info cargo run --example <name>` surfaces

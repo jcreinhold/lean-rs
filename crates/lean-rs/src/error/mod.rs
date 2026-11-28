@@ -37,8 +37,8 @@
 //! family a downstream caller must react to—`Linking`, `Elaboration`,
 //! `Unsupported`, and so on—independent of the internal [`HostStage`]
 //! tag. The `as_str()` form of each code is the identifier used by the
-//! tracing spans and the published `docs/diagnostics.md` catalogue;
-//! variant names and string ids are stable across patch releases.
+//! tracing spans; variant names and string ids are stable across patch
+//! releases.
 
 use std::any::Any;
 use std::fmt;
@@ -400,9 +400,8 @@ pub enum HostStage {
 /// to react by family; reach for [`HostStage`] only when you need the
 /// host-stack's internal classification (and accept that it may grow new
 /// variants). The string form returned by [`Self::as_str`] is also the
-/// identifier emitted in tracing fields and listed in
-/// `docs/diagnostics.md`. Variant names and `as_str()` ids are stable
-/// across patch releases.
+/// identifier emitted in tracing fields. Variant names and `as_str()` ids
+/// are stable across patch releases.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LeanDiagnosticCode {
     /// Lean runtime initialization failed (panic in `lean_initialize`,
@@ -445,7 +444,7 @@ pub enum LeanDiagnosticCode {
 }
 
 impl LeanDiagnosticCode {
-    /// Stable identifier used in tracing fields and `docs/diagnostics.md`.
+    /// Stable identifier used in tracing fields.
     ///
     /// The returned string is part of the published API; the value for
     /// an existing variant is fixed across patch releases. New variants
@@ -467,8 +466,8 @@ impl LeanDiagnosticCode {
         }
     }
 
-    /// One-line prose description used in `docs/diagnostics.md` and as
-    /// the default fallback when a span needs human-readable context.
+    /// One-line prose description, the default fallback when a span needs
+    /// human-readable context.
     #[must_use]
     pub const fn description(self) -> &'static str {
         match self {
