@@ -173,7 +173,7 @@ test marked "run by name" is ignored in routine runs; `AGENTS.md` says how to ru
 - **No loader variables.** The template's binary and its worker run with every dynamic-loader variable removed, and with
   `checked_native_loader_environment` the parent refuses to spawn a child whose environment sets one. Checked by
   `shipped_template_launches_with_clean_loader_environment` in `lean-rs-worker-child/tests/loader_regressions.rs` and
-  `checked_worker_rejects_loader_override_before_spawn` in `lean-rs-worker-parent/src/supervisor.rs`.
+  `checked_worker_rejects_loader_override_before_spawn` in `lean-rs-worker-parent/src/supervisor/tests.rs`.
 
 ### Callbacks and shims
 
@@ -349,7 +349,8 @@ test marked "run by name" is ignored in routine runs; `AGENTS.md` says how to ru
   verdict never changes; a ceiling of 0 or a missing RSS sample changes nothing; a degraded batch marks every selector
   and keeps target order. Checked by the `taint_*` tests in `lean-rs-worker-child/src/child.rs`, and
   `degraded_query_batch_outcome_marks_every_selector_budget_exceeded` and
-  `declaration_verification_batch_degraded_result_preserves_target_order` in `lean-rs-worker-parent/src/supervisor.rs`.
+  `declaration_verification_batch_degraded_result_preserves_target_order` in
+  `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Proof attempts.** The reply's entry state carries the goals and locals; a good candidate closes the goal; a bad one
   returns diagnostics, never reports a false close, and leaves the session usable; the candidate list is capped, rows
   come back in order, the global budget marks the rest not attempted, and nothing writes a file. Checked by
@@ -368,7 +369,7 @@ test marked "run by name" is ignored in routine runs; `AGENTS.md` says how to ru
   allocates for it. Checked by `oversized_data_row_is_rejected_before_write` and
   `oversized_data_row_is_rejected_before_read_allocation` in `lean-rs-worker-protocol/src/protocol.rs`, and
   `max_frame_bytes_clamps_above_ceiling` and `max_frame_bytes_clamps_below_floor` in
-  `lean-rs-worker-parent/src/supervisor.rs`.
+  `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Malformed frames.** A malformed payload is a protocol error. Checked by `malformed_frame_payload_is_protocol_error`
   in `lean-rs-worker-protocol/src/protocol.rs`.
 - **Row order.** Rows carry a sequence number per stream and arrive in pipe order. Checked by
@@ -407,8 +408,9 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
 - **No stale output.** Output from an old generation or an old request cannot complete the current one, a stale terminal
   frame neither completes nor resends the current command, and a success read after the deadline is refused. Checked by
   `conformance_stale_generation_output_is_protocol_failure` and `conformance_stale_request_output_is_protocol_failure`
-  in `lean-rs-worker-parent/src/supervisor.rs`, and `stale_terminal_cannot_complete_or_redispatch_the_current_command`
-  and `configured_deadline_rejects_dequeued_success_and_restarts` in
+  in `lean-rs-worker-parent/src/supervisor/tests.rs`, and
+  `stale_terminal_cannot_complete_or_redispatch_the_current_command` and
+  `configured_deadline_rejects_dequeued_success_and_restarts` in
   `lean-rs-worker-parent/src/supervisor/terminal_frame_tests.rs`.
 - **Deadlines.** One deadline, 30 s by default, covers writing the request and reading the reply, and polling never
   renews it. A timeout kills and reaps the child; the next request starts the replacement. Checked by
@@ -416,11 +418,11 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   `conformance_silent_worker_deadline_is_not_renewed_by_polling`,
   `conformance_timeout_kill_reap_restarts_next_generation` and
   `expired_deadline_leaves_the_replacement_to_the_next_request` in `lean-rs-worker-parent/tests/worker_shutdown.rs`, and
-  `blocked_stdin_write_times_out_and_reaps_child` in `lean-rs-worker-parent/src/supervisor.rs`.
+  `blocked_stdin_write_times_out_and_reaps_child` in `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Cancellation.** The wait checks its cancellation token at least every 50 ms, even when the child sends nothing, and
   cancelling kills and reaps only the child the worker owns. Checked by
   `conformance_silent_worker_cancellation_reaps_only_owned_child` in `lean-rs-worker-parent/tests/worker_shutdown.rs`,
-  `blocked_stdin_write_is_cancellable_and_reaps_child` in `lean-rs-worker-parent/src/supervisor.rs` and
+  `blocked_stdin_write_is_cancellable_and_reaps_child` in `lean-rs-worker-parent/src/supervisor/tests.rs` and
   `parent_can_cancel_long_worker_request_at_progress_boundary` in `lean-rs-worker-child/tests/session_adapter.rs`.
 - **Shutdown.** `shutdown` sends `Terminate`, waits 2 s by default, kills the child if it is still running, waits up to
   5 s for the reap, and reports which path it took. `Drop` takes the same steps and discards the report. Checked by
@@ -430,7 +432,7 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   waits for a pipe that a grandchild holds open; the wait for stdout to close is bounded. Checked by
   `stderr_drain_does_not_block_a_verbose_child_and_keeps_bounded_tail`,
   `stderr_capture_does_not_wait_for_inherited_pipe_to_close`, `stdout_eof_wait_is_bounded_for_a_child_that_stays_alive`
-  and `stopped_stdout_reader_joins_while_pipe_holder_remains_alive` in `lean-rs-worker-parent/src/supervisor.rs`.
+  and `stopped_stdout_reader_joins_while_pipe_holder_remains_alive` in `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Backpressure.** A slow progress sink fills the reader's bounded event buffer; the reader waits, counts each wait in
   `backpressure_waits`, and still delivers every event. Checked by
   `conformance_slow_progress_sink_backpressure_is_bounded_and_observable` in
@@ -441,7 +443,7 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   `planned_restarts_do_not_use_the_restart_window`, `crashed_child_is_replaced_and_counted` and
   `exhausted_worker_starts_again_after_the_window` in `lean-rs-worker-parent/tests/worker_shutdown.rs`, and
   `restart_intensity_policy_clamps_to_nonzero_window`, `restart_reasons_name_their_cause_and_kind` and
-  `lifecycle_snapshot_exposes_restart_generation` in `lean-rs-worker-parent/src/supervisor.rs`.
+  `lifecycle_snapshot_exposes_restart_generation` in `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Restart policy.** The request, import, idle and RSS limits each restart the child before the next request or import;
   a crash and a policy restart report different reasons; an explicit `cycle` records its reason; a stopped worker
   refuses requests until `cycle`; the next request replaces a dead child. Checked by
@@ -457,7 +459,7 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   `a_child_that_reports_no_region_bytes_is_counted_and_still_bounded` in
   `lean-rs-worker-parent/tests/worker_shutdown.rs`, and `residue_accumulates_only_over_confirmed_imports`,
   `header_import_accounting_is_cumulative_and_unknown_is_sticky` and `a_single_import_over_the_whole_budget_still_runs`
-  in `lean-rs-worker-parent/src/supervisor.rs`.
+  in `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Header budget.** Once the budget is spent, a warm header is still reused and a new one recycles the child and
   retries once; a failed header keeps its result and replaces the child before the next request; a second recycle fails
   instead of looping. Checked by `header_budget_reuses_warm_and_retries_distinct_once`,
@@ -473,7 +475,8 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   its handle, runs nothing on it, and never takes the old child's exit as proof. Checked by
   `failed_replacement_retains_unconfirmed_child_instead_of_reusing_old_exit`,
   `failed_replacement_releases_only_after_confirmed_cleanup_or_no_spawn` and
-  `startup_failure_guard_reaps_owned_child_and_preserves_other_child` in `lean-rs-worker-parent/src/supervisor.rs`.
+  `startup_failure_guard_reaps_owned_child_and_preserves_other_child` in
+  `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Stop receipts.** Take `request_checkpoint()` before an operation; `confirmed_request_stop_since` then names the
   latest attempted request, its generation, its child's pid and the confirmed exit. A receipt survives replacement and
   covers a partly written request; a newer attempt hides an older receipt; request and generation counters refuse to
@@ -481,7 +484,7 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   `request_stop_receipt_matches_checkpoint_across_replacement` and `newer_request_shadows_older_stop_receipt` in
   `lean-rs-worker-parent/tests/worker_shutdown.rs`, and `partial_write_stop_receipt_survives_failed_replacement`,
   `newer_unreaped_request_cannot_reuse_older_stop_receipt` and `exhausted_request_identifiers_reject_before_dispatch` in
-  `lean-rs-worker-parent/src/supervisor.rs`.
+  `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Process count.** The process tracker holds a count from before spawn until a confirmed exit. It reaps a dropped
   child without touching another, never settles one child with another's exit, and releases no count it does not own.
   Checked by `reaper_start_failure_prevents_launch_and_releases_no_unowned_capacity`,
@@ -515,7 +518,7 @@ children in `lean-rs-worker-parent` and against real ones in `lean-rs-worker-chi
   Checked by `lean_internal_panic_kills_only_child`, `fatal_exit_after_partial_rows_is_reported_as_worker_failure` and
   `eof_before_rows_complete_is_reported_as_protocol_failure` in `lean-rs-worker-child/tests/protocol.rs`,
   `child_crash_is_typed_and_parent_survives` in `lean-rs-worker-child/tests/supervisor.rs`, and
-  `a_child_abort_carries_the_exit_status_and_the_child_message` in `lean-rs-worker-parent/src/supervisor.rs`.
+  `a_child_abort_carries_the_exit_status_and_the_child_message` in `lean-rs-worker-parent/src/supervisor/tests.rs`.
 - **Session pool keys.** A pooled session is reused only for the same project root, mode, imports in the same order and
   import profile. Checked by `every_dimension_of_a_session_key_defeats_reuse`, `reordering_imports_defeats_reuse` and
   `the_module_query_cache_key_separates_projects_modes_and_import_profiles` in `lean-rs-worker-child/src/child.rs`, and

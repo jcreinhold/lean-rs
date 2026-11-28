@@ -9,11 +9,16 @@
     reason = "private tests inspect the owning supervisor and fail with fixture context"
 )]
 
+use super::request::reader::RequestReaderEvent;
 use super::*;
+use lean_rs_worker_protocol::protocol::{MAX_FRAME_BYTES, Message, Response, write_frame};
+use lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata;
 use std::cell::Cell;
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
-use std::sync::atomic::AtomicU64;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 

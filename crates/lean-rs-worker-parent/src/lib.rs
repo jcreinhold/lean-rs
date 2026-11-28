@@ -11,8 +11,9 @@
 //! does is published separately as [`lean-rs-worker-child`](https://docs.rs/lean-rs-worker-child).
 
 // `deny`, not `forbid`, so the macOS child-CPU sampler can take a narrowly
-// scoped exception for the one `proc_pid_rusage` FFI call (see
-// `supervisor::child_cpu_millis`); every other module stays unsafe-free.
+// scoped exception for its `proc_pidinfo` and `mach_timebase_info` calls (see
+// `supervisor::resources::child_cpu_millis`); every other module stays
+// unsafe-free.
 #![deny(unsafe_code)]
 
 mod capability;

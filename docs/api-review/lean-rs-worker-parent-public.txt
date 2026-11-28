@@ -315,28 +315,33 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerS
 pub struct lean_rs_worker_parent::LeanWorker
 impl lean_rs_worker_parent::LeanWorker
 pub fn lean_rs_worker_parent::LeanWorker::call_fixture_mul(&mut self, impl core::convert::AsRef<std::path::Path>, u64, u64) -> core::result::Result<u64, lean_rs_worker_parent::LeanWorkerError>
-pub fn lean_rs_worker_parent::LeanWorker::cleanup_pending(&self) -> bool
-pub fn lean_rs_worker_parent::LeanWorker::confirmed_request_stop_since(&self, &lean_rs_worker_parent::LeanWorkerRequestCheckpoint) -> core::option::Option<&lean_rs_worker_parent::LeanWorkerRequestStopReceipt>
-pub fn lean_rs_worker_parent::LeanWorker::cumulative_cpu_millis(&mut self) -> core::option::Option<u64>
-pub fn lean_rs_worker_parent::LeanWorker::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::health(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::host_runtime_metadata(&self) -> core::option::Option<&lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata>
+pub fn lean_rs_worker_parent::LeanWorker::load_fixture_capability(&mut self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
+impl lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorker::cleanup_pending(&self) -> bool
+pub fn lean_rs_worker_parent::LeanWorker::confirmed_request_stop_since(&self, &lean_rs_worker_parent::LeanWorkerRequestCheckpoint) -> core::option::Option<&lean_rs_worker_parent::LeanWorkerRequestStopReceipt>
 pub fn lean_rs_worker_parent::LeanWorker::host_session_refusal_since(&self, &lean_rs_worker_parent::LeanWorkerRequestCheckpoint) -> core::option::Option<&'static str>
 pub fn lean_rs_worker_parent::LeanWorker::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
-pub fn lean_rs_worker_parent::LeanWorker::load_fixture_capability(&mut self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::pending_request_stop_since(&self, &lean_rs_worker_parent::LeanWorkerRequestCheckpoint) -> core::option::Option<lean_rs_worker_parent::LeanWorkerPendingRequestStop>
 pub fn lean_rs_worker_parent::LeanWorker::request_checkpoint(&self) -> lean_rs_worker_parent::LeanWorkerRequestCheckpoint
 pub fn lean_rs_worker_parent::LeanWorker::request_timeout(&self) -> core::time::Duration
-pub fn lean_rs_worker_parent::LeanWorker::rss_kib(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorker::runtime_metadata(&self) -> lean_rs_worker_parent::LeanWorkerRuntimeMetadata
 pub fn lean_rs_worker_parent::LeanWorker::set_request_timeout(&mut self, core::time::Duration)
-pub fn lean_rs_worker_parent::LeanWorker::shutdown(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerShutdownReport, lean_rs_worker_parent::LeanWorkerError>
-pub fn lean_rs_worker_parent::LeanWorker::spawn(&lean_rs_worker_parent::LeanWorkerConfig) -> core::result::Result<Self, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::stats(&self) -> lean_rs_worker_parent::LeanWorkerStats
 pub fn lean_rs_worker_parent::LeanWorker::status(&mut self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerStatus, lean_rs_worker_parent::LeanWorkerError>
-pub fn lean_rs_worker_parent::LeanWorker::try_shutdown(&mut self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerShutdownReport, lean_rs_worker_parent::LeanWorkerError>
+impl lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorker::cumulative_cpu_millis(&mut self) -> core::option::Option<u64>
+pub fn lean_rs_worker_parent::LeanWorker::rss_kib(&mut self) -> core::option::Option<u64>
+impl lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorker::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 impl lean_rs_worker_parent::LeanWorker
 pub fn lean_rs_worker_parent::LeanWorker::open_session<'worker>(&'worker mut self, &lean_rs_worker_parent::LeanWorkerSessionConfig, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'worker>, lean_rs_worker_parent::LeanWorkerError>
+impl lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorker::shutdown(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerShutdownReport, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorker::try_shutdown(&mut self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerShutdownReport, lean_rs_worker_parent::LeanWorkerError>
+impl lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorker::spawn(&lean_rs_worker_parent::LeanWorkerConfig) -> core::result::Result<Self, lean_rs_worker_parent::LeanWorkerError>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorker
 pub fn lean_rs_worker_parent::LeanWorker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for lean_rs_worker_parent::LeanWorker
