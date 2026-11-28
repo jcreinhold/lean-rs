@@ -10,12 +10,8 @@
 //! way to avoid the copy when crossing the FFI boundary). The
 //! [`from_str`] helper does the same starting from a borrowed `&str`.
 //!
-//! Reading is split:
-//! - [`TryFromLean`] for `String` copies the bytes into a fresh Rust
-//!   allocation (one heap copy on the Rust side).
-//! - [`borrow_str`] returns a `&str` view into the Lean buffer, avoiding
-//!   the Rust-side allocation. The view is tied to the source [`ObjRef`]
-//!   lifetime so it cannot outlive the underlying Lean object.
+//! Reading goes through [`TryFromLean`] for `String`, which copies the
+//! bytes into a fresh Rust allocation (one heap copy on the Rust side).
 
 #![allow(unsafe_code)]
 
@@ -28,7 +24,7 @@ use lean_rs_sys::string::{lean_mk_string_from_bytes_unchecked, lean_string_cstr,
 use crate::abi::traits::{IntoLean, TryFromLean, conversion_error};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
-use crate::runtime::obj::{Obj, ObjRef};
+use crate::runtime::obj::Obj;
 
 impl<'lean> IntoLean<'lean> for String {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
@@ -75,41 +71,6 @@ impl<'lean> TryFromLean<'lean> for String {
         );
         Self::from_utf8(owned).map_err(|_| invalid_utf8())
     }
-}
-
-/// Borrow a `&str` view of a Lean `String` without copying.
-///
-/// The returned slice is tied to `obj`'s lifetime; it must not outlive
-/// the borrowed `ObjRef`. This is the only zero-allocation path for
-/// reading a Lean `String` from Rust.
-///
-/// # Errors
-///
-/// Returns `LeanError::Host { stage: Conversion, .. }` if `obj` is not a
-/// Lean `String`, or if its bytes are not valid UTF-8 (defensive—Lean
-/// enforces the invariant, but we honour it rather than relying on
-/// `from_utf8_unchecked`).
-pub(crate) fn borrow_str<'a>(obj: &'a ObjRef<'_, '_>) -> LeanResult<&'a str> {
-    let ptr = obj.as_raw_borrowed();
-    // SAFETY: `lean_is_scalar` reads pointer bits only.
-    if unsafe { lean_is_scalar(ptr) } {
-        return Err(wrong_kind_scalar());
-    }
-    // SAFETY: non-scalar branch; tag read on owned-by-source object.
-    if !unsafe { lean_is_string(ptr) } {
-        // SAFETY: same branch.
-        let found_tag = unsafe { lean_obj_tag(ptr) };
-        return Err(wrong_kind_heap(found_tag));
-    }
-    // SAFETY: kind verified; the slice borrows the Lean payload for `'a`,
-    // which is bounded by the lifetime of the `ObjRef` we received.
-    let bytes = unsafe {
-        let size_with_nul = lean_string_size(ptr);
-        let len = size_with_nul.saturating_sub(1);
-        let data = lean_string_cstr(ptr).cast::<u8>();
-        slice::from_raw_parts(data, len)
-    };
-    core::str::from_utf8(bytes).map_err(|_| invalid_utf8())
 }
 
 fn require_string(obj: &Obj<'_>) -> LeanResult<()> {
@@ -173,8 +134,8 @@ unsafe impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
 // `LeanAbi::from_c`'s signature does not bind the input pointer to any
 // `'a`. The body releases the inbound owned reference and returns a
 // conversion error so the impl is honest about the limitation rather
-// than panicking. Code that needs to *read* a Lean `String` uses
-// `String` (owned decode) or `borrow_str(&ObjRef)` (zero-copy view).
+// than panicking. Code that needs to *read* a Lean `String` decodes it
+// as an owned `String`.
 
 // SAFETY: str arguments allocate owned Lean Strings; unsupported return decoding releases the reference.
 unsafe impl<'lean> crate::abi::traits::LeanAbi<'lean> for &str {
@@ -188,8 +149,7 @@ unsafe impl<'lean> crate::abi::traits::LeanAbi<'lean> for &str {
         // when this unreachable branch is reached.
         drop(unsafe { Obj::from_owned_raw(runtime, c) });
         Err(conversion_error(
-            "&str cannot decode a Lean call result; use `String` for an owned copy \
-             or `borrow_str(&ObjRef)` for a zero-copy view",
+            "&str cannot decode a Lean call result; use `String` for an owned copy",
         ))
     }
 }

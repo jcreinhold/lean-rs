@@ -60,15 +60,6 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     pub(crate) fn library(&self) -> &'lib LeanLibrary<'lean> {
         self.library
     }
-
-    /// Initializer name in its mangled C form.
-    ///
-    /// `pub(crate)` so internal symbol-derivation code can reach the
-    /// canonical Lake mangling without re-running the validator.
-    #[allow(dead_code, reason = "reserved for future symbol-derivation helpers")]
-    pub(crate) fn initializer(&self) -> &InitializerName {
-        &self.initializer
-    }
 }
 
 impl std::fmt::Debug for LeanModule<'_, '_> {

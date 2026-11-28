@@ -158,7 +158,7 @@ impl LeanMetaOptions {
 
     // -- crate-internal accessors used by the dispatch site -----------
 
-    #[allow(dead_code, reason = "reserved for run_meta dispatch accessors")]
+    #[cfg(test)]
     pub(crate) fn namespace_context_str(&self) -> &str {
         &self.namespace_context
     }

@@ -27,9 +27,9 @@
 //! earned case: `LeanSession::elaborate`, `kernel_check`, `elaborate_bulk`,
 //! and `make_name` each accepted `&str` from callers and previously paid
 //! a `String::to_owned()` only to reach `LeanAbi<'lean> for String`.
-//! Borrowed-only reads (`borrow_str`) stay as free functions because they
-//! are zero-copy *return*-direction helpers and never need to satisfy the
-//! `LeanAbi` arg-tuple bound.
+//! A borrowed-only read, such as the test-only `bytearray::borrow_bytes`,
+//! stays a free function because it is a zero-copy *return*-direction
+//! helper and never needs to satisfy the `LeanAbi` arg-tuple bound.
 
 use lean_rs_sys::lean_object;
 use lean_toolchain::LeanExportAbiRepr;

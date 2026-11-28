@@ -35,9 +35,10 @@ use lean_rs::module::{LeanExported, LeanLibrary, LeanModule};
 // owned by `criterion_benchmarks`.
 
 fn open_fixture() -> &'static LeanLibrary<'static> {
-    let fixture = ScalarFixture::admit().expect("admit fixed profiling fixture");
+    // The library borrows the fixture, so both live until the process exits.
+    let fixture = Box::leak(Box::new(ScalarFixture::admit().expect("admit fixed profiling fixture")));
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
-    fixture.open(runtime).expect("fixture dylib opens")
+    Box::leak(Box::new(fixture.open_owned(runtime).expect("fixture dylib opens")))
 }
 
 // -- scalar dispatch -----------------------------------------------------

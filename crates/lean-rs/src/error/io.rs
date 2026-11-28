@@ -27,10 +27,6 @@
 //! surface does not currently expose.
 
 #![allow(unsafe_code)]
-#![allow(
-    dead_code,
-    reason = "decoder helpers reached through generic dispatch; lib-only build cannot prove reachability"
-)]
 
 use core::slice;
 
@@ -54,8 +50,7 @@ use crate::runtime::obj::Obj;
 ///
 /// The caller decodes the success [`Obj`] through whichever ABI helper
 /// matches the Lean type of `α` (a `TryFromLean` impl for polymorphic
-/// scalars, `nat::try_to_u64` for `Nat`, `string::borrow_str` for
-/// `String`, …). Splitting the two concerns avoids tying every IO
+/// scalars or `String`, `nat::try_to_u64` for `Nat`, …). Splitting the two concerns avoids tying every IO
 /// decode to one Rust type and keeps each call site honest about the
 /// `IO α`-to-Rust mapping it expects.
 pub(crate) fn decode_io<'lean>(runtime: &'lean LeanRuntime, result: Obj<'lean>) -> LeanResult<Obj<'lean>> {

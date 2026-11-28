@@ -15,16 +15,6 @@
 // `// SAFETY:` comment naming the invariant. The blanket allow keeps
 // the unsafe surface inside the smallest scope that compiles.
 #![allow(unsafe_code)]
-// `Obj` / `ObjRef` and their methods are infrastructure consumed by the
-// `pub(crate) abi` module and by the typed `LeanExported` /
-// `LeanSession` machinery in `module` and `host`. Many helpers are only
-// reached through generic dispatch and look dead to the lib-only
-// `cargo build`; only `cargo test` exercises every branch (transitively
-// through `abi::tests` and the integration suites).
-#![allow(
-    dead_code,
-    reason = "reached through generic dispatch; lib-only build cannot prove reachability"
-)]
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -335,13 +325,8 @@ mod tests {
     /// `Obj<'lean>` is `!Send` and `!Sync`. Both checks use the
     /// canonical `AmbiguousIfSend` ZST trick (`static_assertions`-style)
     /// so this test module fails to compile if either auto-trait is
-    /// ever implemented for `Obj`.
-    ///
-    /// The marker structs (`Invalid`, `InvalidSync`) and the helper
-    /// traits exist only as type-level arguments to the trait selector;
-    /// they are never constructed or called dynamically, so we silence
-    /// `dead_code` locally rather than relax it crate-wide.
-    #[allow(dead_code, reason = "items are consumed only via trait selection at compile time")]
+    /// ever implemented for `Obj`. The marker structs (`Invalid`,
+    /// `InvalidSync`) exist only as type arguments to the trait selector.
     mod not_send_not_sync {
         use super::Obj;
 
@@ -359,7 +344,8 @@ mod tests {
         struct InvalidSync;
         impl<T: ?Sized + Sync> AmbiguousIfSync<InvalidSync> for T {}
 
-        fn _obj_is_not_send() {
+        #[test]
+        fn obj_is_not_send() {
             // Compile-time: trait selection is ambiguous iff
             // `Obj<'static>: Send`, which yields E0283—that is the
             // compile-fail signal this assertion produces. Picking
@@ -367,7 +353,8 @@ mod tests {
             <Obj<'static> as AmbiguousIfSend<_>>::check();
         }
 
-        fn _obj_is_not_sync() {
+        #[test]
+        fn obj_is_not_sync() {
             <Obj<'static> as AmbiguousIfSync<_>>::check();
         }
     }

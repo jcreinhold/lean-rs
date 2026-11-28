@@ -1,13 +1,10 @@
 //! Crate-private layout structs mirroring `lean.h:131–310`.
 //!
-//! Every Lean object subclass is mirrored here, regardless of whether the
-//! crate's current inline helpers exercise it. Keeping the full set in one
-//! file is the layout pin: a new helper for an existing object kind can
-//! cast `*mut lean_object` straight to the matching repr without touching
-//! the rest of the crate. `#[allow(dead_code)]` covers reprs whose
-//! corresponding inline accessors live in higher layers (e.g. `lean-rs`).
+//! Each object kind that an inline helper in this crate reads or allocates
+//! has its mirror here. Keeping the mirrors in one file is the layout pin:
+//! review them side by side with the C header. Add a mirror together with the
+//! first helper that needs it.
 
-#![allow(dead_code)]
 // The `m_*` field-name prefix is intentional: it mirrors the C struct names
 // from `lean.h:131–310` so the layout pin is reviewable side-by-side with
 // the C header.
@@ -94,39 +91,6 @@ pub(crate) struct LeanClosureObjectRepr {
     pub(crate) arity: u16,
     pub(crate) num_fixed: u16,
     pub(crate) objs: [*mut lean_object; 0],
-}
-
-/// Mirrors `lean_ref_object` (`lean.h:207–210`).
-#[repr(C)]
-pub(crate) struct LeanRefObjectRepr {
-    pub(crate) header: LeanObjectRepr,
-    pub(crate) value: *mut lean_object,
-}
-
-/// Mirrors `lean_thunk_object` (`lean.h:212–216`).
-///
-/// `m_value` and `m_closure` are `_Atomic(lean_object *)` in C. Inline mirrors
-/// that touch them use `AtomicPtr<lean_object>::from_ptr` at the call site.
-#[repr(C)]
-pub(crate) struct LeanThunkObjectRepr {
-    pub(crate) header: LeanObjectRepr,
-    pub(crate) value: *mut lean_object,
-    pub(crate) closure: *mut lean_object,
-}
-
-/// Mirrors `lean_task_object` (`lean.h:284–288`). `m_imp` is opaque to us.
-#[repr(C)]
-pub(crate) struct LeanTaskObjectRepr {
-    pub(crate) header: LeanObjectRepr,
-    pub(crate) value: *mut lean_object,
-    pub(crate) imp: *mut c_void,
-}
-
-/// Mirrors `lean_promise_object` (`lean.h:290–293`).
-#[repr(C)]
-pub(crate) struct LeanPromiseObjectRepr {
-    pub(crate) header: LeanObjectRepr,
-    pub(crate) result: *mut c_void,
 }
 
 /// Mirrors `lean_external_object` (`lean.h:306–310`).

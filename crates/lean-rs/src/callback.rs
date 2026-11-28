@@ -175,11 +175,8 @@ pub struct LeanCallbackHandle<P: LeanCallbackPayload> {
 /// call violates the scoped callback contract.
 pub struct LeanProgressCallback<'a> {
     handle: LeanCallbackHandle<LeanProgressTick>,
-    #[allow(
-        dead_code,
-        reason = "keeps the borrowed callback context alive until after handle drop"
-    )]
-    context: Box<ScopedProgressContext<'a>>,
+    // The registered closure reads this through a raw address; it drops after `handle` unregisters.
+    _context: Box<ScopedProgressContext<'a>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
@@ -254,7 +251,7 @@ impl<'a> LeanProgressCallback<'a> {
         let handle = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
             // SAFETY: `context_addr` points at the `ScopedProgressContext`
             // owned by the `LeanProgressCallback` being constructed. The
-            // struct declares `handle` before `context`, so drop unregisters
+            // struct declares `handle` before `_context`, so drop unregisters
             // the callback id before the borrowed context is released. Safe
             // callers cannot move the scoped registration across threads, and
             // Lean may invoke the handle only during the synchronous call for
@@ -264,7 +261,7 @@ impl<'a> LeanProgressCallback<'a> {
         })?;
         Ok(Self {
             handle,
-            context,
+            _context: context,
             _not_send_or_sync: PhantomData,
         })
     }

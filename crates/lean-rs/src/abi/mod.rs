@@ -9,18 +9,13 @@
 //! establish native signatures or permit arbitrary objects to become semantic
 //! handles. The concrete safe host boundary lives in [`crate::host_bridge`].
 
-// Items here are infrastructure for the typed `LeanExported` family
-// and the `module` / `host` modules. A subset is exercised only by
-// `cargo test` (the in-tree `abi::tests` and the integration suites);
-// the lib-only `cargo build` cannot prove every helper is reachable.
-#![allow(
-    dead_code,
-    reason = "ABI helpers reached through generic dispatch; lib-only build cannot prove reachability"
-)]
-
 pub(crate) mod array;
+// Only the unit tests and the `fuzzing` entry points build or read a `ByteArray`.
+#[cfg(any(test, feature = "fuzzing"))]
 pub(crate) mod bytearray;
 pub(crate) mod except;
+// Only the unit tests convert Lean `Int` values.
+#[cfg(test)]
 pub(crate) mod int;
 pub mod nat;
 mod native;

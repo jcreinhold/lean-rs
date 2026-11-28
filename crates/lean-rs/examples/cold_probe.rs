@@ -29,9 +29,11 @@ fn report(name: &str, elapsed_us: u128) {
 }
 
 fn main() {
+    // The library borrows the fixture, so both live until the process exits.
+    let fixture = Box::leak(Box::new(ScalarFixture::admit().expect("admit fixed profiling fixture")));
+
     // Stage 1: runtime init. First-call cost: `lean_initialize`,
     // `lean_io_mark_end_initialization`, OnceLock seeding.
-    let fixture = ScalarFixture::admit().expect("admit fixed profiling fixture");
     let t = Instant::now();
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
     report("runtime_init_cold", t.elapsed().as_micros());
@@ -40,7 +42,7 @@ fn main() {
     // plus the symbol-table walk that classifies function vs.
     // nullary-constant globals.
     let t = Instant::now();
-    let library = fixture.open(runtime).expect("fixture dylib opens");
+    let library = Box::leak(Box::new(fixture.open_owned(runtime).expect("fixture dylib opens")));
     report("library_open_cold", t.elapsed().as_micros());
 
     // Stage 3: module initializer. Invokes the C

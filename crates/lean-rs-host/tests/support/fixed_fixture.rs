@@ -1128,41 +1128,17 @@ pub(super) fn project_library() -> lean_rs::module::LeanLibrary<'static> {
     load()
 }
 
-#[allow(
-    dead_code,
-    reason = "this fixture entry is shared by separate test and profiling binaries"
-)]
-pub(super) fn term_batch<'lean, 'c>(
-    caps: &'c LeanCapabilities<'lean, '_>,
-    session: &lean_rs_host::LeanSession<'lean, '_>,
-    cases: &[&str],
-) -> lean_rs::host_bridge::TrustedHostTermBatch<'lean, 'c> {
-    term_batch_for(caps, session, cases, false)
-}
-
 #[allow(dead_code, reason = "shared with separate strict test binaries")]
 pub(super) fn native_term_batch<'lean, 'c>(
     caps: &'c LeanCapabilities<'lean, '_>,
     session: &lean_rs_host::LeanSession<'lean, '_>,
     cases: &[&str],
 ) -> lean_rs::host_bridge::TrustedHostTermBatch<'lean, 'c> {
-    term_batch_for(caps, session, cases, true)
-}
-
-fn term_batch_for<'lean, 'c>(
-    caps: &'c LeanCapabilities<'lean, '_>,
-    session: &lean_rs_host::LeanSession<'lean, '_>,
-    cases: &[&str],
-    ordinary: bool,
-) -> lean_rs::host_bridge::TrustedHostTermBatch<'lean, 'c> {
     assert!(cases.is_empty() || cases == ["(1 + 2 : Nat)", "1 +", "(1 + \"hi\" : Nat)"]);
     let (env, imports) = session.source_context();
     assert!(imports.matches_request(&caps.import_search_paths(), &["LeanRsHostShims.Elaboration".into()]));
     assert_eq!(imports.options(), &lean_rs::module::HostImportOptions::default());
-    let paths = ordinary
-        .then(|| native_source_paths(caps, &["LeanRsHostShims.Elaboration"]))
-        .flatten()
-        .unwrap_or_else(resolution);
+    let paths = native_source_paths(caps, &["LeanRsHostShims.Elaboration"]).unwrap_or_else(resolution);
     #[allow(
         unsafe_code,
         reason = "exact source-reviewed test batches in the admitted fixture environment"

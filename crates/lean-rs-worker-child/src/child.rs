@@ -1,7 +1,7 @@
 use crate::authority::{WorkerAuthority, WorkerSourceContext, WorkerStringCall, worker_authority};
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -878,8 +878,6 @@ struct HostAnchor {
     installed_roots: std::cell::OnceCell<Vec<String>>,
     project_root: String,
     mode: HostSessionMode,
-    #[allow(dead_code, reason = "leaked host anchors the capability and session lifetimes")]
-    host: &'static LeanHost<'static>,
     capabilities: &'static LeanCapabilities<'static, 'static>,
     worker_capability: Option<&'static TrustedWorkerCapability<'static>>,
 }
@@ -1335,7 +1333,6 @@ impl HostAnchor {
             installed_roots: std::cell::OnceCell::new(),
             project_root: project_root.to_owned(),
             mode: mode.clone(),
-            host,
             capabilities,
             worker_capability,
         })))
@@ -3358,11 +3355,6 @@ fn emit_test_rows(writer: &ProtocolWriter, streams: &[String]) -> Result<u64, Pr
         writer.write(Message::DataRow(row))?;
     }
     Ok(emitter.count())
-}
-
-#[allow(dead_code, reason = "reserved for future worker configuration paths")]
-fn _path_for_diagnostics(path: &Path) -> PathBuf {
-    path.to_path_buf()
 }
 
 #[cfg(test)]

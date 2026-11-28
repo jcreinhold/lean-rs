@@ -82,9 +82,10 @@ fn main() {
         std::process::exit(2);
     });
 
-    let fixture = ScalarFixture::admit().expect("admit fixed profiling fixture");
+    // The library borrows the fixture, so both live until the process exits.
+    let fixture = Box::leak(Box::new(ScalarFixture::admit().expect("admit fixed profiling fixture")));
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
-    let library = fixture.open(runtime).expect("fixture dylib opens");
+    let library = Box::leak(Box::new(fixture.open_owned(runtime).expect("fixture dylib opens")));
 
     match workload.as_str() {
         "string_identity_16" => run_string_identity(library, 16),

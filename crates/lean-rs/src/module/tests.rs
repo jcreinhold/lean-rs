@@ -295,10 +295,8 @@ fn checked_export_lookup_reports_manifest_symbol_missing_from_dylib() {
 
 /// `LeanLibrary<'_>` and `LeanModule<'_, '_>` must be `!Send` and
 /// `!Sync`. Uses the canonical `AmbiguousIfSend` / `AmbiguousIfSync`
-/// trick from `runtime::obj::tests::not_send_not_sync`: the
-/// `_compile_time_check` functions fail to type-check (E0283) if either
-/// auto-trait is ever implemented.
-#[allow(dead_code, reason = "items are consumed only via trait selection at compile time")]
+/// trick from `runtime::obj::tests::not_send_not_sync`: the tests below
+/// fail to type-check (E0283) if either auto-trait is ever implemented.
 mod not_send_not_sync {
     use super::{LeanLibrary, LeanModule};
 
@@ -316,16 +314,20 @@ mod not_send_not_sync {
     struct InvalidSync;
     impl<T: ?Sized + Sync> AmbiguousIfSync<InvalidSync> for T {}
 
-    fn _library_is_not_send() {
+    #[test]
+    fn library_is_not_send() {
         <LeanLibrary<'static> as AmbiguousIfSend<_>>::check();
     }
-    fn _library_is_not_sync() {
+    #[test]
+    fn library_is_not_sync() {
         <LeanLibrary<'static> as AmbiguousIfSync<_>>::check();
     }
-    fn _module_is_not_send() {
+    #[test]
+    fn module_is_not_send() {
         <LeanModule<'static, 'static> as AmbiguousIfSend<_>>::check();
     }
-    fn _module_is_not_sync() {
+    #[test]
+    fn module_is_not_sync() {
         <LeanModule<'static, 'static> as AmbiguousIfSync<_>>::check();
     }
 }

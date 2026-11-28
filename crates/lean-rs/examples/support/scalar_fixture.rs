@@ -103,15 +103,6 @@ impl ScalarFixture {
         })
     }
 
-    #[allow(
-        dead_code,
-        reason = "standalone profiling binaries use this entry; unit tests share open_owned"
-    )]
-    pub(super) fn open(self, runtime: &'static LeanRuntime) -> lean_rs::LeanResult<&'static LeanLibrary<'static>> {
-        let library = Box::leak(Box::new(self)).open_owned(runtime)?;
-        Ok(Box::leak(Box::new(library)))
-    }
-
     pub(super) fn open_owned(
         &'static self,
         runtime: &'static LeanRuntime,

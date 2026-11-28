@@ -11,14 +11,16 @@
 //! *polymorphic-boxed* values (ctor-wrapped `UInt64` / `USize`). The
 //! helpers here handle values of Lean type `Nat`, which is a different
 //! object shape (scalar tag or heap MPZ). Use [`try_to_u64`] /
-//! [`try_to_usize`] when the Lean result type is `Nat`. The writers
-//! `from_u64` / `from_usize` are crate-private: the host bridge uses them
-//! to build `Nat` arguments.
+//! [`try_to_usize`] when the Lean result type is `Nat`. The writer
+//! `from_usize` is crate-private: the host bridge uses it to build `Nat`
+//! arguments. Only the unit tests use `from_u64`.
 
 #![allow(unsafe_code)]
 
 use lean_rs_sys::object::{lean_is_scalar, lean_obj_tag, lean_unbox};
-use lean_rs_sys::scalar::{lean_uint64_to_nat, lean_usize_to_nat};
+#[cfg(test)]
+use lean_rs_sys::scalar::lean_uint64_to_nat;
+use lean_rs_sys::scalar::lean_usize_to_nat;
 
 use crate::abi::traits::conversion_error;
 use crate::error::{LeanError, LeanResult};
@@ -29,6 +31,7 @@ use crate::runtime::obj::Obj;
 ///
 /// Scalar-tagged for values up to `LEAN_MAX_SMALL_NAT`; falls back to a
 /// heap MPZ via `lean_big_uint64_to_nat` otherwise.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn from_u64(runtime: &LeanRuntime, n: u64) -> Obj<'_> {
     // SAFETY: `lean_uint64_to_nat` returns an owned `lean_obj_res` (refcount

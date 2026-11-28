@@ -12,11 +12,6 @@
 //! suite in `crate::error::tests` exercises both the panic-payload
 //! rendering and the diagnostic-code projection.
 
-#![allow(
-    dead_code,
-    reason = "callback-panic helper instantiated only when host-callback registration is wired up"
-)]
-
 use std::panic::{self, AssertUnwindSafe};
 
 use super::{LeanError, LeanResult};
