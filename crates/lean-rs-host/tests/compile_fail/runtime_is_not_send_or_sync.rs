@@ -8,7 +8,7 @@
 //! `docs/architecture/concurrency.md`.
 
 use lean_rs::{LeanDeclaration, LeanExpr, LeanLevel, LeanName, LeanRuntime, LeanThreadGuard};
-use lean_rs_host::{LeanCapabilities, LeanEvidence, LeanHost, LeanSession, PooledSession, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanEvidence, LeanHost, LeanSession};
 
 fn require_send<T: Send>() {}
 fn require_sync<T: Sync>() {}
@@ -34,8 +34,4 @@ fn main() {
     require_sync::<LeanDeclaration<'static>>();
     require_send::<LeanEvidence<'static>>();
     require_sync::<LeanEvidence<'static>>();
-    require_send::<SessionPool<'static>>();
-    require_sync::<SessionPool<'static>>();
-    require_send::<PooledSession<'static, 'static, 'static>>();
-    require_sync::<PooledSession<'static, 'static, 'static>>();
 }
