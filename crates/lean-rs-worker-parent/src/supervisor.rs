@@ -1425,7 +1425,8 @@ impl fmt::Display for LeanWorkerError {
             } => {
                 write!(
                     f,
-                    "worker restart limit exceeded after {restarts} abnormal restarts in {window:?}; next restart allowed in {retry_after:?}"
+                    "worker restart limit exceeded after {restarts} abnormal restarts in {window:?}; \
+                     next restart allowed in {retry_after:?}"
                 )
             }
             Self::UnsupportedRequest { operation } => {

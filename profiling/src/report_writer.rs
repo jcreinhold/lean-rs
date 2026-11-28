@@ -251,7 +251,9 @@ fn render_markdown(report: &PerformanceReport) -> String {
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
-                "| Label | Iteration | Kind | Attempts | Successes | Failures | Budget admitted | Budget skipped | Spawn+handshake ms | Session import ms | Replacement total ms | Reason | Budget status | Skipped reason |"
+                "| Label | Iteration | Kind | Attempts | Successes | Failures | Budget admitted \
+                 | Budget skipped | Spawn+handshake ms | Session import ms | Replacement total ms \
+                 | Reason | Budget status | Skipped reason |"
             );
             let _ = writeln!(
                 out,
@@ -422,7 +424,8 @@ fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "Local recommendation under the {cap_kib} KiB RSS budget: `LeanWorkerRestartPolicy::memory_bounded({recommended_max_imports}, {cap_kib})`."
+        "Local recommendation under the {cap_kib} KiB RSS budget: \
+         `LeanWorkerRestartPolicy::memory_bounded({recommended_max_imports}, {cap_kib})`."
     );
     let _ = writeln!(
         out,
@@ -781,6 +784,9 @@ mod tests {
         let markdown = render_markdown(&report);
         assert!(markdown.contains("## Worker Replacement"));
         assert!(markdown.contains("Spawn+handshake ms"));
-        assert!(markdown.contains("| worker_session_open | 2 | cold | 1 | 1 | 0 | 1 | 0 | 12.000 | 90.500 | 15.000 | max_imports | synchronous-no-overlap | - |"));
+        assert!(markdown.contains(
+            "| worker_session_open | 2 | cold | 1 | 1 | 0 | 1 | 0 | 12.000 | 90.500 | 15.000 \
+             | max_imports | synchronous-no-overlap | - |"
+        ));
     }
 }

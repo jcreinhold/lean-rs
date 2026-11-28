@@ -708,7 +708,11 @@ mod tests {
     #[test]
     fn parses_replacement_lines() {
         let parsed = parse_key_values(
-            "replacement=worker_session_open iteration=2 kind=cold replacement_attempts=1 replacement_successes=1 replacement_failures=0 replacement_budget_admitted=1 replacement_budget_skipped=0 spawn_handshake_ms=12.500 session_open_import_ms=90.250 replacement_total_ms=15.000 replacement_reason=max_imports replacement_budget_status=synchronous-no-overlap skipped_reason=none",
+            "replacement=worker_session_open iteration=2 kind=cold replacement_attempts=1 \
+             replacement_successes=1 replacement_failures=0 replacement_budget_admitted=1 \
+             replacement_budget_skipped=0 spawn_handshake_ms=12.500 session_open_import_ms=90.250 \
+             replacement_total_ms=15.000 replacement_reason=max_imports \
+             replacement_budget_status=synchronous-no-overlap skipped_reason=none",
             "",
         );
         assert_eq!(parsed.replacements.len(), 1);

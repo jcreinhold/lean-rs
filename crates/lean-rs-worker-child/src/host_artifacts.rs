@@ -225,11 +225,19 @@ mod tests {
         }
         fn manifest(root: &Path, package: &str, module: &str, deps: &[PathBuf]) -> PathBuf {
             let path = root.join("out/capability.json");
-            fs::write(&path,serde_json::to_vec(&serde_json::json!({
-                "schema_version":lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
-                "primary_dylib":root.join("out/lib/libcap.dylib"),"package":package,"module":module,
-                "dependencies":deps.iter().map(|root|serde_json::json!({"dylib_path":root.join("out/lib/libcap.dylib")})).collect::<Vec<_>>(),"exports":[]
-            })).expect("manifest JSON")).expect("manifest");
+            let dependencies: Vec<_> = deps
+                .iter()
+                .map(|dep| serde_json::json!({ "dylib_path": dep.join("out/lib/libcap.dylib") }))
+                .collect();
+            let manifest = serde_json::json!({
+                "schema_version": lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
+                "primary_dylib": root.join("out/lib/libcap.dylib"),
+                "package": package,
+                "module": module,
+                "dependencies": dependencies,
+                "exports": []
+            });
+            fs::write(&path, serde_json::to_vec(&manifest).expect("manifest JSON")).expect("manifest");
             path
         }
         fn prepared(&self) -> LeanPreparedHostArtifacts {

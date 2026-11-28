@@ -134,7 +134,12 @@ fn write_transitive_dependency_fixture(project: &TempLakeProject) {
     );
     project.write(
         "lake-manifest.json",
-        r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"./.lake/packages/dep","configFile":"lakefile.lean"}],"name":"consumer","lakeDir":".lake"}"#,
+        concat!(
+            r#"{"version":"1.2.0","packagesDir":".lake/packages","#,
+            r#""packages":[{"type":"path","scope":"","name":"dep","manifestFile":"lake-manifest.json","#,
+            r#""inherited":false,"dir":"./.lake/packages/dep","configFile":"lakefile.lean"}],"#,
+            r#""name":"consumer","lakeDir":".lake"}"#,
+        ),
     );
     project.lake_build_ok("Consumer");
 }

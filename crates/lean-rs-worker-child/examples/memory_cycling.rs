@@ -128,7 +128,10 @@ fn report_admission(
 fn report_replacement(iteration: u64, kind: &str, stats: &lean_rs_worker_parent::LeanWorkerStats) {
     let timing = stats.last_replacement_timing.as_ref();
     println!(
-        "replacement=worker_session_open iteration={iteration} kind={kind} replacement_attempts={} replacement_successes={} replacement_failures={} replacement_budget_admitted={} replacement_budget_skipped={} spawn_handshake_ms={} session_open_import_ms={} replacement_total_ms={} replacement_reason={} replacement_budget_status={} skipped_reason={}",
+        "replacement=worker_session_open iteration={iteration} kind={kind} replacement_attempts={} \
+         replacement_successes={} replacement_failures={} replacement_budget_admitted={} \
+         replacement_budget_skipped={} spawn_handshake_ms={} session_open_import_ms={} \
+         replacement_total_ms={} replacement_reason={} replacement_budget_status={} skipped_reason={}",
         stats.replacement_attempts,
         stats.replacement_successes,
         stats.replacement_failures,
