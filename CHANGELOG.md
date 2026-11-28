@@ -105,7 +105,7 @@ items listed below are gone.
 
 ### Added
 
-- `lean_toolchain::LakeWorkspace` asks Lake about one workspace: `LakeWorkspace::new(root)`, `root` and
+- `lean_toolchain::LakeWorkspace` asks Lake about one workspace: `LakeWorkspace::new(root)`, `root`, `lean_sysroot` and
   `lean_num_threads`, and three questions. Each question has a form that runs Lake and a pair that lets the caller run
   the command under its own time limit and process group: `lean_path`, or `lean_path_command` with `read_lean_path`;
   `shared_library(lib)`, or `shared_library_command` with `read_shared_library`; and `built_shared_library(lib)`, or
