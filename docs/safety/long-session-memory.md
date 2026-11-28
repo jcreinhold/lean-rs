@@ -36,8 +36,7 @@ boundaries; it does not reset Lean's process-global runtime state.
 | `LeanCapabilities` | user + shim libraries, resolved capability symbols | library handles, symbol-table storage | Lean-side initialized module state |
 | `LeanSession` | one imported `Lean.Environment` as `Obj<'lean>` | one refcount on the environment (`lean_dec`) | anything Lean retained globally while importing those modules |
 | `Obj<'lean>` | one owned Lean refcount | that refcount; clones balance with `lean_inc` | persistent and compacted Lean objects (no refcount used) |
-| `SessionPool` slot | a retained environment `Obj<'lean>` keyed by canonical project root, ordered imports, and import profile | dropped when evicted, drained, or pool dropped | process-global Lean import/module state |
-| Worker-child session pool slot | one parked `HostSessionState` keyed by `(project_root, mode, imports, import_profile)` | dropped when evicted past `LEAN_RS_WORKER_SESSION_POOL_CAPACITY` or at child exit | same as above; measured at ~70 MiB per extra *live* environment on real project headers (30–50 MB on the fixture), against 2.0–4.5 GB per import |
+| Worker-child session pool slot | one parked `HostSessionState` keyed by `(project_root, mode, imports, import_profile)` | dropped when evicted past `LEAN_RS_WORKER_SESSION_POOL_CAPACITY` or at child exit | process-global Lean import/module state; measured at ~70 MiB per extra *live* environment on real project headers (30–50 MB on the fixture), against 2.0–4.5 GB per import |
 
 The split has direct support in Lean's own sources. The runtime reference requires foreign code to initialize the
 runtime before calling any Lean code, and the FFI reference describes Lean-owned objects as reference-counted.
@@ -55,9 +54,9 @@ References:
 
 ## Reproducer
 
-The retained-memory counterpart to the latency benches. It runs one long-lived process through fresh imports, pooled
-reuse, bulk introspection, and elaboration, printing RSS checkpoints in KiB (`ps -o rss=`) and `SessionPool` counters
-between phases.
+The retained-memory counterpart to the latency benches. By default it runs each workload in its own child process: fresh
+imports, steady query and elaboration, the import-mode matrix, the bracketed lightweight query, and the derived-index
+probes. Each child prints RSS checkpoints in KiB (`ps -o rss=`) and Lean import stats.
 
 ```sh
 cd fixtures/lean && lake build && cd -
@@ -66,16 +65,16 @@ LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session
 
 The example sets its own defaults, including a 1,572,864 KiB RSS cap. The default workload is:
 
-- One fresh import/drop acquisition through a zero-capacity pool with `max_fresh_imports=1`.
-- One bounded-pool acquisition through a pool with capacity 1 and the same fresh-import budget.
-- 64 `query_declarations_bulk` calls over 16 fixture names.
-- 64 elaboration calls, 50/50 success vs. diagnostic-producing terms.
-- Snapshots before/after runtime init, host/capability load, import loops, bulk introspection, elaboration, drop, and a
-  short steady-state pause.
+- One fresh import of `LeanRsFixture.Handles`, dropped at once.
+- One warm session over the fixture and host elaboration modules, serving 64 `query_declarations_bulk` calls over 16
+  fixture names and 64 elaboration calls, half of them terms that fail with diagnostics.
+- The import-mode matrix, bracketed lightweight query, and derived-index probes described below.
+- Snapshots before and after runtime init, host and capability load, each phase, session drop, and a short steady-state
+  pause.
 
 The old crash-shaped workload remains opt-in: raise `LEAN_RS_LONG_SESSION_IMPORTS`, `LEAN_RS_LONG_SESSION_BULK`, and
-`LEAN_RS_LONG_SESSION_ELAB` only after the previous run's peak RSS is acceptable. Set `LEAN_RS_LONG_SESSION_MAX_RSS_KIB`
-to change the RSS threshold at which the same-process pool refuses the next fresh import.
+`LEAN_RS_LONG_SESSION_ELAB` only after the previous run's peak RSS is acceptable. Before each import the example refuses
+to continue once process RSS reaches `LEAN_RS_LONG_SESSION_MAX_RSS_KIB`; set it to change that threshold.
 
 Environment overrides:
 
@@ -83,18 +82,17 @@ Environment overrides:
 LEAN_RS_LONG_SESSION_IMPORTS=64 \
 LEAN_RS_LONG_SESSION_BULK=512 \
 LEAN_RS_LONG_SESSION_ELAB=512 \
-LEAN_RS_LONG_SESSION_POOL_CAPACITY=4 \
 LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY=16 \
 LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
 LEAN_RS_NUM_THREADS=1 \
 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
-One mode is a driver rather than a phase. `LEAN_RS_LONG_SESSION_MODE=pooled-distinct` forks three fresh child processes
-— pooled, truncated, and alternating — over `LEAN_RS_LONG_SESSION_IMPORTS` distinct import sets (capped at the number
-the fixture defines) and `LEAN_RS_LONG_SESSION_ROUNDS` rounds, then prints their peak RSS and the pooled−truncated
-delta. Fresh processes are the point: the comparison is between two end states at an equal import count, which one
-process sampled over time cannot give.
+`LEAN_RS_LONG_SESSION_MODE=pooled-distinct` is a separate driver outside the default run. It forks three fresh child
+processes — pooled, truncated, and alternating — over `LEAN_RS_LONG_SESSION_IMPORTS` distinct import sets (capped at the
+number the fixture defines) and `LEAN_RS_LONG_SESSION_ROUNDS` rounds, then prints their peak RSS and the
+pooled−truncated delta. Fresh processes are the point: the comparison is between two end states at an equal import
+count, which one process sampled over time cannot give.
 
 ```sh
 LEAN_RS_LONG_SESSION_MODE=pooled-distinct \
@@ -113,8 +111,8 @@ The profiling wrappers under `profiling/scripts/` run the bounded variants and c
 ```
 
 This is not a Criterion bench by design. Criterion answers per-iteration latency questions; this workload answers
-whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, and `Obj<'lean>` drops. A single
-long-running process with named checkpoints answers that directly.
+whether RSS returns at lifetime boundaries after `LeanSession` and `Obj<'lean>` drops. A long-running process with named
+checkpoints answers that directly.
 
 ## Import Attribution
 
@@ -247,58 +245,41 @@ Historical local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LO
 ## Measured Shape
 
 Post-reduction rebaseline on 2026-06-08, macOS aarch64, Lean 4.31.0-rc1, profiling profile, `LEAN_RS_NUM_THREADS=1`, and
-a local `2,097,152` KiB RSS budget. The profiling examples now default to 1,572,864 KiB RSS caps. Nextest
-allows two test processes, but memory-heavy cases reserve both slots. Cargo and libtest still default to one job or
-thread, and `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` limits each worker's Lean runtime.
+a local `2,097,152` KiB RSS budget. The profiling examples now default to 1,572,864 KiB RSS caps. Nextest allows two
+test processes, but memory-heavy cases reserve both slots. Cargo and libtest still default to one job or thread, and
+`LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` limits each worker's Lean runtime.
 
 | Workload | Command/env shape | Status | Peak RSS KiB | Import profile | Imported bytes | Regions | Ext entries |
 | --- | --- | --- | ---: | --- | ---: | ---: | ---: |
 | Fresh same-process imports | `LEAN_RS_LONG_SESSION_MODE=fresh-import`, `LEAN_RS_LONG_SESSION_IMPORTS=4`, `LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152` | `resource_exhausted` after the second import | 2,225,584 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
-| Pooled reuse | `LEAN_RS_LONG_SESSION_MODE=pooled-reuse`, pool capacity 1 | `ok` | 1,192,976 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
 | Steady query/elaboration | `LEAN_RS_LONG_SESSION_MODE=steady-state` | `ok` | 1,198,608 | `private`, `importAll=false`, `loadExts=true` | 1,956,159,664 | 9,037 | 1,733,621 |
 | Bracketed lightweight | `LEAN_RS_LONG_SESSION_MODE=bracketed-lightweight` | `ok`; after-free RSS settled near 122,480 KiB | 1,044,832 | `private`, `importAll=false`, `loadExts=false` | 1,955,323,616 | 9,033 | 1,732,192 |
 | Derived-index probes | `LEAN_RS_LONG_SESSION_MODE=derived-indexes` | `ok` | 1,236,368 | `private`, `importAll=false`, `loadExts=true` | 1,955,250,248 | 9,033 | 1,732,016 |
 | Worker cycling candidate | `LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1`, `LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152` | `ok`, 5 restarts for 6 imports | 1,194,368 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
 | Worker cycling candidate | `LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2`, same RSS cap | `ok`, but over local cap | 3,236,416 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
-| Worker pool fixture | `max_workers=1`, total/per-worker RSS cap 2,097,152 KiB, `max_imports=1` | `ok` | 419,616 | `private`, `importAll=false`, `loadExts=true` | 460,060,392 | 2,638 | 464,688 |
 
-The local worker recommendation from that run is:
-
-```rust
-LeanWorkerRestartPolicy::memory_bounded(1, 2_097_152);
-LeanWorkerPoolConfig::new(1)
-    .per_worker_rss_ceiling_kib(2_097_152)
-    .max_total_child_rss_kib(2_097_152);
-```
-
-The current checked-in local-safe defaults are stricter and require no shell exports:
-
-```rust
-LeanWorkerRestartPolicy::memory_bounded(1, 1_572_864);
-LeanWorkerPoolConfig::new(1)
-    .per_worker_rss_ceiling_kib(1_572_864)
-    .max_total_child_rss_kib(1_572_864);
-```
+The local worker policy from that run is `LeanWorkerRestartPolicy::memory_bounded(1, 2_097_152)`: one fresh import per
+child generation and a 2 GiB child RSS ceiling. The checked-in profiling defaults are stricter and need no shell
+exports: `LeanWorkerRestartPolicy::memory_bounded(1, 1_572_864)`.
 
 The `max_imports=2` candidate was collected because the one-import run stayed below the 70% widening threshold, but it
 then peaked above the 2 GiB budget. For this fixture and machine, one fresh full-session import per child is the
-measured local policy. Larger hosts should scale `max_total_child_rss_kib` with `max_workers *
-per_worker_rss_ceiling_kib`, and should set both values from their own capped baseline rather than copying the raw KiB
-above.
+measured local policy. A host that runs several children owns their total: budget the number of children times the
+per-child ceiling, and set both from its own capped baseline rather than copying the raw KiB above.
 
 The same-process test command `cargo test -p lean-rs-host session_leak_loop` is not a safe local verification command.
-It can run multiple fresh full-session imports inside one Rust test harness process without a `SessionPoolMemoryPolicy`
-or worker boundary. Host full-session imports are therefore rejected when started from Cargo's same-process libtest
-harness, before Lean import begins. Use nextest process isolation instead. For an explicitly budgeted one-off debug run,
-set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1`; `-- --test-threads=1` only serializes tests inside the same process and
-does not reset Lean import state.
+It can run multiple fresh full-session imports inside one Rust test harness process with no import budget or worker
+boundary. Host full-session imports are therefore rejected when started from Cargo's same-process libtest harness,
+before Lean import begins. Use nextest process isolation instead. For an explicitly budgeted one-off debug run, set
+`LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1`; `-- --test-threads=1` only serializes tests inside the same process and does
+not reset Lean import state.
 
 The numbers below are local snapshots on macOS aarch64 against `lean=4.29.1`. They are not portable: macOS RSS is noisy
 under memory pressure and compression, and absolute KiB values vary between machines. The *shape*—order-of-magnitude
 growth during fresh imports, flat reuse, flat introspection and elaboration, no return to baseline after drop—is the
 load-bearing claim and was observed in the recorded runs.
 
-Fresh-import-then-drop, capacity 0:
+Fresh import, then drop:
 
 | Checkpoint | RSS KiB |
 | --- | ---: |
@@ -310,8 +291,8 @@ Fresh-import-then-drop, capacity 0:
 | `fresh_import_drop_48` | 2,901,984 |
 | `fresh_import_drop_64` | 2,386,784 |
 
-Sixteen imports of the fixture workload move RSS from ~50 MiB into the multi-GiB range, despite a pool capacity of zero
-and every session environment being dropped immediately.
+Sixteen imports of the fixture workload move RSS from ~50 MiB into the multi-GiB range, although the loop drops each
+session at once.
 
 Read the series as evidence that dropping does not return process memory to baseline, not as a growth *rate*: it is not
 monotone (3.73 → 3.85 → 2.90 → 2.39 GB), because macOS RSS under compression is noisy enough at this scale to move the
@@ -320,34 +301,21 @@ below, which compare fresh processes at a fixed import count instead of sampling
 
 Full sweep with `LEAN_RS_LONG_SESSION_IMPORTS=64`:
 
-| Phase | Imports performed | Reuses | RSS KiB (entry → exit) |
-| --- | ---: | ---: | --- |
-| Fresh import/drop, capacity 0 | 64 | 0 | 4,372,352 → 4,121,040 |
-| Bounded pool, capacity 4 | 4 | 64 | 3,699,472 → 3,696,816 |
-| Bulk introspection | 0 | 16 | 3,662,176 → 3,662,224 |
-| Elaboration (256 ok, 256 fail) | 0 | 1 | 3,668,672 → 3,532,464 |
-| After drops + steady-state | n/a | n/a | 3,532,464 → 3,487,472 |
-
-In the 2026-06-08 pool fixture capture, parent RSS ranged from 2,144 to 3,456 KiB; cold requests were about 215 ms and
-warm reuse about 5–6 ms. Child peak RSS was 419,616 KiB. These are local workload measurements, not service-level
-bounds.
-
-The pool counters confirm the Rust-side bookkeeping:
-
-```text
-fresh_import_drop  imports=64 reused=0  acquired=64 released_to_pool=0  released_dropped=64
-bounded_pool       imports=4  reused=64 acquired=68 released_to_pool=68 released_dropped=0
-mixed_before_drop  imports=1  reused=0  acquired=1  released_to_pool=1  released_dropped=0
-```
+| Phase | Imports performed | RSS KiB (entry → exit) |
+| --- | ---: | --- |
+| Fresh import, then drop | 64 | 4,372,352 → 4,121,040 |
+| Bulk introspection | 0 | 3,662,176 → 3,662,224 |
+| Elaboration (256 ok, 256 fail) | 0 | 3,668,672 → 3,532,464 |
+| After drops + steady-state | n/a | 3,532,464 → 3,487,472 |
 
 Three attributable findings:
 
 - **Fresh imports drive growth.** Repeated `Lean.importModules` calls grow RSS even when every imported environment is
   dropped immediately.
-- **Reuse is flat.** Bulk introspection (512 calls), elaboration (512 calls), and bounded-pool reuse (64 acquires across
-  4 cached environments) add no measurable RSS.
-- **Drop does not return RSS to baseline.** Dropping the pool and session after the sweep does not reclaim the
-  imported-module residue.
+- **Reuse is flat.** Bulk introspection (512 calls) and elaboration (512 calls) in one warm session add no measurable
+  RSS.
+- **Drop does not return RSS to baseline.** Dropping the sessions after the sweep does not reclaim the imported-module
+  residue.
 
 ### What one extra *live* environment costs
 
@@ -357,9 +325,9 @@ each sampled after the same settling pause:
 
 | N | Arm | Imports | Live envs | Peak RSS |
 | ---: | --- | ---: | ---: | ---: |
-| 2 | truncated (capacity 0, stops at N acquires) | 2 | 1 | 1.650 GB |
-| 2 | pooled (capacity N) | 2 | 2 | 1.679 GB |
-| 2 | alternating (capacity 0, N·M acquires) | 8 | 1 | 8.824 GB |
+| 2 | truncated (drops each session, stops after N uses) | 2 | 1 | 1.650 GB |
+| 2 | pooled (holds all N sessions) | 2 | 2 | 1.679 GB |
+| 2 | alternating (drops each session, N·M uses) | 8 | 1 | 8.824 GB |
 | 4 | truncated | 4 | 1 | 4.043 GB |
 | 4 | pooled | 4 | 4 | 4.190 GB |
 | 4 | alternating | 16 | 1 | ~7.9 GB |
@@ -377,30 +345,29 @@ Open questions the reproducer does not answer: how the retained bytes split betw
 module state, compacted `.olean` regions, and mimalloc arena retention; how these fixture measurements generalize beyond
 the separately recorded downstream sample; cross-toolchain variation.
 
-## Recycling API
+## Recycling
 
-`SessionPool::drain()` is the shipped recycle surface. It drops every cached free-list environment, increments
-`PoolStats::{drains, drained}`, and leaves checked-out `PooledSession` values valid. It is useful at idle boundaries
-when a worker wants to release Rust-owned cached environments without discarding the pool object. It is *not* an RSS
-reset: the process-global Lean state in the retention model above remains live until the process exits.
+The same-process host has no recycle call. Dropping a `LeanSession` releases its reference to the environment, but the
+process-global Lean state in the retention model above stays live until the process exits. Cycle a worker child to reset
+it; see [Production hosting](../production-hosting.md).
 
 `LeanRuntime::recycle()` and `LeanCapabilities::reopen()` are not provided. The safe Rust lifetime model treats
-`LeanRuntime::init()` as a process-once anchor: every `Obj<'lean>`, `LeanSession<'lean, '_>`,
-`LeanCapabilities<'lean, '_>`, and `SessionPool<'lean>` value is tied to that borrow. An in-process recycle would have
-to prove that no Lean-derived value, cached symbol address, thread-local runtime attachment, task, initializer global,
-or persistent object from the old runtime can be observed after reinitialization; Lean's embedding surface provides no
-global stop-the-world / finalize / reinitialize contract strong enough to back that claim. Reopening capabilities was
-rejected for a separate reason: the measured growth is not attributable to loaded dylib handles or symbol-resolution
-caches.
+`LeanRuntime::init()` as a process-once anchor: every `Obj<'lean>`, `LeanSession<'lean, '_>`, and
+`LeanCapabilities<'lean, '_>` value is tied to that borrow. An in-process recycle would have to prove that no
+Lean-derived value, cached symbol address, thread-local runtime attachment, task, initializer global, or persistent
+object from the old runtime can be observed after reinitialization; Lean's embedding surface provides no global
+stop-the-world / finalize / reinitialize contract strong enough to back that claim. Reopening capabilities was rejected
+for a separate reason: the measured growth is not attributable to loaded dylib handles or symbol-resolution caches.
 
 ## Pooling and cycling
 
-[Production hosting](../production-hosting.md) owns pool sizing, residue/RSS limits, admission, retries, and typed
-resource failures. The [profiling guide](https://github.com/jcreinhold/lean-rs/blob/main/profiling/README.md) owns the
-bounded worker/pool reproducer commands and report fields. These controls act at lifecycle boundaries; they do not
-prevent a single import from overshooting a budget. `LEAN_RS_LEAN_MAX_MEMORY_KIB` changes Lean's process-global limit.
-An overrun can abort through an uncaught foreign exception, so it is a contained-process guardrail rather than a
-recoverable Rust error or reclamation API.
+[Production hosting](../production-hosting.md) owns warm-session capacity, residue and RSS limits, import admission,
+retries, and typed resource failures. The
+[profiling guide](https://github.com/jcreinhold/lean-rs/blob/main/profiling/README.md) owns the bounded worker
+reproducer commands and report fields. These controls act at lifecycle boundaries; they do not prevent a single import
+from overshooting a budget. `LEAN_RS_LEAN_MAX_MEMORY_KIB` changes Lean's process-global limit. An overrun can abort
+through an uncaught foreign exception, so it is a contained-process guardrail rather than a recoverable Rust error or
+reclamation API.
 
 ### Pooled worker sessions
 
@@ -413,15 +380,15 @@ A pooled environment is a snapshot of its import. Rebuilding `.olean` files does
 must track freshness for every retained profile and cycle the worker or select a different validated key when artifacts
 change. Reopening the same key alone does not promise a new import.
 
-A later import can register an environment extension and leave an older environment with a short `extensions` array.
-Both pools compare an epoch derived from public append-only registries before reuse and evict stale environments. The
-epoch includes persistent extensions, scoped extensions, and builtin attributes. This is a correctness boundary: reusing
-an environment across a registering import can otherwise cause Lean to index past its extension storage.
+A later import can register an environment extension and leave an older environment with a short `extensions` array. The
+child's session pool compares an epoch derived from public append-only registries before reuse and evicts stale
+environments. The epoch includes persistent extensions, scoped extensions, and builtin attributes. This is a correctness
+boundary: reusing an environment across a registering import can otherwise cause Lean to index past its extension
+storage.
 
 `stats.imports` counts imports rather than opens. Snapshot caches survive parking and clear when the corresponding
 session drops; cache identity includes mode. A failed open can leave the child sessionless while other parked sessions
-remain reusable. See [Worker session adapter](../architecture/worker-sessions.md) for the supported session
-operations and [Worker pool](../architecture/worker-pool.md) for lease and admission behavior.
+remain reusable. See [Worker session adapter](../architecture/worker-sessions.md) for the supported session operations.
 
 The retained-memory measurements above explain why pooling helps: an extra live environment cost 30–50 MB in the fixture
 sample, far less than the 0.8–1.0 GiB additional import residue in that run. These observations support reuse; they do
@@ -437,9 +404,10 @@ the same document.
 
 `envExtensionsRef` grows whenever an imported module's `initialize` block registers an environment extension, and every
 environment created before that point keeps a permanently short `extensions` array. This is a correctness hazard rather
-than a memory one, and both pools handle it by dropping the affected environments; see
-[Pooled worker sessions](#pooled-worker-sessions) for the mechanism and `LeanSession::extension_registry_epoch` for the
-primitive.
+than a memory one. The worker child's session pool handles it by dropping the affected environments; see
+[Pooled worker sessions](#pooled-worker-sessions) for the mechanism. A same-process caller that holds several sessions
+compares `LeanSession::extension_registry_epoch` with `LeanSession::live_extension_registry_epoch` before elaborating
+against an older one, and drops it when they differ.
 
 ### The attribute map (documented, not fixed)
 

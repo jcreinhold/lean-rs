@@ -7,9 +7,9 @@ operations; Lean's own task manager remains an implementation detail of those op
 
 `LeanRuntime` contains `PhantomData<*mut ()>` and is `!Send + !Sync`. Object handles carry a borrow of that runtime,
 directly or through `Obj<'lean>`, and inherit the restriction. It covers semantic handles, `LeanHost`,
-`LeanCapabilities`, `LeanSession`, `LeanEvidence`, `SessionPool`, `PooledSession`, and `LeanThreadGuard`. The
-[compile-fail suite](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs) pins the handle chain;
-no unsafe `Send` or `Sync` implementation relaxes it.
+`LeanCapabilities`, `LeanSession`, `LeanEvidence`, and `LeanThreadGuard`. The
+[compile-fail suite](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs)
+pins the handle chain; no unsafe `Send` or `Sync` implementation relaxes it.
 
 `LeanRuntime::init()` returns a process-lived borrow. The `'lean` parameter still records the dependency in every handle
 and prevents a value from escaping a shorter runtime view. A `'static` lifetime does not make a handle thread-safe.
@@ -51,15 +51,11 @@ run concurrently. Repository test runs default to one Lean task worker; see [tes
 The task manager and runtime live until process exit. `lean-rs` does not finalize or recycle them in-process. Lean
 `Task α` values are not a public Rust API; Rust-side scheduling uses Rust primitives.
 
-## Per-thread session pools
+## One host per thread
 
-`SessionPool` uses single-threaded interior mutability and retains environment handles on its owning thread. Reuse keys
-include the canonical Lake root, ordered imports, and import profile; the pool also rejects environments whose
-extension-registration stamp is stale. Import order is preserved because it affects Lean imports.
-
-Use one host/capability/session pool per Rust worker. Separate workers may execute against their own environments, but
-host import and source-processing paths that touch global Lean import/cache state share a process-local mutex. This is
-not a claim that all Lean operations serialize, nor does it serialize separate worker processes.
+Use one host, capability set and session per Rust thread. Separate threads may execute against their own environments,
+but host import and source-processing paths that touch global Lean import/cache state share a process-local mutex. This
+is not a claim that all Lean operations serialize, nor does it serialize separate worker processes.
 
 ## Async embedding
 
@@ -74,10 +70,9 @@ Submit a complete Lean job to a bounded blocking executor or dedicated worker th
 
 A Tokio `spawn_blocking` closure is one possible adapter. Do not use async-runtime worker start/stop hooks to attach
 blocking workers: those hooks do not establish the lifetime of each blocking task. A dedicated thread can keep its own
-host and session pool across many jobs; an arbitrary blocking-task scheduler must not migrate those values between
-threads.
+host and sessions across many jobs; an arbitrary blocking-task scheduler must not migrate those values between threads.
 
 `!Send` values cannot be retained across an `await` in a future that must be `Send`. Even on a local executor, keep the
 Lean operation synchronous and on its attached thread. Async cancellation does not pre-empt a running Lean call; see
-[cooperative cancellation](../same-process-controls.md#cancellation). Use the worker crates for process timeouts and fatal-exit
-containment.
+[cooperative cancellation](../same-process-controls.md#cancellation). Use the worker crates for process timeouts and
+fatal-exit containment.

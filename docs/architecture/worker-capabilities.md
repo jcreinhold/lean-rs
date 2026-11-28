@@ -1,29 +1,26 @@
-# Worker Capability Layer
+# Worker Capability Sessions
 
-The capability layer runs downstream commands while hiding child setup, IPC, timeouts, cancellation, diagnostics, and
-completion. Applications define command names and serde request, row, and terminal-summary types. They also own cache
-validity, persistence, indexing, and user-facing behavior.
-
-Use `LeanWorkerJsonCommand<Req, Resp>` and `LeanWorkerStreamingCommand<Req, Row, Summary>` through a capability or
-[pool lease](worker-pool.md). `run_data_stream` remains a lower-level option for fixtures and schema-less tools.
-Command-specific methods such as `extract`, `features`, `index`, or `probe` belong downstream.
+A worker session can load a downstream Lake capability beside the bundled host shims. The application names the Lake
+project, package, library and imports. It also owns what its exports mean, cache validity, persistence, indexing, and
+user-facing behavior. The worker runs host services in that session and calls the capability's metadata and doctor
+exports.
 
 ## Setup and deployment
 
-`LeanWorkerCapabilityBuilder` describes the capability Lake project, package, target, and imports. It resolves or builds
-the capability, resolves the worker child, checks startup, opens the import session, applies restart/timeout policy, and
-optionally validates capability metadata. Packaged applications should use the manifest-backed artifact path from the
-[loader contract](loading.md).
+`LeanWorkerSessionConfig::new(project_root, package, lib_name, imports)` describes a capability session for
+`LeanWorker::open_session`. The child asks Lake for the library with `lake --no-build query <lib>:shared` and builds
+nothing, so the application builds the capability first. Packaged applications use
+`LeanWorkerSessionConfig::manifest_backed`, which names the artifact manifest from the [loader contract](loading.md).
+`LeanWorkerHostHandleBuilder::shims_only` opens host sessions that load no capability.
 
 The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile paths, and the workspace development
 build. Applications ship an app-owned child binary. `LeanWorker` remains available for custom supervision, diagnostics,
-and focused lifecycle tests. `LeanWorkerCapabilityBuilder::check()` reports bootstrap readiness before body commands.
+and focused lifecycle tests. `LeanWorkerHostHandleBuilder::check()` reports bootstrap readiness before body commands.
 
 An application can set one UTF-8 value of up to 4096 bytes with `LeanWorkerChild::application_launch_input`. The
 supervisor supplies those same bytes in `LEAN_RS_WORKER_APPLICATION_INPUT` on every launch and removes the variable when
 omitted. The child interprets and validates the data. If the value identifies an external file, the application verifies
-its contents and keeps the file unchanged. A capability pool keeps different launch selections separate when application
-input is present.
+its contents and keeps the file unchanged.
 
 ## Import roots
 
@@ -33,11 +30,7 @@ The capability project owns its dylib and manifest. The project root a session o
 worker does not add the capability project's dependencies to that path. Capability exports must use the search path the
 host installs; calling `Lean.initSearchPath` or rebuilding it from `LEAN_PATH` would discard the selected roots.
 
-## Results and failures
-
-Streaming commands deliver typed rows live, diagnostics and progress on separate sinks, and terminal metadata on
-success. Typed row decode errors identify the command export, stream, and sequence. Rows remain tentative until terminal
-success; [streaming mechanics and measurements](worker-streaming.md) define that contract.
+## Deadlines
 
 Startup and request deadlines are separate. `LeanWorkerConfig::startup_timeout` covers the child handshake.
 `LeanWorkerConfig::request_timeout`, `LeanWorker::set_request_timeout`, and `LeanWorkerSession::set_request_timeout` set
@@ -55,6 +48,5 @@ Loaded host-runtime metadata is a third contract: it describes manifest-checked 
 before a body runs. It is documented with the [session adapter](worker-sessions.md#loaded-host-runtime-metadata). It is
 separate from capability version metadata and from evidence that a command executed.
 
-The [capability recipe](../recipes/worker-capability-runner.md) is the normal worked example. The
-[scale and replacement fixtures](../testing.md#worker-fixtures) exercise these generic primitives without adopting
-downstream schemas. Lean authors can use the [envelope helpers](worker-streaming.md#lean-envelope-helpers).
+The [worker fixtures](../testing.md#worker-fixtures) exercise these metadata and doctor calls without adopting
+downstream schemas.

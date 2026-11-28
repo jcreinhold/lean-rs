@@ -16,9 +16,9 @@ semantic facts, and Lean services must not depend on a Rust application's schedu
 | `lean-rs-sys` | Raw Lean C ABI declarations and inline mirrors. Public FFI types are opaque; layout representations remain crate-private. Its build script checks the active header digest and emits runtime link directives. |
 | `lean-rs-interop-shims` | Packaged Lean/C source for generic callback and worker-stream helpers, materialized into a caller-owned build root. |
 | `lean-rs` | Runtime and thread handles, object ownership, ABI conversion, library/module loading, checked typed exports, callbacks, and errors. |
-| `lean-rs-host` | Standard services: imports, sessions, elaboration, evidence, declaration/module queries, bounded `MetaM`, and same-process session pooling. Owns its Lean host-shim packages. |
+| `lean-rs-host` | Standard services: imports, sessions, elaboration, evidence, declaration/module queries, and bounded `MetaM`. Owns its Lean host-shim packages. |
 | `lean-rs-worker-protocol` | Framed parent/child messages and owned wire data; no Lean runtime link. |
-| `lean-rs-worker-parent` | Child supervision, deadlines, cycling, local pools, diagnostics, and typed command facades; no Lean runtime link. |
+| `lean-rs-worker-parent` | Child supervision, deadlines, cycling, worker sessions, and diagnostics; no Lean runtime link. |
 | `lean-rs-worker-child` | Lean-linked child runtime and worker executable. |
 
 The profiling harness is an unpublished workspace member; the ABI fuzz harness is a separate unpublished package. Public
@@ -31,18 +31,17 @@ Use the highest layer that fits the job:
 
 - `lean-rs` for custom same-process exports and callbacks;
 - `lean-rs-host` for common checked Lean services;
-- worker crates for fatal-exit containment, request watchdogs, process memory reset, or live row streams.
+- worker crates for fatal-exit containment, request watchdogs, or process memory reset.
 
-Downstream applications own their semantic commands and row schemas. The worker API is a supervised process service, not
-a remote mirror of every `LeanSession` operation. Its model is specified in
-[Worker runtime semantics](worker-runtime.md).
+Downstream applications own their exports and what they mean. The worker API is a supervised process service, not a
+remote mirror of every `LeanSession` operation. Its model is specified in [Worker runtime semantics](worker-runtime.md).
 
 ## Ownership and lifetime
 
 `Obj<'lean>` owns a Lean reference count and carries a lifetime tied to a `LeanRuntime` borrow. Semantic handles and
 host/session types propagate that lifetime. `LeanRuntime::init` initializes the process once and returns a static
-anchor; Lean-derived handles remain thread-confined. [Concurrency](concurrency.md) describes initialization and
-thread attachment, and the [safety model](safety.md) defines the unsafe obligations.
+anchor; Lean-derived handles remain thread-confined. [Concurrency](concurrency.md) describes initialization and thread
+attachment, and the [safety model](safety.md) defines the unsafe obligations.
 
 Dropping an object or session releases its owned references. It does not reset Lean's process-global imports,
 initializers, extension registries, or allocator state. Full-session workloads reuse environments and bound fresh
@@ -54,9 +53,9 @@ imports; process exit is the reset boundary. See [Production hosting](../product
 | Boundary | Hidden decisions |
 | --- | --- |
 | Safe runtime | Initialization order; scalar/heap tags; constructor layout; owned versus borrowed reference counts; object conversion; module initializer symbols; dynamic loader calls; callback context pointers and panic containment. |
-| Host services | Host-shim symbol binding and ABI; Lean monad/state plumbing; environment handles; batching; cache and same-process pool bookkeeping. |
+| Host services | Host-shim symbol binding and ABI; Lean monad/state plumbing; environment handles; batching; cache bookkeeping. |
 | Worker services | Child handles; request framing; generation and cleanup ownership; request interruption; bounded event buffers; replacement and admission policy. |
-| Build tooling | Toolchain discovery order; Lake artifact naming; content-addressed build reuse; artifact manifests; native command lifetimes. |
+| Build tooling | Toolchain discovery order; the Lake questions asked and how their answers are read; artifact manifests; native command lifetimes. |
 
 Public callers choose capabilities, imports, budgets, commands, and typed results. They should not need to reconstruct
 the hidden decisions to use an operation safely. Explicitly unsafe raw FFI remains available through `lean-rs-sys` for

@@ -1,8 +1,8 @@
 # Callbacks and interop shims
 
 `LeanCallbackHandle<P>` lets an explicit Lean export synchronously push a supported payload into Rust. `lean-rs` owns
-registration, payload decoding, the C trampoline, panic containment, and stale-handle detection. Worker parent callers
-use typed commands and row sinks; callbacks may implement the child-local mechanism.
+registration, payload decoding, the C trampoline, panic containment, and stale-handle detection. Callbacks never cross a
+process boundary: a worker parent receives progress through `LeanWorkerProgressSink` and results as typed replies.
 
 ## Registration and ABI
 
@@ -15,8 +15,8 @@ let (handle, trampoline) = callback.abi_parts();
 ```
 
 Lean receives the pair as opaque `USize` values and passes them to a payload-specific
-[`LeanRsInterop.Callback`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback.lean) helper. A small
-C helper linked into the shim invokes the shared private trampoline ABI:
+[`LeanRsInterop.Callback`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback.lean)
+helper. A small C helper linked into the shim invokes the shared private trampoline ABI:
 
 ```c
 uint8_t (*)(uintptr_t handle, uint8_t payload_tag,
@@ -40,8 +40,7 @@ pointer; payload helpers own the matching ABI shape.
 A single enum was rejected because every callback would receive variants it cannot use, making wrong payloads ordinary
 application branching. User-defined payload implementations were rejected because they would expose object lifetimes,
 reference counts, and trampoline safety to consumers. The sealed family keeps those obligations in `lean-rs`. Byte-array
-and arbitrary-object callbacks require a concrete same-process use case before adding ABI and ownership surface. Worker
-JSON rows already have their own transport and do not require a new callback payload.
+and arbitrary-object callbacks require a concrete same-process use case before adding ABI and ownership surface.
 
 See the [string streaming recipe](../recipes/downstream-interop.md#string-callbacks) for a downstream line protocol and
 [structured progress](../same-process-controls.md#progress) for the host interpretation of tick counters.
@@ -86,11 +85,14 @@ The trampoline catches unwinding Rust panics, records a bounded `LeanError` at `
 ## Implementation and checks
 
 The [registry](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/callback.rs),
-[C helpers](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/shims/lean-rs-interop-shims/c/interop_callback.c), and
-[Lean payload helpers](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback) implement the boundary.
-[`callback_registry.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/tests/callback_registry.rs) covers payload mismatch, clean stop, stale
-ids, owned strings, scoped progress, and contained panics;
-[`callback_trampoline.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/tests/callback_trampoline.rs) exercises the lower-level trampoline.
+[C helpers](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/shims/lean-rs-interop-shims/c/interop_callback.c),
+and
+[Lean payload helpers](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback)
+implement the boundary.
+[`callback_registry.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/tests/callback_registry.rs)
+covers payload mismatch, clean stop, stale ids, owned strings, scoped progress, and contained panics;
+[`callback_trampoline.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/tests/callback_trampoline.rs)
+exercises the lower-level trampoline.
 
 ## Generic shim package
 
@@ -101,13 +103,13 @@ without depending on theorem-prover services. Add helpers for a repeated ABI or 
 The canonical crate and Lean/C payload live in
 [`crates/lean-rs/shims/lean-rs-interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs/shims/lean-rs-interop-shims).
 `materialize_source_package` copies that payload into a caller-owned build root. The host carries a bundled copy in
-[`crates/lean-rs-host/shims/lean-rs-interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/shims/lean-rs-interop-shims) so its
-published package can prepare shims without locating another crate's source directory at runtime.
+[`crates/lean-rs-host/shims/lean-rs-interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/shims/lean-rs-interop-shims)
+so its published package can prepare shims without locating another crate's source directory at runtime.
 
 The Lean/C payload copies must be byte-identical, including modules the host does not import.
-[`interop_shims_parity`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/interop_shims_parity.rs) checks this. Edit the canonical
-payload and synchronize the bundled copy. Rust crate scaffolding (`Cargo.toml`, `src/`, README, and licenses) is
-intentionally excluded from payload parity.
+[`interop_shims_parity`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/interop_shims_parity.rs)
+checks this. Edit the canonical payload and synchronize the bundled copy. Rust crate scaffolding (`Cargo.toml`, `src/`,
+README, and licenses) is intentionally excluded from payload parity.
 
 | Module | Role |
 | --- | --- |
@@ -115,8 +117,6 @@ intentionally excluded from payload parity.
 | `LeanRsInterop.Callback.String` | Borrowed Lean string callbacks copied to Rust |
 | `LeanRsInterop.Callback` | Imports both callback helper namespaces |
 | `LeanRsInterop.Worker.Stream` | Worker row/diagnostic/terminal envelope helpers |
-
-The worker helper contract lives in [Lean envelope helpers](worker-streaming.md#lean-envelope-helpers).
 
 ```lean
 LeanRsInterop.Callback.Tick.call : USize -> USize -> UInt64 -> UInt64 -> BaseIO UInt8
@@ -129,11 +129,11 @@ The first two values are the opaque registration id and crate-owned trampoline. 
 `lean_rs_interop_tick_callback_call` and `lean_rs_interop_string_callback_call` invoke it with the matching payload and
 return its status. Lean helpers stop on nonzero status, subject to the lifetime and panic rules above.
 
-The host's `lean_rs_interop_test_callback_loop` export uses the same generic tick C helper. Its shared facet
-compiles the bundled helper source instead of defining a second callback ABI.
+The host's `lean_rs_interop_test_callback_loop` export uses the same generic tick C helper. Its shared facet compiles
+the bundled helper source instead of defining a second callback ABI.
 
 [`fixtures/interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims) and the
-[`interop_callback`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/examples/interop_callback.rs) example
-check addition, ticks, and strings without host sessions. Build with `lean_toolchain::build_lake_target`; the
-[build contract](build-and-link.md) owns Lake target resolution. Interop changes also need host progress,
-payload parity, API review, and the relevant checks in [release](../release.md).
+[`interop_callback`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/examples/interop_callback.rs)
+example check addition, ticks, and strings without host sessions. Build with `lean_toolchain::build_lake_target`; the
+[build contract](build-and-link.md) owns Lake target resolution. Interop changes also need host progress, payload
+parity, API review, and the relevant checks in [release](../release.md).

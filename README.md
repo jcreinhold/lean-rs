@@ -51,7 +51,7 @@ All published crates share the workspace version; dependency examples use `"0.12
 | --- | --- |
 | Call typed Lean exports, load modules, or receive callbacks in one process | [`lean-rs`](crates/lean-rs/README.md) |
 | Use imports, elaboration, kernel checks, declaration queries, or bounded `MetaM` | [`lean-rs-host`](crates/lean-rs-host/README.md) |
-| Supervise child processes, pool sessions, or receive typed row streams | [`lean-rs-worker-parent`](crates/lean-rs-worker-parent/README.md) |
+| Run host services in supervised child processes that keep warm sessions | [`lean-rs-worker-parent`](crates/lean-rs-worker-parent/README.md) |
 | Build the Lean-linked worker binary | [`lean-rs-worker-child`](crates/lean-rs-worker-child/README.md) |
 | Implement a worker protocol peer | [`lean-rs-worker-protocol`](crates/lean-rs-worker-protocol/README.md) |
 | Discover toolchains or build and package Lean capabilities | [`lean-toolchain`](crates/lean-toolchain/README.md) |
@@ -60,11 +60,11 @@ All published crates share the workspace version; dependency examples use `"0.12
 | Call raw Lean C symbols with explicit unsafe obligations | [`lean-rs-sys`](crates/lean-rs-sys/README.md) |
 
 The safe layers hide Lean object layout, reference counting, and raw dispatch. Checked export lookup relies on trusted
-ABI metadata; arbitrary symbol lookup remains explicitly unsafe. The
-[safety model](docs/architecture/safety.md) records the required guarantees and current boundary gaps; Lean
-remains responsible for semantic correctness. Resource exhaustion and fatal Lean exits require a process boundary. Read
-the [architecture map](docs/architecture/README.md), [charter](docs/architecture/charter.md), and
-[safety model](docs/architecture/safety.md) before changing these boundaries.
+ABI metadata; arbitrary symbol lookup remains explicitly unsafe. The [safety model](docs/architecture/safety.md) records
+the required guarantees and current boundary gaps; Lean remains responsible for semantic correctness. Resource
+exhaustion and fatal Lean exits require a process boundary. Read the [architecture map](docs/architecture/README.md),
+[charter](docs/architecture/charter.md), and [safety model](docs/architecture/safety.md) before changing these
+boundaries.
 
 ## Documentation and examples
 
@@ -74,9 +74,7 @@ The [documentation index](docs/SUMMARY.md) is the complete reading map; the same
 | Task | Guide or example |
 | --- | --- |
 | Receive Lean-to-Rust callbacks | [Downstream interop](docs/recipes/downstream-interop.md) |
-| Run typed commands with live rows, diagnostics, and deadlines | [Worker capability runner](docs/recipes/worker-capability-runner.md) |
-| Work with raw worker requests and frames | [Worker transport](docs/recipes/worker-capability-runner.md#wire-and-raw-rows) |
-| Inspect scale probes | [Scale fixtures](docs/testing.md#worker-fixtures) |
+| Run host services in a supervised worker process | [Worker sessions](docs/architecture/worker-sessions.md) |
 | Diagnose a failure | [Diagnostics](docs/diagnostics.md); start with `RUST_LOG=lean_rs=debug` |
 | Measure performance or memory | [Performance](docs/performance.md) and [retention measurements](docs/safety/long-session-memory.md) |
 

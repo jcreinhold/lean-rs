@@ -2,14 +2,13 @@
 
 Use `lean-rs` directly for trusted Lean extensions that call Rust before a Lean export returns. For ordinary
 Rust-to-Lean calls, prefer the manifest-backed [shipped-crate recipe](ship-crate-with-lean.md). For process isolation,
-timeouts, cycling, and typed rows, use the [worker capability runner](worker-capability-runner.md).
+timeouts, and cycling, run the work in a [worker session](../architecture/worker-sessions.md).
 
-The in-tree `interop_callback` and `string_streaming` examples open a prepared pair of images under their
-fixture's reader guards and image checks. Their Lean sources are the generic interop shim and the
-[consumer fixture](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims).
-The fixture's Lake dependency points at the repository's bundled shim copy; a published consumer should materialize the
-package from `lean-rs-interop-shims` as described in the
-[generic shim contract](../architecture/callbacks.md#generic-shim-package).
+The in-tree `interop_callback` and `string_streaming` examples open a prepared pair of images under their fixture's
+reader guards and image checks. Their Lean sources are the generic interop shim and the
+[consumer fixture](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims). The fixture's Lake
+dependency points at the repository's bundled shim copy; a published consumer should materialize the package from
+`lean-rs-interop-shims` as described in the [generic shim contract](../architecture/callbacks.md#generic-shim-package).
 
 ## Build and load
 
@@ -37,8 +36,8 @@ let bundle = unsafe {
 let module = bundle.initialize_module("my_package", "MyCapability")?;
 ```
 
-Here the environment variables are compile-time outputs supplied by the consumer's build script. The full examples
-admit their fixture paths before opening the bundle.
+Here the environment variables are compile-time outputs supplied by the consumer's build script. The full examples admit
+their fixture paths before opening the bundle.
 
 ## Call Lean
 
@@ -62,8 +61,8 @@ let answer = unsafe { add.call(20, 22) }?;
 ```
 
 The sealed C representations limit the slot types. The application establishes the actual symbol contract. Use
-`CargoLeanCapability::export_signature` and `LeanCapability::exported` for manifest-checked dispatch when the crate
-owns that contract.
+`CargoLeanCapability::export_signature` and `LeanCapability::exported` for manifest-checked dispatch when the crate owns
+that contract.
 
 ## Receive progress callbacks
 
@@ -133,4 +132,4 @@ borrowed Lean string into an owned Rust `String` before invoking the callback. N
 
 The example treats JSONL-like text as strings; it defines no row schema or transport. Payloads are sealed:
 `LeanProgressTick` carries counters, while `LeanStringEvent` carries one string. Host progress maps the counters into
-`LeanProgressEvent`; worker streaming adds its own validated envelopes and IPC above string callbacks.
+`LeanProgressEvent`.

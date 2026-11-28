@@ -2,13 +2,12 @@
 
 Use `lean-rs-host` for same-process Lean services. Use worker children to survive fatal Lean failures, enforce request
 deadlines, or reset process-global memory. The child runs `lean-rs-host`; the parent owns supervision, framed IPC,
-cancellation, timeouts, streaming, restart policy, and diagnostics. Lean handles and callback registrations stay in the
-child; the parent receives owned, serializable values.
+cancellation, timeouts, restart policy, and diagnostics. Lean handles and callback registrations stay in the child; the
+parent receives owned, serializable values.
 
-Each child processes requests serially. The local pool provides synchronous leases with bounded admission waits. See
-[runtime semantics](worker-runtime.md) for lifecycle rules, the
-[session adapter](worker-sessions.md) for host operations, and the
-[capability recipe](../recipes/worker-capability-runner.md) for downstream commands.
+Each child processes requests serially. See [runtime semantics](worker-runtime.md) for lifecycle rules, the
+[session adapter](worker-sessions.md) for host operations, and [worker capabilities](worker-capabilities.md) for
+downstream exports.
 
 ## Failure channels
 
@@ -26,15 +25,15 @@ exception crossing a non-unwinding C ABI. Lean has several panic mechanisms: run
 
 After such a failure, Rust cannot establish which owned ABI arguments Lean consumed, whether reference counts remain
 valid, or whether global initializer, import, task-manager, and allocator state is consistent. The process-lived `'lean`
-anchor also cannot invalidate every existing handle and then start a new runtime. Neither session poisoning nor
-`SessionPool::drain()` proves recovery. Draining only releases normal cached references; see
+anchor also cannot invalidate every existing handle and then start a new runtime. Session poisoning does not prove
+recovery, and dropping sessions only releases normal cached references; see
 [long-session memory](../safety/long-session-memory.md).
 
 ## Memory reset
 
-Dropping sessions or calling `SessionPool::drain()` releases Rust-owned environment references. Lean may retain memory
-in imported modules, compacted regions, interned names, allocator state, and other process-global structures. Only
-process exit resets that state; see the [recorded memory investigation](../safety/long-session-memory.md).
+Dropping sessions releases Rust-owned environment references. Lean may retain memory in imported modules, compacted
+regions, interned names, allocator state, and other process-global structures. Only process exit resets that state; see
+the [recorded memory investigation](../safety/long-session-memory.md).
 
 Worker policies can cycle a child on request count, import-like request count, idle time, sampled RSS, explicit request,
 or in-flight cancellation. RSS sampling is best effort. Cleanup must confirm the owned child has exited before a
@@ -42,7 +41,8 @@ replacement can be treated as usable; an unconfirmed replacement retains its own
 
 ## Worker panic defaults
 
-[`LeanWorkerConfig`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-parent/src/supervisor.rs) supplies two child environment defaults:
+[`LeanWorkerConfig`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-parent/src/supervisor.rs)
+supplies two child environment defaults:
 
 - `LEAN_ABORT_ON_PANIC=1` makes Lean internal panics terminate rather than return inhabited default values that could be
   mistaken for real query results.
@@ -55,10 +55,11 @@ uses. The panic message still goes to captured child stderr. In-process applicat
 
 ## Prompt fatal-exit detection
 
-On Unix, [`run_worker_child_stdio`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-child/src/child.rs) installs a `SIGABRT` handler that
-writes a short marker and calls `_exit(134)`. It also sets `RLIMIT_CORE=0` and, on Linux, `PR_SET_DUMPABLE=0` as
-fallback measures. This policy travels with downstream child binaries using the same entry point, independently of their
-supervisor.
+On Unix,
+[`run_worker_child_stdio`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-child/src/child.rs)
+installs a `SIGABRT` handler that writes a short marker and calls `_exit(134)`. It also sets `RLIMIT_CORE=0` and, on
+Linux, `PR_SET_DUMPABLE=0` as fallback measures. This policy travels with downstream child binaries using the same entry
+point, independently of their supervisor.
 
 The reason is operationally specific. Pipe-based Linux `core_pattern` handlers can keep a dying child's IPC descriptors
 open while draining its core image. Recorded runner delays were roughly 30–110 seconds, enough to race the supervisor's
@@ -68,8 +69,10 @@ stderr are the supported diagnostics; worker children do not promise core files.
 
 [`protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-child/tests/protocol.rs)
 runs a Lean panic after partial rows and requires fatal-exit detection within 10 seconds. The fixture export is
-[`lean_rs_fixture_panic_unit`](https://github.com/jcreinhold/lean-rs/blob/main/fixtures/lean/LeanRsFixture/Effects.lean). These are ordinary worker containment
-tests; the [sanitizer workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/sanitizer.yml) does not ASan-instrument in-process Lean tests.
+[`lean_rs_fixture_panic_unit`](https://github.com/jcreinhold/lean-rs/blob/main/fixtures/lean/LeanRsFixture/Effects.lean).
+These are ordinary worker containment tests; the
+[sanitizer workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/sanitizer.yml) does not
+ASan-instrument in-process Lean tests.
 
 ## Read-only queries and degraded results
 
@@ -83,8 +86,8 @@ renderer does not catch that panic. The safeguards have distinct responsibilitie
 3. For supported read-only verify and batched-query operations, the supervisor catches a fatal child exit, restarts the
    child, and returns an unavailable/`BudgetExceeded` result. Other errors and a failed restart still propagate.
 
-The exact policies live in [module-query projection](module-queries.md). They prevent or classify failures at
-the layer that has the needed information; they do not make an interrupted Lean process reusable.
+The exact policies live in [module-query projection](module-queries.md). They prevent or classify failures at the layer
+that has the needed information; they do not make an interrupted Lean process reusable.
 
 An ambiguous name alone is not evidence of this panic. The
 [`verify_declaration_ambiguous_open_reference_does_not_restart_child`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-child/tests/typed_session.rs)

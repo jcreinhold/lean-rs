@@ -74,34 +74,28 @@ protection against arbitrary same-user writes. The opt-in covers only ordinary s
 
 ## Interop checks
 
-For changes to callback, progress, or worker streaming contracts, run these targeted checks in addition to the workspace
-gates:
+For changes to callback or progress contracts, run these targeted checks in addition to the workspace gates:
 
 ```sh
 cargo nextest run -p lean-rs --test callback_trampoline --test callback_registry --test string_callback_abi
 cargo nextest run -p lean-rs-host --test progress
-cargo nextest run -p lean-rs-worker-child --test streaming_runner --test typed_command
 cargo run -p lean-rs --example interop_callback
 cargo run -p lean-rs --example string_streaming
 cargo build -p lean-rs-host --example progress
-cargo run -p lean-rs-worker-child --example worker_capability_runner
 ```
 
 The progress example accepts an application-admitted session. Its build checks the example API; the host progress test
 above exercises runtime callbacks. The executable examples need their Lake fixtures built; see the
-[interop](recipes/downstream-interop.md) and [worker](recipes/worker-capability-runner.md) recipes. For
-performance-sensitive changes, compare saved baselines on the same toolchain and machine:
+[interop recipe](recipes/downstream-interop.md). For performance-sensitive changes, compare saved baselines on the same
+toolchain and machine:
 
 ```sh
 cargo bench -p lean-rs-host --bench session -- host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline <saved-baseline>
-cargo bench -p lean-rs-worker-child --bench row_payload -- --baseline <saved-baseline>
-cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 10
 ```
 
-The worker-capability benchmark is an operational measurement, not a saved-baseline comparison. Record the command,
-revision, workload, and results using the [performance guide](performance.md). Sanitizer coverage is narrower: the
-current workflow runs Miri on pure-Rust sys helpers and ASan on Rust-only toolchain helpers; it does not instrument the
-Lean runtime or establish callback/worker safety by itself.
+Record the command, revision, workload, and results using the [performance guide](performance.md). Sanitizer coverage is
+narrower: the current workflow runs Miri on pure-Rust sys helpers and ASan on Rust-only toolchain helpers; it does not
+instrument the Lean runtime or establish callback/worker safety by itself.
 
 ## Optional dry run
 

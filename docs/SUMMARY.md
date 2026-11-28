@@ -6,7 +6,6 @@
 
 - [Ship a crate with Lean](recipes/ship-crate-with-lean.md)
 - [Exports and callbacks](recipes/downstream-interop.md)
-- [Worker commands and raw transport](recipes/worker-capability-runner.md)
 - [Production hosting](production-hosting.md)
 - [Diagnostics](diagnostics.md)
 
@@ -37,8 +36,6 @@
 - [Worker processes](architecture/worker-processes.md)
 - [Worker capabilities](architecture/worker-capabilities.md)
 - [Worker sessions](architecture/worker-sessions.md)
-- [Worker streaming](architecture/worker-streaming.md)
-- [Worker pool](architecture/worker-pool.md)
 - [Worker runtime](architecture/worker-runtime.md)
 
 # Verification and maintenance

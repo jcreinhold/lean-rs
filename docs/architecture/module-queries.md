@@ -177,9 +177,9 @@ cache RSS guard. Leave it unset or zero to disable it; choose a ceiling above th
 ## Reusing module headers after edits
 
 Each live session keeps at most one reusable header environment, separate from disposable body snapshots. A global
-eight-entry least-recently-used bound also limits retention for direct host callers outside the worker pool. Clearing
-snapshots because of TTL, size, or RSS no longer forces another header import. Cached queries, uncached queries, proof
-attempts, and verification use the same header resolver. Reuse never substitutes the old body's final environment.
+eight-entry least-recently-used bound also limits retention for direct same-process host callers. Clearing snapshots
+because of TTL, size, or RSS no longer forces another header import. Cached queries, uncached queries, proof attempts,
+and verification use the same header resolver. Reuse never substitutes the old body's final environment.
 
 Reuse requires the same input environment object, exact header text, file label, heartbeat setting, and complete Lean
 option map. Exact text preserves import order, `public import`, `import all`, and source positions. Changing any of

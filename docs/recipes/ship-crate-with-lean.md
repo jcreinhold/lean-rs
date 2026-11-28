@@ -98,30 +98,28 @@ for the host shims. The authority returns the project's roots from `project_impo
 and `imports` accepts only that list followed by the shim roots.
 [Worker entrypoint](https://github.com/jcreinhold/lean-rs/blob/main/templates/shipped-lean-crate/src/bin/shipped_lean_crate_worker.rs)
 
-Point the builder at that binary and the same manifest:
+Point a host handle at that binary and the project's Lake root:
 
 ```rust,ignore
-let spec = lean_rs::LeanBuiltCapability::manifest_path(
-    env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
-)
-.manifest_env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST");
-let builder = lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability(
-    &spec,
-    ["MyCapability"],
-)?
-.worker_child(
-    lean_rs_worker_parent::LeanWorkerChild::sibling("my_app_lean_worker")
-        .env_override("MY_APP_LEAN_WORKER"),
-);
+let lean_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lean");
+let builder = lean_rs_worker_parent::LeanWorkerHostHandleBuilder::shims_only(lean_root, ["MyCapability"])
+    .worker_child(
+        lean_rs_worker_parent::LeanWorkerChild::sibling("my_app_lean_worker")
+            .env_override("MY_APP_LEAN_WORKER"),
+    );
 let report = builder.check();
 if let Some(first) = report.first_error() {
     return Err(format!("worker bootstrap check failed: {}", first.message()).into());
 }
-let mut capability = builder.open()?;
+let mut host = builder.open()?;
+let session = host.open_session(None, None)?;
 ```
 
-The active bootstrap probe checks the child, artifacts, handshake, import session, and any metadata expectation. See the
-[worker runner](worker-capability-runner.md) for command signatures, typed rows, diagnostics, and lifecycle behavior.
+`check` resolves the child, completes the handshake, and opens a session, so a bad deployment fails before the first
+real request. The handle runs host services over the project's modules. To call the capability's own metadata and doctor
+exports, open a `LeanWorker` session with `LeanWorkerSessionConfig::manifest_backed`, which names the same manifest. See
+[worker capability sessions](../architecture/worker-capabilities.md) for those calls and
+[worker sessions](../architecture/worker-sessions.md) for diagnostics and lifecycle behavior.
 
 ## Publish the source package
 

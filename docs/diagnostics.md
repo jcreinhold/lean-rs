@@ -1,10 +1,10 @@
 # Diagnostics and Observability
 
-`lean-rs` and `lean-rs-host` classify recoverable errors with [`LeanDiagnosticCode`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/error/mod.rs)
-and emit `tracing` events against the `lean_rs` target. Branch on `err.code()` for a stable failure family; internal
-stage tags can grow. Worker process outcomes use the separate `LeanWorkerError` surface. Lean runtime panics can
-terminate a process and are not recoverable session errors; see
-[panic containment](architecture/worker-processes.md).
+`lean-rs` and `lean-rs-host` classify recoverable errors with
+[`LeanDiagnosticCode`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/error/mod.rs) and emit
+`tracing` events against the `lean_rs` target. Branch on `err.code()` for a stable failure family; internal stage tags
+can grow. Worker process outcomes use the separate `LeanWorkerError` surface. Lean runtime panics can terminate a
+process and are not recoverable session errors; see [panic containment](architecture/worker-processes.md).
 
 ## Diagnostic codes
 
@@ -66,7 +66,8 @@ if let Some(check) = report.first_error() {
 
 `LeanCapability::from_build_manifest` also uses preflight when it can explain a load failure. Its broad error remains
 `ModuleInit`; the message includes the loader code and repair hint. The source catalogue is
-[`loader.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/loader.rs). All identifiers below start with `lean_rs.loader.`.
+[`loader.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/loader.rs). All identifiers
+below start with `lean_rs.loader.`.
 
 | Code | Identifier suffix | Repair |
 | --- | --- | --- |
@@ -86,8 +87,8 @@ rather than requiring users to set `LD_LIBRARY_PATH` or `DYLD_*`.
 
 ## Worker bootstrap and checked commands
 
-`LeanWorkerCapabilityBuilder::check()` validates the child executable, capability preflight, handshake, import session,
-and optional metadata expectation:
+`LeanWorkerHostHandleBuilder::check()` validates the child executable, the protocol handshake, and a shims-only session
+open:
 
 ```rust
 let report = builder.check();
@@ -103,14 +104,11 @@ The returned `LeanWorkerBootstrapReport` uses these identifiers with prefix `lea
 | `WorkerChildUnresolved` | `child_unresolved` | Ship or locate the app-owned worker binary. |
 | `WorkerChildNotExecutable` | `child_not_executable` | Build/package the child with executable permissions. |
 | `WorkerHandshakeFailed` | `handshake_failed` | Use a compatible child calling `run_worker_child_stdio()`. |
-| `CapabilityMetadataMismatch` | `metadata_mismatch` | Select the intended capability package/metadata. |
 | `WorkerStartupFailed` | `startup_failed` | Inspect the bounded startup message in the deployment environment. |
 
-`CapabilityPreflight { code }` carries the corresponding `lean_rs.loader.*` identifier instead. Worker command lookup
-uses `lean_rs.worker.checked_binding` when manifest identity, export metadata, or the trusted signature is missing or
-mismatched. The message names the export and shape, such as metadata/JSON `String -> IO String` or streaming
-`String, USize, USize -> IO UInt8`. Rebuild with `CargoLeanCapability::export_signature(...)` or the builder's command
-helpers; the check fails before invoking the export.
+Worker export lookup uses `lean_rs.worker.checked_binding` when manifest identity, export metadata, or the trusted
+signature is missing or mismatched. The message names the export and shape, such as metadata `String -> IO String`.
+Rebuild with `CargoLeanCapability::export_signature(...)`; the check fails before invoking the export.
 
 `lean-toolchain::LinkDiagnostics` is a separate build-script enum for discovery, unsupported toolchains, missing Lake or
 targets, build failure, and unresolved outputs. It renders as one line suitable for an error or `cargo:warning=`.
@@ -142,17 +140,13 @@ remain explicit. `ModuleQueryOutputBudgets` bounds rendered fields and total pro
 candidate. A parent timeout/cancellation returns `LeanWorkerError` and discards the child generation according to
 lifecycle policy. Earlier rows then do not constitute a committed `ProofAttemptResult`.
 
-## Streams and pool snapshots
+## Worker snapshots
 
-Process exit, request timeout, cancellation-triggered cycling, stale lease use, sink panic, and typed-row decode failure
-are worker outcomes. Use `LeanWorkerPoolSnapshot` and lease `snapshot()` to inspect active workers, warm leases, restart
-reasons, best-effort RSS, stream outcomes, rows, bytes, elapsed time, and backpressure counters. The queue-depth field
-is currently zero: admission is synchronous and bounded by `queue_wait_timeout`, without a request mailbox.
-
-Rows reach sinks before terminal success. An empty successful stream has a zero-row terminal summary. If a later request
-error occurs, delivered rows remain partial and tentative. Inspect `stream_failures`, `data_rows_delivered`,
-`data_row_payload_bytes`, and `backpressure_waits`/`backpressure_failures` alongside the returned error. Commit counts
-from a successful terminal summary, rather than from callbacks alone.
+Process exit, request timeout, cancellation-triggered cycling, and progress-sink panic are worker outcomes. Use
+`LeanWorker::lifecycle_snapshot` and `LeanWorker::stats` to inspect the child generation, restart reasons, best-effort
+RSS, retained import bytes, and replacement timings. Host services that return many rows, such as
+`list_declarations_strings`, receive them as row frames and return them only after terminal success; the stream, row,
+byte and backpressure counters in `LeanWorkerStats` count those frames.
 
 ## Callbacks and cancellation
 
@@ -168,9 +162,8 @@ from a successful terminal summary, rather than from callbacks alone.
 | `Stopped` | 4 | The callback requested a clean stop. |
 
 Progress sink panics become `LeanError::Host`, stage `CallbackPanic`, code `lean_rs.internal`. Cancellation is checked
-when Rust regains control; it cannot pre-empt an in-flight Lean call. See
-[callbacks](architecture/callbacks.md), [progress](same-process-controls.md#progress), and
-[cancellation](same-process-controls.md#cancellation).
+when Rust regains control; it cannot pre-empt an in-flight Lean call. See [callbacks](architecture/callbacks.md),
+[progress](same-process-controls.md#progress), and [cancellation](same-process-controls.md#cancellation).
 
 ## Tracing
 
@@ -206,9 +199,6 @@ and fields. `source_len` is bytes.
 | `lean_rs.host.session.run_meta` | debug | `service`, `heartbeats`, `diagnostic_byte_limit` |
 | `lean_rs.host.session.process_module_query_batch` | debug | Source/selector counts and output/Lean budgets |
 | `lean_rs.host.session.attempt_proof` | debug | Source/candidate counts and output/Lean budgets |
-| `lean_rs.host.pool.acquire` | debug | `imports_len` |
-| `lean_rs.host.pool.acquire.result` | debug | `hit` |
-| `lean_rs.host.pool.release` | trace | `kept` |
 
 ### Capturing diagnostics in tests
 

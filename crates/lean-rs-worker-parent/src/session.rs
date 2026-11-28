@@ -711,8 +711,8 @@ impl LeanWorkerSession<'_> {
     /// Run a generic doctor check from a downstream capability export.
     ///
     /// The Lean export must have ABI `String -> IO String`. Doctor diagnostics
-    /// are capability-layer facts; data rows remain reserved for downstream
-    /// streaming payloads.
+    /// are facts the capability reports about itself, separate from the
+    /// runtime metadata the worker records at handshake.
     ///
     /// # Errors
     ///

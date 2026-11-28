@@ -5,7 +5,7 @@ meaning; Rust owns the runtime bridge, error boundaries, scheduling, and packagi
 
 For a runnable project, start with [Ship a crate with Lean](recipes/ship-crate-with-lean.md). Use
 [Downstream interop](recipes/downstream-interop.md) for custom exports and callbacks, or
-[Worker capability runner](recipes/worker-capability-runner.md) for supervised commands and live rows.
+[Worker sessions](architecture/worker-sessions.md) for host services in a supervised process.
 [Production hosting](production-hosting.md) covers long-running services with bounded workers and warm sessions.
 
 For design work, use the [architecture map](architecture/) to find the owning contract. Start with the

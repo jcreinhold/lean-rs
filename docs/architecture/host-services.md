@@ -1,9 +1,8 @@
 # Standard Lean Service Layer
 
 `lean-rs-host` provides imports, declaration inspection and search, elaboration, kernel-checked evidence, bounded
-`MetaM`, module-query projections, proof attempts, cancellation, progress, and session reuse. It builds on the typed FFI
-in `lean-rs` and forbids unsafe Rust. Applications that only call explicit Lean `@[export]` functions can use `lean-rs`
-directly.
+`MetaM`, module-query projections, proof attempts, cancellation, and progress. It builds on the typed FFI in `lean-rs`
+and forbids unsafe Rust. Applications that only call explicit Lean `@[export]` functions can use `lean-rs` directly.
 
 The public API lives in the
 [crate root](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/lib.rs), public `host` modules, and
@@ -27,7 +26,7 @@ names.
 
 `LeanHost<'lean>` borrows the runtime. `LeanCapabilities<'lean, 'h>` borrows the host, and `LeanSession<'lean, 'c>`
 borrows capabilities while owning its imported environment. Semantic handles from `lean-rs` and `LeanEvidence<'lean>`
-retain the runtime lifetime. `PooledSession` additionally borrows its pool. The
+retain the runtime lifetime. The
 [compile-fail fixtures](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/tests/compile_fail) pin
 these lifetimes and the `!Send + !Sync` contract. All Lean work stays on the thread where the handles were constructed.
 
@@ -41,7 +40,6 @@ these lifetimes and the `!Send + !Sync` contract. All Lean work stays on the thr
 | `lean_rs_host::host::evidence` and root re-exports | Opaque checked evidence, outcome tags, and display summaries |
 | `lean_rs_host::meta` | Opt-in bounded `MetaM` services |
 | `lean_rs_host::host::process` | Module queries, selector batches, snapshot-cache policy, and proof-workflow projections |
-| Crate-root `SessionPool`, `PooledSession`, configuration and statistics | Per-thread environment reuse and memory-retention policy |
 
 `LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`, the runtime, and `LeanError` belong to `lean-rs`. Host methods
 reuse these types without re-exporting a parallel handle model. Low-level export dispatch and callback mechanisms remain
@@ -108,19 +106,6 @@ The current bounds are defined in
 Option setters saturate at their ceilings. Heartbeats bound Lean work that consumes them; they are not a wall-clock
 watchdog. `LeanElabOptions::lean_options` supplies typed project options for source processing, with the host heartbeat
 limit taking precedence over `maxHeartbeats`.
-
-## Pooling
-
-`SessionPool` caches environment references by canonical project root, ordered imports, import profile, and extension
-registry safety state. Import order is significant. The pool rewraps reusable environments under the supplied capability
-borrow rather than retaining old capability references. Acquiring and returning sessions is single-threaded.
-
-Capacity bounds cached entries; `SessionPoolMemoryPolicy` can additionally refuse a fresh cache-miss import after an
-import-count or RSS admission limit is reached. It does not impose an RSS-based release policy on warm entries. Pool
-statistics distinguish reuse, key misses, releases, and drains. `drain()` releases cached Rust-owned environment
-references and returns the number removed. Checked-out sessions stay valid and may return later. Draining does not reset
-Lean's process-global import/runtime state or promise reclaimed RSS; see
-[long-session memory](../safety/long-session-memory.md).
 
 ## Errors and implementation boundary
 

@@ -1,8 +1,8 @@
 # Architecture
 
-Start with the [charter](charter.md) for crate ownership and the [safety model](safety.md) for Rust boundary obligations.
-Then choose the contract for the change you are making. The filenames name topics; this page and the book sidebar
-provide the reading order.
+Start with the [charter](charter.md) for crate ownership and the [safety model](safety.md) for Rust boundary
+obligations. Then choose the contract for the change you are making. The filenames name topics; this page and the book
+sidebar provide the reading order.
 
 ## Runtime and FFI
 
@@ -30,9 +30,7 @@ provide the reading order.
 | --- | --- |
 | Choose isolation, classify fatal failures, or reset Lean memory | [Worker processes](worker-processes.md) |
 | Expose host operations, loaded metadata, or prepared host artifacts over IPC | [Worker sessions](worker-sessions.md) |
-| Configure a downstream command and its import workspace | [Worker capabilities](worker-capabilities.md) |
-| Deliver live rows, apply backpressure, or change framing | [Worker streaming](worker-streaming.md) |
-| Reuse workers, admit leases, or report pool statistics | [Worker pool](worker-pool.md) |
+| Load a downstream capability in a worker session | [Worker capabilities](worker-capabilities.md) |
 | Change generations, cleanup ownership, capacity, parent death, or restart semantics | [Worker runtime](worker-runtime.md) |
 
 The worker runtime is the lifecycle contract. The session, build, and loading pages own their boundary-specific details;

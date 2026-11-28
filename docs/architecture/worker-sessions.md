@@ -1,25 +1,24 @@
 # Worker Session Adapter
 
-`LeanWorker::open_session` returns a borrowing `LeanWorkerSession`. Configure it with a Lake project and imports,
-a manifest-backed capability, or `LeanWorkerSessionConfig::shims_only` for host services without a downstream
-capability. The child performs Lean work; the parent receives copied, serializable results.
+`LeanWorker::open_session` returns a borrowing `LeanWorkerSession`. Configure it with a Lake project and imports, a
+manifest-backed capability, or `LeanWorkerSessionConfig::shims_only` for host services without a downstream capability.
+The child performs Lean work; the parent receives copied, serializable results.
 
 The worker records the effective ordered search roots during the first observed import for an admitted host anchor.
-Before reusing a current or parked environment, it asks the same shim to compute the requested order under the
-current import admission. A changed order retires the child before the request body. A legacy shim can open fresh
-sessions. The ordered paths say where Lean searched. The application still owns stability of the files and of
-earlier module prefixes that could shadow them. Relative entries use the worker’s working directory
-at import and comparison time. Before each source grant, `WorkerAuthority::validate_source_context` receives
-the opened session context and its retained root order. Applications that require this observation can refuse a
-legacy session with no recorded order.
+Before reusing a current or parked environment, it asks the same shim to compute the requested order under the current
+import admission. A changed order retires the child before the request body. A legacy shim can open fresh sessions. The
+ordered paths say where Lean searched. The application still owns stability of the files and of earlier module prefixes
+that could shadow them. Relative entries use the worker’s working directory at import and comparison time. Before each
+source grant, `WorkerAuthority::validate_source_context` receives the opened session context and its retained root
+order. Applications that require this observation can refuse a legacy session with no recorded order.
 
 An application can select one native plugin in its unsafe import attestation. The application verifies the canonical
-image, explicit initializer, matching compiled modules and dependencies, and keeps them unchanged while the worker
-runs. It establishes the loader environment before executing the worker or its helpers. Ordinary requests supply only the
-existing import fields. Lean loads the plugin during the import transaction and can retain it if the import fails.
-The worker binds the policy on its first import attempt. Changing the image, initializer or presence of the plugin
-requires a fresh worker. Plugin-free imports continue to work with older shims. A plugin requires the versioned
-plugin entry and supports ordinary session import and path comparison.
+image, explicit initializer, matching compiled modules and dependencies, and keeps them unchanged while the worker runs.
+It establishes the loader environment before executing the worker or its helpers. Ordinary requests supply only the
+existing import fields. Lean loads the plugin during the import transaction and can retain it if the import fails. The
+worker binds the policy on its first import attempt. Changing the image, initializer or presence of the plugin requires
+a fresh worker. Plugin-free imports continue to work with older shims. A plugin requires the versioned plugin entry and
+supports ordinary session import and path comparison.
 
 ## Supported operations
 
@@ -32,13 +31,13 @@ The adapter exposes bounded service operations rather than runtime-bound handles
 | Declarations | `declaration_kinds`, `declaration_names`, `list_declarations_strings`, `describe`, `describe_bulk`, `search_declarations`, `declaration_type`, `inspect_declaration` |
 | Source queries | `process_module_query`, `process_module_query_batch`, `clear_module_snapshot_cache` |
 | Proof work | `attempt_proof`, `verify_declaration`, `verify_declaration_batch` |
-| Downstream capabilities | Typed JSON and streaming commands, capability metadata and doctor checks |
+| Downstream capabilities | `capability_metadata`, `capability_doctor` |
 | Loaded host contract | `host_runtime_metadata` |
 
 `LeanExpr`, `LeanEvidence`, `LeanDeclaration`, and `LeanName` handles remain inside the child. Meta operations return
 rendered values or booleans with structured status. Each meta pass, including notation-aware pretty-printing, has its
-own heartbeat limit. Only an unsupported pretty-printer falls back to raw rendering; a pretty-printer failure fails
-the whole call. Proof attempts use in-memory source overlays and never write source files.
+own heartbeat limit. Only an unsupported pretty-printer falls back to raw rendering; a pretty-printer failure fails the
+whole call. Proof attempts use in-memory source overlays and never write source files.
 
 `LeanWorkerDiagnostic` copies severity, message, file label, and available source positions. Ordinary source diagnostics
 use `original_source` and may carry `original_range`. Proof-overlay diagnostics use `synthetic_buffer`: their line and
@@ -104,7 +103,7 @@ child.
 
 New host operations need a process-safe result shape and explicit output/resource budgets. Runtime handles,
 cross-process callback handles, and arbitrary access to child-local `MetaM` state are outside this adapter. Downstream
-exports use the [capability layer](worker-capabilities.md).
+capability sessions and their metadata and doctor exports are in [worker capabilities](worker-capabilities.md).
 
 ## Loaded host-runtime metadata
 
@@ -115,17 +114,14 @@ optional absent symbols omitted. It reports the running child's compiled Lean ve
 Lean version read through the loaded `lean_rs_host_runtime_version` shim. This remains the cooperative library trust
 boundary, not a certificate against library substitution or hostile metaprograms.
 
-`LeanWorkerHostHandleBuilder::require_host_runtime`, `LeanWorkerCapabilityBuilder::require_host_runtime`, and
-`LeanWorkerSessionConfig::with_host_runtime_expectation` enforce
+`LeanWorkerHostHandleBuilder::require_host_runtime` and `LeanWorkerSessionConfig::with_host_runtime_expectation` enforce
 a required subset before exposing each host session, including session opens after an internal recycle.
-Capability builders also include the requirement in their pool reuse key, so an existing unguarded or differently
-constrained session cannot satisfy a newly required contract.
-`LeanWorkerHostHandle::set_host_runtime_expectation` installs a contract on a retained host handle
-without replacing its worker. It validates any cached actual metadata before changing the configuration. Extra
-compatible bindings do not invalidate the subset. The parent retains metadata only after successful validation and
-clears it before every new session open and shutdown/replacement attempt; old metadata never authorizes a new
-generation. Inspection itself does not consume the request-cycle budget. An old worker that lacks this extension cannot
-satisfy an opted-in requirement and receives no body command through that session.
+`LeanWorkerHostHandle::set_host_runtime_expectation` installs a contract on a retained host handle without replacing its
+worker. It validates any cached actual metadata before changing the configuration. Extra compatible bindings do not
+invalidate the subset. The parent retains metadata only after successful validation and clears it before every new
+session open and shutdown/replacement attempt; old metadata never authorizes a new generation. Inspection itself does
+not consume the request-cycle budget. An old worker that lacks this extension cannot satisfy an opted-in requirement and
+receives no body command through that session.
 
 An embedder may advertise its expected contract before opening a session. Actual loaded metadata exists only after a
 session has opened and must be bound to that owner/generation when projected into an execution receipt. It does not
@@ -134,23 +130,23 @@ prove a submitted command ran, a child exited, or a proof succeeded.
 ## Prepared host artifacts
 
 An application with an immutable prepared deployment can pass its descriptor through
-`LeanWorkerChild::prepared_host_artifacts` to an ordinary child running `run_worker_child_with_authority`.
-The child checks the bounded descriptor and named shim manifest, then uses those inputs for every host anchor in
-that generation. Only an omitted ordinary descriptor selects bundled shim discovery and preparation. An invalid
-explicit descriptor or a refused grant fails the operation. The application's `WorkerAuthority::host` must
-independently verify the exact manifest, images, initializers and ordered import paths. The launch-time byte comparison
-alone cannot establish immutability. Project manifest reads, native loads and imports still require their ordinary
-application grants.
+`LeanWorkerChild::prepared_host_artifacts` to an ordinary child running `run_worker_child_with_authority`. The child
+checks the bounded descriptor and named shim manifest, then uses those inputs for every host anchor in that generation.
+Only an omitted ordinary descriptor selects bundled shim discovery and preparation. An invalid explicit descriptor or a
+refused grant fails the operation. The application's `WorkerAuthority::host` must independently verify the exact
+manifest, images, initializers and ordered import paths. The launch-time byte comparison alone cannot establish
+immutability. Project manifest reads, native loads and imports still require their ordinary application grants.
 
 The child takes a project's import roots from `lake env`, dependencies first and the project last, once per host. An
-application that already asked Lake, for example a server that runs `lean_toolchain::LakeWorkspace::lean_path` when it
-starts a worker, returns those roots from `WorkerAuthority::project_import_roots`, and the child uses them as given and
-runs no Lake for them. Either way, `WorkerAuthority::imports` approves the ordered list. A capability session without a
-manifest asks Lake for its library with `lake --no-build query <lib>:shared`; the child never builds a project.
+application that already asked Lake, for example a server that runs the command from
+`lean_toolchain::LakeWorkspace::lean_path_command` under its own controls and reads it with `read_lean_path`, returns
+those roots from `WorkerAuthority::project_import_roots`, and the child uses them as given and runs no Lake for them.
+Either way, `WorkerAuthority::imports` approves the ordered list. A capability session without a manifest asks Lake for
+its library with `lake --no-build query <lib>:shared`; the child never builds a project.
 
 The worker binary has runtime-free preparation entries. `--lean-rs-ready-host-artifacts` runs `lake --no-build query`
-for the host and interop shim libraries and checks the exact manifest, without building, loading or publishing
-anything; Lake may still write its own files there. A stale library or a different manifest exits 75.
+for the host and interop shim libraries and checks the exact manifest, without building, loading or publishing anything;
+Lake may still write its own files there. A stale library or a different manifest exits 75.
 `--lean-rs-prepare-host-artifacts [DEST]` builds the shims and emits one bounded storage descriptor before any
 `LeanRuntime::init` or parent lifeline. Without `DEST` it builds the shims where Cargo unpacked `lean-rs-host`. With
 `DEST`, a directory that must not exist yet, it first writes the shim sources compiled into the worker there and builds
