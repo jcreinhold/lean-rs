@@ -32,9 +32,6 @@ use lean_rs_worker_parent::{
     LeanWorkerRendering, LeanWorkerSessionConfig, LeanWorkerSorryPolicy, LeanWorkerSourceCoordinateSpace,
 };
 
-#[path = "support/qualification_launch.rs"]
-mod qualification_launch;
-
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
 }
@@ -86,12 +83,8 @@ fn cache_worker_config() -> LeanWorkerConfig {
 }
 
 fn handles_session_config() -> LeanWorkerSessionConfig {
-    handles_session_at(fixture_root())
-}
-
-fn handles_session_at(root: PathBuf) -> LeanWorkerSessionConfig {
     LeanWorkerSessionConfig::new(
-        root,
+        fixture_root(),
         "lean_rs_fixture",
         "LeanRsFixture",
         ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"],
@@ -219,30 +212,12 @@ fn is_def_eq_recognises_equal_terms() {
     }
 }
 
-fn describe_fixture() -> (LeanWorkerConfig, LeanWorkerSessionConfig) {
-    let Some(selection) = option_env!("LEAN_RS_TEST_QUALIFIED_TYPED_SESSION") else {
-        ensure_fixture_built();
-        return (worker_config(), handles_session_config());
-    };
-    let q = qualification_launch::checked(selection);
-    (checked_worker_config(&q), handles_session_at(q.fixture))
-}
-
-fn checked_worker_config(q: &qualification_launch::Qualification) -> LeanWorkerConfig {
-    let prepared = serde_json::to_string(&q.prepared).expect("serialize prepared descriptor");
-    assert!(prepared.len() <= 64 * 1024, "prepared descriptor exceeds launch limit");
-    LeanWorkerConfig::new(&q.worker)
-        .checked_native_loader_environment()
-        .env("LEAN_SYSROOT", q.sysroot.as_os_str())
-        .env(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV, prepared)
-}
-
 #[test]
 fn describe_distinguishes_known_and_missing_declarations() {
-    let (config, session_config) = describe_fixture();
-    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let mut session = worker
-        .open_session(&session_config, None, None)
+        .open_session(&handles_session_config(), None, None)
         .expect("worker session opens");
 
     let row = session
