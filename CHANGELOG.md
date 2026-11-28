@@ -38,6 +38,8 @@ Breaking: upgrade the worker parent and worker child together.
 - A Unix worker child holds the read end of a pipe named by `LEAN_RS_WORKER_PARENT_LIFELINE` and exits with status 125
   when its parent dies, even inside a Lean call. Each child runs in its own process group and inherits the descriptors
   its parent leaves open without `FD_CLOEXEC`. `process_group::spawn_inheriting` is now public.
+- On Linux the child no longer sets `PR_SET_PDEATHSIG(SIGTERM)`. The lifeline covers parent death on every Unix, and
+  Linux sends that signal when the thread that started the child exits, even while the parent process lives.
 
 ### Release
 

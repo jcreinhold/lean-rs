@@ -228,9 +228,6 @@ fn host_import_profile(profile: LeanWorkerSessionImportProfile) -> LeanResult<Le
 
 pub(crate) fn run_stdio() -> ExitCode {
     install_immediate_abort_exit();
-    if install_parent_death_signal() {
-        return ExitCode::SUCCESS;
-    }
     match serve_stdio() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -327,41 +324,6 @@ fn install_immediate_abort_exit() {
 
 #[cfg(not(unix))]
 fn install_immediate_abort_exit() {}
-
-/// Ask Linux to terminate this child if its current parent process dies.
-///
-/// This is best-effort hardening around the portable protocol contract below:
-/// the child still exits deterministically when stdin reaches EOF or stdout
-/// writes fail. `PR_SET_PDEATHSIG` covers the narrower Linux case where a
-/// parent dies while inherited control file descriptors remain open.
-#[cfg(target_os = "linux")]
-#[allow(
-    unsafe_code,
-    reason = "installing a Linux parent-death signal requires libc prctl/getppid"
-)]
-fn install_parent_death_signal() -> bool {
-    // SAFETY: `prctl(PR_SET_PDEATHSIG, SIGTERM)` modifies only this process'
-    // parent-death setting. If the call fails, the portable pipe EOF/write
-    // failure paths below still provide the baseline contract.
-    let installed = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == 0 };
-
-    if installed {
-        // SAFETY: `getppid` is a pure process query. Checking for PID 1 closes
-        // the race where the original parent dies between `fork/exec` and the
-        // `prctl` call above.
-        let parent_pid = unsafe { libc::getppid() };
-        if parent_pid == 1 {
-            return true;
-        }
-    }
-
-    false
-}
-
-#[cfg(not(target_os = "linux"))]
-fn install_parent_death_signal() -> bool {
-    false
-}
 
 #[allow(
     clippy::significant_drop_tightening,
