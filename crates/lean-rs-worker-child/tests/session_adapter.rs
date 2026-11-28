@@ -54,7 +54,7 @@ fn worker_config() -> LeanWorkerConfig {
 #[test]
 fn ordinary_worker_refuses_invalid_prepared_shims_before_handshake() {
     let result = Command::new(worker_binary())
-        .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", "{}")
+        .env(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV, "{}")
         .output()
         .expect("run the ordinary worker");
     assert!(!result.status.success());
@@ -259,7 +259,7 @@ fn shims_only_session_opens_without_user_dylib() {
         let tracker = LeanWorkerProcessTracker::new();
         let config = LeanWorkerConfig::new(&selected.worker)
             .checked_native_loader_environment()
-            .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", prepared)
+            .env(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV, prepared)
             .process_tracker(tracker.clone());
         (selected.fixture.clone(), config, Some(tracker))
     } else {

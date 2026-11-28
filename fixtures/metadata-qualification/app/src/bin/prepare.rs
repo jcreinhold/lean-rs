@@ -115,7 +115,7 @@ fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result
 }
 
 fn selected_host_artifacts() -> Result<lean_rs_host::host::LeanPreparedHostArtifacts, Box<dyn std::error::Error>> {
-    let raw = env::var("LEAN_RS_PREPARED_HOST_ARTIFACTS")?;
+    let raw = env::var(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV)?;
     if raw.len() > 64 * 1024 {
         return Err("prepared descriptor exceeds limit".into());
     }

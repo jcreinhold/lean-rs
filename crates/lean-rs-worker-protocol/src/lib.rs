@@ -46,3 +46,25 @@ pub mod harness;
 
 /// Version of the `lean-rs-worker-protocol` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Environment variable that hands the application's launch input to a worker child.
+///
+/// The parent sets it from `LeanWorkerChild::application_launch_input` on every launch and
+/// removes any inherited value when the application gave none. The application's worker
+/// reads and checks it.
+pub const WORKER_APPLICATION_INPUT_ENV: &str = "LEAN_RS_WORKER_APPLICATION_INPUT";
+
+/// Environment variable that hands a worker child the JSON descriptor of its prepared
+/// host artifacts.
+///
+/// The parent removes any inherited value, so a descriptor reaches only the child whose
+/// own configuration carries it. A parent that starts other processes can remove it too.
+pub const PREPARED_HOST_ARTIFACTS_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
+
+/// Environment variable that names the inherited read end of a worker child's parent
+/// lifeline pipe.
+///
+/// The child exits when a read from that descriptor reaches end of file, which happens
+/// when the parent dies. A parent that starts other processes can remove it from their
+/// environment.
+pub const WORKER_PARENT_LIFELINE_ENV: &str = "LEAN_RS_WORKER_PARENT_LIFELINE";

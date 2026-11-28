@@ -1868,7 +1868,7 @@ impl LeanWorker {
             command.current_dir(current_dir);
         }
         // A prepared descriptor reaches this child only through its own configuration.
-        command.env_remove("LEAN_RS_PREPARED_HOST_ARTIFACTS");
+        command.env_remove(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV);
         for (key, value) in &config.env {
             command.env(key, value);
         }
@@ -1882,9 +1882,9 @@ impl LeanWorker {
         // Install this reserved value after inherited and explicit generic environment
         // choices, on the common path for both initial and replacement generations.
         if let Some(input) = &config.application_launch_input {
-            command.env("LEAN_RS_WORKER_APPLICATION_INPUT", input);
+            command.env(lean_rs_worker_protocol::WORKER_APPLICATION_INPUT_ENV, input);
         } else {
-            command.env_remove("LEAN_RS_WORKER_APPLICATION_INPUT");
+            command.env_remove(lean_rs_worker_protocol::WORKER_APPLICATION_INPUT_ENV);
         }
         // Its own process group keeps the worker and the processes it starts
         // apart from this process's terminal and its other children.

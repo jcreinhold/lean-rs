@@ -1121,7 +1121,7 @@ pub struct LeanWorkerLocalInfo {
     pub value: Option<LeanWorkerRenderedInfo>,
 }
 
-/// Source metadata for the declaration surrounding a proof-agent query.
+/// Source metadata for the declaration a query targets.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationTargetInfo {
     pub short_name: String,

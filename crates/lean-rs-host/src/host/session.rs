@@ -1552,10 +1552,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Parse and elaborate a Lean module once, returning several bounded
     /// projections keyed by selector id.
     ///
-    /// This is the proof-agent path: Lean owns header handling, one body
-    /// elaboration, info-tree traversal, and selector projection. Rust sends
-    /// a small selector array and receives per-selector outcomes; whole-file
-    /// info-tree arrays never cross the boundary.
+    /// Lean owns header handling, one body elaboration, info-tree traversal,
+    /// and selector projection. Rust sends a small selector array and
+    /// receives per-selector outcomes; whole-file info-tree arrays never
+    /// cross the boundary.
     ///
     /// The shim is optional. When the loaded capability dylib does not
     /// export `lean_rs_host_process_module_query_batch`, the method returns

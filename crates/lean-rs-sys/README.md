@@ -16,7 +16,8 @@ safe surface is missing a capability you need.
 
 ## Supported Lean window
 
-Currently **4.30.0 through 4.35.0**; the authoritative list lives in
+The [version matrix](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md) gives the supported
+releases; the authoritative list lives in
 [`crates/lean-rs-abi/src/supported.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs).
 The build script computes a SHA-256 digest over the discovered `lean.h` and accepts any digest matching an entry in the
 [`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) table.

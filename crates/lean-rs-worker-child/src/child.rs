@@ -332,8 +332,9 @@ fn install_immediate_abort_exit() {}
 fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(unix)]
     crate::parent_watchdog::install_parent_watchdog()?;
-    let mut prepared =
-        crate::host_artifacts::from_launch(std::env::var_os(crate::host_artifacts::PREPARED_ENV).as_deref())?;
+    let mut prepared = crate::host_artifacts::from_launch(
+        std::env::var_os(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV).as_deref(),
+    )?;
     let runtime = LeanRuntime::init()?;
     configure_lean_runtime_memory_limit_from_env();
     let stdin = std::io::stdin();

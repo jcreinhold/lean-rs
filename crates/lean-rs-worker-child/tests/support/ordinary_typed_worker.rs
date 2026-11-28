@@ -13,7 +13,7 @@ fn sealed_worker_config(selected: &OrdinaryTypedSelection) -> LeanWorkerConfig {
         .checked_native_loader_environment()
         .env("LEAN_SYSROOT", selected.sysroot.as_os_str())
         .env(
-            "LEAN_RS_PREPARED_HOST_ARTIFACTS",
+            lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV,
             serde_json::to_string(&selected.prepared).expect("prepared shim descriptor"),
         )
 }

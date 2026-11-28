@@ -326,7 +326,7 @@ impl<'lean> TryFromLean<'lean> for LocalInfo {
     }
 }
 
-/// Source metadata for the declaration surrounding a proof-agent query.
+/// Source metadata for the declaration a query targets.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationTargetInfo {
     pub short_name: String,

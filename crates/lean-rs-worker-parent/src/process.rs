@@ -5,9 +5,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-/// Names the inherited read end of a worker's parent lifeline pipe.
-const LIFELINE_ENV: &str = "LEAN_RS_WORKER_PARENT_LIFELINE";
-
 /// Observe all child generations created with one worker configuration.
 ///
 /// Counts decrease after `wait` or `try_wait` confirms exit. After its owner
@@ -80,14 +77,17 @@ fn spawn_with_lifeline(mut command: Command) -> io::Result<(Child, Option<io::Pi
     use std::os::fd::{AsFd as _, AsRawFd as _};
     let _serial = LIFELINE_SPAWN.lock().unwrap_or_else(PoisonError::into_inner);
     let (reader, writer) = io::pipe()?;
-    command.env(LIFELINE_ENV, reader.as_raw_fd().to_string());
+    command.env(
+        lean_rs_worker_protocol::WORKER_PARENT_LIFELINE_ENV,
+        reader.as_raw_fd().to_string(),
+    );
     let child = lean_toolchain::process_group::spawn_inheriting(command, &[reader.as_fd()])?;
     Ok((child, Some(writer)))
 }
 
 #[cfg(not(unix))]
 fn spawn_with_lifeline(mut command: Command) -> io::Result<(Child, Option<io::PipeWriter>)> {
-    command.env_remove(LIFELINE_ENV);
+    command.env_remove(lean_rs_worker_protocol::WORKER_PARENT_LIFELINE_ENV);
     Ok((command.spawn()?, None))
 }
 

@@ -13,7 +13,6 @@ use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
 const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 /// The only descriptor layout this child writes or reads.
 const DESCRIPTOR_PROTOCOL: u32 = 1;
-pub(crate) const PREPARED_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -99,7 +98,7 @@ fn descriptor_bytes(prepared: &LeanPreparedHostArtifacts) -> io::Result<Vec<u8>>
     Ok(bytes)
 }
 
-/// Parse the descriptor the parent passed in `LEAN_RS_PREPARED_HOST_ARTIFACTS`.
+/// Parse the descriptor the parent passed in [`lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV`].
 ///
 /// The named manifest must still hold the descriptor's bytes.
 pub(crate) fn from_launch(value: Option<&OsStr>) -> io::Result<Option<LeanPreparedHostArtifacts>> {

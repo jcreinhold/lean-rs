@@ -710,7 +710,7 @@ impl LeanWorkerHostHandle {
         })
     }
 
-    /// Install the broker's current contract for all subsequent session opens.
+    /// Require `expected` host runtime metadata for every later session open.
     /// A cached actual observation is checked before changing the configuration.
     ///
     /// # Errors
@@ -924,7 +924,7 @@ fn spawn_checked_worker(
                 message: "prepared host artifacts exceed the 64 KiB launch limit".to_owned(),
             });
         }
-        config = config.env("LEAN_RS_PREPARED_HOST_ARTIFACTS", encoded);
+        config = config.env(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV, encoded);
     }
     if let Some(tracker) = process_tracker {
         config = config.process_tracker(tracker);
@@ -1127,10 +1127,10 @@ impl LeanWorkerChild {
 
     /// Set an immutable application-defined UTF-8 value for this child and its replacements.
     ///
-    /// The child reads `LEAN_RS_WORKER_APPLICATION_INPUT`. The supervisor removes any
-    /// ambient value when the input is omitted. The application defines and validates
-    /// its contents. For an external file, the application can carry its locator and
-    /// expected digest here and retain custody itself.
+    /// The child reads it from [`lean_rs_worker_protocol::WORKER_APPLICATION_INPUT_ENV`].
+    /// The supervisor removes any ambient value when the input is omitted. The application
+    /// defines and validates its contents. For an external file, the application can carry
+    /// its locator and expected digest here and retain custody itself.
     ///
     /// # Errors
     /// Returns a setup error for an empty value, a NUL byte, or more than 4096 UTF-8 bytes.

@@ -1,9 +1,9 @@
 # Release checklist
 
 [`.github/workflows/release.yml`](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release.yml)
-publishes all nine crates when a `v<semver>` tag is pushed. It verifies the head Lean version on Ubuntu and macOS, checks
-public API baselines, packages and publishes crates in dependency order, and creates a GitHub Release from the matching
-`## [<version>]` changelog section.
+publishes all nine crates when a `v<semver>` tag is pushed. It verifies the head Lean version on Ubuntu and macOS,
+checks public API baselines, packages and publishes crates in dependency order, and creates a GitHub Release from the
+matching `## [<version>]` changelog section.
 
 The [version matrix](version-matrix.md) owns support claims; use the [bump procedure](bump-toolchain.md) when changing
 that window. A release that needs full-window evidence also needs CI's manual `full_matrix: true` run: the release
@@ -23,10 +23,10 @@ verification job tests only the head.
 
    The Python check packages the crates, verifies crate/template contents, then builds docs from unpacked packages with
    `DOCS_RS=1` and Lean tools hidden from `PATH`.
-3. Choose `X.Y.Z`: while the crates are 0.x, a breaking change bumps the minor version, anything else the patch
-   version. Move the unreleased changelog entries into `## [X.Y.Z]`. The heading must match tag `vX.Y.Z` exactly.
-4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`. A minor bump
-   also changes the `"0.Y"` dependency examples in `README.md` and the crate READMEs.
+3. Choose `X.Y.Z`: while the crates are 0.x, a breaking change bumps the minor version, anything else the patch version.
+   Move the unreleased changelog entries into `## [X.Y.Z]`. The heading must match tag `vX.Y.Z` exactly.
+4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`. A minor bump also
+   changes the `"0.Y"` dependency examples in `README.md` and the crate READMEs.
 5. Regenerate intentionally changed public API baselines using the pinned tools and procedure in
    [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` is
    published outside that loop.
@@ -60,10 +60,7 @@ cargo --config "patch.crates-io.lean-toolchain.path='$sdk/crates/lean-toolchain'
 ```
 
 This example patches one crate. When a change crosses the worker boundary, include each matching worker crate in the
-same override. Use the consumer's installed-worker test for changes to installation or process ownership. For example,
-lean-host-mcp is a separate consumer repository with such a test: in its checkout,
-`LEAN_RS_CHECKOUT="$sdk" scripts/test-installed-stdio.sh --all-targets` builds the shims, worker and host from
-the SDK checkout, restores the host lockfile on exit, and fails if Cargo kept a registry SDK crate. Review the
+same override. Use the consumer's installed-worker test for changes to installation or process ownership. Review the
 consumer's manifest and lockfile for local changes before staging the release.
 
 ## Local fixture setup
@@ -113,9 +110,9 @@ Dispatch the Release workflow with `dry_run: true` (the default). It runs verifi
 without uploading crates or creating a GitHub Release. Manual runs of Release cannot upload crates; use the tag for a
 live release.
 
-Cargo builds all nine publishable tarballs from a temporary registry. Sibling crates do not need to be published for this
-check, but external dependencies still have to resolve. A real release runs the same check before its first upload, then
-publishes crates in dependency order.
+Cargo builds all nine publishable tarballs from a temporary registry. Sibling crates do not need to be published for
+this check, but external dependencies still have to resolve. A real release runs the same check before its first upload,
+then publishes crates in dependency order.
 
 ## Tag and watch
 
@@ -145,10 +142,10 @@ exists. A live recovery requires the existing release tag to point to that commi
 verification gates; use it only for contents already verified for that release. Recovery defaults to `dry_run: true`,
 which builds the tarballs without uploading. Set it to `false` only when you intend to resume the upload.
 
-For example, `gh workflow run release-recover.yml --ref vX.Y.Z -f version=X.Y.Z -f dry_run=true` checks all nine packages
-at the original tag. The publish script checks that every publishable crate has the workspace version and uses the
-committed lockfile for crates.io. If Cargo times out waiting for the index after an upload, check the registry for that
-version before resuming. An indexing timeout can follow a successful upload.
+For example, `gh workflow run release-recover.yml --ref vX.Y.Z -f version=X.Y.Z -f dry_run=true` checks all nine
+packages at the original tag. The publish script checks that every publishable crate has the workspace version and uses
+the committed lockfile for crates.io. If Cargo times out waiting for the index after an upload, check the registry for
+that version before resuming. An indexing timeout can follow a successful upload.
 
 Keep published crate versions and their release tags fixed. If any workspace crate reached crates.io, resume the partial
 upload from the original commit, or use a new version for changed contents. Publish from a clean commit.

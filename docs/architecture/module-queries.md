@@ -22,9 +22,9 @@ Batch selectors additionally support proof states inside declarations, declarati
 and declaration outlines. Selector ids associate each result with its request. Proof attempts and explicit verification
 reuse the same module-processing infrastructure.
 
-Setup-aware declaration verification offers a compact batch entry point. It checks errors across the message log
-before projecting display evidence into the row budget. Oversized diagnostics can be skipped so a later diagnostic
-can still fit. Axiom coverage is complete only when `axiomsAvailable` is true and `axiomsTruncated` is false.
+Setup-aware declaration verification offers a compact batch entry point. It checks errors across the message log before
+projecting display evidence into the row budget. Oversized diagnostics can be skipped so a later diagnostic can still
+fit. Axiom coverage is complete only when `axiomsAvailable` is true and `axiomsTruncated` is false.
 
 ## Outcome Shape
 
@@ -69,9 +69,9 @@ informational output is returned as bounded diagnostics. Invalid commands return
 errors.
 
 No separate `command_message`, `trial`, or `probe` protocol request exists upstream because this is already the generic
-module-processing operation. Downstream hosts may wrap the pattern in product-specific names such as `lean_trial`, but
-the worker boundary stays the same: one normal module-query request, one terminal outcome, existing cancellation,
-timeout, generation, restart, and frame-limit behavior.
+module-processing operation. Downstream hosts may give the pattern their own names, but the worker boundary stays the
+same: one normal module-query request, one terminal outcome, existing cancellation, timeout, generation, restart, and
+frame-limit behavior.
 
 This operation is non-mutating in the filesystem sense: `lean-rs` constructs an in-memory module and never writes the
 submitted command source to disk. It is not an OS sandbox. Lean commands run inside the worker child process with the
@@ -89,9 +89,9 @@ worker's contribution is to make each per-file query's worst case predictable:
   `elaboration_micros` is 0.
 
 The remaining cross-query cost on a large scan is the *cold header re-import*: when the worker is recycled mid-scan by
-the RSS cap (`worker-processes.md`, memory cycling and restart policy), the replacement child must re-load the
-import closure from `.olean`, which for heavy closures can dominate a per-file query. That is RSS-policy behaviour, not
-a projection cost; mitigate it by building the project first or by capping the scan with the caller's `limit`, so the
+the RSS cap (`worker-processes.md`, memory cycling and restart policy), the replacement child must re-load the import
+closure from `.olean`, which for heavy closures can dominate a per-file query. That is RSS-policy behaviour, not a
+projection cost; mitigate it by building the project first or by capping the scan with the caller's `limit`, so the
 worker re-imports a closure once and answers many files against it before the next cycle.
 
 ## Proof-state locals rendering
@@ -102,9 +102,9 @@ locals collector so the concern lives in one place:
 
 - **`pretty`** (default for user-facing `proof_state`): each local's type/value is rendered with `Meta.ppExpr` inside
   the goal's `MetaM` context, so binders resolve to user names and notation is applied, then bound under the diagnostic
-  byte budget. On a pretty-printer failure it falls back to the raw renderer. This matches the goal renderer and is
-  more compact than the raw unfolded form in the recorded regression (raw locals such as
-  `((((Quiver.Hom.{v,u} _uniq.NNNN)…` accompanied the RSS spike). This is not a general pretty-printer cost guarantee.
+  byte budget. On a pretty-printer failure it falls back to the raw renderer. This matches the goal renderer and is more
+  compact than the raw unfolded form in the recorded regression (raw locals such as `((((Quiver.Hom.{v,u} _uniq.NNNN)…`
+  accompanied the RSS spike). This is not a general pretty-printer cost guarantee.
 - **`raw`**: the previous `Expr`-string form, opt-in via the `locals_raw` selector field.
 - **`skip`**: render no locals at all. The verify path and the try-proof-step goals path read only `goals_after` and
   discard locals, so they pass `skip` and pay nothing for locals they never inspect.
@@ -165,10 +165,9 @@ prove that memory pressure evicted a particular declaration. Three layers handle
    uncatchable process exit, so only the parent can absorb it. `worker_verify_declaration` and
    `worker_process_module_query_batch` map a `ChildPanicOrAbort` during the request to a synthesized degraded result —
    verify → `Ok { BudgetExceeded, facts: unavailable(), imports: [] }`; batch → a per-selector `BudgetExceeded` outcome
-   — and record a `ChildAbort` restart (`stable_cause = "child_abort"`). A successful restart yields the degraded verdict
-   and a fresh child for subsequent calls; a failed restart or non-abort error still propagates. This is the
-   process-boundary half of the panic-containment contract; see
-   [`worker-processes.md`](worker-processes.md).
+   — and record a `ChildAbort` restart (`stable_cause = "child_abort"`). A successful restart yields the degraded
+   verdict and a fresh child for subsequent calls; a failed restart or non-abort error still propagates. This is the
+   process-boundary half of the panic-containment contract; see [`worker-processes.md`](worker-processes.md).
 
 No new status variant is introduced: `BudgetExceeded` already names "the worker could not complete this within its
 resource envelope," which is exactly the degraded case. `LEAN_RS_VERIFY_RSS_TAINT_KIB` is an internal child environment
@@ -178,72 +177,71 @@ cache RSS guard. Leave it unset or zero to disable it; choose a ceiling above th
 ## Reusing module headers after edits
 
 Each live session keeps at most one reusable header environment, separate from disposable body snapshots. A global
-eight-entry least-recently-used bound also limits retention for direct host callers outside the worker pool. Clearing snapshots
-because of TTL, size, or RSS no longer forces another header import. Cached queries, uncached queries, proof attempts,
-and verification use the same header resolver. Reuse never substitutes the old body's final environment.
+eight-entry least-recently-used bound also limits retention for direct host callers outside the worker pool. Clearing
+snapshots because of TTL, size, or RSS no longer forces another header import. Cached queries, uncached queries, proof
+attempts, and verification use the same header resolver. Reuse never substitutes the old body's final environment.
 
-Reuse requires the same input environment object, exact header text, file label, heartbeat setting, and complete
-Lean option map. Exact text preserves import order, `public import`, `import all`, and source positions. Changing
-any of these inputs requires a fresh header. Session eviction clears its header, not the cumulative memory count.
-Changing an imported artifact requires a fresh input session or worker restart. Clearing body snapshots alone is not
-dependency invalidation: it does not change the session's imported environment.
-Host source calls and header-cache operations share the existing process-local session-import mutex. This protects
-global Lean import/cache state for direct concurrent host callers; it does not serialize separate worker processes.
+Reuse requires the same input environment object, exact header text, file label, heartbeat setting, and complete Lean
+option map. Exact text preserves import order, `public import`, `import all`, and source positions. Changing any of
+these inputs requires a fresh header. Session eviction clears its header, not the cumulative memory count. Changing an
+imported artifact requires a fresh input session or worker restart. Clearing body snapshots alone is not dependency
+invalidation: it does not change the session's imported environment. Host source calls and header-cache operations share
+the existing process-local session-import mutex. This protects global Lean import/cache state for direct concurrent host
+callers; it does not serialize separate worker processes.
 
-The resolver records successful fresh imports before elaborating the body. It sums non-memory-mapped compacted
-region sizes, excluding pointer-identical input-session regions and previously charged region objects. It never
-deduplicates by filename: loading the same file again can allocate a different buffer. This is conservative retained
-import accounting, not a measurement of total heap usage. Metadata copies can overcount; dropping snapshots does
-not prove that Lean freed imported regions, so eviction never subtracts bytes.
+The resolver records successful fresh imports before elaborating the body. It sums non-memory-mapped compacted region
+sizes, excluding pointer-identical input-session regions and previously charged region objects. It never deduplicates by
+filename: loading the same file again can allocate a different buffer. This is conservative retained import accounting,
+not a measurement of total heap usage. Metadata copies can overcount; dropping snapshots does not prove that Lean freed
+imported regions, so eviction never subtracts bytes.
 
-Before another fresh header, a reached import budget requests a child restart. Warm header reuse remains allowed.
-The first header in a fresh child may exceed the budget, under the unchanged runtime memory ceiling; the supervisor
-retries at most once. This avoids an endless restart loop for a large but valid first profile. A failed header import
-can hide partial allocations. The resolver preserves its error and marks accounting unknown; the supervisor retires
-that child before its next request instead of silently retrying the failed import.
+Before another fresh header, a reached import budget requests a child restart. Warm header reuse remains allowed. The
+first header in a fresh child may exceed the budget, under the unchanged runtime memory ceiling; the supervisor retries
+at most once. This avoids an endless restart loop for a large but valid first profile. A failed header import can hide
+partial allocations. The resolver preserves its error and marks accounting unknown; the supervisor retires that child
+before its next request instead of silently retrying the failed import.
 
-Tests compare warm and genuinely cold results after body, visibility, option, file-label, and session changes. A
-private Lean probe checks environment identity, snapshot eviction, budget handling, and a failed import. Host API
-tests check shared accounting across single and batch queries. These checks do not make C++ exceptions recoverable;
-process isolation and the runtime memory ceiling remain necessary.
+Tests compare warm and genuinely cold results after body, visibility, option, file-label, and session changes. A private
+Lean probe checks environment identity, snapshot eviction, budget handling, and a failed import. Host API tests check
+shared accounting across single and batch queries. These checks do not make C++ exceptions recoverable; process
+isolation and the runtime memory ceiling remain necessary.
 
 ### Bounded real-project check
 
-`header_cache_probe` runs three diagnostics calls on one existing source file, clearing body snapshots between calls.
-It uses one worker thread, a 4 GiB import budget, and a 14 GiB runtime ceiling. It does not build project modules.
+`header_cache_probe` runs three diagnostics calls on one existing source file, clearing body snapshots between calls. It
+uses one worker thread, a 4 GiB import budget, and a 14 GiB runtime ceiling. It does not build project modules.
 
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child --example header_cache_probe
 target/debug/examples/header_cache_probe target/debug/lean-rs-worker-child /path/to/project /path/to/source.lean
 ```
 
-A Mathlib-scale determinant file completed all three calls without errors or restarts: header processing took
-3.097 seconds, then 2 milliseconds twice. Recorded retained imports stayed at 3,660,081,344 bytes; RSS stayed near
-6.80 GiB and sampled physical footprint peaked at 4.45 GiB. This checks warm reuse after snapshot eviction, not every
-profile transition or an upper bound on future elaboration memory.
+A Mathlib-scale determinant file completed all three calls without errors or restarts: header processing took 3.097
+seconds, then 2 milliseconds twice. Recorded retained imports stayed at 3,660,081,344 bytes; RSS stayed near 6.80 GiB
+and sampled physical footprint peaked at 4.45 GiB. This checks warm reuse after snapshot eviction, not every profile
+transition or an upper bound on future elaboration memory.
 
 ## File-specific Lean options
 
-The caller supplies Lake's effective per-file option map through `LeanElabOptions::lean_options`
-(or `LeanWorkerElabOptions::lean_options`). Boolean, natural-number, and string values retain their types.
-Lean decodes the map with its own `LeanOptions` decoder before processing the header or body. Malformed
-values fail the request; they never silently select defaults. Natural numbers in this wire format must
-fit in `u64`. After imports load, Lean resolves `weak` option prefixes and checks registered names,
-just as its normal frontend does. An empty map preserves normal Lean defaults. Source-local `set_option` commands
-still work.
+The caller supplies Lake's effective per-file option map through `LeanElabOptions::lean_options` (or
+`LeanWorkerElabOptions::lean_options`). Boolean, natural-number, and string values retain their types. Lean decodes the
+map with its own `LeanOptions` decoder before processing the header or body. Malformed values fail the request; they
+never silently select defaults. Natural numbers in this wire format must fit in `u64`. After imports load, Lean resolves
+`weak` option prefixes and checks registered names, just as its normal frontend does. An empty map preserves normal Lean
+defaults. Source-local `set_option` commands still work.
 
-The host's heartbeat limit overrides the map's `maxHeartbeats`. This resource override is separate from
-semantic options such as `autoImplicit` and `maxSynthPendingDepth`, which must match the build.
-All source elaboration entry points, proof overlays, and explicit verification use the map. The worker
-cache key, module snapshot lookup, incremental reuse, and header reuse all distinguish option changes.
-The [worker protocol version check](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-protocol/src/protocol.rs) prevents a mismatched old child
-from silently ignoring the map.
+The host's heartbeat limit overrides the map's `maxHeartbeats`. This resource override is separate from semantic options
+such as `autoImplicit` and `maxSynthPendingDepth`, which must match the build. All source elaboration entry points,
+proof overlays, and explicit verification use the map. The worker cache key, module snapshot lookup, incremental reuse,
+and header reuse all distinguish option changes. The
+[worker protocol version check](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-protocol/src/protocol.rs)
+prevents a mismatched old child from silently ignoring the map.
 
-Resolving Lake configuration belongs to the caller, not the Lean runtime bridge. The host does not read
-or build a project merely to discover options. A caller that omits build options cannot claim that its
-result matches that project's build configuration.
+Resolving Lake configuration belongs to the caller, not the Lean runtime bridge. The host does not read or build a
+project merely to discover options. A caller that omits build options cannot claim that its result matches that
+project's build configuration.
 
-The separate `LeanMetaOptions` API still controls standalone MetaM operations such as weak-head
-normalization and expression pretty-printing. Those operations do not receive this new map after
-their input source has been elaborated. This change establishes build-option parity for source
-elaboration and verification, not for every standalone MetaM rendering operation.
+The separate `LeanMetaOptions` API still controls standalone MetaM operations such as weak-head normalization and
+expression pretty-printing. Those operations do not receive this new map after their input source has been elaborated.
+This change establishes build-option parity for source elaboration and verification, not for every standalone MetaM
+rendering operation.

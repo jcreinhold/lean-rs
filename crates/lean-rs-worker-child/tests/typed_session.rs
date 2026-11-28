@@ -232,7 +232,7 @@ fn checked_worker_config(q: &qualification_launch::Qualification) -> LeanWorkerC
     LeanWorkerConfig::new(&q.worker)
         .checked_native_loader_environment()
         .env("LEAN_SYSROOT", q.sysroot.as_os_str())
-        .env("LEAN_RS_PREPARED_HOST_ARTIFACTS", prepared)
+        .env(lean_rs_worker_protocol::PREPARED_HOST_ARTIFACTS_ENV, prepared)
 }
 
 #[test]

@@ -25,10 +25,8 @@ LeanHost            opened once per Lean runtime
 Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across calls into the same loading mode, and open
 a fresh `LeanSession` for each unit of work.
 
-Supports the same Lean toolchain window as [`lean-rs-sys`](https://docs.rs/lean-rs-sys): currently **Lean 4.30.0 through
-4.35.0**; see [`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md). The
-capability loader transparently handles the Lake naming-convention change between Lean 4.26 and 4.27 (dylib filename and
-module-initializer symbol shape), so consumer `lakefile.lean`s do not need version-conditional logic.
+Supports the same Lean releases as [`lean-rs-sys`](https://docs.rs/lean-rs-sys); the
+[version matrix](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md) lists them.
 
 ## Quick start
 

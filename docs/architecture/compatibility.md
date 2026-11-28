@@ -1,9 +1,8 @@
 # Versioning and Compatibility
 
 [`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) is the
-source of truth for accepted Lean releases and audited `lean.h` digests. The current window starts at 4.30.0 and ends at
-4.36.0, including the explicitly listed release candidates. Do not infer support for an unlisted release from its
-version number. The [version matrix](../version-matrix.md) summarizes support; the
+source of truth for accepted Lean releases and audited `lean.h` digests. Do not infer support for an unlisted release
+from its version number. The [version matrix](../version-matrix.md) summarizes support; the
 [bump procedure](../bump-toolchain.md) owns changes to it.
 
 ## Toolchain identity and ABI checks

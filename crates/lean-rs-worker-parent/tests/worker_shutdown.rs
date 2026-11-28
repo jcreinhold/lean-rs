@@ -58,7 +58,7 @@ const FAKE_IMPORT_RESIDUE_BYTES: u64 = 1_000;
 //   cargo nextest run -p lean-rs-worker-parent --profile ci
 //
 const LAUNCH_INPUT_CASE: &str = "worker_application_launch_input";
-const INPUT_ENV: &str = "LEAN_RS_WORKER_APPLICATION_INPUT";
+const INPUT_ENV: &str = lean_rs_worker_protocol::WORKER_APPLICATION_INPUT_ENV;
 
 fn main() {
     if env::args().nth(1).as_deref() == Some("--test-launch-input-parent") {

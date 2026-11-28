@@ -72,15 +72,14 @@ lease_dropped(l)          admission_refused(c, reason)
 where `o in Resp + Fail` and `b` ranges over finite row buffers.
 
 The intended refinement mapping hides child pids, OS pipe handles, stderr fragments not surfaced in typed errors,
-tracing spans, metrics-only counters, exact thread scheduling, and handshake/configuration frame order. This mapping
-is not an implementation-trace refinement theorem.
+tracing spans, metrics-only counters, exact thread scheduling, and handshake/configuration frame order. This mapping is
+not an implementation-trace refinement theorem.
 
 ## Conformance Trace Harness
 
-The implementation-level conformance harness lives in
-`crates/lean-rs-worker-parent/tests/worker_shutdown.rs`. Its `RuntimeTraceEvent` enum is test-only vocabulary, not a
-public tracing API and not an IPC message. The enum names the parent-observable events that later supervisor and pool
-refactors must preserve:
+The implementation-level conformance harness lives in `crates/lean-rs-worker-parent/tests/worker_shutdown.rs`. Its
+`RuntimeTraceEvent` enum is test-only vocabulary, not a public tracing API and not an IPC message. The enum names the
+parent-observable events that later supervisor and pool refactors must preserve:
 
 | Test trace event | Model event or invariant |
 | --- | --- |
@@ -154,14 +153,13 @@ RestartExhausted(g, t)
 ```
 
 `g in G`, `r in Req`, `b` is the finite sequence of rows and progress/diagnostic events already delivered for the
-current request, `c` is an observed child exit or fatal condition, and `t` is the time the oldest counted restart
-leaves the restart window. The current implementation keeps process handles,
-stdio pipes, and stats as separate fields, but its private `WorkerSupervisorState` records the model-facing phases:
-idle, busy, streaming, stopping, killing, reaping, crashed, restart-exhausted, and exited. Spawn-time `Starting` remains
-inside `LeanWorker::spawn` rather than as a stored state on a constructed supervisor. An armed startup guard owns the
-child through pipe setup, handshake, and frame-limit negotiation. Any early error before ownership transfers to the
-supervisor kills and polls for reaping of that child within the normal kill-wait deadline. Successful startup disarms
-the guard without disturbing the child.
+current request, `c` is an observed child exit or fatal condition, and `t` is the time the oldest counted restart leaves
+the restart window. The current implementation keeps process handles, stdio pipes, and stats as separate fields, but its
+private `WorkerSupervisorState` records the model-facing phases: idle, busy, streaming, stopping, killing, reaping,
+crashed, restart-exhausted, and exited. Spawn-time `Starting` remains inside `LeanWorker::spawn` rather than as a stored
+state on a constructed supervisor. An armed startup guard owns the child through pipe setup, handshake, and frame-limit
+negotiation. Any early error before ownership transfers to the supervisor kills and polls for reaping of that child
+within the normal kill-wait deadline. Successful startup disarms the guard without disturbing the child.
 
 The core transitions are:
 
@@ -237,11 +235,11 @@ in-flight work, attempt graceful termination when appropriate, escalate to kill 
 record a structured result.
 
 **Cleanup terminalization.** Explicit shutdown, policy cycle, timeout, cancellation-triggered cycle, hard-RSS kill,
-fatal exit, and `Drop` all drive the child toward a terminal reaped state as far as the parent process is alive and
-Rust cleanup can run. For requests carrying a cancellation token, the IPC wait checks that token at intervals of
-at most 50 ms even when the worker emits no events. This does not renew the request deadline, and excludes caller sink
-execution and OS scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement; when
-the request's own deadline has passed, the next request or `cycle` starts the replacement instead.
+fatal exit, and `Drop` all drive the child toward a terminal reaped state as far as the parent process is alive and Rust
+cleanup can run. For requests carrying a cancellation token, the IPC wait checks that token at intervals of at most 50
+ms even when the worker emits no events. This does not renew the request deadline, and excludes caller sink execution
+and OS scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement; when the
+request's own deadline has passed, the next request or `cycle` starts the replacement instead.
 
 **Restart intensity.** Each restart reason is planned or abnormal, as `LeanWorkerRestartReason::is_planned` reports. A
 planned restart carries out the restart policy or an explicit cycle on a working child; the window neither counts nor
@@ -275,9 +273,9 @@ exited. Every replacement path uses the same tracked startup: if setup fails and
 the supervisor retains that replacement's process handle. Status fails rather than treating the old exit as current
 proof, and no request runs on the retained process. The next request or `cycle` retries bounded cleanup and starts a new
 child only after the retained one is reaped. Structured shutdown retries the same cleanup and reports success only after
-the process is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed child and can
-still report an already-exited service. This applies to explicit, idle, memory-policy, cancellation, timeout, and
-crash-triggered replacement; it is independent of the host's capacity policy.
+the process is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed
+child and can still report an already-exited service. This applies to explicit, idle, memory-policy, cancellation,
+timeout, and crash-triggered replacement; it is independent of the host's capacity policy.
 
 **Request-bound stop evidence.** Take `request_checkpoint()` immediately before a synchronous worker operation and query
 `confirmed_request_stop_since(&checkpoint)` afterward. A receipt identifies the latest attempted protocol request, its
@@ -298,8 +296,8 @@ protocol, kill, or wait failures, so callers needing status must call `shutdown`
 status-reporting API.
 
 **Parent-death handling.** On Unix each child holds the read end of a lifeline pipe and exits as soon as its parent
-dies, even while a request is inside Lean. [Parent death and inherited descriptors](#parent-death-and-inherited-descriptors)
-states the mechanism and its limits.
+dies, even while a request is inside Lean.
+[Parent death and inherited descriptors](#parent-death-and-inherited-descriptors) states the mechanism and its limits.
 
 **Restart semantics.** Crash, timeout, cancellation after dispatch, shutdown, explicit cycle, memory cycling, and
 restart-limit exhaustion all end the current generation. Each admitted restart creates generation `g + 1`, even when its
@@ -325,10 +323,10 @@ supervision, but they do not own the primitive child cleanup semantics inside `l
 replacement, restart intensity, and stale-session invalidation remain in `lean-rs-worker-parent` and
 `lean-rs-worker-child`.
 
-An application that selects native images can opt in to `checked_native_loader_environment` on its worker
-configuration. Each launch and restart rejects loader overrides before it starts a child. The application still
-owns executable and image checks. Use `inherit_checked_native_loader_environment` for a separate helper only when the helper
-should inherit the parent environment; it freezes that environment with the helper's explicit additions and removals.
+An application that selects native images can opt in to `checked_native_loader_environment` on its worker configuration.
+Each launch and restart rejects loader overrides before it starts a child. The application still owns executable and
+image checks. Use `inherit_checked_native_loader_environment` for a separate helper only when the helper should inherit
+the parent environment; it freezes that environment with the helper's explicit additions and removals.
 
 ## Operational Assumptions
 
@@ -393,9 +391,8 @@ The table maps the control and cleanup contracts above to their implementation o
 
 ## Proof Status
 
-This document states the SDK worker and pool contract. Its named Rust conformance tests exercise selected
-implementation behaviors; they do not establish trace refinement or shutdown liveness. No formal model checks this
-contract.
+This document states the SDK worker and pool contract. Its named Rust conformance tests exercise selected implementation
+behaviors; they do not establish trace refinement or shutdown liveness. No formal model checks this contract.
 
 ## Worker pipe I/O (macOS and Linux)
 
@@ -419,17 +416,17 @@ cleanup confirms its owned scope is closed.
 ## Confirmed child exit and capacity
 
 `LeanWorkerProcessTracker` counts child processes across startup and replacement. Pass one shared tracker to every
-worker builder whose children an embedder counts against one limit. After the owner stops and cannot spawn again, it
-may release that capacity when `active_processes()` returns zero. The tracker reserves one count before spawn, after it
+worker builder whose children an embedder counts against one limit. After the owner stops and cannot spawn again, it may
+release that capacity when `active_processes()` returns zero. The tracker reserves one count before spawn, after it
 starts a cleanup thread, and a failed spawn returns the reservation. After spawn, only a confirmed direct exit releases
 the count.
 
 `try_shutdown(&mut self)` allows cleanup retries without consuming the owner. Dropping an owner moves any unconfirmed
 child into the tracker's cleanup registry. The reaper remains available while launches or children are outstanding,
 wakes on transfer and retries unresolved handles every 100 ms. If the thread cannot start, launch fails before spawn.
-Cleanup sends a kill only after `try_wait` reports the owned child still running; a wait error never authorizes a
-signal to a reused PID. Other wait errors, including `ECHILD`, keep the actual child and its count, so a child that
-some other wait call reaped stays counted.
+Cleanup sends a kill only after `try_wait` reports the owned child still running; a wait error never authorizes a signal
+to a reused PID. Other wait errors, including `ECHILD`, keep the actual child and its count, so a child that some other
+wait call reaped stays counted.
 
 ## Source-header imports and retained memory
 
@@ -463,24 +460,22 @@ that count on actual session-cache misses, even when the parent predicted reuse.
 retained-byte budget, not this session-count limit. With the byte budget disabled, header churn has no count limit; use
 the byte budget to bound it. Header import counts remain available through host accounting and protocol events.
 
-
 ## Parent death and inherited descriptors
 
 On Unix the parent creates a pipe for each child it starts and keeps the write end. The child inherits the read end and
 finds its number in `LEAN_RS_WORKER_PARENT_LIFELINE`. Before the Lean runtime starts, a child thread checks that the
 descriptor is the read end of a pipe, marks it close-on-exec so that processes the child starts do not hold it, and
 blocks reading it. When the parent exits or drops the worker, the kernel closes the write end, the read returns end of
-file, and the thread calls `_exit(125)`. The child therefore exits even while its main thread is inside a Lean call,
-and it runs no destructors on the way out. A child started without the variable relies on stdin EOF.
+file, and the thread calls `_exit(125)`. The child therefore exits even while its main thread is inside a Lean call, and
+it runs no destructors on the way out. A child started without the variable relies on stdin EOF.
 
 Each child runs in its own process group (`process_group(0)`), apart from the parent's terminal and its other children.
 The lifeline ends only the worker child; processes it starts keep running until their own owner stops them.
 
 Children inherit every descriptor the parent leaves open without `FD_CLOEXEC`, and the SDK never closes a descriptor it
-did not open. lean-host-mcp will clear `FD_CLOEXEC` on its store lock, so every worker child holds that `flock` until
-it exits, and a second server cannot take the store while an old worker still runs.
+did not open.
 
 macOS has no atomic close-on-exec pipe call: the standard library calls `pipe` and then sets `FD_CLOEXEC`. The SDK
 serializes that step with its other worker spawns, but a thread outside the SDK that starts a process in that window,
-such as a Lake build, gives that process a copy of the write end. The worker then outlives its parent until that
-process exits. Linux creates the pipe with `pipe2(O_CLOEXEC)` and has no such window.
+such as a Lake build, gives that process a copy of the write end. The worker then outlives its parent until that process
+exits. Linux creates the pipe with `pipe2(O_CLOEXEC)` and has no such window.

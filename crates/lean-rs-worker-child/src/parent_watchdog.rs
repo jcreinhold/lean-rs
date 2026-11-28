@@ -14,8 +14,7 @@ use std::io::{self, Read};
 use std::os::fd::{FromRawFd as _, RawFd};
 use std::os::unix::fs::FileTypeExt as _;
 
-/// Names the inherited read end of the parent lifeline pipe.
-pub(crate) const LIFELINE_ENV: &str = "LEAN_RS_WORKER_PARENT_LIFELINE";
+use lean_rs_worker_protocol::WORKER_PARENT_LIFELINE_ENV as LIFELINE_ENV;
 
 /// Exit status of a child whose parent lifeline closed.
 const PARENT_LOST_EXIT: i32 = 125;
