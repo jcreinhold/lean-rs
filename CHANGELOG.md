@@ -43,10 +43,12 @@ Breaking: upgrade the worker parent and worker child together.
 
 ### Release
 
-The first `v0.12.0` tag, on `1425402`, failed verification, and no crate was published. The tests had three faults. On
-Linux, the parent-death test's worker passed the workspace's 1.5 GiB Lean memory cap during its `#eval`, and once its
-parent died it stayed a zombie, which the fixture qualification counted as a live worker. The TTL eviction test's 1 ms
-TTL could drop a new cache entry before the next lookup. The tag now points to the commit that fixes all three.
+The first `v0.12.0` tag, on `1425402`, failed verification, and no crate was published. On Linux, the parent-death
+test's worker passed the workspace's 1.5 GiB Lean memory cap during its `#eval`, and once its parent died it stayed a
+zombie, which the fixture qualification counted as a live worker. The TTL eviction test's 1 ms TTL could drop a new
+cache entry before the next lookup. Fixing these exposed two more faults: on Linux the child's
+`PR_SET_PDEATHSIG(SIGTERM)` could kill the worker before its lifeline stopped it (see Changed), and the typed timeout
+test's 50 ms deadline could pass before its first row arrived. The tag now points to the commit that fixes all five.
 
 ## [0.11.1]
 

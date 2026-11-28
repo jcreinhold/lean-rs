@@ -34,11 +34,11 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-# Used only to call `setrlimit(RLIMIT_CORE, 0)` and install an immediate
-# `SIGABRT` handler in the worker child so abort-triggered termination does
-# not block on the kernel's core-dump pipe handler (e.g. apport,
-# systemd-coredump). See `child::install_immediate_abort_exit` and
-# `docs/architecture/worker-processes.md`.
+# Raw Unix calls in the worker child: `child::install_immediate_abort_exit`
+# sets `RLIMIT_CORE` to 0 and exits at once on `SIGABRT`, so an abort does not
+# wait on a core-dump handler such as apport; `parent_watchdog` reads the
+# parent's lifeline pipe; `host_artifacts` opens installed artifacts with
+# `O_NOFOLLOW`. See `docs/architecture/worker-processes.md`.
 libc = "0.2"
 
 [dev-dependencies]

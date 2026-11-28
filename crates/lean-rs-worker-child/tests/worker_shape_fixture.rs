@@ -286,7 +286,9 @@ fn timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes() {
     let mut timeout_capability = builder().open().expect("builder opens timeout capability");
     {
         let mut session = timeout_capability.open_session(None, None).expect("session opens");
-        session.set_request_timeout(Duration::from_millis(50));
+        // The request deadline includes dispatch and first-row delivery. The
+        // paired Lean fixture waits longer after emitting its row.
+        session.set_request_timeout(Duration::from_secs(2));
         let command = LeanWorkerStreamingCommand::<ShapeRequest, ShapeRow, ShapeSummary>::new(
             "lean_rs_interop_consumer_worker_shape_timeout_after_row",
         );
@@ -299,7 +301,7 @@ fn timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes() {
                 operation, duration, ..
             } => {
                 assert_eq!(operation, "worker_run_data_stream");
-                assert_eq!(duration, Duration::from_millis(50));
+                assert_eq!(duration, Duration::from_secs(2));
             }
             other => panic!("expected timeout, got {other:?}"),
         }

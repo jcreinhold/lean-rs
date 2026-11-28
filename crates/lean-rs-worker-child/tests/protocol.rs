@@ -1,4 +1,4 @@
-#![allow(unsafe_code, clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
+#![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 #[path = "support/ordinary_typed_selection.rs"]
 mod ordinary_typed_selection;
@@ -147,91 +147,6 @@ fn broken_stdout_write_exits_without_waiting_for_another_request() {
         !status.success(),
         "broken stdout is reported as a protocol/channel loss, not graceful termination"
     );
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn linux_parent_death_signal_exits_when_stdio_stays_open() {
-    use std::fs;
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    let temp_root = std::env::temp_dir().join(format!("lean-rs-worker-parent-death-{}", std::process::id()));
-    fs::create_dir_all(&temp_root).expect("temp dir is created");
-    let fifo = temp_root.join("stdin.fifo");
-    let stdout = temp_root.join("stdout.log");
-    let stderr = temp_root.join("stderr.log");
-    let pidfile = temp_root.join("worker.pid");
-
-    let fifo_c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).expect("fifo path has no nul");
-    // SAFETY: `mkfifo` receives a valid nul-terminated path and creates one
-    // filesystem node used only by this test.
-    let rc = unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) };
-    assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
-
-    let _held_fifo = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(libc::O_CLOEXEC)
-        .open(&fifo)
-        .expect("test holds FIFO open so child stdin does not reach EOF");
-
-    let helper = Command::new("sh")
-        .arg("-c")
-        .arg("\"$1\" < \"$2\" > \"$3\" 2> \"$4\" & echo $! > \"$5\"")
-        .arg("sh")
-        .arg(worker_binary())
-        .arg(&fifo)
-        .arg(&stdout)
-        .arg(&stderr)
-        .arg(&pidfile)
-        .status()
-        .expect("helper shell starts worker");
-    assert!(helper.success(), "helper shell exits cleanly");
-
-    let mut pid_text = String::new();
-    for _ in 0..100 {
-        pid_text = fs::read_to_string(&pidfile).unwrap_or_default();
-        if !pid_text.trim().is_empty() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let pid: libc::pid_t = pid_text.trim().parse().expect("worker pid is written");
-
-    let exited = wait_for_pid_to_disappear(pid, Duration::from_secs(5));
-    if !exited {
-        // SAFETY: best-effort cleanup for a failed test; `pid` came from the
-        // helper shell that spawned the worker child.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
-    }
-    drop(fs::remove_dir_all(&temp_root));
-
-    assert!(
-        exited,
-        "worker pid {pid} stayed alive after its parent shell exited while stdin remained open"
-    );
-}
-
-#[cfg(target_os = "linux")]
-fn wait_for_pid_to_disappear(pid: libc::pid_t, timeout: Duration) -> bool {
-    let started = Instant::now();
-    loop {
-        let status = std::fs::read_to_string(format!("/proc/{pid}/status"));
-        match status {
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return true,
-            Ok(status)
-                if status
-                    .lines()
-                    .any(|line| line.starts_with("State:") && line.contains('Z')) =>
-            {
-                return true;
-            }
-            Ok(_) | Err(_) if started.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
-            Ok(_) | Err(_) => return false,
-        }
-    }
 }
 
 #[test]

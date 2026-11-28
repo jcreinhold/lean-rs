@@ -348,7 +348,7 @@ def workerShapeTimeoutAfterRow (_requestJson : String) (handle trampoline : USiz
     #[Stream.row "declarations"
       "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.timeout\",\"ordinal\":0}"]
   if status == 0 then
-    IO.sleep 200
+    IO.sleep 5000
     pure 0
   else
     pure status
