@@ -525,28 +525,48 @@ pub(crate) mod tests {
         }
     }
 
+    /// A test's own directory under the system temporary directory.
+    ///
+    /// Dropping it removes the directory, so a run leaves nothing behind.
+    pub(crate) struct TempDir(PathBuf);
+
+    impl TempDir {
+        pub(crate) fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(&self.0));
+        }
+    }
+
     /// A fresh directory under the system temporary directory.
-    pub(crate) fn temp_dir(name: &str) -> Result<PathBuf, String> {
-        let dir = std::env::temp_dir().join(format!(
+    pub(crate) fn temp_dir(name: &str) -> Result<TempDir, String> {
+        let mut dir = TempDir(std::env::temp_dir().join(format!(
             "lean-toolchain-lake-{name}-{}-{}",
             std::process::id(),
             NONCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-        dir.canonicalize().map_err(|error| error.to_string())
+        )));
+        fs::create_dir_all(&dir.0).map_err(|error| error.to_string())?;
+        dir.0 = dir.0.canonicalize().map_err(|error| error.to_string())?;
+        Ok(dir)
     }
 
     /// A workspace root with a lakefile, and a directory holding `Lake.olean`.
-    pub(crate) fn fake_project(name: &str) -> Result<(PathBuf, PathBuf), String> {
+    ///
+    /// Both live in the returned directory; keep it until the test ends.
+    pub(crate) fn fake_project(name: &str) -> Result<(TempDir, PathBuf, PathBuf), String> {
         let dir = temp_dir(name)?;
-        let root = dir.join("project");
-        let lake = dir.join("toolchain/lib/lean");
+        let root = dir.path().join("project");
+        let lake = dir.path().join("toolchain/lib/lean");
         for path in [&root, &lake] {
             fs::create_dir_all(path).map_err(|error| error.to_string())?;
         }
         fs::write(root.join("lakefile.lean"), "package demo\n").map_err(|error| error.to_string())?;
         fs::write(lake.join("Lake.olean"), "").map_err(|error| error.to_string())?;
-        Ok((root, lake))
+        Ok((dir, root, lake))
     }
 
     fn lean_path_line(entries: &[&Path]) -> Result<String, String> {
@@ -559,7 +579,7 @@ pub(crate) mod tests {
 
     #[test]
     fn lean_path_keeps_lakes_order_and_drops_lakes_own_directory() -> Result<(), String> {
-        let (root, lake) = fake_project("env")?;
+        let (_dir, root, lake) = fake_project("env")?;
         let dependency = root.join("dep/out/lib/lean");
         let own = root.join("out/lib/lean");
         let stdout = lean_path_line(&[&dependency, &own, &lake])?;
@@ -578,7 +598,7 @@ pub(crate) mod tests {
 
     #[test]
     fn lean_path_refuses_an_answer_lean_toolchain_cannot_check() -> Result<(), String> {
-        let (root, lake) = fake_project("env-invalid")?;
+        let (_dir, root, lake) = fake_project("env-invalid")?;
         let own = root.join("out/lib/lean");
         let cases = [
             "PATH=/bin\n".to_owned(),
@@ -599,7 +619,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_caller_runs_the_command_and_hands_back_its_output() -> Result<(), String> {
-        let (root, _) = fake_project("options")?;
+        let (_dir, root, _) = fake_project("options")?;
         let sysroot = root.join("sysroot");
         let workspace = LakeWorkspace::new(&root)
             .lean_sysroot(&sysroot)
@@ -635,7 +655,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_query_returns_the_one_file_lake_prints() -> Result<(), String> {
-        let (root, _) = fake_project("query")?;
+        let (_dir, root, _) = fake_project("query")?;
         let library = root.join("out/lib/libdemo_Demo.dylib");
         fs::create_dir_all(root.join("out/lib")).map_err(|error| error.to_string())?;
         fs::write(&library, "").map_err(|error| error.to_string())?;
@@ -681,7 +701,7 @@ pub(crate) mod tests {
 
     #[test]
     fn lakes_messages_for_a_missing_library_name_it() -> Result<(), String> {
-        let (root, _) = fake_project("missing")?;
+        let (_dir, root, _) = fake_project("missing")?;
         for stderr in [
             "error: unknown target `Demo`",
             "error: unknown package facet `shared`",
@@ -709,9 +729,9 @@ pub(crate) mod tests {
 
     #[test]
     fn a_root_without_a_lakefile_runs_no_lake() -> Result<(), String> {
-        let root = temp_dir("no-lakefile")?;
+        let dir = temp_dir("no-lakefile")?;
         let mut fake = FakeLake::new(|_: &[String]| answer(0, "", ""));
-        let result = LakeWorkspace::new(&root).lean_path_with(&mut fake);
+        let result = LakeWorkspace::new(dir.path()).lean_path_with(&mut fake);
         assert!(
             matches!(result, Err(LinkDiagnostics::LakeConfigMissing { .. })),
             "{result:?}"

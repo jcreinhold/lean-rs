@@ -1113,7 +1113,7 @@ mod tests {
         CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, INTEROP_LIBRARY, capability_env_var,
         capability_manifest_env_var, capability_manifest_name, collect_sources, generated_output_key_for_sysroot,
     };
-    use crate::lake::tests::{FakeLake, answer, fake_project, temp_dir};
+    use crate::lake::tests::{FakeLake, TempDir, answer, fake_project, temp_dir};
     use crate::{
         LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
         LeanExportSignature, LeanLibraryDependency, LinkDiagnostics,
@@ -1160,9 +1160,9 @@ mod tests {
     }
 
     /// A Lean prefix holding this build's `lean.h` and the given version string.
-    fn fake_sysroot(name: &str, version: &str) -> Result<PathBuf, String> {
+    fn fake_sysroot(name: &str, version: &str) -> Result<TempDir, String> {
         let root = temp_dir(name)?;
-        let include = root.join("include/lean");
+        let include = root.path().join("include/lean");
         fs::create_dir_all(&include).map_err(text)?;
         fs::copy(crate::LEAN_HEADER_PATH, include.join("lean.h")).map_err(text)?;
         write(
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     fn a_build_writes_the_manifest_for_the_library_lake_names() -> TestResult {
-        let (root, _) = fake_project("build")?;
+        let (_dir, root, _) = fake_project("build")?;
         let library = root.join("out/lib/libdemo_BuildCapability.dylib");
         write(&library, "")?;
         let mut lake = lake_knowing(vec![("BuildCapability", library.clone())], false);
@@ -1241,7 +1241,7 @@ mod tests {
 
     #[test]
     fn the_interop_library_comes_first_among_dependencies() -> TestResult {
-        let (root, _) = fake_project("interop")?;
+        let (_dir, root, _) = fake_project("interop")?;
         let library = root.join("out/lib/libdemo_InteropUser.dylib");
         let interop = root.join("interop/out/lib/libinterop.dylib");
         let support = root.join("support/libsupport.dylib");
@@ -1291,7 +1291,7 @@ mod tests {
 
     #[test]
     fn the_interop_library_records_no_dependency_on_itself() -> TestResult {
-        let (root, _) = fake_project("interop-self")?;
+        let (_dir, root, _) = fake_project("interop-self")?;
         let interop = root.join("out/lib/libinterop.dylib");
         write(&interop, "")?;
         let mut lake = lake_knowing(vec![(INTEROP_LIBRARY, interop)], false);
@@ -1309,14 +1309,15 @@ mod tests {
 
     #[test]
     fn an_explicit_sysroot_reaches_lake_and_the_manifest() -> TestResult {
-        let (root, _) = fake_project("sysroot")?;
-        let sysroot = fake_sysroot("sysroot-prefix", crate::LEAN_VERSION)?;
+        let (_dir, root, _) = fake_project("sysroot")?;
+        let prefix = fake_sysroot("sysroot-prefix", crate::LEAN_VERSION)?;
+        let sysroot = prefix.path();
         let library = root.join("out/lib/libdemo_SysrootCapability.dylib");
         write(&library, "")?;
         let mut lake = lake_knowing(vec![("SysrootCapability", library)], false);
         let built = CargoLeanCapability::new(&root, "SysrootCapability")
             .package("demo")
-            .lean_sysroot(&sysroot)
+            .lean_sysroot(sysroot)
             .lean_num_threads(1)
             .build_with_runner(&mut lake, CargoMetadata::Suppress)
             .map_err(text)?;
@@ -1346,13 +1347,13 @@ mod tests {
             "4.31.0-rc2" => "4.31.0-rc1",
             _ => return Ok(()),
         };
-        let (root, _) = fake_project("fingerprint")?;
-        let sysroot = fake_sysroot("fingerprint-prefix", alias)?;
+        let (_dir, root, _) = fake_project("fingerprint")?;
+        let prefix = fake_sysroot("fingerprint-prefix", alias)?;
         let library = root.join("out/lib/libdemo_FingerprintCapability.dylib");
         write(&library, "")?;
         let built = CargoLeanCapability::new(&root, "FingerprintCapability")
             .package("demo")
-            .lean_sysroot(&sysroot)
+            .lean_sysroot(prefix.path())
             .build_with_runner(
                 &mut lake_knowing(vec![("FingerprintCapability", library)], false),
                 CargoMetadata::Suppress,
@@ -1370,7 +1371,7 @@ mod tests {
 
     #[test]
     fn an_explicit_sysroot_never_falls_back_to_ambient_discovery() -> TestResult {
-        let (root, _) = fake_project("bad-sysroot")?;
+        let (_dir, root, _) = fake_project("bad-sysroot")?;
         let mut lake = lake_knowing(Vec::new(), false);
         let result = CargoLeanCapability::new(&root, "BadSysroot")
             .package("demo")
@@ -1387,7 +1388,7 @@ mod tests {
 
     #[test]
     fn a_capability_without_a_package_runs_no_lake() -> TestResult {
-        let (root, _) = fake_project("no-package")?;
+        let (_dir, root, _) = fake_project("no-package")?;
         let mut lake = lake_knowing(Vec::new(), false);
         let capability = CargoLeanCapability::new(&root, "NoPackage");
         let probe = capability.probe_ready_with(&mut lake).map(drop);
@@ -1406,7 +1407,7 @@ mod tests {
 
     #[test]
     fn lakes_report_of_a_missing_target_passes_through() -> TestResult {
-        let (root, _) = fake_project("missing-target")?;
+        let (_dir, root, _) = fake_project("missing-target")?;
         let result = CargoLeanCapability::new(&root, "Missing")
             .package("demo")
             .build_with_runner(&mut lake_knowing(Vec::new(), false), CargoMetadata::Suppress);
@@ -1419,7 +1420,7 @@ mod tests {
 
     #[test]
     fn a_probe_is_ready_only_for_built_libraries_and_the_same_manifest() -> TestResult {
-        let (root, _) = fake_project("probe")?;
+        let (_dir, root, _) = fake_project("probe")?;
         let library = root.join("out/lib/libdemo_ProbeCapability.dylib");
         let support = root.join("support/libsupport.dylib");
         for path in [&library, &support] {
@@ -1458,7 +1459,7 @@ mod tests {
 
     #[test]
     fn a_keyed_build_has_lake_read_its_lakefiles_again_once() -> TestResult {
-        let (root, _) = fake_project("keyed")?;
+        let (_dir, root, _) = fake_project("keyed")?;
         let default = root.join("out/lib/libdemo_KeyedCapability.dylib");
         let keyed = root.join("out/lean-4.36.0/lib/libdemo_KeyedCapability.dylib");
         for path in [&default, &keyed] {
@@ -1506,7 +1507,7 @@ mod tests {
 
     #[test]
     fn keyed_libraries_must_not_be_aliased() -> TestResult {
-        let (root, _) = fake_project("aliased")?;
+        let (_dir, root, _) = fake_project("aliased")?;
         let real = root.join("elsewhere/libdemo_AliasedCapability.dylib");
         write(&real, "")?;
         let slot = root.join("out/lean-4.36.0/lib");
@@ -1532,7 +1533,7 @@ mod tests {
 
     #[test]
     fn a_malformed_key_runs_no_lake() -> TestResult {
-        let (root, _) = fake_project("bad-key")?;
+        let (_dir, root, _) = fake_project("bad-key")?;
         let long = "x".repeat(65);
         for key in [
             "",
@@ -1561,7 +1562,8 @@ mod tests {
 
     #[test]
     fn source_triggers_cover_top_level_files_and_lean_sources() -> TestResult {
-        let root = temp_dir("sources")?;
+        let dir = temp_dir("sources")?;
+        let root = dir.path();
         for path in [
             "lakefile.lean",
             "lean-toolchain",
@@ -1575,7 +1577,7 @@ mod tests {
             write(&root.join(path), "")?;
         }
         let mut paths = Vec::new();
-        collect_sources(&root, true, &mut paths).map_err(text)?;
+        collect_sources(root, true, &mut paths).map_err(text)?;
         paths.sort();
         let expected = ["Demo/Basic.lean", "Demo.lean", "lakefile.lean", "lean-toolchain"].map(|path| root.join(path));
         assert_eq!(paths, expected);
