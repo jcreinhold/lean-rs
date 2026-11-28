@@ -9,7 +9,7 @@
 //! lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
 //! bundled `lean_rs_host_*` shim sources. This crate owns the closed native host
-//! bridge and ships the generic interop shims used by same-process callbacks.
+//! bridge and the callback ABI that the generic interop shims call.
 //!
 //! ## Happy Path
 //!

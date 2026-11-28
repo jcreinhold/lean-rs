@@ -208,7 +208,7 @@ jobs:
             # digest it with the other sources, and leave `.lake` out of each source list; none of them parses it.
             -g '!Cargo.toml' -g '!crates/lean-rs-host/src/host/shim_sources.rs'
             -g '!crates/lean-rs-host/tests/interop_shims_parity.rs' -g '!crates/lean-toolchain/src/source_package.rs'
-            -g '!crates/lean-rs/shims/lean-rs-interop-shims/src/lib.rs' -g '!scripts/check_package_docsrs.py'
+            -g '!scripts/check_package_docsrs.py'
             -g '!templates/shipped-lean-crate/build.rs' -g '!templates/shipped-lean-crate/src/support/deployment.rs'
           )
           status=0
@@ -304,7 +304,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host \
+          for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host \
                        lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
             baseline="docs/api-review/${crate}-public.txt"
             if [ ! -f "$baseline" ]; then

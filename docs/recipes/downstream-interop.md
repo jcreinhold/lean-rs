@@ -7,8 +7,8 @@ timeouts, and cycling, run the work in a [worker session](../architecture/worker
 The in-tree `interop_callback` and `string_streaming` examples open a prepared pair of images under their fixture's
 reader guards and image checks. Their Lean sources are the generic interop shim and the
 [consumer fixture](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims). The fixture's Lake
-dependency points at the repository's bundled shim copy; a published consumer should materialize the package from
-`lean-rs-interop-shims` as described in the [generic shim contract](../architecture/callbacks.md#generic-shim-package).
+dependency points at the repository's canonical shim copy; a published consumer can `require` the same package from the
+lean-rs Git repository, as the [generic shim contract](../architecture/callbacks.md#generic-shim-package) describes.
 
 ## Build and load
 

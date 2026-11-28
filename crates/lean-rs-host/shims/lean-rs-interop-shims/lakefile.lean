@@ -18,8 +18,7 @@ def leanRsBuildDir : FilePath :=
     This package contains reusable ABI support shared by downstream Lean
     capabilities and higher-level host shims. It does not define theorem-prover
     host policy, declaration introspection, elaboration, or `MetaM` services.
-    Those stay in `lean-rs-host-shims`. Worker streaming helpers in this
-    package define callback-envelope mechanics, not downstream row schemas. -/
+    Those stay in `lean-rs-host-shims`. -/
 package «lean_rs_interop_shims» where
   buildDir := leanRsBuildDir
 

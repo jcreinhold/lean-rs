@@ -398,14 +398,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lean-rs-interop-shims"
-version = "0.12.0"
-dependencies = [
- "lean-toolchain",
- "sha2",
-]
-
-[[package]]
 name = "lean-rs-profiling"
 version = "0.12.0"
 dependencies = [

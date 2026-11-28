@@ -96,27 +96,26 @@ exercises the lower-level trampoline.
 
 ## Generic shim package
 
-`lean-rs-interop-shims` packages reusable Lean/C helpers under `LeanRsInterop`, below host-session policy. Explicit
-`@[export]` calls carry the ABI; Rust owns object and callback safety. Custom typed-FFI consumers can use this package
-without depending on theorem-prover services. Add helpers for a repeated ABI or ownership need.
+The `lean-rs-interop-shims` Lake package holds reusable Lean/C helpers under `LeanRsInterop`, below host-session policy.
+Explicit `@[export]` calls carry the ABI; Rust owns object and callback safety. Custom typed-FFI consumers can use this
+package without depending on theorem-prover services. Add helpers for a repeated ABI or ownership need.
 
-The canonical crate and Lean/C payload live in
+The canonical Lean/C payload lives in
 [`crates/lean-rs/shims/lean-rs-interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs/shims/lean-rs-interop-shims).
-`materialize_source_package` copies that payload into a caller-owned build root. The host carries a bundled copy in
+A Lake project outside this repository can `require` the package from the lean-rs Git repository at a release tag, with
+that directory as its path. The host carries a bundled copy in
 [`crates/lean-rs-host/shims/lean-rs-interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/shims/lean-rs-interop-shims)
 so its published package can prepare shims without locating another crate's source directory at runtime.
 
 The Lean/C payload copies must be byte-identical, including modules the host does not import.
 [`interop_shims_parity`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/interop_shims_parity.rs)
-checks this. Edit the canonical payload and synchronize the bundled copy. Rust crate scaffolding (`Cargo.toml`, `src/`,
-README, and licenses) is intentionally excluded from payload parity.
+checks this. Edit the canonical payload and synchronize the bundled copy.
 
 | Module | Role |
 | --- | --- |
 | `LeanRsInterop.Callback.Tick` | Two-counter callbacks |
 | `LeanRsInterop.Callback.String` | Borrowed Lean string callbacks copied to Rust |
 | `LeanRsInterop.Callback` | Imports both callback helper namespaces |
-| `LeanRsInterop.Worker.Stream` | Worker row/diagnostic/terminal envelope helpers |
 
 ```lean
 LeanRsInterop.Callback.Tick.call : USize -> USize -> UInt64 -> UInt64 -> BaseIO UInt8

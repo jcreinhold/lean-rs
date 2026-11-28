@@ -4,8 +4,9 @@ Safe Rust bindings for hosting Lean 4 capabilities. This crate covers runtime in
 handles, typed first-order ABI conversions, module loading and exported functions, semantic handles (`LeanName`,
 `LeanLevel`, `LeanExpr`, `LeanDeclaration`), and a structured error/diagnostic boundary.
 
-Ships the generic interop shim package used by same-process Lean-to-Rust callbacks, but no theorem-prover host shims. If
-you want sessions, `MetaM`, and kernel-checked evidence, add [`lean-rs-host`](https://docs.rs/lean-rs-host) on top.
+Defines the callback ABI that the generic interop shims use for same-process Lean-to-Rust calls, and ships no Lean
+shims. If you want sessions, `MetaM`, and kernel-checked evidence, add [`lean-rs-host`](https://docs.rs/lean-rs-host) on
+top.
 
 ## Quick start
 

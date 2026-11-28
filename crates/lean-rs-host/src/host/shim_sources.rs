@@ -31,7 +31,6 @@ const BUNDLED_SHIM_SOURCES: &[(&str, &[u8])] = shim_sources![
     "lean-rs-interop-shims/LeanRsInterop/Callback.lean",
     "lean-rs-interop-shims/LeanRsInterop/Callback/String.lean",
     "lean-rs-interop-shims/LeanRsInterop/Callback/Tick.lean",
-    "lean-rs-interop-shims/LeanRsInterop/Worker/Stream.lean",
     "lean-rs-interop-shims/c/interop_callback.c",
     "lean-rs-interop-shims/lake-manifest.json",
     "lean-rs-interop-shims/lakefile.lean",

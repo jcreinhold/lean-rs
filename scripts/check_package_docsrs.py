@@ -17,7 +17,6 @@ CRATES = [
     "lean-rs-abi",
     "lean-rs-sys",
     "lean-toolchain",
-    "lean-rs-interop-shims",
     "lean-rs",
     "lean-rs-host",
     "lean-rs-worker-protocol",
@@ -25,17 +24,8 @@ CRATES = [
     "lean-rs-worker-child",
 ]
 
-CRATE_MANIFESTS = {
-    "lean-rs-interop-shims": pathlib.Path(
-        "crates/lean-rs/shims/lean-rs-interop-shims/Cargo.toml"
-    ),
-}
-
-
 def crate_manifest(crate: str) -> pathlib.Path:
-    return ROOT / CRATE_MANIFESTS.get(
-        crate, pathlib.Path("crates") / crate / "Cargo.toml"
-    )
+    return ROOT / "crates" / crate / "Cargo.toml"
 
 
 def fail(message: str) -> None:
@@ -124,21 +114,6 @@ def package_contents(version: str, package_dir: pathlib.Path) -> None:
             "src/diagnostics.rs",
             "src/fingerprint.rs",
             "src/source_package.rs",
-        ],
-        "lean-rs-interop-shims": [
-            "Cargo.toml",
-            "LICENSE-APACHE",
-            "LICENSE-MIT",
-            "README.md",
-            "LeanRsInterop.lean",
-            "LeanRsInterop/Callback.lean",
-            "LeanRsInterop/Callback/String.lean",
-            "LeanRsInterop/Callback/Tick.lean",
-            "LeanRsInterop/Worker/Stream.lean",
-            "c/interop_callback.c",
-            "lake-manifest.json",
-            "lakefile.lean",
-            "src/lib.rs",
         ],
         "lean-rs": [
             "Cargo.toml",
@@ -230,7 +205,6 @@ def template_package_contents() -> None:
 def release_docs_exist() -> None:
     for rel in [
         "docs/api-review/lean-rs-public.txt",
-        "docs/api-review/lean-rs-interop-shims-public.txt",
         "docs/api-review/lean-rs-worker-protocol-public.txt",
         "docs/api-review/lean-rs-worker-parent-public.txt",
         "docs/api-review/lean-rs-worker-child-public.txt",

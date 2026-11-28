@@ -14,7 +14,6 @@ semantic facts, and Lean services must not depend on a Rust application's schedu
 | `lean-rs-abi` | Static supported-toolchain, required-symbol, and `lean.h` layout metadata. No build script, extern declarations, link directives, or installed-toolchain probe. |
 | `lean-toolchain` | Toolchain discovery, live build-time identity, fingerprints, Lake builds, artifact manifests, linking diagnostics, and native command ownership helpers. Builds without Lean when no runtime is required. |
 | `lean-rs-sys` | Raw Lean C ABI declarations and inline mirrors. Public FFI types are opaque; layout representations remain crate-private. Its build script checks the active header digest and emits runtime link directives. |
-| `lean-rs-interop-shims` | Packaged Lean/C source for generic callback and worker-stream helpers, materialized into a caller-owned build root. |
 | `lean-rs` | Runtime and thread handles, object ownership, ABI conversion, library/module loading, checked typed exports, callbacks, and errors. |
 | `lean-rs-host` | Standard services: imports, sessions, elaboration, evidence, declaration/module queries, and bounded `MetaM`. Owns its Lean host-shim packages. |
 | `lean-rs-worker-protocol` | Framed parent/child messages and owned wire data; no Lean runtime link. |

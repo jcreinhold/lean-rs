@@ -1,15 +1,12 @@
 //! Guard: `lean-rs-host`'s bundled `lean-rs-interop-shims` payload must stay a
 //! verbatim copy of the canonical package payload under `crates/lean-rs/`.
 //!
-//! The package is duplicated, not shared, because a published crate's
-//! `Cargo.toml` `include` cannot reach outside its own directory, so each crate
-//! must vendor its own self-contained copy (see
-//! `docs/architecture/callbacks.md#generic-shim-package`). The canonical copy is also
-//! a Rust crate; the host copy intentionally is not. Duplication without a
-//! payload guard drifts: `LeanRsInterop/Worker/Stream.lean` was once added to
-//! the canonical copy alone. This test makes the "two runtime payloads,
-//! byte-identical" invariant mechanically enforced instead of a comment nobody
-//! re-checks.
+//! The host vendors its own copy because a published crate's `Cargo.toml`
+//! `include` cannot reach outside its own directory (see
+//! `docs/architecture/callbacks.md#generic-shim-package`). The repository's
+//! fixtures and examples build the canonical copy. Two copies drift without a
+//! guard, so this test checks that they hold the same files with the same
+//! bytes.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -27,7 +24,8 @@ fn collect_payload_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
             let entry = entry.expect("dir entry is readable");
             let path = entry.path();
             let rel = path.strip_prefix(root).expect("entry lives under root").to_path_buf();
-            if is_non_payload_path(&rel) {
+            // Lake's build output is not payload.
+            if rel.starts_with(".lake") {
                 continue;
             }
             let file_type = entry.file_type().expect("file type is readable");
@@ -40,20 +38,6 @@ fn collect_payload_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         }
     }
     files
-}
-
-fn is_non_payload_path(rel: &Path) -> bool {
-    rel == Path::new(".lake")
-        || rel == Path::new("src")
-        || rel == Path::new("Cargo.toml")
-        || rel == Path::new("Cargo.lock")
-        || rel == Path::new("Cargo.toml.orig")
-        || rel == Path::new("README.md")
-        || rel == Path::new("LICENSE-APACHE")
-        || rel == Path::new("LICENSE-MIT")
-        || rel == Path::new(".cargo_vcs_info.json")
-        || rel.starts_with("src")
-        || rel.starts_with(".lake")
 }
 
 #[test]

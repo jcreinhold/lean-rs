@@ -56,7 +56,6 @@ All published crates share the workspace version; dependency examples use `"0.12
 | Implement a worker protocol peer | [`lean-rs-worker-protocol`](crates/lean-rs-worker-protocol/README.md) |
 | Discover toolchains or build and package Lean capabilities | [`lean-toolchain`](crates/lean-toolchain/README.md) |
 | Read static ABI metadata without Lean installed | [`lean-rs-abi`](crates/lean-rs-abi/README.md) |
-| Materialize the reusable Lean callback and streaming shims | [`lean-rs-interop-shims`](crates/lean-rs/shims/lean-rs-interop-shims/README.md) |
 | Call raw Lean C symbols with explicit unsafe obligations | [`lean-rs-sys`](crates/lean-rs-sys/README.md) |
 
 The safe layers hide Lean object layout, reference counting, and raw dispatch. Checked export lookup relies on trusted

@@ -22,9 +22,8 @@ partial output. Keep stderr visible for build failures:
 set -eu
 actual=$(mktemp)
 trap 'rm -f "$actual"' EXIT
-for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs \
-             lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent \
-             lean-rs-worker-child; do
+for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host \
+             lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
   cargo +nightly-2026-06-18 public-api --simplified -p "$crate" > "$actual"
   cp "$actual" "docs/api-review/${crate}-public.txt"
 done

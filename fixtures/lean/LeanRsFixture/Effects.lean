@@ -33,7 +33,8 @@ def ioThrow : IO Nat :=
 def panicUnit (_ : UInt8) : Unit :=
   panic! "lean_rs_fixture: deliberate Lean panic"
 
-/-- Constant response for the ordinary worker command and pool tests. -/
+/-- Constant `String -> IO String` export that the typed worker session
+    qualification case loads. -/
 @[export lean_rs_interop_consumer_worker_json_command]
 def workerJsonCommand (_requestJson : String) : IO String :=
   pure "{\"accepted\":true,\"kind\":\"fixture\"}"
