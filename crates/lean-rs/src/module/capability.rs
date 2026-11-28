@@ -451,6 +451,7 @@ mod tests {
         BuiltCapabilityArtifact, CapabilityManifest, LeanBuiltCapability, LeanBuiltCapabilityError,
         LeanLibraryDependency,
     };
+    use crate::module::test_dir::{TempDir, temp_dir};
     use std::fs;
     use std::path::PathBuf;
 
@@ -506,7 +507,7 @@ mod tests {
 
     #[test]
     fn manifest_descriptor_parses_dependencies() {
-        let path = temp_manifest_path("manifest_descriptor_parses_dependencies");
+        let (_dir, path) = temp_manifest_path("manifest_descriptor_parses_dependencies");
         write_manifest(
             &path,
             r#"{
@@ -548,7 +549,7 @@ mod tests {
 
     #[test]
     fn unsupported_manifest_schema_is_typed() {
-        let path = temp_manifest_path("unsupported_manifest_schema_is_typed");
+        let (_dir, path) = temp_manifest_path("unsupported_manifest_schema_is_typed");
         write_manifest(
             &path,
             r#"{
@@ -588,11 +589,10 @@ mod tests {
         assert_eq!(initializer.module_name(), "Dep");
     }
 
-    fn temp_manifest_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("lean-rs-manifest-{}-{name}", std::process::id()));
-        drop(fs::remove_dir_all(&dir));
-        fs::create_dir_all(&dir).expect("create manifest test dir");
-        dir.join("capability.json")
+    fn temp_manifest_path(name: &str) -> (TempDir, PathBuf) {
+        let dir = temp_dir(name).expect("create manifest test dir");
+        let path = dir.path().join("capability.json");
+        (dir, path)
     }
 
     fn write_manifest(path: &std::path::Path, contents: &str) {

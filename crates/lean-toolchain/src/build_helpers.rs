@@ -1113,7 +1113,8 @@ mod tests {
         CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, INTEROP_LIBRARY, capability_env_var,
         capability_manifest_env_var, capability_manifest_name, collect_sources, generated_output_key_for_sysroot,
     };
-    use crate::lake::tests::{FakeLake, TempDir, answer, fake_project, temp_dir};
+    use crate::lake::tests::{FakeLake, answer, fake_project};
+    use crate::test_dir::{TempDir, temp_dir};
     use crate::{
         LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
         LeanExportSignature, LeanLibraryDependency, LinkDiagnostics,

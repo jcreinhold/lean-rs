@@ -8,16 +8,14 @@
 )]
 
 use super::{OwnedCommandGroup, macos};
+use crate::test_dir::{TempDir, temp_dir};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::fd::{AsFd as _, AsRawFd as _};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
 const LIMIT: Duration = Duration::from_secs(5);
 const SCRIPT: &str = r"
 import os, pathlib, signal, sys, time
@@ -48,27 +46,25 @@ while not (root / 'release').exists():
 os._exit(0)
 ";
 
+/// A process group under test and the directory its processes write to.
+///
+/// Fields drop in order, so the group is gone before its directory is removed.
 struct Fixture {
-    root: PathBuf,
     group: Option<OwnedCommandGroup>,
+    root: TempDir,
 }
 
 impl Fixture {
     fn start(mode: &str, count: usize) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "lean-owned-group-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&root).unwrap();
-        let mut command = Self::command(&root, mode, count);
-        command.stdout(File::create(root.join("stdout")).unwrap());
+        let root = temp_dir("owned-group").unwrap();
+        let mut command = Self::command(root.path(), mode, count);
+        command.stdout(File::create(root.path().join("stdout")).unwrap());
         let group = OwnedCommandGroup::spawn(command).unwrap();
         let fixture = Self {
-            root,
             group: Some(group),
+            root,
         };
-        wait_until(|| fixture.root.join("root-ready").exists());
+        wait_until(|| fixture.root.path().join("root-ready").exists());
         fixture
     }
 
@@ -90,7 +86,7 @@ impl Fixture {
     }
 
     fn heartbeat(&self) -> u64 {
-        fs::metadata(self.root.join("heartbeat-0")).map_or(0, |metadata| metadata.len())
+        fs::metadata(self.root.path().join("heartbeat-0")).map_or(0, |metadata| metadata.len())
     }
 
     fn root_exited(&mut self) {
@@ -119,7 +115,6 @@ impl Drop for Fixture {
                 std::thread::sleep(Duration::from_millis(5));
             }
         }
-        let _removed = fs::remove_dir_all(&self.root);
     }
 }
 
@@ -161,7 +156,7 @@ fn descendants_can_finish_naturally_without_intervention() {
     let mut fixture = Fixture::start("exit", 1);
     fixture.root_exited();
     assert!(fixture.group().try_wait().unwrap().is_none());
-    fs::write(fixture.root.join("release"), b"finish").unwrap();
+    fs::write(fixture.root.path().join("release"), b"finish").unwrap();
     assert_eq!(fixture.finish().code(), Some(0));
     assert!(!fixture.group().intervened());
     assert!(!fixture.group().cleanup_pending());
@@ -203,7 +198,7 @@ fn full_two_pid_snapshot_never_reaps_a_three_member_group() {
     fixture.root_exited();
     assert_eq!(macos::members(fixture.group().id()).unwrap(), macos::Members::Others);
     assert!(fixture.group().try_wait().unwrap().is_none());
-    assert!(fixture.root.join("ready-1").exists());
+    assert!(fixture.root.path().join("ready-1").exists());
     fixture.group().request_stop().unwrap();
     assert_eq!(fixture.finish().code(), Some(0));
 }
@@ -214,7 +209,7 @@ fn inherited_pipe_stays_open_after_root_exit_until_group_closes() {
     fixture.finish();
     let (mut observer, inherited) = UnixStream::pair().unwrap();
     observer.set_read_timeout(Some(LIMIT)).unwrap();
-    let mut command = Fixture::command(&fixture.root, "exit", 1);
+    let mut command = Fixture::command(fixture.root.path(), "exit", 1);
     command.arg(inherited.as_raw_fd().to_string());
     fixture.group = Some(OwnedCommandGroup::spawn_inheriting(command, &[inherited.as_fd()]).unwrap());
     drop(inherited);
@@ -235,7 +230,7 @@ fn inherited_borrowed_file_is_closed_only_in_the_child_and_parent_keeps_cloexec(
     use rustix::io::{FdFlags, fcntl_getfd};
     let mut fixture = Fixture::start("exit", 0);
     fixture.finish();
-    let marker = fixture.root.join("ownership-file");
+    let marker = fixture.root.path().join("ownership-file");
     fs::write(&marker, b"ownership").unwrap();
     let file = File::open(&marker).unwrap();
     assert!(fcntl_getfd(&file).unwrap().contains(FdFlags::CLOEXEC));

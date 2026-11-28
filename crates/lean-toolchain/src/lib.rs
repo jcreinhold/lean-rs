@@ -33,6 +33,8 @@ pub mod manifest_validation;
 #[cfg(unix)]
 pub mod process_group;
 mod source_package;
+#[cfg(test)]
+mod test_dir;
 
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, emit_lean_link_directives_checked,

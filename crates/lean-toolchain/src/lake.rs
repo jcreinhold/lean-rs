@@ -447,12 +447,10 @@ pub(crate) mod tests {
     use std::os::unix::process::ExitStatusExt as _;
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitStatus, Output};
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{LakeRunner, LakeWorkspace};
     use crate::diagnostics::LinkDiagnostics;
-
-    static NONCE: AtomicU64 = AtomicU64::new(0);
+    use crate::test_dir::{TempDir, temp_dir};
 
     /// One recorded Lake command: program, arguments, environment changes and directory.
     #[derive(Debug)]
@@ -523,35 +521,6 @@ pub(crate) mod tests {
             stdout: stdout.as_bytes().to_vec(),
             stderr: stderr.as_bytes().to_vec(),
         }
-    }
-
-    /// A test's own directory under the system temporary directory.
-    ///
-    /// Dropping it removes the directory, so a run leaves nothing behind.
-    pub(crate) struct TempDir(PathBuf);
-
-    impl TempDir {
-        pub(crate) fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            drop(fs::remove_dir_all(&self.0));
-        }
-    }
-
-    /// A fresh directory under the system temporary directory.
-    pub(crate) fn temp_dir(name: &str) -> Result<TempDir, String> {
-        let mut dir = TempDir(std::env::temp_dir().join(format!(
-            "lean-toolchain-lake-{name}-{}-{}",
-            std::process::id(),
-            NONCE.fetch_add(1, Ordering::Relaxed)
-        )));
-        fs::create_dir_all(&dir.0).map_err(|error| error.to_string())?;
-        dir.0 = dir.0.canonicalize().map_err(|error| error.to_string())?;
-        Ok(dir)
     }
 
     /// A workspace root with a lakefile, and a directory holding `Lake.olean`.

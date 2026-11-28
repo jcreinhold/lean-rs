@@ -516,9 +516,11 @@ mod tests {
     };
     use std::path::{Path, PathBuf};
 
+    use crate::test_dir::{TempDir, temp_dir};
+
     #[test]
     fn manifest_round_trips_export_signatures() {
-        let path = temp_manifest_path("manifest_round_trips_export_signatures");
+        let (_dir, path) = temp_manifest_path("manifest_round_trips_export_signatures");
         let signature = LeanExportSignature::function(
             "cap_u8_identity",
             vec![LeanExportArgAbi::new(LeanExportAbiRepr::U8, LeanExportOwnership::None)],
@@ -543,7 +545,7 @@ mod tests {
 
     #[test]
     fn old_manifest_schema_is_rejected() {
-        let path = temp_manifest_path("old_manifest_schema_is_rejected");
+        let (_dir, path) = temp_manifest_path("old_manifest_schema_is_rejected");
         write_manifest(&path, 1, &[]);
 
         let err = CapabilityManifest::read(&path).expect_err("schema v1 is obsolete");
@@ -614,11 +616,10 @@ mod tests {
         );
     }
 
-    fn temp_manifest_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("lean-toolchain-manifest-{}-{name}", std::process::id()));
-        drop(std::fs::remove_dir_all(&dir));
-        std::fs::create_dir_all(&dir).expect("create manifest test dir");
-        dir.join("capability.json")
+    fn temp_manifest_path(name: &str) -> (TempDir, PathBuf) {
+        let dir = temp_dir(name).expect("create manifest test dir");
+        let path = dir.path().join("capability.json");
+        (dir, path)
     }
 
     fn write_manifest(path: &Path, schema_version: u32, exports: &[serde_json::Value]) {

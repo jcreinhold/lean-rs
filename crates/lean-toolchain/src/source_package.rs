@@ -668,19 +668,8 @@ mod tests {
 
     use super::{
         GeneratedSourceFile, SourcePackageError, SourcePackageMaterializationRequest, materialize_source_package,
-        remove_path_if_exists,
     };
-
-    fn temp_root(name: &str) -> Result<PathBuf, String> {
-        let root = std::env::temp_dir().join(format!(
-            "lean-toolchain-source-package-{name}-{}-{}",
-            std::process::id(),
-            super::unique_nanos()
-        ));
-        drop(remove_path_if_exists(&root, "remove old source package test temp root"));
-        fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-        Ok(root)
-    }
+    use crate::test_dir::{TempDir, temp_dir};
 
     fn write(path: &Path, contents: &str) -> Result<(), String> {
         if let Some(parent) = path.parent() {
@@ -689,25 +678,25 @@ mod tests {
         fs::write(path, contents).map_err(|error| error.to_string())
     }
 
-    fn source_root(name: &str) -> Result<PathBuf, String> {
-        let root = temp_root(name)?;
+    fn source_root(name: &str) -> Result<TempDir, String> {
+        let root = temp_dir(name)?;
         write(
-            &root.join("lakefile.lean"),
+            &root.path().join("lakefile.lean"),
             "import Lake\nopen Lake DSL\npackage test_pkg\n",
         )?;
         write(
-            &root.join("lake-manifest.json"),
+            &root.path().join("lake-manifest.json"),
             r#"{"version":"1.1.0","packages":[],"name":"test_pkg"}"#,
         )?;
-        write(&root.join("Test.lean"), "def answer := 42\n")?;
-        write(&root.join("Test/Extra.lean"), "def extra := 43\n")?;
+        write(&root.path().join("Test.lean"), "def answer := 42\n")?;
+        write(&root.path().join("Test/Extra.lean"), "def extra := 43\n")?;
         Ok(root)
     }
 
-    fn request(source_root: PathBuf, cache_root: PathBuf, digest: &str) -> SourcePackageMaterializationRequest {
+    fn request(source_root: &Path, cache_root: &Path, digest: &str) -> SourcePackageMaterializationRequest {
         SourcePackageMaterializationRequest {
-            source_root,
-            cache_root,
+            source_root: source_root.to_path_buf(),
+            cache_root: cache_root.to_path_buf(),
             package_name: "test-pkg".to_owned(),
             materialized_package_name: "test_pkg".to_owned(),
             library_name: "Test".to_owned(),
@@ -734,9 +723,9 @@ mod tests {
     #[test]
     fn materialization_writes_generated_toolchain_and_provenance() -> Result<(), String> {
         let source = source_root("writes")?;
-        let cache = temp_root("cache-writes")?;
-        let package =
-            materialize_source_package(&request(source, cache, "digest-a")).map_err(|error| error.to_string())?;
+        let cache = temp_dir("cache-writes")?;
+        let package = materialize_source_package(&request(source.path(), cache.path(), "digest-a"))
+            .map_err(|error| error.to_string())?;
 
         assert_eq!(
             read_string(&package.project_root.join("lean-toolchain"))?.trim(),
@@ -747,21 +736,17 @@ mod tests {
         assert_eq!(package.provenance.package_name, "test-pkg");
         assert!(package.provenance.generated_toolchain_file);
         assert!(package.project_root.join(super::SIDECAR_FILE_NAME).is_file());
-        drop(remove_path_if_exists(
-            &package.project_root,
-            "remove source package test output",
-        ));
         Ok(())
     }
 
     #[test]
     fn cache_path_changes_when_digest_changes() -> Result<(), String> {
         let source = source_root("digest")?;
-        let cache = temp_root("cache-digest")?;
-        let first = materialize_source_package(&request(source.clone(), cache.clone(), "digest-a"))
+        let cache = temp_dir("cache-digest")?;
+        let first = materialize_source_package(&request(source.path(), cache.path(), "digest-a"))
             .map_err(|error| error.to_string())?;
-        let second =
-            materialize_source_package(&request(source, cache, "digest-b")).map_err(|error| error.to_string())?;
+        let second = materialize_source_package(&request(source.path(), cache.path(), "digest-b"))
+            .map_err(|error| error.to_string())?;
         assert_ne!(first.project_root, second.project_root);
         assert!(
             first
@@ -781,8 +766,8 @@ mod tests {
     #[test]
     fn warm_materialization_reuses_valid_entry() -> Result<(), String> {
         let source = source_root("warm")?;
-        let cache = temp_root("cache-warm")?;
-        let input = request(source, cache, "digest-warm");
+        let cache = temp_dir("cache-warm")?;
+        let input = request(source.path(), cache.path(), "digest-warm");
         let first = materialize_source_package(&input).map_err(|error| error.to_string())?;
         let marker = first.project_root.join("warm-marker");
         fs::write(&marker, b"warm").map_err(|error| error.to_string())?;
@@ -796,8 +781,8 @@ mod tests {
     #[test]
     fn stale_sidecar_rematerializes_entry() -> Result<(), String> {
         let source = source_root("sidecar")?;
-        let cache = temp_root("cache-sidecar")?;
-        let input = request(source, cache, "digest-sidecar");
+        let cache = temp_dir("cache-sidecar")?;
+        let input = request(source.path(), cache.path(), "digest-sidecar");
         let first = materialize_source_package(&input).map_err(|error| error.to_string())?;
         let marker = first.project_root.join("warm-marker");
         fs::write(&marker, b"warm").map_err(|error| error.to_string())?;
@@ -812,8 +797,8 @@ mod tests {
     #[test]
     fn mismatched_toolchain_rematerializes_entry() -> Result<(), String> {
         let source = source_root("toolchain")?;
-        let cache = temp_root("cache-toolchain")?;
-        let input = request(source, cache, "digest-toolchain");
+        let cache = temp_dir("cache-toolchain")?;
+        let input = request(source.path(), cache.path(), "digest-toolchain");
         let first = materialize_source_package(&input).map_err(|error| error.to_string())?;
         let marker = first.project_root.join("warm-marker");
         fs::write(&marker, b"warm").map_err(|error| error.to_string())?;
@@ -829,10 +814,10 @@ mod tests {
     #[test]
     fn concurrent_first_materialization_serializes_same_entry() -> Result<(), String> {
         let source = source_root("concurrent")?;
-        let cache = temp_root("cache-concurrent")?;
+        let cache = temp_dir("cache-concurrent")?;
         let handles = (0..8)
             .map(|_| {
-                let input = request(source.clone(), cache.clone(), "digest-concurrent");
+                let input = request(source.path(), cache.path(), "digest-concurrent");
                 thread::spawn(move || {
                     materialize_source_package(&input)
                         .map_err(|error| error.to_string())
@@ -860,8 +845,8 @@ mod tests {
     #[test]
     fn generated_files_can_override_lake_metadata() -> Result<(), String> {
         let source = source_root("generated")?;
-        let cache = temp_root("cache-generated")?;
-        let mut input = request(source, cache, "digest-generated");
+        let cache = temp_dir("cache-generated")?;
+        let mut input = request(source.path(), cache.path(), "digest-generated");
         input.generated_files = vec![
             GeneratedSourceFile {
                 relative_path: PathBuf::from("lakefile.lean"),
@@ -880,8 +865,8 @@ mod tests {
     #[test]
     fn generated_file_mismatch_rematerializes_entry() -> Result<(), String> {
         let source = source_root("generated-mismatch")?;
-        let cache = temp_root("cache-generated-mismatch")?;
-        let mut input = request(source, cache, "digest-generated-mismatch");
+        let cache = temp_dir("cache-generated-mismatch")?;
+        let mut input = request(source.path(), cache.path(), "digest-generated-mismatch");
         input.generated_files = vec![GeneratedSourceFile {
             relative_path: PathBuf::from("generated.txt"),
             contents: b"expected".to_vec(),
@@ -904,8 +889,8 @@ mod tests {
     #[test]
     fn error_messages_include_action_and_path() -> Result<(), String> {
         let source = source_root("missing")?;
-        let cache = temp_root("cache-missing")?;
-        let mut input = request(source, cache, "digest-missing");
+        let cache = temp_dir("cache-missing")?;
+        let mut input = request(source.path(), cache.path(), "digest-missing");
         input.include_paths.push(PathBuf::from("Missing.lean"));
         let error = match materialize_source_package(&input) {
             Ok(package) => {
@@ -921,10 +906,11 @@ mod tests {
             "missing include path should be an invalid payload error: {error}"
         );
 
-        let bad_cache_file = temp_root("cache-file")?.join("not-a-directory");
+        let cache_file_dir = temp_dir("cache-file")?;
+        let bad_cache_file = cache_file_dir.path().join("not-a-directory");
         fs::write(&bad_cache_file, b"not a directory").map_err(|error| error.to_string())?;
         let source = source_root("io-path")?;
-        let error = match materialize_source_package(&request(source, bad_cache_file, "digest-io")) {
+        let error = match materialize_source_package(&request(source.path(), &bad_cache_file, "digest-io")) {
             Ok(package) => {
                 return Err(format!(
                     "cache root file should fail, materialized {}",
@@ -943,8 +929,8 @@ mod tests {
     #[test]
     fn a_held_entry_lock_bounds_the_wait_and_cancellation_stops_it() -> Result<(), String> {
         let source = source_root("held-entry")?;
-        let cache = temp_root("cache-held-entry")?;
-        let input = request(source, cache, "digest-held-entry");
+        let cache = temp_dir("cache-held-entry")?;
+        let input = request(source.path(), cache.path(), "digest-held-entry");
         let held = super::with_materialized_source_package(
             &input,
             std::time::Duration::from_secs(5),

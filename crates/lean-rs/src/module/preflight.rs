@@ -290,6 +290,7 @@ mod tests {
         inspect_artifact,
     };
     use crate::LeanBuiltCapability;
+    use crate::module::test_dir::TempDir;
     use std::collections::HashSet;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -297,7 +298,8 @@ mod tests {
 
     #[test]
     fn missing_manifest_reports_stable_code() {
-        let path = temp_dir("missing_manifest").join("missing.json");
+        let dir = temp_dir("missing_manifest");
+        let path = dir.path().join("missing.json");
         let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(path)).check();
 
         assert!(!report.is_ok());
@@ -310,7 +312,7 @@ mod tests {
     #[test]
     fn malformed_manifest_reports_stable_code() {
         let dir = temp_dir("malformed_manifest");
-        let manifest = dir.join("capability.json");
+        let manifest = dir.path().join("capability.json");
         fs::write(&manifest, "{").expect("write malformed manifest");
 
         let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(&manifest)).check();
@@ -325,7 +327,7 @@ mod tests {
     #[test]
     fn unsupported_manifest_schema_reports_stable_code() {
         let dir = temp_dir("unsupported_manifest_schema");
-        let manifest = dir.join("capability.json");
+        let manifest = dir.path().join("capability.json");
         fs::write(
             &manifest,
             r#"{
@@ -350,8 +352,8 @@ mod tests {
     #[test]
     fn missing_primary_dylib_reports_stable_code() {
         let dir = temp_dir("missing_primary_dylib");
-        let missing = dir.join("missing-capability.dylib");
-        let manifest = write_manifest(&dir, &missing, "", "");
+        let missing = dir.path().join("missing-capability.dylib");
+        let manifest = write_manifest(dir.path(), &missing, "", "");
 
         let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
@@ -361,12 +363,12 @@ mod tests {
     #[test]
     fn missing_dependency_reports_stable_code() {
         let dir = temp_dir("missing_dependency");
-        let missing = dir.join("missing-dependency.dylib");
+        let missing = dir.path().join("missing-dependency.dylib");
         let dependency = format!(
             r#""dependencies":[{{"dylib_path":"{}","export_symbols_for_dependents":true}}],"#,
             json_path(&missing)
         );
-        let manifest = write_manifest(&dir, current_exe(), &dependency, "");
+        let manifest = write_manifest(dir.path(), current_exe(), &dependency, "");
 
         let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
@@ -379,7 +381,7 @@ mod tests {
     #[test]
     fn invalid_object_reports_unsupported_architecture() {
         let dir = temp_dir("invalid_object");
-        let bad = dir.join("not-a-dylib.so");
+        let bad = dir.path().join("not-a-dylib.so");
         fs::write(&bad, b"not an object").expect("write invalid object");
 
         let err = inspect_artifact(&bad, super::ArtifactRole::Primary).expect_err("invalid object should fail");
@@ -390,7 +392,7 @@ mod tests {
     #[test]
     fn unsupported_toolchain_fingerprint_reports_stable_code() {
         let dir = temp_dir("unsupported_toolchain_fingerprint");
-        let manifest = dir.join("capability.json");
+        let manifest = dir.path().join("capability.json");
         fs::write(
             &manifest,
             format!(
@@ -423,9 +425,9 @@ mod tests {
     #[test]
     fn stale_manifest_reports_stable_code() {
         let dir = temp_dir("stale_manifest");
-        let primary = dir.join("libcap.so");
+        let primary = dir.path().join("libcap.so");
         fs::write(&primary, b"old").expect("write old primary");
-        let manifest = write_manifest(&dir, &primary, "", "");
+        let manifest = write_manifest(dir.path(), &primary, "", "");
         std::thread::sleep(Duration::from_millis(20));
         fs::write(&primary, b"new").expect("write newer primary");
         let parsed = CapabilityManifest::read(&manifest).expect("manifest parses");
@@ -443,7 +445,7 @@ mod tests {
     #[test]
     fn missing_initializer_reports_stable_code() {
         let dir = temp_dir("missing_initializer");
-        let manifest = write_manifest(&dir, current_exe(), "", "");
+        let manifest = write_manifest(dir.path(), current_exe(), "", "");
 
         let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
@@ -480,8 +482,8 @@ mod tests {
     #[test]
     fn open_failure_uses_preflight_code_in_error_message() {
         let dir = temp_dir("open_failure_preflight_code");
-        let missing = dir.join("missing-capability.dylib");
-        let manifest = write_manifest(&dir, &missing, "", "");
+        let missing = dir.path().join("missing-capability.dylib");
+        let manifest = write_manifest(dir.path(), &missing, "", "");
         let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
         assert!(!report.is_ok());
         let err = super::report_into_error(report);
@@ -496,11 +498,8 @@ mod tests {
         report.checks().iter().any(|check| check.code() == code)
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("lean-rs-preflight-{}-{name}", std::process::id()));
-        drop(fs::remove_dir_all(&dir));
-        fs::create_dir_all(&dir).expect("create preflight test dir");
-        dir
+    fn temp_dir(name: &str) -> TempDir {
+        crate::module::test_dir::temp_dir(name).expect("create preflight test dir")
     }
 
     fn current_exe() -> PathBuf {

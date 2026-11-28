@@ -67,4 +67,6 @@ pub use trusted::{
 pub use crate::abi::traits::{LeanAbi, LeanCReprAbi};
 
 #[cfg(test)]
+mod test_dir;
+#[cfg(test)]
 mod tests;
