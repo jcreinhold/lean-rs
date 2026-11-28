@@ -10,7 +10,7 @@ use lean_rs::abi::structure::{take_ctor_objects, view};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 pub use lean_rs::host_bridge::declaration_requests::{
     DeclarationInspectionBudgets, DeclarationInspectionFields, DeclarationInspectionRequest, DeclarationNameMatch,
-    DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchScope,
+    DeclarationSearchRequest,
 };
 
 use crate::host::session::LeanSourceRange;
@@ -22,6 +22,21 @@ pub struct DeclarationFlags {
     pub is_internal: bool,
 }
 
+/// How a declaration's full name matched the request's name fragment.
+///
+/// The variants are in result order: search returns exact names first, then
+/// prefixes, then substrings, so a limit keeps the closest names.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DeclarationNameMatchKind {
+    /// The name is the fragment, compared with case.
+    Exact,
+    /// The name starts with the fragment, ignoring ASCII case.
+    Prefix,
+    /// The name contains the fragment after its start, ignoring ASCII case.
+    Substring,
+}
+
+/// One declaration that a search kept.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationSearchRow {
     pub name: String,
@@ -29,8 +44,8 @@ pub struct DeclarationSearchRow {
     pub module: Option<String>,
     pub source: Option<LeanSourceRange>,
     pub match_reason: String,
-    pub score: i32,
-    pub rank: usize,
+    /// How the name matched the fragment; `None` when the request had no fragment.
+    pub name_match: Option<DeclarationNameMatchKind>,
     pub flags: DeclarationFlags,
 }
 
@@ -44,7 +59,7 @@ pub struct DeclarationSearchPruning {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DeclarationSearchTimings {
     pub scan_micros: u64,
-    pub rank_micros: u64,
+    pub sort_micros: u64,
     pub source_micros: u64,
 }
 
@@ -68,7 +83,6 @@ pub struct DeclarationSearchFacts {
     pub after_kind_filter: usize,
     pub after_required_constants_filter: usize,
     pub after_conclusion_filter: usize,
-    pub after_scope_filter: usize,
     pub source_lookups: usize,
     pub broad_pruning: Vec<DeclarationSearchPruning>,
     pub truncated: bool,
@@ -76,6 +90,8 @@ pub struct DeclarationSearchFacts {
     pub derived_work: LeanDerivedWorkFacts,
 }
 
+/// The rows a search kept, in [`DeclarationNameMatchKind`] order and then by
+/// name, cut to the request's limit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationSearchResult {
     pub declarations: Vec<DeclarationSearchRow>,
@@ -143,20 +159,31 @@ impl<'lean> TryFromLean<'lean> for DeclarationFlags {
     }
 }
 
+// The shim encodes the match as a `Nat`: 0 for no fragment, then 1, 2, 3 in
+// `DeclarationNameMatchKind` order.
+fn name_match_from_nat(obj: Obj<'_>) -> lean_rs::LeanResult<Option<DeclarationNameMatchKind>> {
+    match nat::try_to_usize(obj)? {
+        0 => Ok(None),
+        1 => Ok(Some(DeclarationNameMatchKind::Exact)),
+        2 => Ok(Some(DeclarationNameMatchKind::Prefix)),
+        3 => Ok(Some(DeclarationNameMatchKind::Substring)),
+        other => Err(conversion_error(format!(
+            "expected declaration name match 0..=3, found {other}"
+        ))),
+    }
+}
+
 impl<'lean> TryFromLean<'lean> for DeclarationSearchRow {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let [name, kind, module, source, match_reason, score, rank, flags] =
-            take_ctor_objects::<8>(obj, 0, "DeclarationSearchRow")?;
+        let [name, kind, module, source, match_reason, name_match, flags] =
+            take_ctor_objects::<7>(obj, 0, "DeclarationSearchRow")?;
         Ok(Self {
             name: String::try_from_lean(name)?,
             kind: String::try_from_lean(kind)?,
             module: Option::<String>::try_from_lean(module)?,
             source: Option::<LeanSourceRange>::try_from_lean(source)?,
             match_reason: String::try_from_lean(match_reason)?,
-            score: String::try_from_lean(score)?
-                .parse()
-                .map_err(|_| conversion_error("score does not fit i32"))?,
-            rank: nat::try_to_usize(rank)?,
+            name_match: name_match_from_nat(name_match)?,
             flags: DeclarationFlags::try_from_lean(flags)?,
         })
     }
@@ -175,10 +202,10 @@ impl<'lean> TryFromLean<'lean> for DeclarationSearchPruning {
 
 impl<'lean> TryFromLean<'lean> for DeclarationSearchTimings {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let [scan_micros, rank_micros, source_micros] = take_ctor_objects::<3>(obj, 0, "DeclarationSearchTimings")?;
+        let [scan_micros, sort_micros, source_micros] = take_ctor_objects::<3>(obj, 0, "DeclarationSearchTimings")?;
         Ok(Self {
             scan_micros: nat::try_to_u64(scan_micros)?,
-            rank_micros: nat::try_to_u64(rank_micros)?,
+            sort_micros: nat::try_to_u64(sort_micros)?,
             source_micros: nat::try_to_u64(source_micros)?,
         })
     }
@@ -221,20 +248,18 @@ impl<'lean> TryFromLean<'lean> for DeclarationSearchFacts {
             after_kind_filter,
             after_required_constants_filter,
             after_conclusion_filter,
-            after_scope_filter,
             source_lookups,
             broad_pruning,
             truncated,
             timings,
             derived_work,
-        ] = take_ctor_objects::<11>(obj, 0, "DeclarationSearchFacts")?;
+        ] = take_ctor_objects::<10>(obj, 0, "DeclarationSearchFacts")?;
         Ok(Self {
             declarations_scanned: nat::try_to_usize(declarations_scanned)?,
             after_name_filter: nat::try_to_usize(after_name_filter)?,
             after_kind_filter: nat::try_to_usize(after_kind_filter)?,
             after_required_constants_filter: nat::try_to_usize(after_required_constants_filter)?,
             after_conclusion_filter: nat::try_to_usize(after_conclusion_filter)?,
-            after_scope_filter: nat::try_to_usize(after_scope_filter)?,
             source_lookups: nat::try_to_usize(source_lookups)?,
             broad_pruning: Vec::<DeclarationSearchPruning>::try_from_lean(broad_pruning)?,
             truncated: bool_from_nat(truncated)?,

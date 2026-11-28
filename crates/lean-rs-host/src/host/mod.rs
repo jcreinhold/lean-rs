@@ -81,10 +81,10 @@ pub use self::capabilities::{
 pub use self::capabilities::{prepare_host_artifacts_for_generated_output, ready_host_artifacts_for_generated_output};
 pub use self::declaration_search::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
-    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
-    DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
-    DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
-    DeclarationSearchTimings, LeanDerivedWorkFacts,
+    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationNameMatchKind,
+    DeclarationProofSearchFacts, DeclarationRenderedInfo, DeclarationSearchFacts, DeclarationSearchPruning,
+    DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchTimings,
+    LeanDerivedWorkFacts,
 };
 pub use self::host::LeanHost;
 pub use self::process::{

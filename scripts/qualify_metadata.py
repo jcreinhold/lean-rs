@@ -81,7 +81,7 @@ HOST_BUILDER_CASES = (
 )
 ORDINARY_TYPED_TESTS = (
     "describe_distinguishes_known_and_missing_declarations",
-    "search_declarations_applies_filters_ranks_and_limits",
+    "search_declarations_applies_filters_orders_and_limits",
     "core_declaration_queries_preserve_missing_slots_and_type_caps",
     "inspect_declaration_distinguishes_theorem_definition_and_missing",
     "inspect_declaration_bounds_output_and_opts_in_to_proof_search",

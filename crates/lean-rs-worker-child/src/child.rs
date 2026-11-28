@@ -32,11 +32,11 @@ use lean_rs_host::host::process::{
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
-    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
-    DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchResult,
-    DeclarationSearchRow, DeclarationSearchScope, LeanCapabilities, LeanDeclarationFilter, LeanDerivedWorkFacts,
-    LeanElabFailure, LeanElabOptions, LeanHost, LeanImportStats, LeanKernelOutcome, LeanSession,
-    LeanSessionImportProfile, LeanSeverity, LeanSourceRange,
+    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationNameMatchKind,
+    DeclarationProofSearchFacts, DeclarationRenderedInfo, DeclarationSearchRequest, DeclarationSearchResult,
+    DeclarationSearchRow, LeanCapabilities, LeanDeclarationFilter, LeanDerivedWorkFacts, LeanElabFailure,
+    LeanElabOptions, LeanHost, LeanImportStats, LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
+    LeanSourceRange,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -49,20 +49,20 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags,
     LeanWorkerDeclarationInspection, LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
-    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationOutlineResult,
-    LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
-    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
-    LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchItem,
-    LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationBatchResult,
-    LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
-    LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
-    LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
-    LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerGoalAtResult, LeanWorkerHostRuntimeMetadata, LeanWorkerImportStats, LeanWorkerKernelResult,
-    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationNameMatchKind,
+    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow,
+    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchTimings,
+    LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType,
+    LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationBatchRow,
+    LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
+    LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerDiagnostic, LeanWorkerDoctorReport,
+    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult,
+    LeanWorkerHostRuntimeMetadata, LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerKernelStatus,
+    LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
     LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
     LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
@@ -2521,7 +2521,6 @@ fn declaration_search_host(search: &LeanWorkerDeclarationSearch) -> DeclarationS
         kind: search.kind.clone(),
         required_constants: search.required_constants.clone(),
         conclusion_head: search.conclusion_head.clone(),
-        scope_biases: search.scope_biases.iter().map(declaration_search_bias_host).collect(),
         limit: search.limit.clamp(1, 100),
         filter: LeanDeclarationFilter {
             include_private: search.filter.include_private,
@@ -2576,19 +2575,11 @@ fn declaration_name_match_host(name_match: LeanWorkerDeclarationNameMatch) -> De
     }
 }
 
-fn declaration_search_scope_host(scope: LeanWorkerDeclarationSearchScope) -> DeclarationSearchScope {
-    match scope {
-        LeanWorkerDeclarationSearchScope::Namespace => DeclarationSearchScope::Namespace,
-        LeanWorkerDeclarationSearchScope::Module => DeclarationSearchScope::Module,
-    }
-}
-
-fn declaration_search_bias_host(bias: &LeanWorkerDeclarationSearchBias) -> DeclarationSearchBias {
-    DeclarationSearchBias {
-        scope: declaration_search_scope_host(bias.scope),
-        prefix: bias.prefix.clone(),
-        strict: bias.strict,
-        weight: bias.weight,
+const fn declaration_name_match_kind_wire(kind: DeclarationNameMatchKind) -> LeanWorkerDeclarationNameMatchKind {
+    match kind {
+        DeclarationNameMatchKind::Exact => LeanWorkerDeclarationNameMatchKind::Exact,
+        DeclarationNameMatchKind::Prefix => LeanWorkerDeclarationNameMatchKind::Prefix,
+        DeclarationNameMatchKind::Substring => LeanWorkerDeclarationNameMatchKind::Substring,
     }
 }
 
@@ -2611,8 +2602,7 @@ fn declaration_search_row_wire(row: DeclarationSearchRow) -> LeanWorkerDeclarati
         module: row.module,
         source: row.source.map(source_range_wire),
         match_reason: row.match_reason,
-        score: row.score,
-        rank: row.rank,
+        name_match: row.name_match.map(declaration_name_match_kind_wire),
         flags: declaration_flags_wire(row.flags),
     }
 }
@@ -2632,7 +2622,6 @@ fn declaration_search_facts_wire(facts: lean_rs_host::DeclarationSearchFacts) ->
         after_kind_filter: facts.after_kind_filter,
         after_required_constants_filter: facts.after_required_constants_filter,
         after_conclusion_filter: facts.after_conclusion_filter,
-        after_scope_filter: facts.after_scope_filter,
         source_lookups: facts.source_lookups,
         broad_pruning: facts
             .broad_pruning
@@ -2646,7 +2635,7 @@ fn declaration_search_facts_wire(facts: lean_rs_host::DeclarationSearchFacts) ->
         truncated: facts.truncated,
         timings: LeanWorkerDeclarationSearchTimings {
             scan_micros: facts.timings.scan_micros,
-            rank_micros: facts.timings.rank_micros,
+            sort_micros: facts.timings.sort_micros,
             source_micros: facts.timings.source_micros,
         },
         derived_work: derived_work_facts_wire(&facts.derived_work),

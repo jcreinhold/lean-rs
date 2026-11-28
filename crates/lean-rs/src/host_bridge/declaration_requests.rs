@@ -12,20 +12,6 @@ pub enum DeclarationNameMatch {
     Suffix,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeclarationSearchScope {
-    Namespace,
-    Module,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeclarationSearchBias {
-    pub scope: DeclarationSearchScope,
-    pub prefix: String,
-    pub strict: bool,
-    pub weight: i32,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationSearchRequest {
     pub name_fragment: Option<String>,
@@ -33,7 +19,6 @@ pub struct DeclarationSearchRequest {
     pub kind: Option<String>,
     pub required_constants: Vec<String>,
     pub conclusion_head: Option<String>,
-    pub scope_biases: Vec<DeclarationSearchBias>,
     pub limit: usize,
     pub filter: LeanDeclarationFilter,
     pub include_source: bool,
@@ -48,7 +33,6 @@ impl DeclarationSearchRequest {
             kind: None,
             required_constants: Vec::new(),
             conclusion_head: None,
-            scope_biases: Vec::new(),
             limit: 20,
             filter: LeanDeclarationFilter {
                 include_private: false,
@@ -175,32 +159,8 @@ impl<'lean> IntoLean<'lean> for DeclarationNameMatch {
     }
 }
 
-impl<'lean> IntoLean<'lean> for DeclarationSearchScope {
-    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
-        match self {
-            Self::Namespace => nat::from_usize(runtime, 0),
-            Self::Module => nat::from_usize(runtime, 1),
-        }
-    }
-}
-
 fn nat_from_bool(runtime: &LeanRuntime, value: bool) -> Obj<'_> {
     nat::from_usize(runtime, usize::from(value))
-}
-
-impl<'lean> IntoLean<'lean> for DeclarationSearchBias {
-    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
-        alloc_ctor_with_objects(
-            runtime,
-            0,
-            [
-                self.scope.into_lean(runtime),
-                self.prefix.into_lean(runtime),
-                nat_from_bool(runtime, self.strict),
-                self.weight.to_string().into_lean(runtime),
-            ],
-        )
-    }
 }
 
 impl<'lean> IntoLean<'lean> for DeclarationSearchRequest {
@@ -214,7 +174,6 @@ impl<'lean> IntoLean<'lean> for DeclarationSearchRequest {
                 self.kind.into_lean(runtime),
                 self.required_constants.into_lean(runtime),
                 self.conclusion_head.into_lean(runtime),
-                self.scope_biases.into_lean(runtime),
                 nat::from_usize(runtime, self.limit),
                 self.filter.into_lean(runtime),
                 nat_from_bool(runtime, self.include_source),

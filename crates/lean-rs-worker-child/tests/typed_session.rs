@@ -19,7 +19,7 @@ use std::time::Duration;
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionFields,
     LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch,
-    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchScope,
+    LeanWorkerDeclarationNameMatchKind, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchRow,
     LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
     LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
@@ -265,8 +265,43 @@ fn describe_distinguishes_known_and_missing_declarations() {
     assert!(row.is_none(), "absent name should project to None");
 }
 
+/// The match kind the shim must report, recomputed from its rule: exact when
+/// the name is the fragment, then prefix or substring ignoring ASCII case.
+fn expected_name_match(name: &str, fragment: &str) -> Option<LeanWorkerDeclarationNameMatchKind> {
+    if name == fragment {
+        return Some(LeanWorkerDeclarationNameMatchKind::Exact);
+    }
+    let name = name.to_ascii_lowercase();
+    let fragment = fragment.to_ascii_lowercase();
+    if name.starts_with(&fragment) {
+        Some(LeanWorkerDeclarationNameMatchKind::Prefix)
+    } else if name.contains(&fragment) {
+        Some(LeanWorkerDeclarationNameMatchKind::Substring)
+    } else {
+        None
+    }
+}
+
+fn assert_in_match_order(rows: &[LeanWorkerDeclarationSearchRow], fragment: &str) {
+    for row in rows {
+        assert_eq!(row.name_match, expected_name_match(&row.name, fragment), "{row:?}");
+    }
+    assert!(
+        rows.is_sorted_by(|a, b| (a.name_match, &a.name) <= (b.name_match, &b.name)),
+        "rows must come exact, prefix, substring, then by name: {rows:?}"
+    );
+}
+
+fn name_search(fragment: &str, limit: usize) -> LeanWorkerDeclarationSearch {
+    LeanWorkerDeclarationSearch {
+        limit,
+        include_source: false,
+        ..LeanWorkerDeclarationSearch::new(fragment)
+    }
+}
+
 #[test]
-fn search_declarations_applies_filters_ranks_and_limits() {
+fn search_declarations_applies_filters_orders_and_limits() {
     ensure_fixture_built();
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let mut session = worker
@@ -281,7 +316,6 @@ fn search_declarations_applies_filters_ranks_and_limits() {
                 kind: Some("theorem".to_owned()),
                 required_constants: Vec::new(),
                 conclusion_head: None,
-                scope_biases: Vec::new(),
                 limit: 5,
                 filter: LeanWorkerDeclarationFilter {
                     include_private: false,
@@ -305,11 +339,7 @@ fn search_declarations_applies_filters_ranks_and_limits() {
         result.declarations.iter().all(|row| row.source.is_none()),
         "metadata search should be able to omit source lookups"
     );
-    assert!(
-        result.declarations.iter().all(|row| row.rank >= 1),
-        "search rows should carry deterministic ranks: {:?}",
-        result.declarations
-    );
+    assert_in_match_order(&result.declarations, "add");
     assert_eq!(result.facts.source_lookups, 0);
     assert!(result.facts.declarations_scanned >= result.facts.after_name_filter);
 
@@ -319,12 +349,6 @@ fn search_declarations_applies_filters_ranks_and_limits() {
         kind: Some("definition".to_owned()),
         required_constants: vec!["Unit".to_owned()],
         conclusion_head: Some("Lean.Name".to_owned()),
-        scope_biases: vec![LeanWorkerDeclarationSearchBias {
-            scope: LeanWorkerDeclarationSearchScope::Namespace,
-            prefix: "LeanRsFixture.Handles".to_owned(),
-            strict: true,
-            weight: 25,
-        }],
         limit: 10,
         filter: LeanWorkerDeclarationFilter {
             include_private: false,
@@ -354,9 +378,75 @@ fn search_declarations_applies_filters_ranks_and_limits() {
         first.declarations
     );
     assert!(first.declarations.iter().all(|row| row.kind == "definition"));
-    assert!(first.declarations.iter().all(|row| row.name.ends_with("Anonymous")));
+    assert!(
+        first
+            .declarations
+            .iter()
+            .all(|row| row.name.to_ascii_lowercase().ends_with("anonymous"))
+    );
+    assert_in_match_order(&first.declarations, "Anonymous");
     assert_eq!(first.facts.source_lookups, 0);
-    assert!(first.facts.after_scope_filter <= first.facts.after_conclusion_filter);
+    assert!(first.facts.after_conclusion_filter <= first.facts.after_required_constants_filter);
+
+    // Each match kind on its own: the full name, a prefix, and a later substring.
+    let exact = session
+        .search_declarations(&name_search("LeanRsFixture.Handles.levelZero", 5), None, None)
+        .expect("exact name search succeeds");
+    assert_eq!(
+        exact
+            .declarations
+            .first()
+            .map(|row| (row.name.as_str(), row.name_match)),
+        Some((
+            "LeanRsFixture.Handles.levelZero",
+            Some(LeanWorkerDeclarationNameMatchKind::Exact)
+        )),
+        "{exact:?}"
+    );
+    assert_in_match_order(&exact.declarations, "LeanRsFixture.Handles.levelZero");
+    let level_names = [
+        "LeanRsFixture.Handles.levelBeq",
+        "LeanRsFixture.Handles.levelMax",
+        "LeanRsFixture.Handles.levelSucc",
+        "LeanRsFixture.Handles.levelToString",
+        "LeanRsFixture.Handles.levelZero",
+    ];
+    for (fragment, kind) in [
+        (
+            "LeanRsFixture.Handles.level",
+            LeanWorkerDeclarationNameMatchKind::Prefix,
+        ),
+        ("Handles.level", LeanWorkerDeclarationNameMatchKind::Substring),
+    ] {
+        let found = session
+            .search_declarations(&name_search(fragment, 100), None, None)
+            .expect("name search succeeds");
+        let names: Vec<&str> = found.declarations.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, level_names, "{fragment}");
+        assert!(
+            found.declarations.iter().all(|row| row.name_match == Some(kind)),
+            "{fragment}: {found:?}"
+        );
+    }
+
+    // The limit cuts the ordered list, so a short search keeps the closest names.
+    let wide = session
+        .search_declarations(&name_search("Nat.add", 100), None, None)
+        .expect("wide name search succeeds");
+    assert_eq!(
+        wide.declarations.first().map(|row| (row.name.as_str(), row.name_match)),
+        Some(("Nat.add", Some(LeanWorkerDeclarationNameMatchKind::Exact)))
+    );
+    assert!(
+        wide.declarations
+            .iter()
+            .any(|row| row.name_match == Some(LeanWorkerDeclarationNameMatchKind::Prefix))
+    );
+    assert_in_match_order(&wide.declarations, "Nat.add");
+    let short = session
+        .search_declarations(&name_search("Nat.add", 3), None, None)
+        .expect("short name search succeeds");
+    assert_eq!(short.declarations, wide.declarations[..3]);
 
     let result = session
         .search_declarations(
@@ -366,7 +456,6 @@ fn search_declarations_applies_filters_ranks_and_limits() {
                 kind: None,
                 required_constants: Vec::new(),
                 conclusion_head: None,
-                scope_biases: Vec::new(),
                 limit: 1,
                 filter: LeanWorkerDeclarationFilter {
                     include_private: false,
@@ -381,6 +470,7 @@ fn search_declarations_applies_filters_ranks_and_limits() {
         .expect("broad search_declarations dispatch succeeds");
 
     assert_eq!(result.declarations.len(), 1);
+    assert!(result.declarations.iter().all(|row| row.name_match.is_none()));
     assert!(result.truncated);
     assert!(result.facts.truncated);
     assert!(
@@ -610,7 +700,6 @@ fn search_result_name_can_be_inspected() {
         kind: Some("theorem".to_owned()),
         required_constants: Vec::new(),
         conclusion_head: None,
-        scope_biases: Vec::new(),
         limit: 1,
         filter: LeanWorkerDeclarationFilter {
             include_private: false,

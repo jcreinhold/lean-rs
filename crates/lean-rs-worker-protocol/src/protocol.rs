@@ -36,7 +36,7 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 14;
+pub const PROTOCOL_VERSION: u16 = 15;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -713,16 +713,16 @@ mod tests {
     use crate::types::{
         LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection,
         LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
-        LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationOutlineResult,
-        LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias,
+        LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationNameMatchKind,
+        LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationSearch,
         LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult,
-        LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings,
-        LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationBatchItem,
-        LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationBatchResult,
-        LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
-        LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
-        LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
-        LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerLocalInfo,
+        LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo,
+        LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
+        LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationBatchRow,
+        LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
+        LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
+        LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerDiagnostic,
+        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerLocalInfo,
         LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
         LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
         LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
@@ -997,12 +997,6 @@ mod tests {
                 kind: Some("theorem".to_owned()),
                 required_constants: vec!["List.map".to_owned()],
                 conclusion_head: Some("Eq".to_owned()),
-                scope_biases: vec![LeanWorkerDeclarationSearchBias {
-                    scope: LeanWorkerDeclarationSearchScope::Namespace,
-                    prefix: "List".to_owned(),
-                    strict: false,
-                    weight: 7,
-                }],
                 limit: 3,
                 filter: LeanWorkerDeclarationFilter {
                     include_private: false,
@@ -1025,8 +1019,7 @@ mod tests {
                     module: Some("Init.Data.List.Lemmas".to_owned()),
                     source: None,
                     match_reason: "name,kind,required_constants,conclusion_head".to_owned(),
-                    score: 127,
-                    rank: 1,
+                    name_match: Some(LeanWorkerDeclarationNameMatchKind::Substring),
                     flags: LeanWorkerDeclarationFlags::default(),
                 }],
                 truncated: true,
@@ -1036,7 +1029,6 @@ mod tests {
                     after_kind_filter: 8,
                     after_required_constants_filter: 4,
                     after_conclusion_filter: 2,
-                    after_scope_filter: 2,
                     source_lookups: 0,
                     broad_pruning: vec![LeanWorkerDeclarationSearchPruning {
                         stage: "limit".to_owned(),
@@ -1046,7 +1038,7 @@ mod tests {
                     truncated: true,
                     timings: LeanWorkerDeclarationSearchTimings {
                         scan_micros: 1000,
-                        rank_micros: 50,
+                        sort_micros: 50,
                         source_micros: 0,
                     },
                     derived_work: LeanWorkerDerivedWorkFacts::default(),
@@ -1057,6 +1049,17 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("declaration search response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("declaration search response reads");
         assert_eq!(frame.message, response);
+
+        let kinds = [
+            LeanWorkerDeclarationNameMatchKind::Exact,
+            LeanWorkerDeclarationNameMatchKind::Prefix,
+            LeanWorkerDeclarationNameMatchKind::Substring,
+        ];
+        assert_eq!(
+            serde_json::to_value(kinds).expect("name match kinds encode"),
+            json!(["exact", "prefix", "substring"])
+        );
+        assert!(kinds.is_sorted(), "the derived order is the result order");
     }
 
     #[test]

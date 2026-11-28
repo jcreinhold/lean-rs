@@ -37,30 +37,14 @@ structure DeclarationFilter where
   includeInternal : Nat
   deriving Inhabited
 
-inductive DeclarationNameMatch where
-  | contains
-  | suffix
-  deriving Inhabited
-
-inductive DeclarationSearchScope where
-  | namespace
-  | module
-  deriving Inhabited
-
-structure DeclarationSearchBias where
-  scope : Nat
-  scopePrefix : String
-  isStrict : Nat
-  weight : String
-  deriving Inhabited
-
 structure DeclarationSearchRequest where
   nameFragment : Option String
+  /-- Which names the fragment keeps: 0 keeps names that contain it, 1 keeps names that end with it.
+  Both ignore ASCII case. -/
   nameMatch : Nat
   kind : Option String
   requiredConstants : Array String
   conclusionHead : Option String
-  scopeBiases : Array DeclarationSearchBias
   limit : Nat
   filter : DeclarationFilter
   includeSource : Nat
@@ -78,8 +62,10 @@ structure DeclarationSearchRow where
   module : Option String
   source : Option SourceRange
   matchReason : String
-  score : String
-  rank : Nat
+  /-- How the name matched the fragment: 0 when the request has no fragment, 1 when the name is the
+  fragment, 2 when the name starts with it, 3 when it contains it later. Rows come in this order,
+  then by name. -/
+  nameMatch : Nat
   flags : DeclarationFlags
   deriving Inhabited
 
@@ -91,7 +77,7 @@ structure DeclarationSearchPruning where
 
 structure DeclarationSearchTimings where
   scanMicros : Nat
-  rankMicros : Nat
+  sortMicros : Nat
   sourceMicros : Nat
   deriving Inhabited
 
@@ -113,7 +99,6 @@ structure DeclarationSearchFacts where
   afterKindFilter : Nat
   afterRequiredConstantsFilter : Nat
   afterConclusionFilter : Nat
-  afterScopeFilter : Nat
   sourceLookups : Nat
   broadPruning : Array DeclarationSearchPruning
   truncated : Nat
@@ -731,7 +716,7 @@ private structure DeclarationSearchCandidate where
   kind : String
   moduleName : Option String
   matchReason : String
-  score : Int
+  nameMatch : Nat
   flags : DeclarationFlags
   deriving Inhabited
 
@@ -741,9 +726,6 @@ private def elapsedMicrosSince (startMs : Nat) : IO Nat := do
 
 private def clampSearchLimit (limit : Nat) : Nat :=
   max 1 (min limit 100)
-
-private def isBoundaryPrefix (pref value : String) : Bool :=
-  value == pref || value.startsWith (pref ++ ".")
 
 private def declarationKindOf : ConstantInfo → String
   | .axiomInfo  _ => "axiom"
@@ -915,46 +897,31 @@ private def requiredConstantsPresent (required : Array String) (type : Expr) : B
   let used := type.getUsedConstantsAsSet
   required.all (fun name => used.contains name.toName)
 
-private def matchesNameFragment (request : DeclarationSearchRequest) (name : String) : Bool :=
+/-- Classify how `name` matches the request's fragment, or return `none` when the fragment drops it.
+The filter ignores ASCII case. The exact class does not, because Lean names are case-sensitive. -/
+private def nameMatch? (request : DeclarationSearchRequest) (name : String) : Option Nat :=
   match request.nameFragment with
-  | none => true
+  | none => some 0
   | some fragment =>
     if fragment.isEmpty then
-      true
+      some 0
+    else if name == fragment then
+      some 1
     else
       let haystack := name.toLower
       let needle := fragment.toLower
-      if request.nameMatch == 1 then
-        haystack.endsWith needle
+      let kept := if request.nameMatch == 1 then haystack.endsWith needle else haystack.contains needle
+      if !kept then
+        none
+      else if haystack.startsWith needle then
+        some 2
       else
-        haystack.contains needle
-
-private def matchesStrictScope (request : DeclarationSearchRequest) (name : String) (moduleName : Option String) :
-    Bool :=
-  request.scopeBiases.all fun bias =>
-    if bias.isStrict == 0 then
-      true
-    else
-      if bias.scope == 1 then
-        moduleName.any (fun moduleName => isBoundaryPrefix bias.scopePrefix moduleName)
-      else
-        isBoundaryPrefix bias.scopePrefix name
-
-private def scopeBiasScore (request : DeclarationSearchRequest) (name : String) (moduleName : Option String) :
-    Int :=
-  request.scopeBiases.foldl (init := 0) fun score bias =>
-    let doesMatch :=
-      if bias.scope == 1 then
-        moduleName.any (fun moduleName => isBoundaryPrefix bias.scopePrefix moduleName)
-      else
-        isBoundaryPrefix bias.scopePrefix name
-    if doesMatch then score + (bias.weight.toInt?.getD 0) else score
+        some 3
 
 private def isBroadDeclarationSearch (request : DeclarationSearchRequest) : Bool :=
   request.nameFragment.all String.isEmpty
     && request.requiredConstants.isEmpty
     && request.conclusionHead.isNone
-    && request.scopeBiases.all (fun bias => bias.isStrict == 0)
 
 private def searchMatchReason (request : DeclarationSearchRequest) : String := Id.run do
   let mut reasons := #[]
@@ -966,30 +933,14 @@ private def searchMatchReason (request : DeclarationSearchRequest) : String := I
     reasons := reasons.push "required_constants"
   if request.conclusionHead.isSome then
     reasons := reasons.push "conclusion_head"
-  if request.scopeBiases.any (fun bias => bias.isStrict != 0) then
-    reasons := reasons.push "strict_scope"
   if reasons.isEmpty then
     "broad"
   else
     String.intercalate "," reasons.toList
 
-private def declarationSearchBaseScore (request : DeclarationSearchRequest) (name : String) (kind : String)
-    (moduleName : Option String) : Int := Id.run do
-  let mut score : Int := 0
-  if request.nameFragment.any (fun fragment => !fragment.isEmpty && name.toLower == fragment.toLower) then
-    score := score + 100
-  if request.nameFragment.any (fun fragment => !fragment.isEmpty && name.toLower.endsWith fragment.toLower) then
-    score := score + 40
-  if request.kind == some kind then
-    score := score + 20
-  if !request.requiredConstants.isEmpty then
-    score := score + 30
-  if request.conclusionHead.isSome then
-    score := score + 30
-  score + scopeBiasScore request name moduleName
-
+/-- Order candidates by match class, then by name, so the limit keeps the closest names. -/
 private def candidateLess (a b : DeclarationSearchCandidate) : Bool :=
-  a.score > b.score || (a.score == b.score && a.nameString < b.nameString)
+  a.nameMatch < b.nameMatch || (a.nameMatch == b.nameMatch && a.nameString < b.nameString)
 
 private def natOfBool (value : Bool) : Nat :=
   if value then 1 else 0
@@ -1029,15 +980,13 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
   let mut afterKind := 0
   let mut afterRequired := 0
   let mut afterConclusion := 0
-  let mut afterScope := 0
   let mut candidates := #[]
   for (name, info) in env.constants.toList do
     scanned := scanned + 1
     unless keepDeclaration request.filter name do
       continue
     let nameString := name.toString
-    unless matchesNameFragment request nameString do
-      continue
+    let some nameMatch := nameMatch? request nameString | continue
     afterName := afterName + 1
     let kind := declarationKindOf info
     if request.kind.any (· != kind) then
@@ -1050,9 +999,6 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
       continue
     afterConclusion := afterConclusion + 1
     let moduleName := (declarationModule? env name).map Name.toString
-    unless matchesStrictScope request nameString moduleName do
-      continue
-    afterScope := afterScope + 1
     let flags : DeclarationFlags := {
       isPrivate := if isPrivateName name then 1 else 0
       isGenerated := if isGeneratedName name then 1 else 0
@@ -1064,15 +1010,15 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
       kind
       moduleName
       matchReason := reason
-      score := declarationSearchBaseScore request nameString kind moduleName
+      nameMatch
       flags
     }
   let scanMicros ← elapsedMicrosSince scanStart
-  let rankStart ← IO.monoMsNow
-  let ranked := candidates.qsort candidateLess
-  let truncated := ranked.size > limit
-  let selected := ranked.extract 0 (min ranked.size limit)
-  let rankMicros ← elapsedMicrosSince rankStart
+  let sortStart ← IO.monoMsNow
+  let sorted := candidates.qsort candidateLess
+  let truncated := sorted.size > limit
+  let selected := sorted.extract 0 (min sorted.size limit)
+  let sortMicros ← elapsedMicrosSince sortStart
   let sourceStart ← IO.monoMsNow
   let mut rows := #[]
   let mut sourceLookups := 0
@@ -1090,8 +1036,7 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
       module := candidate.moduleName
       source
       matchReason := candidate.matchReason
-      score := toString candidate.score
-      rank := idx + 1
+      nameMatch := candidate.nameMatch
       flags := candidate.flags
     }
   let sourceMicros ← elapsedMicrosSince sourceStart
@@ -1100,13 +1045,13 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
       #[{
         stage := "limit"
         reason := "broad_search_limit"
-        count := ranked.size - selected.size
+        count := sorted.size - selected.size
       }]
     else
       #[]
   let timings : DeclarationSearchTimings := {
     scanMicros
-    rankMicros
+    sortMicros
     sourceMicros
   }
   let facts : DeclarationSearchFacts := {
@@ -1115,7 +1060,6 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
     afterKindFilter := afterKind
     afterRequiredConstantsFilter := afterRequired
     afterConclusionFilter := afterConclusion
-    afterScopeFilter := afterScope
     sourceLookups := sourceLookups
     broadPruning
     truncated := if truncated then 1 else 0

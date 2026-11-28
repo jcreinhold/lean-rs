@@ -390,30 +390,28 @@ pub enum LeanWorkerDeclarationNameMatch {
     Suffix,
 }
 
-/// Scope kind used by declaration-search ranking bias.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LeanWorkerDeclarationSearchScope {
-    Namespace,
-    Module,
-}
-
-/// Optional namespace/module preference for declaration search.
+/// How a declaration's full name matched the search's name fragment.
 ///
-/// Non-strict biases affect ranking only. Strict biases act as filters.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LeanWorkerDeclarationSearchBias {
-    pub scope: LeanWorkerDeclarationSearchScope,
-    pub prefix: String,
-    pub strict: bool,
-    pub weight: i32,
+/// The variants are in result order: search returns exact names first, then
+/// prefixes, then substrings, so `limit` keeps the closest names.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerDeclarationNameMatchKind {
+    /// The name is the fragment, compared with case.
+    Exact,
+    /// The name starts with the fragment, ignoring ASCII case.
+    Prefix,
+    /// The name contains the fragment after its start, ignoring ASCII case.
+    Substring,
 }
 
 /// Bounded structured declaration search request.
 ///
 /// Search inspects declaration metadata and Lean expressions structurally, but
 /// never renders declaration type text. Use the worker session's explicit
-/// one-name declaration-type query for type rendering.
+/// one-name declaration-type query for type rendering. Rows come back in
+/// [`LeanWorkerDeclarationNameMatchKind`] order and then by name, cut to
+/// `limit`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationSearch {
     pub name_fragment: Option<String>,
@@ -421,7 +419,6 @@ pub struct LeanWorkerDeclarationSearch {
     pub kind: Option<String>,
     pub required_constants: Vec<String>,
     pub conclusion_head: Option<String>,
-    pub scope_biases: Vec<LeanWorkerDeclarationSearchBias>,
     pub limit: usize,
     pub filter: LeanWorkerDeclarationFilter,
     pub include_source: bool,
@@ -437,7 +434,6 @@ impl LeanWorkerDeclarationSearch {
             kind: None,
             required_constants: Vec::new(),
             conclusion_head: None,
-            scope_biases: Vec::new(),
             limit: 20,
             filter: LeanWorkerDeclarationFilter {
                 include_private: false,
@@ -465,8 +461,8 @@ pub struct LeanWorkerDeclarationSearchRow {
     pub module: Option<String>,
     pub source: Option<LeanWorkerSourceRange>,
     pub match_reason: String,
-    pub score: i32,
-    pub rank: usize,
+    /// How the name matched the fragment; `None` when the search had no fragment.
+    pub name_match: Option<LeanWorkerDeclarationNameMatchKind>,
     pub flags: LeanWorkerDeclarationFlags,
 }
 
@@ -482,7 +478,7 @@ pub struct LeanWorkerDeclarationSearchPruning {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationSearchTimings {
     pub scan_micros: u64,
-    pub rank_micros: u64,
+    pub sort_micros: u64,
     pub source_micros: u64,
 }
 
@@ -508,7 +504,6 @@ pub struct LeanWorkerDeclarationSearchFacts {
     pub after_kind_filter: usize,
     pub after_required_constants_filter: usize,
     pub after_conclusion_filter: usize,
-    pub after_scope_filter: usize,
     pub source_lookups: usize,
     pub broad_pruning: Vec<LeanWorkerDeclarationSearchPruning>,
     pub truncated: bool,
