@@ -16,10 +16,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use serde_json::value::RawValue;
 
 use crate::types::{
@@ -164,20 +162,11 @@ pub enum Request {
         names: Vec<String>,
         progress: bool,
     },
-    RunDataStream {
-        export: String,
-        request_json: String,
-        progress: bool,
-    },
     CapabilityMetadata {
         export: String,
         request_json: String,
     },
     CapabilityDoctor {
-        export: String,
-        request_json: String,
-    },
-    JsonCommand {
         export: String,
         request_json: String,
     },
@@ -314,19 +303,6 @@ pub enum Response {
     Strings {
         values: Vec<String>,
     },
-    StreamComplete {
-        summary: StreamSummary,
-    },
-    StreamExportFailed {
-        status_byte: u8,
-    },
-    StreamCallbackFailed {
-        status_byte: u8,
-        description: String,
-    },
-    StreamRowMalformed {
-        message: String,
-    },
     CapabilityMetadata {
         metadata: LeanWorkerCapabilityMetadata,
     },
@@ -338,9 +314,6 @@ pub enum Response {
     },
     CapabilityDoctorMalformed {
         message: String,
-    },
-    JsonCommand {
-        response_json: String,
     },
     MetaExpr {
         result: LeanWorkerMetaResult<LeanWorkerRendered>,
@@ -463,41 +436,8 @@ impl PartialEq for DataRow {
 
 impl Eq for DataRow {}
 
-/// Terminal stream-completion summary returned alongside a streaming response.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[non_exhaustive]
-pub struct StreamSummary {
-    /// Total rows emitted across all streams.
-    pub total_rows: u64,
-    /// Per-stream row counts at completion.
-    pub per_stream_counts: BTreeMap<String, u64>,
-    /// Child-side elapsed time in microseconds.
-    pub elapsed_micros: u64,
-    /// Optional downstream-defined terminal metadata.
-    pub metadata: Option<Value>,
-}
-
-impl StreamSummary {
-    /// Build a stream-completion summary, clamping the elapsed duration into
-    /// the `u64` micros field.
-    #[must_use]
-    pub fn new(
-        total_rows: u64,
-        per_stream_counts: BTreeMap<String, u64>,
-        elapsed: Duration,
-        metadata: Option<Value>,
-    ) -> Self {
-        Self {
-            total_rows,
-            per_stream_counts,
-            elapsed_micros: elapsed.as_micros().try_into().unwrap_or(u64::MAX),
-            metadata,
-        }
-    }
-}
-
-/// Stateful emitter that assigns per-stream sequence numbers and tracks the
-/// running row count for the terminal [`StreamSummary`].
+/// Stateful emitter that assigns per-stream sequence numbers and counts the
+/// rows that the terminal [`Response::RowsComplete`] reports.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct DataRowEmitter {
@@ -526,7 +466,7 @@ impl DataRowEmitter {
         &mut self,
         writer: &mut impl Write,
         stream: impl Into<String>,
-        payload: &Value,
+        payload: &serde_json::Value,
     ) -> Result<(), ProtocolError> {
         let row = self.next(stream, serde_json::value::to_raw_value(payload)?);
         write_frame(writer, Message::DataRow(row), MAX_FRAME_BYTES)
@@ -536,12 +476,6 @@ impl DataRowEmitter {
     #[must_use]
     pub fn count(&self) -> u64 {
         self.count
-    }
-
-    /// Snapshot of per-stream row counts.
-    #[must_use]
-    pub fn per_stream_counts(&self) -> BTreeMap<String, u64> {
-        self.sequences.clone()
     }
 }
 

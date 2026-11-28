@@ -82,7 +82,7 @@ fn public_fixture_export_call_succeeds() {
 fn explicit_restart_replaces_live_child() {
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     worker.health().expect("health check succeeds before restart");
-    worker.restart().expect("worker restarts");
+    worker.cycle().expect("worker restarts");
     worker.health().expect("health check succeeds after restart");
     let stats = worker.stats();
     assert_eq!(stats.restarts, 1);

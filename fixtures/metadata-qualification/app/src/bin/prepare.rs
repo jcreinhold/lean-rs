@@ -1,7 +1,7 @@
 #[path = "../stream_cases.rs"]
 mod stream_cases;
 
-use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature, json_command_signature};
+use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature, metadata_signature};
 use lean_toolchain::{CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, ToolchainFingerprint};
 use std::io::Write as _;
 use std::{
@@ -263,7 +263,8 @@ fn prepare_typed_session(
             "lean_rs_fixture",
             "LeanRsFixture.Effects",
             serde_json::json!([]),
-            vec![json_command_signature("lean_rs_interop_consumer_worker_json_command").to_json()],
+            // The typed session admits this `String -> IO String` export by its shape alone.
+            vec![metadata_signature("lean_rs_interop_consumer_worker_json_command").to_json()],
         )
     };
     let manifest = serde_json::to_string(&serde_json::json!({

@@ -41,9 +41,7 @@ pub(crate) mod loaded;
 pub(crate) mod preflight;
 pub(crate) mod trusted;
 mod worker_bindings;
-pub use worker_bindings::{
-    WorkerBinaryBinding, WorkerBindingFailure, WorkerStreamBinding, WorkerStringBinding, WorkerUnitBinding,
-};
+pub use worker_bindings::{WorkerBinaryBinding, WorkerBindingFailure, WorkerStringBinding, WorkerUnitBinding};
 
 pub use bundle::{LeanLibraryBundle, LeanLibraryDependency, LeanModuleInitializer};
 pub use capability::{

@@ -1,5 +1,8 @@
 use crate::pipe::Pipe;
-use crate::process::{CheckedSpawnError, LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild};
+use crate::process::{
+    CheckedSpawnError, LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild,
+    inherit_checked_native_loader_environment,
+};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
@@ -242,16 +245,16 @@ impl SpawnFailure {
 }
 
 /// Default deadline for one worker request after startup.
-pub const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
+pub(crate) const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 
 /// Suggested deadline for long-running worker requests.
-pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mins(10);
+pub(crate) const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mins(10);
 
 /// Default deadline for graceful child shutdown before kill escalation.
-pub const LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT: Duration = Duration::from_secs(2);
+pub(crate) const LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT: Duration = Duration::from_secs(2);
 
 /// Default deadline for waiting on a killed child process to be reaped.
-pub const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(5);
+pub(crate) const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(5);
 
 /// Configuration for starting a `lean-rs-worker` child process.
 ///
@@ -1873,7 +1876,7 @@ impl LeanWorker {
             command.env(key, value);
         }
         if config.check_loader_environment {
-            crate::inherit_checked_native_loader_environment(&mut command).map_err(|error| {
+            inherit_checked_native_loader_environment(&mut command).map_err(|error| {
                 SpawnFailure::no_child(LeanWorkerError::Setup {
                     message: error.to_string(),
                 })
@@ -2350,16 +2353,6 @@ impl LeanWorker {
         self.restart_with_reason(reason)
     }
 
-    /// Restart this worker using its original configuration; the same as
-    /// [`Self::cycle`].
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::cycle`].
-    pub fn restart(&mut self) -> Result<(), LeanWorkerError> {
-        self.cycle()
-    }
-
     #[doc(hidden)]
     /// Kill the child process for supervisor tests.
     ///
@@ -2380,17 +2373,6 @@ impl LeanWorker {
     #[must_use]
     pub fn __child_pid_for_test(&self) -> Option<u32> {
         self.child.as_ref().map(|child| child.id())
-    }
-
-    /// Ask the child to terminate cleanly and wait for it.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LeanWorkerError` if the worker is already dead, the protocol
-    /// fails, or waiting for the child process fails.
-    #[deprecated(note = "use LeanWorker::shutdown for structured shutdown status")]
-    pub fn terminate(self) -> Result<LeanWorkerExit, LeanWorkerError> {
-        self.shutdown().map(|report| report.exit)
     }
 
     /// Shut down the worker child, escalating to kill after a bounded grace period.
@@ -4537,10 +4519,7 @@ impl LeanWorker {
         backpressure_waits: u64,
     ) -> Response {
         if streaming {
-            if matches!(
-                response,
-                Response::StreamComplete { .. } | Response::RowsComplete { .. }
-            ) {
+            if matches!(response, Response::RowsComplete { .. }) {
                 self.record_stream_success(started);
             } else {
                 self.record_stream_failure(started, backpressure_waits);
@@ -5768,7 +5747,7 @@ time.sleep(60)";
         let mut worker = blocked_stdin_worker();
         let started = std::time::Instant::now();
         let result = worker.write_request_bounded(
-            lean_rs_worker_protocol::protocol::Request::JsonCommand {
+            lean_rs_worker_protocol::protocol::Request::CapabilityMetadata {
                 export: "unused".into(),
                 request_json: "x".repeat(256 * 1024),
             },
@@ -5793,7 +5772,7 @@ time.sleep(60)";
         });
         let started = std::time::Instant::now();
         let result = worker.write_request_bounded(
-            lean_rs_worker_protocol::protocol::Request::JsonCommand {
+            lean_rs_worker_protocol::protocol::Request::CapabilityMetadata {
                 export: "unused".into(),
                 request_json: "x".repeat(256 * 1024),
             },
@@ -5815,7 +5794,7 @@ time.sleep(60)";
         let checkpoint = worker.request_checkpoint();
         let pid = worker.child.as_ref().expect("owned child").id();
         let result = worker.send_request_cancellable(
-            lean_rs_worker_protocol::protocol::Request::JsonCommand {
+            lean_rs_worker_protocol::protocol::Request::CapabilityMetadata {
                 export: "unused".into(),
                 request_json: "x".repeat(256 * 1024),
             },

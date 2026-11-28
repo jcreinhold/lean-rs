@@ -836,26 +836,6 @@ impl LeanWorkerHostHandle {
         self.worker.cycle()
     }
 
-    /// Restart this worker using its original configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LeanWorkerError` if the worker cannot be replaced.
-    pub fn restart(&mut self) -> Result<(), LeanWorkerError> {
-        self.worker.restart()
-    }
-
-    /// Terminate the worker child and return its exit status.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LeanWorkerError` if the worker is already dead, the terminate
-    /// request fails, or waiting for the child fails.
-    #[deprecated(note = "use LeanWorkerHostHandle::shutdown for structured shutdown status")]
-    pub fn terminate(self) -> Result<crate::supervisor::LeanWorkerExit, LeanWorkerError> {
-        self.worker.shutdown().map(|report| report.exit)
-    }
-
     /// Shut down the worker child and return structured shutdown status.
     ///
     /// # Errors

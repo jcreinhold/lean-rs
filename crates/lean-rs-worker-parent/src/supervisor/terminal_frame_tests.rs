@@ -265,7 +265,7 @@ fn stale_terminal_cannot_complete_or_redispatch_the_current_command() {
         worker.health().expect("establish prior completed request");
         let prior = worker.last_request.clone().expect("prior request identity");
         let (tag, expected_error) = if previous_generation {
-            worker.restart().expect("establish successor generation");
+            worker.cycle().expect("establish successor generation");
             assert_ne!(prior.generation, worker.generation);
             (
                 EarlierTag::Generation(prior.generation),

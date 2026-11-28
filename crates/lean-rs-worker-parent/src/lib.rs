@@ -26,59 +26,15 @@ pub use capability::{
     LeanWorkerBootstrapSeverity, LeanWorkerChild, LeanWorkerHostHandle, LeanWorkerHostHandleBuilder,
     LeanWorkerModuleCacheLimits,
 };
-pub use process::{LeanWorkerExitObservation, LeanWorkerProcessTracker};
+pub use process::LeanWorkerProcessTracker;
 pub use session::{
     LeanWorkerCancellationToken, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata,
     LeanWorkerSession, LeanWorkerSessionConfig,
 };
-/// Replace a child's environment with a checked snapshot of the parent environment,
-/// including the command's explicit additions and removals.
-///
-/// Use on commands intended to inherit from the parent. This supplies the parent
-/// environment even if the command previously called [`std::process::Command::env_clear`].
-/// Do not add loader settings after this check. This checks environment variables;
-/// it does not verify an executable, its linked images, or its search paths.
-///
-/// # Errors
-/// Returns an error, without changing the command, if the resulting environment
-/// contains a `DYLD_*`, `__XPC_DYLD_*`, `LD_*`, or `GLIBC_TUNABLES` variable.
-pub fn inherit_checked_native_loader_environment(command: &mut std::process::Command) -> std::io::Result<()> {
-    use std::collections::BTreeMap;
-    use std::ffi::OsString;
-    let mut environment: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
-    for (name, value) in command.get_envs() {
-        match value {
-            Some(value) => {
-                environment.insert(name.to_owned(), value.to_owned());
-            }
-            None => {
-                environment.remove(name);
-            }
-        }
-    }
-    for name in environment.keys() {
-        let key = name.as_encoded_bytes();
-        if key.starts_with(b"DYLD_")
-            || key.starts_with(b"LD_")
-            || key.starts_with(b"__XPC_DYLD_")
-            || key == b"GLIBC_TUNABLES"
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("native loader environment override refused: {}", name.to_string_lossy()),
-            ));
-        }
-    }
-    command.env_clear().envs(environment);
-    Ok(())
-}
-
 pub use supervisor::{
-    LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
-    LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT, LeanWorker, LeanWorkerConfig,
-    LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerPendingRequestStop,
-    LeanWorkerRequestCheckpoint, LeanWorkerRequestStopReceipt, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
-    LeanWorkerShutdownOutcome, LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
+    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot,
+    LeanWorkerPendingRequestStop, LeanWorkerRequestCheckpoint, LeanWorkerRequestStopReceipt, LeanWorkerRestartPolicy,
+    LeanWorkerRestartReason, LeanWorkerShutdownOutcome, LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
 };
 
 // Curated re-exports of the wire types that appear on this crate's public

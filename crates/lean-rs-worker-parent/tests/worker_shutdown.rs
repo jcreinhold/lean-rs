@@ -327,7 +327,7 @@ fn check_application_launch_input() {
         };
         let first = observe(handle.runtime_metadata());
         assert_eq!(first.1.as_deref(), expected);
-        handle.restart().expect("worker replaced");
+        handle.cycle().expect("worker replaced");
         let replacement = observe(handle.runtime_metadata());
         assert_ne!(first.0, replacement.0);
         assert_eq!(replacement.1.as_deref(), expected);

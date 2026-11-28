@@ -19,8 +19,8 @@
 //!   envelope, [`protocol::Message`] message variants, and the
 //!   [`protocol::Request`] / [`protocol::Response`] / [`protocol::Diagnostic`]
 //!   / [`protocol::ProgressTick`] / [`protocol::DataRow`] /
-//!   [`protocol::StreamSummary`] / [`protocol::FatalExit`] payload types, plus
-//!   [`protocol::write_frame`] and [`protocol::read_frame`].
+//!   [`protocol::FatalExit`] payload types, plus [`protocol::write_frame`] and
+//!   [`protocol::read_frame`].
 //!
 //! ## Stability
 //!

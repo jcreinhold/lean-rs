@@ -28,8 +28,7 @@ Call `shutdown()` on `LeanWorker` or `LeanWorkerHostHandle` when shutdown status
 asks the child to terminate, escalates to kill after a bounded timeout, waits for the child to be reaped, and returns a
 structured `LeanWorkerShutdownReport`.
 
-The older `terminate()` methods are deprecated compatibility wrappers that return only the final exit status. Dropping a
-worker handle runs best-effort bounded cleanup, but Rust `Drop` cannot report kill or wait failures.
+Dropping a worker handle runs best-effort bounded cleanup, but Rust `Drop` cannot report kill or wait failures.
 
 To distinguish a failed operation whose direct worker has stopped from unconfirmed execution, take
 `request_checkpoint()` before the synchronous operation and then query `confirmed_request_stop_since(&checkpoint)`. The

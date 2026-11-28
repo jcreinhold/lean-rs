@@ -257,18 +257,11 @@ pub trait WorkerAuthority: Send + Sync {
 
 static AUTHORITY: OnceLock<Box<dyn WorkerAuthority>> = OnceLock::new();
 
-/// Install the application loader and source authority for this dedicated child.
-/// Call this once in the application-owned entry point before serving requests.
+/// Install the embedding application's authority, then serve the worker
+/// protocol on stdin and stdout.
 ///
-/// # Errors
-///
-/// Rejects attempts to replace an installed policy.
-pub fn install_worker_authority(authority: impl WorkerAuthority + 'static) -> LeanResult<()> {
-    AUTHORITY
-        .set(Box::new(authority))
-        .map_err(|_| lean_rs::__host_internals::host_module_init("worker authority already installed"))
-}
-/// Install the embedding application's authority before bootstrap or protocol dispatch.
+/// The authority loads the application's artifacts and sources for native
+/// requests, so it must be in place before bootstrap or protocol dispatch.
 ///
 /// # Errors
 ///
@@ -276,7 +269,9 @@ pub fn install_worker_authority(authority: impl WorkerAuthority + 'static) -> Le
 pub fn run_worker_child_with_authority(
     authority: impl WorkerAuthority + 'static,
 ) -> LeanResult<std::process::ExitCode> {
-    install_worker_authority(authority)?;
+    AUTHORITY
+        .set(Box::new(authority))
+        .map_err(|_| lean_rs::__host_internals::host_module_init("worker authority already installed"))?;
     Ok(crate::run_worker_child_stdio())
 }
 

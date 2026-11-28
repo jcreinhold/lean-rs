@@ -370,8 +370,6 @@ impl TrustedHostImports<'_, '_> {
 pub enum WorkerExportContract {
     /// `String -> IO String`, including correct Lean String layouts.
     StringIoString,
-    /// Standard synchronous String request/row callback command protocol.
-    StringStream,
     /// Two unboxed `UInt64` arguments and an unboxed `UInt64` result.
     U64Binary,
     /// One unboxed `UInt8` argument and a boxed `Unit` result.
@@ -599,8 +597,8 @@ mod tests {
         let contracts =
             collect_contracts([("json".to_owned(), WorkerExportContract::StringIoString)]).expect("one contract");
         require_contract(&contracts, "json", WorkerExportContract::StringIoString).expect("exact pair");
-        let wrong = require_contract(&contracts, "json", WorkerExportContract::StringStream)
-            .expect_err("a request cannot change the callback protocol");
+        let wrong = require_contract(&contracts, "json", WorkerExportContract::U64Binary)
+            .expect_err("a request cannot change the native contract");
         assert_eq!(wrong.code(), LeanDiagnosticCode::SymbolLookup);
         let unknown = require_contract(&contracts, "unknown", WorkerExportContract::StringIoString)
             .expect_err("a request cannot add a symbol");
@@ -631,7 +629,7 @@ mod tests {
             vec![(String::new(), WorkerExportContract::U64Binary)],
             vec![
                 ("duplicate".to_owned(), WorkerExportContract::StringIoString),
-                ("duplicate".to_owned(), WorkerExportContract::StringStream),
+                ("duplicate".to_owned(), WorkerExportContract::U64Binary),
             ],
         ] {
             let err = collect_contracts(entries).expect_err("the attestation must name each symbol exactly once");

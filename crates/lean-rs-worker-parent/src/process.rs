@@ -1,4 +1,5 @@
-//! Process ownership, confirmed-exit accounting and the parent lifeline.
+//! Process ownership, confirmed-exit accounting, the parent lifeline and the
+//! checked loader environment.
 use std::io;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,12 +27,12 @@ struct Processes {
 /// An unresolved observation does not prove the child is running. Successful
 /// waiting records its actual status.
 #[derive(Clone, Debug, Default)]
-pub struct LeanWorkerExitObservation(Arc<Mutex<Option<ExitStatus>>>);
+pub(crate) struct LeanWorkerExitObservation(Arc<Mutex<Option<ExitStatus>>>);
 
 impl LeanWorkerExitObservation {
     /// Return the exit status confirmed by waiting on this exact owned child.
     #[must_use]
-    pub fn confirmed_exit(&self) -> Option<ExitStatus> {
+    pub(crate) fn confirmed_exit(&self) -> Option<ExitStatus> {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -89,6 +90,48 @@ fn spawn_with_lifeline(mut command: Command) -> io::Result<(Child, Option<io::Pi
 fn spawn_with_lifeline(mut command: Command) -> io::Result<(Child, Option<io::PipeWriter>)> {
     command.env_remove(lean_rs_worker_protocol::WORKER_PARENT_LIFELINE_ENV);
     Ok((command.spawn()?, None))
+}
+
+/// Replace a child's environment with a checked snapshot of this process's
+/// environment, including the command's explicit additions and removals.
+///
+/// A worker configured with a checked loader environment launches through
+/// this, so a `DYLD_*`, `__XPC_DYLD_*`, `LD_*` or `GLIBC_TUNABLES` variable
+/// cannot change which native libraries the child loads. It checks variables
+/// only, not the executable, its linked images or its search paths.
+///
+/// # Errors
+/// Returns an error, without changing the command, if the resulting
+/// environment contains one of those loader variables.
+pub(crate) fn inherit_checked_native_loader_environment(command: &mut Command) -> io::Result<()> {
+    use std::collections::BTreeMap;
+    use std::ffi::OsString;
+    let mut environment: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => {
+                environment.insert(name.to_owned(), value.to_owned());
+            }
+            None => {
+                environment.remove(name);
+            }
+        }
+    }
+    for name in environment.keys() {
+        let key = name.as_encoded_bytes();
+        if key.starts_with(b"DYLD_")
+            || key.starts_with(b"LD_")
+            || key.starts_with(b"__XPC_DYLD_")
+            || key == b"GLIBC_TUNABLES"
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("native loader environment override refused: {}", name.to_string_lossy()),
+            ));
+        }
+    }
+    command.env_clear().envs(environment);
+    Ok(())
 }
 
 impl LeanWorkerProcessTracker {

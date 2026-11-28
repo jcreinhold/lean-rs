@@ -16,8 +16,6 @@ use lean_toolchain::{
 pub enum WorkerExportOperation {
     Metadata,
     Doctor,
-    JsonCommand,
-    StreamingCommand,
     FixtureMul,
     FixturePanic,
 }
@@ -29,8 +27,6 @@ impl WorkerExportOperation {
         match self {
             Self::Metadata => "metadata String -> IO String",
             Self::Doctor => "doctor String -> IO String",
-            Self::JsonCommand => "json command String -> IO String",
-            Self::StreamingCommand => "streaming command String, USize, USize -> IO UInt8",
             Self::FixtureMul => "fixture multiplication UInt64, UInt64 -> UInt64",
             Self::FixturePanic => "fixture panic UInt8 -> Unit",
         }
@@ -47,26 +43,6 @@ pub fn metadata_signature(symbol: impl Into<String>) -> LeanExportSignature {
 #[must_use]
 pub fn doctor_signature(symbol: impl Into<String>) -> LeanExportSignature {
     string_io_signature(symbol)
-}
-
-/// Trusted manifest signature for a JSON command export.
-#[must_use]
-pub fn json_command_signature(symbol: impl Into<String>) -> LeanExportSignature {
-    string_io_signature(symbol)
-}
-
-/// Trusted manifest signature for a streaming command export.
-#[must_use]
-pub fn streaming_command_signature(symbol: impl Into<String>) -> LeanExportSignature {
-    LeanExportSignature::function(
-        symbol,
-        vec![
-            owned_object_arg(),
-            scalar_arg(LeanExportAbiRepr::USize),
-            scalar_arg(LeanExportAbiRepr::USize),
-        ],
-        io_return(LeanExportAbiRepr::LeanObject),
-    )
 }
 
 /// Trusted manifest signature for the private fixture multiplication export.

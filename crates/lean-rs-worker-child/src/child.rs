@@ -5,16 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use lean_rs::error::host_internal;
 use lean_rs::module::{
-    TrustedHostImports, TrustedWorkerCapability, WorkerBinaryBinding, WorkerBindingFailure, WorkerStreamBinding,
-    WorkerStringBinding, WorkerUnitBinding,
+    TrustedHostImports, TrustedWorkerCapability, WorkerBinaryBinding, WorkerBindingFailure, WorkerStringBinding,
+    WorkerUnitBinding,
 };
-use lean_rs::{
-    LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
-};
+use lean_rs::{LeanError, LeanResult, LeanRuntime};
 use lean_rs_host::host::LeanPreparedHostArtifacts;
 use lean_rs_host::host::process::{
     DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationBatchItem,
@@ -38,13 +35,11 @@ use lean_rs_host::{
     LeanElabOptions, LeanHost, LeanImportStats, LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
     LeanSourceRange,
 };
-use serde::Deserialize;
-use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
 use lean_rs_worker_protocol::protocol::{
-    DataRowEmitter, Diagnostic, HostSessionMode, MAX_FRAME_BYTES, Message, ProgressTick, ProtocolError, Request,
-    Response, StreamSummary, read_frame, write_frame,
+    DataRowEmitter, HostSessionMode, MAX_FRAME_BYTES, Message, ProgressTick, ProtocolError, Request, Response,
+    read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags,
@@ -521,29 +516,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 write_response(&writer, response)?;
             }
-            Request::RunDataStream {
-                export,
-                request_json,
-                progress,
-            } => {
-                let response = match host_session.as_mut() {
-                    Some(state) => match state.run_data_stream(&export, request_json, progress, &writer) {
-                        Ok(summary) => Response::StreamComplete { summary },
-                        Err(StreamRunError::Host(err)) => error_response(&err),
-                        Err(StreamRunError::Binding(err)) => binding_error_response(&err),
-                        Err(StreamRunError::ExportStatus(status)) => {
-                            Response::StreamExportFailed { status_byte: status }
-                        }
-                        Err(StreamRunError::CallbackStatus(status)) => Response::StreamCallbackFailed {
-                            status_byte: status.as_abi(),
-                            description: status.description().to_owned(),
-                        },
-                        Err(StreamRunError::MalformedRow(message)) => Response::StreamRowMalformed { message },
-                    },
-                    None => missing_session_response(),
-                };
-                write_response(&writer, response)?;
-            }
             Request::HostRuntimeMetadata => {
                 let response = match host_session.as_ref() {
                     Some(state) => match state.session.checked_host_runtime_metadata() {
@@ -594,17 +566,6 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                         Err(CapabilityJsonError::Binding(err)) => binding_error_response(&err),
                         Err(CapabilityJsonError::Host(err)) => error_response(&err),
                         Err(CapabilityJsonError::Malformed(message)) => Response::CapabilityDoctorMalformed { message },
-                    },
-                    None => missing_session_response(),
-                };
-                write_response(&writer, response)?;
-            }
-            Request::JsonCommand { export, request_json } => {
-                let response = match host_session.as_mut() {
-                    Some(state) => match state.json_command(&export, request_json) {
-                        Ok(response_json) => Response::JsonCommand { response_json },
-                        Err(WorkerCallError::Host(err)) => error_response(&err),
-                        Err(WorkerCallError::Binding(err)) => binding_error_response(&err),
                     },
                     None => missing_session_response(),
                 };
@@ -943,7 +904,6 @@ struct HostSessionState {
 struct WorkerCapabilityBindings<'cap> {
     capability: &'cap TrustedWorkerCapability<'static>,
     string_io: HashMap<String, WorkerStringBinding<'static, 'cap>>,
-    streams: HashMap<String, WorkerStreamBinding<'static, 'cap>>,
     fixture_mul: HashMap<String, WorkerBinaryBinding<'static, 'cap>>,
     fixture_panic: HashMap<String, WorkerUnitBinding<'static, 'cap>>,
 }
@@ -953,7 +913,6 @@ impl<'cap> WorkerCapabilityBindings<'cap> {
         Self {
             capability,
             string_io: HashMap::new(),
-            streams: HashMap::new(),
             fixture_mul: HashMap::new(),
             fixture_panic: HashMap::new(),
         }
@@ -976,22 +935,6 @@ impl<'cap> WorkerCapabilityBindings<'cap> {
                 operation,
                 export,
                 "checked worker String -> IO String binding cache missed after insertion",
-            ))
-        })
-    }
-
-    fn stream(&mut self, export: &str) -> Result<&WorkerStreamBinding<'static, 'cap>, WorkerCallError> {
-        if !self.streams.contains_key(export) {
-            let binding = self.capability.bind_stream(export).map_err(|source| {
-                WorkerBindingError::checked(WorkerExportOperation::StreamingCommand, export, source)
-            })?;
-            self.streams.insert(export.to_owned(), binding);
-        }
-        self.streams.get(export).ok_or_else(|| {
-            WorkerCallError::Binding(WorkerBindingError::internal(
-                WorkerExportOperation::StreamingCommand,
-                export,
-                "checked worker streaming binding cache missed after insertion",
             ))
         })
     }
@@ -1626,137 +1569,6 @@ impl HostSessionState {
         }
     }
 
-    fn run_data_stream(
-        &mut self,
-        export: &str,
-        request_json: String,
-        progress: bool,
-        writer: &ProtocolWriter,
-    ) -> Result<StreamSummary, StreamRunError> {
-        if progress {
-            emit_progress(writer, "data_stream", 0, None);
-        }
-
-        let started = Instant::now();
-        let forwarder = Arc::new(Mutex::new(StreamForwarder::new(writer.clone(), progress)));
-        let row_error = Arc::new(Mutex::new(None::<StreamCallbackError>));
-        let callback_forwarder = Arc::clone(&forwarder);
-        let callback_error = Arc::clone(&row_error);
-        let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
-            if callback_error.lock().map_or(true, |guard| guard.is_some()) {
-                return LeanCallbackFlow::Stop;
-            }
-            match parse_row_envelope(&event.value) {
-                Ok(StreamCallbackEvent::Row(row)) => match callback_forwarder.lock() {
-                    Ok(mut guard) => match guard.emit_row(row) {
-                        Ok(()) => LeanCallbackFlow::Continue,
-                        Err(err) => {
-                            if let Ok(mut guard) = callback_error.lock() {
-                                *guard = Some(StreamCallbackError::Write(err.to_string()));
-                            }
-                            LeanCallbackFlow::Stop
-                        }
-                    },
-                    Err(_) => {
-                        if let Ok(mut guard) = callback_error.lock() {
-                            *guard = Some(StreamCallbackError::Malformed(
-                                "stream forwarder mutex was poisoned".to_owned(),
-                            ));
-                        }
-                        LeanCallbackFlow::Stop
-                    }
-                },
-                Ok(StreamCallbackEvent::Diagnostic(diagnostic)) => match callback_forwarder.lock() {
-                    Ok(guard) => match guard.emit_diagnostic(diagnostic) {
-                        Ok(()) => LeanCallbackFlow::Continue,
-                        Err(err) => {
-                            if let Ok(mut guard) = callback_error.lock() {
-                                *guard = Some(StreamCallbackError::Write(err.to_string()));
-                            }
-                            LeanCallbackFlow::Stop
-                        }
-                    },
-                    Err(_) => {
-                        if let Ok(mut guard) = callback_error.lock() {
-                            *guard = Some(StreamCallbackError::Malformed(
-                                "stream forwarder mutex was poisoned".to_owned(),
-                            ));
-                        }
-                        LeanCallbackFlow::Stop
-                    }
-                },
-                Ok(StreamCallbackEvent::Progress(progress)) => match callback_forwarder.lock() {
-                    Ok(guard) => match guard.emit_progress(progress) {
-                        Ok(()) => LeanCallbackFlow::Continue,
-                        Err(err) => {
-                            if let Ok(mut guard) = callback_error.lock() {
-                                *guard = Some(StreamCallbackError::Write(err.to_string()));
-                            }
-                            LeanCallbackFlow::Stop
-                        }
-                    },
-                    Err(_) => {
-                        if let Ok(mut guard) = callback_error.lock() {
-                            *guard = Some(StreamCallbackError::Malformed(
-                                "stream forwarder mutex was poisoned".to_owned(),
-                            ));
-                        }
-                        LeanCallbackFlow::Stop
-                    }
-                },
-                Ok(StreamCallbackEvent::Metadata(metadata)) => match callback_forwarder.lock() {
-                    Ok(mut guard) => {
-                        guard.set_metadata(metadata);
-                        LeanCallbackFlow::Continue
-                    }
-                    Err(_) => {
-                        if let Ok(mut guard) = callback_error.lock() {
-                            *guard = Some(StreamCallbackError::Malformed(
-                                "stream forwarder mutex was poisoned".to_owned(),
-                            ));
-                        }
-                        LeanCallbackFlow::Stop
-                    }
-                },
-                Err(message) => {
-                    if let Ok(mut guard) = callback_error.lock() {
-                        *guard = Some(StreamCallbackError::Malformed(message));
-                    }
-                    LeanCallbackFlow::Stop
-                }
-            }
-        })
-        .map_err(StreamRunError::Host)?;
-
-        let status = self
-            .worker_bindings_for(WorkerExportOperation::StreamingCommand, export)
-            .map_err(StreamRunError::from_worker_call)?
-            .stream(export)
-            .map_err(StreamRunError::from_worker_call)?
-            .call(request_json, &callback)
-            .map_err(StreamRunError::Host)?;
-
-        if let Some(error) = row_error.lock().ok().and_then(|mut guard| guard.take()) {
-            return Err(match error {
-                StreamCallbackError::Malformed(message) => StreamRunError::MalformedRow(message),
-                StreamCallbackError::Write(message) => {
-                    StreamRunError::Host(host_internal(format!("worker stream frame write failed: {message}")))
-                }
-            });
-        }
-
-        match LeanCallbackStatus::from_abi(status) {
-            Some(LeanCallbackStatus::Ok) => {}
-            Some(status) => return Err(StreamRunError::CallbackStatus(status)),
-            None => return Err(StreamRunError::ExportStatus(status)),
-        }
-
-        let guard = forwarder
-            .lock()
-            .map_err(|_| StreamRunError::MalformedRow("stream forwarder mutex was poisoned".to_owned()))?;
-        Ok(guard.summary(started.elapsed()))
-    }
-
     fn capability_metadata(
         &mut self,
         export: &str,
@@ -1777,10 +1589,6 @@ impl HostSessionState {
             .worker_string_call(WorkerExportOperation::Doctor, export, request_json)
             .map_err(CapabilityJsonError::from_worker_call)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
-    }
-
-    fn json_command(&mut self, export: &str, request_json: String) -> Result<String, WorkerCallError> {
-        self.worker_string_call(WorkerExportOperation::JsonCommand, export, request_json)
     }
 
     fn worker_string_call(
@@ -2247,94 +2055,10 @@ impl HostSessionState {
     }
 }
 
-#[derive(Clone, Debug)]
-struct PendingDataRow {
-    stream: String,
-    payload: Box<RawValue>,
-}
-
-enum StreamCallbackEvent {
-    Row(PendingDataRow),
-    Diagnostic(Diagnostic),
-    Progress(ProgressTick),
-    Metadata(serde_json::Value),
-}
-
-enum StreamCallbackError {
-    Malformed(String),
-    Write(String),
-}
-
-struct StreamForwarder {
-    writer: ProtocolWriter,
-    emitter: DataRowEmitter,
-    progress: bool,
-    metadata: Option<serde_json::Value>,
-}
-
-impl StreamForwarder {
-    fn new(writer: ProtocolWriter, progress: bool) -> Self {
-        Self {
-            writer,
-            emitter: DataRowEmitter::default(),
-            progress,
-            metadata: None,
-        }
-    }
-
-    fn emit_row(&mut self, row: PendingDataRow) -> Result<(), ProtocolError> {
-        let row = self.emitter.next(row.stream, row.payload);
-        self.writer.write(Message::DataRow(row))?;
-        if self.progress {
-            emit_progress(&self.writer, "data_stream", self.emitter.count(), None);
-        }
-        Ok(())
-    }
-
-    fn emit_diagnostic(&self, diagnostic: Diagnostic) -> Result<(), ProtocolError> {
-        self.writer.write(Message::Diagnostic(diagnostic))
-    }
-
-    fn emit_progress(&self, progress: ProgressTick) -> Result<(), ProtocolError> {
-        self.writer.write(Message::ProgressTick(progress))
-    }
-
-    fn set_metadata(&mut self, metadata: serde_json::Value) {
-        self.metadata = Some(metadata);
-    }
-
-    fn summary(&self, elapsed: std::time::Duration) -> StreamSummary {
-        StreamSummary::new(
-            self.emitter.count(),
-            self.emitter.per_stream_counts(),
-            elapsed,
-            self.metadata.clone(),
-        )
-    }
-}
-
-#[derive(Debug)]
-enum StreamRunError {
-    Host(LeanError),
-    Binding(WorkerBindingError),
-    ExportStatus(u8),
-    CallbackStatus(LeanCallbackStatus),
-    MalformedRow(String),
-}
-
 enum CapabilityJsonError {
     Host(LeanError),
     Binding(WorkerBindingError),
     Malformed(String),
-}
-
-impl StreamRunError {
-    fn from_worker_call(value: WorkerCallError) -> Self {
-        match value {
-            WorkerCallError::Host(err) => Self::Host(err),
-            WorkerCallError::Binding(err) => Self::Binding(err),
-        }
-    }
 }
 
 impl CapabilityJsonError {
@@ -2344,73 +2068,6 @@ impl CapabilityJsonError {
             WorkerCallError::Binding(err) => Self::Binding(err),
         }
     }
-}
-
-impl From<ProtocolError> for StreamRunError {
-    fn from(value: ProtocolError) -> Self {
-        Self::Host(host_internal(format!("worker data-row frame write failed: {value}")))
-    }
-}
-
-fn parse_row_envelope(raw: &str) -> Result<StreamCallbackEvent, String> {
-    let envelope: RowCallbackEnvelope =
-        serde_json::from_str(raw).map_err(|err| format!("row callback payload is not valid JSON: {err}"))?;
-    if let Some(diagnostic) = envelope.diagnostic {
-        let code = diagnostic
-            .code
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "diagnostic callback payload must contain a non-empty string field `code`".to_owned())?;
-        let message = diagnostic
-            .message
-            .ok_or_else(|| "diagnostic callback payload must contain a string field `message`".to_owned())?;
-        return Ok(StreamCallbackEvent::Diagnostic(Diagnostic::new(code, message)));
-    }
-    if let Some(progress) = envelope.progress {
-        let phase = progress
-            .phase
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "progress callback payload must contain a non-empty string field `phase`".to_owned())?;
-        return Ok(StreamCallbackEvent::Progress(ProgressTick::new(
-            phase,
-            progress.current,
-            progress.total,
-        )));
-    }
-    if let Some(metadata) = envelope.metadata {
-        let metadata = serde_json::from_str(metadata.get())
-            .map_err(|err| format!("metadata callback payload is not valid JSON: {err}"))?;
-        return Ok(StreamCallbackEvent::Metadata(metadata));
-    }
-    let stream = envelope
-        .stream
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "row callback payload must contain a non-empty string field `stream`".to_owned())?;
-    let payload = envelope
-        .payload
-        .ok_or_else(|| "row callback payload must contain field `payload`".to_owned())?;
-    Ok(StreamCallbackEvent::Row(PendingDataRow { stream, payload }))
-}
-
-#[derive(Deserialize)]
-struct RowCallbackEnvelope {
-    stream: Option<String>,
-    payload: Option<Box<RawValue>>,
-    diagnostic: Option<RowCallbackDiagnostic>,
-    progress: Option<RowCallbackProgress>,
-    metadata: Option<Box<RawValue>>,
-}
-
-#[derive(Deserialize)]
-struct RowCallbackDiagnostic {
-    code: Option<String>,
-    message: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct RowCallbackProgress {
-    phase: Option<String>,
-    current: u64,
-    total: Option<u64>,
 }
 
 fn elab_options_to_host(options: &LeanWorkerElabOptions) -> LeanElabOptions {

@@ -1,6 +1,6 @@
 //! Closed worker calls from application-attested images and symbol contracts.
 use super::{LeanCheckedExportError, LeanExported, LeanIo, TrustedWorkerCapability, WorkerExportContract};
-use crate::{LeanCallbackHandle, LeanError, LeanResult, LeanStringEvent};
+use crate::{LeanError, LeanResult};
 
 /// A policy rejection or a checked lookup failure before worker dispatch.
 #[derive(Debug)]
@@ -52,13 +52,6 @@ worker_binding!(
     (String,),
     LeanIo<String>
 );
-worker_binding!(
-    WorkerStreamBinding,
-    bind_stream,
-    StringStream,
-    (String, usize, usize),
-    LeanIo<u8>
-);
 worker_binding!(WorkerBinaryBinding, bind_binary, U64Binary, (u64, u64), u64);
 worker_binding!(WorkerUnitBinding, bind_unit, U8ToUnit, (u8,), ());
 
@@ -70,17 +63,6 @@ impl WorkerStringBinding<'_, '_> {
     pub fn call(&self, request: String) -> LeanResult<String> {
         // SAFETY: the exact native contract and both owned strings are fixed at binding.
         unsafe { self.0.call(request) }
-    }
-}
-impl WorkerStreamBinding<'_, '_> {
-    /// Call the admitted stream export with one live synchronous String callback.
-    /// # Errors
-    /// Propagates a native call or decoding failure.
-    #[allow(unsafe_code, reason = "callback object supplies both correctly paired native slots")]
-    pub fn call(&self, request: String, callback: &LeanCallbackHandle<LeanStringEvent>) -> LeanResult<u8> {
-        let (handle, trampoline) = callback.abi_parts();
-        // SAFETY: the binding attests synchronous String payloads; the registration remains live through the call.
-        unsafe { self.0.call(request, handle, trampoline) }
     }
 }
 impl WorkerBinaryBinding<'_, '_> {

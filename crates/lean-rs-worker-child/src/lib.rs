@@ -14,8 +14,7 @@
 
 mod authority;
 pub use authority::{
-    WorkerAuthority, WorkerManifestRead, WorkerSourceContext, WorkerStringCall, install_worker_authority,
-    run_worker_child_with_authority,
+    WorkerAuthority, WorkerManifestRead, WorkerSourceContext, WorkerStringCall, run_worker_child_with_authority,
 };
 mod child;
 mod host_artifacts;
