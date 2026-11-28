@@ -1,50 +1,19 @@
 # lean-rs-sys
 
-Raw FFI bindings for the Lean 4 C ABI. Sits above [`lean-rs-abi`](../lean-rs-abi/), which owns link-free ABI/toolchain
-metadata, and below the [`lean-rs`](../lean-rs/) safe front door.
+Raw bindings to the Lean 4 C ABI. It sits between [`lean-rs-abi`](https://docs.rs/lean-rs-abi), which holds the ABI
+facts and needs no Lean, and [`lean-rs`](https://docs.rs/lean-rs), the safe layer that most code should use.
 
-Lean's header layout is **not** part of this crate's public semver. The semver promise covers the opaque public types,
-the `pub unsafe fn` surface, and the supported-window metadata re-exported from `lean-rs-abi`. The `LeanObjectRepr`
-layout struct is `pub(crate)` and may be updated to track Lean version bumps without breaking downstream code that uses
-the `pub unsafe fn` helpers.
+Public types are opaque: `lean_object` is zero-sized and `!Send + !Sync + !Unpin`, and code outside the crate reaches
+reference counts, tags and payloads only through `pub unsafe fn` helpers, each with a `# Safety` section. Calling a Lean
+runtime function is `unsafe`; reading static metadata is safe. Lean's object layout is not part of this crate's semver.
 
-**Calling raw Lean runtime functions is `unsafe`; static metadata queries are safe.** Public types are opaque
-(`lean_object` is `[u8; 0]` plus phantom markers, `!Send + !Sync + !Unpin`); downstream code reaches refcount, tag, and
-payload state only through `pub unsafe fn` helpers, each of which carries a `# Safety` section naming the invariant the
-caller must uphold. Prefer the safe layers in `lean-rs` for almost every use case; reach for this crate only when the
-safe surface is missing a capability you need.
+The build script finds Lean through `LEAN_SYSROOT` or `lean --print-prefix`, checks the digest of the active `lean.h`
+against the supported window, and emits the link directives; a digest outside the window fails the build. The default
+features (`dynamic`, `mimalloc`) link `libleanshared`. With `DOCS_RS=1` the script skips discovery and linking, so the
+docs build without Lean.
 
-## Supported Lean window
-
-The [version matrix](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md) gives the supported
-releases; the authoritative list lives in
-[`crates/lean-rs-abi/src/supported.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs).
-The build script computes a SHA-256 digest over the discovered `lean.h` and accepts any digest matching an entry in the
-[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) table.
-Releases that ship a byte-identical `lean.h` share one entry. A miss fails the build with a bounded diagnostic naming
-the discovered digest and the full window.
-
-The build script emits crate-local `cargo:rustc-cfg=lean_v_X_Y_Z` and `lean_at_least_X_Y` flags for the resolved
-version. Cargo does not propagate dependency cfg flags to consumers; downstream gates need their own build-script
-configuration. Layout mirrors and required symbols are checked against the supported window.
-
-Bumping the window is the [bump procedure](https://github.com/jcreinhold/lean-rs/blob/main/docs/bump-toolchain.md): add
-a row to `SUPPORTED_TOOLCHAINS`, update CI coverage, perform the focused checks, and run CI's full matrix. The optional
-local sweep skips uninstalled toolchains and deletes build outputs; read its documented effects before running it.
-
-## Build environment
-
-`build.rs` discovers Lean via `lean --print-prefix` (or `LEAN_SYSROOT` when set), verifies the active header against the
-`lean-rs-abi` supported window, and emits the appropriate `cargo:rustc-link-*` directives. The default features
-(`dynamic`, `mimalloc`) link against `libleanshared`; the `static` feature is available but requires extending the link
-set beyond what `lean.h` alone demands. The `metadata-only` feature remains as a compatibility marker; new metadata-only
-consumers should depend on `lean-rs-abi` or `lean-toolchain` instead of this raw FFI crate.
-
-When `DOCS_RS=1`, the build script emits documentation-only metadata for the latest supported Lean window entry and
-deliberately skips Lean discovery and link directives. docs.rs does not install Lean, so published API docs must not
-require a local toolchain.
+The supported Lean releases are in the [version matrix](https://github.com/jcreinhold/lean-rs#version-matrix).
 
 ## License
 
-Dual-licensed under either of [Apache License, Version 2.0](../../LICENSE-APACHE) or [MIT license](../../LICENSE-MIT),
-at your option.
+Dual-licensed under MIT or Apache-2.0 at your option.

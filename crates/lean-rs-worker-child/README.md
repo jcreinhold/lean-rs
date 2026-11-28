@@ -1,40 +1,24 @@
 # lean-rs-worker-child
 
-Child-process runtime for the `lean-rs` worker boundary.
+The Lean-linked worker process that [`lean-rs-worker-parent`](https://docs.rs/lean-rs-worker-parent) starts. It hosts a
+`lean-rs` runtime, serves typed requests over stdin and stdout one at a time, and exits when its parent dies. It is the
+only crate in the worker stack that links `libleanshared`. A worker binary's `main` is one call:
 
-This crate ships the `lean-rs-worker-child` binary that hosts a `lean-rs` runtime and serves typed requests over
-stdin/stdout from a parent supervisor. It is the only crate in the worker stack that links `libleanshared`.
-
-Parent supervisors should depend on [`lean-rs-worker-parent`](https://docs.rs/lean-rs-worker-parent). The wire types
-both peers exchange live in [`lean-rs-worker-protocol`](https://docs.rs/lean-rs-worker-protocol).
-
-## Layering
-
-```text
-lean-rs-worker-child        (this crate; links libleanshared)
-├── lean-rs-worker-protocol   (wire types, no Lean link)
-├── lean-rs                   (typed FFI layer)
-├── lean-rs-host              (standard Lean services: capabilities, sessions, kernel)
-└── lean-toolchain            (manifest validation, capability descriptor)
-```
-
-## Custom child binary
-
-Application binaries can wrap [`run_worker_child_stdio`] in a one-line `main` to ship a per-toolchain worker child whose
-identity matches the host application:
-
-```rust,ignore
+```rust
 fn main() -> std::process::ExitCode {
     lean_rs_worker_child::run_worker_child_stdio()
 }
 ```
 
-## Parent Loss
+```text
+lean-rs-worker-child         (this crate; links libleanshared)
+├── lean-rs-worker-protocol  (wire types; no Lean link)
+├── lean-rs                  (runtime and objects)
+├── lean-rs-host             (sessions, elaboration, kernel checks)
+└── lean-toolchain           (manifest checks, capability descriptors)
+```
 
-The child treats stdin/stdout as the control channel. If stdin reaches EOF or a response write fails because stdout is
-closed, the child exits instead of waiting for another request. On Unix the parent also passes the read end of a pipe in
-`LEAN_RS_WORKER_PARENT_LIFELINE`; when the parent dies, a child thread sees end of file and exits with status 125, even
-while a request is inside Lean. Other platforms rely on the control channel and external process-manager policy.
+The supported Lean releases are in the [version matrix](https://github.com/jcreinhold/lean-rs#version-matrix).
 
 ## License
 

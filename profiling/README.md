@@ -1,8 +1,7 @@
 # Profiling
 
 These opt-in workloads measure Lean import retention, worker CPU cost, and baseline reports. Normal tests use bounded
-`cargo nextest` execution; profiling is diagnostic work. Read [production hosting](../docs/production-hosting.md) for
-budget policy and [performance](../docs/performance.md) for Criterion, cold-start, and allocation probes.
+`cargo nextest` execution; profiling is diagnostic work.
 
 ## Baseline reports
 
@@ -67,10 +66,9 @@ LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
 ```
 
 These are diagnostic settings, not portable service bounds. The collectors try `max_imports=2` only if the one-import
-candidate stays at or below 70% of the 1.5 GiB cap, then recommend the largest measured candidate within budget. On the
-2026-06-08 macOS aarch64/Lean 4.31.0-rc1 rebaseline at an older 2 GiB cap, one import per generation peaked at 1,194,368
-KiB; two peaked at 3,236,416 KiB. Production policy should measure retained import bytes and keep an import-count
-backstop, rather than infer memory from counts alone.
+candidate stays at or below 70% of the 1.5 GiB cap, then recommend the largest measured candidate within budget. A
+worker policy should measure retained import bytes and keep an import-count backstop, rather than infer memory from
+counts alone.
 
 `LEAN_RS_LEAN_MAX_MEMORY_KIB` supplies an opt-in Lean fail-fast limit checked periodically. It cannot reclaim import
 state and does not replace cycling.
@@ -88,11 +86,7 @@ state and does not replace cycling.
 Replacement is synchronous (`synchronous-no-overlap`); prewarming needs evidence that the total RSS budget admits
 overlap.
 
-A local macOS aarch64/Lean 4.31.0-rc1 bracketed probe for one `LeanRsFixture.Handles` import reported
-`bracketed_after_lean_import_1=1010720 KiB`, `bracketed_after_query_before_free_1=1032032 KiB`,
-`bracketed_after_free_1=108048 KiB`, `imported_bytes=1955323616`, `compacted_regions=9033`, and `free_regions_ran=true`.
-The [memory evidence](../docs/safety/long-session-memory.md) retains the measured tables and interpretation. Absolute
-RSS values are local evidence; compare recaptures on the same machine.
+Absolute RSS values depend on the machine; compare recaptures on the same machine.
 
 ## CPU stacks
 

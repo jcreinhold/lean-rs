@@ -8,10 +8,9 @@ description: Use for designing, specifying, implementing, or reviewing actor-mod
 An actor owns private state, processes messages serially, and exposes a narrow handle. Specify delivery, ordering,
 capacity, failure, and ownership before choosing runtime mechanisms.
 
-For work in this repository, read the
-[worker runtime contract](../../../docs/architecture/worker-runtime.md) and
-[safety model](../../../docs/architecture/safety.md) first. The references below are design guidance, not a
-claim that lean-rs implements a generic actor framework or a Tokio runtime.
+For work in this repository, read the worker and supervisor invariants in
+[docs/architecture.md](../../../docs/architecture.md) first. The references below are design guidance, not a claim that
+lean-rs implements a generic actor framework or a Tokio runtime.
 
 ## References
 

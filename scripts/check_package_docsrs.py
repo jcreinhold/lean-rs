@@ -208,8 +208,7 @@ def release_docs_exist() -> None:
         "docs/api-review/lean-rs-worker-protocol-public.txt",
         "docs/api-review/lean-rs-worker-parent-public.txt",
         "docs/api-review/lean-rs-worker-child-public.txt",
-        "docs/recipes/ship-crate-with-lean.md",
-        "docs/architecture/loading.md",
+        "docs/architecture.md",
     ]:
         if not (ROOT / rel).is_file():
             fail(f"release documentation is missing {rel}")

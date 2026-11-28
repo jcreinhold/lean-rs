@@ -1,7 +1,7 @@
 # Lean/Rust FFI Actor Boundaries
 
-Keep the ABI small and document ownership and threads before making it safe. In lean-rs, follow the established
-[safety model](../../../../docs/architecture/safety.md), conversion APIs, and callback registry rather than
+Keep the ABI small and document ownership and threads before making it safe. In lean-rs, follow the invariants in
+[docs/architecture.md](../../../../docs/architecture.md), the conversion APIs and the callback registry rather than
 adding a parallel raw boundary.
 
 ## Handles and ownership

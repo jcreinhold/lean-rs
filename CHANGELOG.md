@@ -4,10 +4,22 @@ All notable changes to the published `lean-rs` workspace crates are recorded her
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each crate version is governed by Cargo's `0.x` semver. Items
 inside `pub(crate)` modules are not part of the public API and are excluded from this log.
 
-The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
-[`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
+The README's [version matrix](README.md#version-matrix) lists the Lean releases, Rust version and platforms that the
+current release supports. `.claude/skills/release-lean-rs/SKILL.md` describes how to cut a release.
 
 ## [Unreleased]
+
+### Changed
+
+- Documentation moved. `docs/architecture.md` states the goal, the requirements, who owns what, and each invariant with
+  the tests that check it; the README covers installation, one example and the version matrix; `AGENTS.md` holds the
+  rules for agents working in this repository; and the `release-lean-rs` and `bump-toolchain` skills hold the release
+  and toolchain procedures. The mdbook under `docs/`, its CI build, the Pages workflow, `CONTRIBUTING.md` and the host
+  examples README are gone.
+- Each crate's README now says what the crate does and where it sits, and links to the version matrix. Cargo packages
+  the README with each crate, so all eight crates need a patch release.
+- The `lean-rs-sys` and `lean-toolchain` build scripts no longer cite a removed doc when the active `lean.h` is outside
+  the supported window.
 
 ## [0.13.0]
 

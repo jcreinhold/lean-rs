@@ -32,8 +32,7 @@ and initializer `initialize_lean__rs__fixture_LeanRsFixture`. Ask Lake for artif
 `lean_toolchain::LakeWorkspace` or `CargoLeanCapability` rather than hard-coding a platform extension or output
 subdirectory.
 
-The [lakefile](lakefile.lean) shows the shared-library target shape for a consumer package. For a complete downstream
-example, use [the interop recipe](../../docs/recipes/downstream-interop.md).
+The [lakefile](lakefile.lean) shows the shared-library target shape.
 
 The fixture does not import host shims. `lean-rs-host` builds and loads its bundled shims separately, preserving the
 fixture's use by L1 tests that open the dylib directly. `CoreM` and `MetaM` services cross the ABI through those bounded

@@ -3,82 +3,90 @@
 [![CI](https://github.com/jcreinhold/lean-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/jcreinhold/lean-rs/actions/workflows/ci.yml)
 [![Sanitizer](https://github.com/jcreinhold/lean-rs/actions/workflows/sanitizer.yml/badge.svg)](https://github.com/jcreinhold/lean-rs/actions/workflows/sanitizer.yml)
 [![Release](https://github.com/jcreinhold/lean-rs/actions/workflows/release.yml/badge.svg)](https://github.com/jcreinhold/lean-rs/actions/workflows/release.yml)
-[![Docs](https://img.shields.io/badge/docs-jcreinhold.github.io%2Flean--rs-blue)](https://jcreinhold.github.io/lean-rs/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](#license)
 
-A Lean 4 runtime bridge for Rust: load Lean libraries, call typed `@[export]` functions, use elaboration and kernel
-checking, or isolate Lean work in supervised child processes. Lean owns dependent-type meaning and proof checking; Rust
-owns linking, object conversion, scheduling, diagnostics, and packaging.
+lean-rs runs Lean 4 from Rust. It finds a Lean toolchain, asks Lake for paths, loads Lean libraries, imports modules,
+elaborates, evaluates and kernel-checks, and runs that work in worker processes that exit when their parent dies. Lean
+decides what terms mean; lean-rs handles linking, object conversion, processes and diagnostics.
+[docs/architecture.md](docs/architecture.md) states the goal, who owns what, and each invariant with its test.
 
-## Requirements
+## Install
 
-- [`elan`](https://github.com/leanprover/elan) with a Lean toolchain in the [supported window](docs/version-matrix.md).
-- Stable Rust, MSRV 1.94 (declared in [Cargo.toml](Cargo.toml)).
-- macOS or Linux.
+You need [elan](https://github.com/leanprover/elan) with a Lean release from the [version matrix](#version-matrix),
+stable Rust 1.94 or later, and x86_64 Linux or Apple Silicon macOS.
 
-## Start with a runnable project
+The parent process depends on `lean-rs-worker-parent`, which does not link Lean:
 
-The [shipped-crate template](templates/shipped-lean-crate/) builds its Lean library from `build.rs` and calls it from
-Rust. It also includes an application-owned worker binary. See the
-[build prerequisites](docs/recipes/ship-crate-with-lean.md) before running:
-
-```sh
-cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
-cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shipped-lean-crate-worker
-cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
+```toml
+[dependencies]
+lean-rs-worker-parent = "0.13"
 ```
 
-Follow [Ship a crate with Lean](docs/recipes/ship-crate-with-lean.md) for the dependency declarations, Lean source,
-export signatures, and runtime manifest handoff. For a custom same-process integration, use
-[Downstream interop](docs/recipes/downstream-interop.md).
+The worker is a separate binary that links Lean. Its crate depends on `lean-rs-worker-child = "0.13"`, and its `main` is
+one call:
 
-To explore the standard host services in this checkout:
-
-```sh
-(cd fixtures/lean && lake build)
-cargo run -p lean-rs-host --example tour
+```rust
+fn main() -> std::process::ExitCode {
+    lean_rs_worker_child::run_worker_child_stdio()
+}
 ```
 
-The tour opens an import session, elaborates a term, kernel-checks it, runs a bulk query, and calls `Meta.whnf`. See the
-[host crate](crates/lean-rs-host/README.md) for service APIs. For long-running import-heavy services, follow
-[Production hosting](docs/production-hosting.md) for bounded workers, warm sessions, and process cycling.
+## Example
 
-## Choose a crate
+Elaborate a term in a worker:
 
-All published crates share the workspace version; dependency examples use `"0.13"` for the 0.13.x series.
+```rust
+use lean_rs_worker_parent::{LeanWorkerElabOptions, LeanWorkerError, LeanWorkerHostHandleBuilder};
 
-| Job | Crate |
+fn main() -> Result<(), LeanWorkerError> {
+    let mut host = LeanWorkerHostHandleBuilder::shims_only("path/to/lake/project", ["Init"])
+        .worker_executable("path/to/your-worker")
+        .open()?;
+    {
+        let mut session = host.open_session(None, None)?;
+        let result = session.elaborate("(2 + 2 : Nat)", &LeanWorkerElabOptions::default(), None, None)?;
+        println!("ok: {}, diagnostics: {}", result.success, result.diagnostics.len());
+    }
+    host.shutdown()?;
+    Ok(())
+}
+```
+
+The session borrows the handle, so it must end before `shutdown`. The first session builds the host shims with Lake,
+which takes a while.
+
+## Crates
+
+All published crates share one version.
+
+| Crate | What it does |
 | --- | --- |
-| Call typed Lean exports, load modules, or receive callbacks in one process | [`lean-rs`](crates/lean-rs/README.md) |
-| Use imports, elaboration, kernel checks, declaration queries, or bounded `MetaM` | [`lean-rs-host`](crates/lean-rs-host/README.md) |
-| Run host services in supervised child processes that keep warm sessions | [`lean-rs-worker-parent`](crates/lean-rs-worker-parent/README.md) |
-| Build the Lean-linked worker binary | [`lean-rs-worker-child`](crates/lean-rs-worker-child/README.md) |
-| Implement a worker protocol peer | [`lean-rs-worker-protocol`](crates/lean-rs-worker-protocol/README.md) |
-| Discover toolchains or build and package Lean capabilities | [`lean-toolchain`](crates/lean-toolchain/README.md) |
-| Read static ABI metadata without Lean installed | [`lean-rs-abi`](crates/lean-rs-abi/README.md) |
-| Call raw Lean C symbols with explicit unsafe obligations | [`lean-rs-sys`](crates/lean-rs-sys/README.md) |
+| [`lean-rs-worker-parent`](crates/lean-rs-worker-parent/README.md) | Starts and supervises worker processes; no Lean link |
+| [`lean-rs-worker-child`](crates/lean-rs-worker-child/README.md) | The Lean-linked worker binary |
+| [`lean-rs-worker-protocol`](crates/lean-rs-worker-protocol/README.md) | The messages between parent and worker |
+| [`lean-rs-host`](crates/lean-rs-host/README.md) | Imports, elaboration, kernel checks and queries in one process |
+| [`lean-rs`](crates/lean-rs/README.md) | The Lean runtime, object ownership, loading and callbacks |
+| [`lean-toolchain`](crates/lean-toolchain/README.md) | Toolchain discovery, Lake queries, build helpers and process groups |
+| [`lean-rs-sys`](crates/lean-rs-sys/README.md) | Raw `lean.h` bindings |
+| [`lean-rs-abi`](crates/lean-rs-abi/README.md) | The supported toolchain window and ABI constants, without Lean |
 
-The safe layers hide Lean object layout, reference counting, and raw dispatch. Checked export lookup relies on trusted
-ABI metadata; arbitrary symbol lookup remains explicitly unsafe. The [safety model](docs/architecture/safety.md) records
-the required guarantees and current boundary gaps; Lean remains responsible for semantic correctness. Resource
-exhaustion and fatal Lean exits require a process boundary. Read the [architecture map](docs/architecture/README.md),
-[charter](docs/architecture/charter.md), and [safety model](docs/architecture/safety.md) before changing these
-boundaries.
+## Version matrix
 
-## Documentation and examples
-
-The [documentation index](docs/SUMMARY.md) is the complete reading map; the same pages are published with search at
-<https://jcreinhold.github.io/lean-rs/>.
-
-| Task | Guide or example |
+| Setting | Supported |
 | --- | --- |
-| Receive Lean-to-Rust callbacks | [Downstream interop](docs/recipes/downstream-interop.md) |
-| Run host services in a supervised worker process | [Worker sessions](docs/architecture/worker-sessions.md) |
-| Diagnose a failure | [Diagnostics](docs/diagnostics.md); start with `RUST_LOG=lean_rs=debug` |
-| Measure performance or memory | [Performance](docs/performance.md) and [retention measurements](docs/safety/long-session-memory.md) |
+| Lean | 4.30.0; 4.31.0-rc1, 4.31.0-rc2, 4.31.0; 4.32.0-rc1, 4.32.0, 4.32.2; 4.33.0-rc1, 4.33.0-rc2, 4.33.0, 4.33.1; 4.34.0-rc1, 4.34.0-rc2, 4.34.0, 4.34.1; 4.35.0-rc1, 4.35.0-rc2, 4.35.0-rc3, 4.35.0-rc4, 4.35.0; 4.36.0 |
+| Rust | Stable, 1.94 or later |
+| Platforms | `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` |
 
-Public API snapshots live in [docs/api-review/](docs/api-review/). [CONTRIBUTING.md](CONTRIBUTING.md) describes local
-checks, CI coverage, and review requirements.
+A Lean release not in the list is unsupported even if it builds. The listed releases ship 13 distinct `lean.h` headers,
+and each exports all 91 symbols lean-rs requires. The build checks the active header against
+[`SUPPORTED_TOOLCHAINS`](crates/lean-rs-abi/src/supported.rs).
+
+The window starts at 4.30.0. Releases 4.27.0 to 4.29.1 do not export the `collectAndGet` symbol that the host shims
+reach through `Lean.collectAxioms`; 4.26 fails to build the shims; 4.25 and earlier crash in `lean_dec_ref_cold`.
+
+Pushes, pull requests and release builds test the newest release, 4.36.0, on `ubuntu-latest` and `macos-latest`. A CI
+run started with `full_matrix: true` tests every listed release on both.
 
 ## License
 
