@@ -11,7 +11,7 @@ from its version number. The [version matrix](../version-matrix.md) summarizes s
 | --- | --- |
 | `lean-rs-abi` | Static `SUPPORTED_TOOLCHAINS`, `REQUIRED_SYMBOLS`, and layout literals; no build script, probe, FFI, or linking |
 | `lean-rs-sys` | Raw declarations, inline mirrors, opaque types, private layouts, runtime linking, and build-baked live identity |
-| `lean-toolchain` | Discovery, typed fingerprints, fixture digests, build/link diagnostics and helpers; its own build-baked live identity |
+| `lean-toolchain` | Discovery, typed fingerprints, build/link diagnostics and helpers; its own build-baked live identity |
 
 `lean-rs-sys` and `lean-toolchain` hash the discovered header and require a matching supported entry. A discovered but
 unsupported header fails the build with the digest and accepted window. Header-identical releases share one entry. Both

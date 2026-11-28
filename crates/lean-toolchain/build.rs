@@ -9,17 +9,12 @@
 //!    installed. The crate that *hard*-requires a toolchain is `lean-rs-sys`,
 //!    because it links `libleanshared`; a link-free metadata/discovery crate
 //!    must not.
-//! 2. Walk parents of `$CARGO_MANIFEST_DIR` until `fixtures/lean/lakefile.lean`
-//!    is found; that directory roots the workspace Lake fixture. Compute a
-//!    SHA-256 over a stable ordered concatenation of the fixture Lake manifest
-//!    plus the compiled `.olean` and shared-library artifacts, when those
-//!    artifacts already exist. Clean Cargo git checkouts and published crate
-//!    tarballs may not contain `.lake` outputs; those builds record a zero
-//!    digest instead.
-//! 3. Write `$OUT_DIR/metadata.rs` with the toolchain identity constants plus
-//!    `LAKE_FIXTURE_DIGEST` and `HOST_TRIPLE` so `fingerprint.rs` can
-//!    `include!` them.
-//! 4. Emit `cargo:rerun-if-*` for every input the metadata depends on.
+//! 2. Write `$OUT_DIR/metadata.rs` with the toolchain identity constants plus
+//!    `HOST_TRIPLE` so `fingerprint.rs` can `include!` them.
+//! 3. Emit `cargo:rerun-if-*` for every input the metadata depends on.
+//!
+//! The script reads no Lake output. Its last fallback for the Lean prefix asks
+//! Lake, through `lake env`, in the workspace's `fixtures/lean` project.
 //!
 //! This script emits no Lean runtime link or rpath directives. Runtime link
 //! directives are emitted only by crates that actually load Lean.
@@ -49,76 +44,9 @@ struct ToolchainMetadata {
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let docs_rs = env::var_os("DOCS_RS").is_some();
 
     let toolchain = resolve_toolchain_metadata(&manifest_dir, docs_rs);
-
-    let (digest, inputs) = find_fixture_dir(&manifest_dir).map_or_else(
-        || {
-            println!(
-                "cargo:warning=lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero"
-            );
-            ("0".repeat(64), Vec::new())
-        },
-        |fixture_dir| {
-            if docs_rs {
-                println!(
-                    "cargo:warning=lean-toolchain: DOCS_RS=1; skipping workspace fixture digest and Lean runtime probes"
-                );
-                return ("0".repeat(64), Vec::new());
-            }
-
-            let dylib_ext = match target_os.as_str() {
-                "macos" => "dylib",
-                "linux" => "so",
-                other => panic!("lean-toolchain: unsupported target_os `{other}`; only macos and linux are tested"),
-            };
-
-            // Lake's shared-library filename changed between Lean 4.26 and 4.27:
-            // older versions emit `liblean_rs_fixture.{dylib,so}` (just the lib
-            // name); 4.27+ emit `liblean__rs__fixture_LeanRsFixture.{dylib,so}`
-            // (package-escaped + lib name). Probe both candidates so the build
-            // works across the supported window.
-            let lib_dir = fixture_dir.join(".lake/build/lib");
-            let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"));
-            let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_ext}"));
-            let fixture_dylib = if new_style.is_file() {
-                (new_style, "liblean__rs__fixture_LeanRsFixture")
-            } else {
-                (old_style, "libLeanRsFixture")
-            };
-            let inputs: Vec<(PathBuf, &str)> = vec![
-                (fixture_dir.join("lakefile.lean"), "lakefile.lean"),
-                (fixture_dir.join("lake-manifest.json"), "lake-manifest.json"),
-                (
-                    fixture_dir.join(".lake/build/lib/lean/LeanRsFixture.olean"),
-                    "LeanRsFixture.olean",
-                ),
-                fixture_dylib,
-            ];
-
-            let mut hasher = Sha256::new();
-            for (path, label) in &inputs {
-                if !path.is_file() {
-                    println!(
-                        "cargo:warning=lean-toolchain: missing fixture artifact {}; LAKE_FIXTURE_DIGEST is zero",
-                        path.display()
-                    );
-                    return ("0".repeat(64), inputs);
-                }
-                let bytes = fs::read(path)
-                    .unwrap_or_else(|err| panic!("lean-toolchain: cannot read {}: {err}", path.display()));
-                // Domain-separated, length-prefixed: label, length, bytes. Prevents
-                // boundary ambiguity between concatenated inputs.
-                hasher.update((label.len() as u64).to_le_bytes());
-                hasher.update(label.as_bytes());
-                hasher.update((bytes.len() as u64).to_le_bytes());
-                hasher.update(&bytes);
-            }
-            (hex(&hasher.finalize()), inputs)
-        },
-    );
 
     let host_triple = env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
 
@@ -139,8 +67,6 @@ fn main() {
          pub const LEAN_HEADER_PATH: &str = {header_path:?};\n\
          /// SHA-256 of the resolved `lean.h`, lowercase hex.\n\
          pub const LEAN_HEADER_DIGEST: &str = {header_digest:?};\n\
-         /// SHA-256 over the workspace Lake fixture's manifest plus compiled native artifacts.\n\
-         pub const LAKE_FIXTURE_DIGEST: &str = \"{digest}\";\n\
          /// Cargo `TARGET` triple `lean-toolchain` was built for.\n\
          pub const HOST_TRIPLE: &str = \"{host_triple}\";",
         lean_version = toolchain.lean_version,
@@ -150,12 +76,6 @@ fn main() {
     )
     .unwrap_or_else(|err| panic!("lean-toolchain: cannot write {}: {err}", metadata_path.display()));
 
-    for (path, _) in &inputs {
-        // Watch the nearest existing directory until Lake creates the input.
-        // Watching a missing path directly would make Cargo rebuild on every run.
-        let watched = path.ancestors().find(|ancestor| ancestor.exists()).unwrap_or(path);
-        println!("cargo:rerun-if-changed={}", watched.display());
-    }
     if Path::new(&toolchain.header_path).is_file() {
         println!("cargo:rerun-if-changed={}", toolchain.header_path);
     }

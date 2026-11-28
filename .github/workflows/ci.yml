@@ -175,15 +175,52 @@ jobs:
           actionlint
           shellcheck scripts/lean-release-prefix.sh scripts/publish-workspace.sh scripts/trybuild-linked-fixture-rustc.sh
 
-      - name: SDK sources ask Lake for paths
+      - name: Ask Lake, never read its files
         if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.36.0'
-        # Fail if SDK code again reads lake-manifest.json or builds a Lake output path itself.
+        # Lake decides what to build, where outputs live and whether they are current, so no file here reads
+        # Lake's files or builds their paths. The search skips Markdown, Lean sources (lakefiles set Lake's own
+        # layout), committed lake-manifest.json files, .gitignore files and comment lines. Every other exception
+        # is listed below with the reason it remains.
         run: |
           command -v rg >/dev/null || { sudo apt-get update && sudo apt-get install -y ripgrep; }
+          exceptions=(
+            # This workflow, the release workflows and the local release gate put each Lake library directory on
+            # the Linux loader path before any test starts. Asking `lake query` there instead needs a Linux run to
+            # check. They also delete or skip whole `.lake` directories so a build or copy starts clean, and this
+            # file holds this check's patterns.
+            -g '!.github/workflows/ci.yml' -g '!.github/workflows/release.yml'
+            -g '!.github/workflows/release-recover.yml' -g '!scripts/prerelease.sh'
+            # This script deletes each `.lake` so no build from one Lean release survives into the next.
+            -g '!scripts/test-all-toolchains.sh'
+            # The metadata qualification harness seals a private copy of each project and digests every file Lake
+            # built there, so it names Lake's output directories and keeps its own record under `.lake`.
+            -g '!fixtures/metadata-qualification/**' -g '!scripts/qualify_metadata.py'
+            -g '!scripts/tests/test_metadata_qualification.py' -g '!crates/lean-rs-host/tests/support/fixed_fixture.rs'
+            # The profiling and callback fixtures pin each library by path and file identity before tests start,
+            # and still build that path from Lake's layout and file names.
+            -g '!scripts/select_test_fixtures.py' -g '!crates/lean-rs/examples/support/scalar_fixture.rs'
+            -g '!crates/lean-rs/examples/support/callback_fixture.rs'
+            # These tests write small Lake workspaces by hand, with a path dependency under `.lake/packages`, its
+            # lake-manifest.json or an empty output directory, so Lake has a known case to answer.
+            -g '!crates/lean-rs-host/tests/host_services.rs' -g '!crates/lean-rs-host/tests/batching.rs'
+            -g '!crates/lean-rs-worker-child/tests/host_handle.rs'
+            # A Lean package's committed lake-manifest.json is one of its sources. These files ship it, watch it or
+            # digest it with the other sources, and leave `.lake` out of each source list; none of them parses it.
+            -g '!Cargo.toml' -g '!crates/lean-rs-host/src/host/shim_sources.rs'
+            -g '!crates/lean-rs-host/tests/interop_shims_parity.rs' -g '!crates/lean-toolchain/src/source_package.rs'
+            -g '!crates/lean-rs/shims/lean-rs-interop-shims/src/lib.rs' -g '!scripts/check_package_docsrs.py'
+            -g '!templates/shipped-lean-crate/build.rs' -g '!templates/shipped-lean-crate/src/support/deployment.rs'
+          )
           status=0
-          rg -n --type rust -e 'packagesDir' -e '\.lake/build' -e 'join\("build"\)' -e 'lean-rs-generated' \
-            -e "replace\('_', \"__\"\)" crates/*/src || status=$?
-          test "$status" -eq 1
+          hits=$(rg -n --hidden -g '!.git' -g '!*.md' -g '!*.lean' -g '!lake-manifest.json' -g '!.gitignore' \
+            "${exceptions[@]}" -e '\.lake\b' -e 'lake-manifest' -e 'packagesDir' -e 'lean-rs-generated' \
+            -e 'join\("build"\)' -e "replace\(\s*['\"]_['\"]\s*,\s*['\"]__['\"]\s*\)" .) || status=$?
+          test "$status" -le 1
+          code=$(printf '%s\n' "$hits" | rg -v -e '^$' -e '^[^:]+:[0-9]+:\s*(//|#|--|\*|/\*)' || true)
+          if [ -n "$code" ]; then
+            printf 'These lines read Lake files or build Lake paths; ask Lake instead:\n%s\n' "$code"
+            exit 1
+          fi
 
       - name: Required SDK worker tests
         if: matrix.lean_version == '4.36.0'

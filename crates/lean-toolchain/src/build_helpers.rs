@@ -949,7 +949,6 @@ fn capability_manifest_value(
             "lean_version": &fingerprint.lean_version,
             "resolved_version": &fingerprint.resolved_version,
             "header_sha256": &fingerprint.header_sha256,
-            "fixture_sha256": fingerprint.fixture_sha256,
             "host_triple": fingerprint.host_triple,
         },
         "build_toolchain": build_toolchain,
@@ -966,7 +965,6 @@ struct ManifestToolchainFingerprint {
     lean_version: String,
     resolved_version: String,
     header_sha256: String,
-    fixture_sha256: &'static str,
     host_triple: &'static str,
 }
 
@@ -981,7 +979,6 @@ fn manifest_toolchain_fingerprint(
             lean_version: current.lean_version.to_owned(),
             resolved_version: current.resolved_version.to_owned(),
             header_sha256: current.header_sha256.to_owned(),
-            fixture_sha256: current.fixture_sha256,
             host_triple: current.host_triple,
         });
     };
@@ -1001,7 +998,6 @@ fn manifest_toolchain_fingerprint(
         lean_version: info.version.clone(),
         resolved_version,
         header_sha256,
-        fixture_sha256: ToolchainFingerprint::current().fixture_sha256,
         host_triple: ToolchainFingerprint::current().host_triple,
     })
 }
@@ -1618,7 +1614,7 @@ mod tests {
             "Demo/Basic.lean",
             "Demo/notes.txt",
             "Demo/.hidden/Skip.lean",
-            ".lake/Cache.lean",
+            ".cache/Cache.lean",
             ".env",
         ] {
             write(&root.join(path), "")?;

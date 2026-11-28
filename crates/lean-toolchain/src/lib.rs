@@ -1,10 +1,10 @@
 //! Lean 4 toolchain discovery, fingerprinting, allowlist re-export, and build-script helpers.
 //!
 //! Sits one layer above [`lean_rs_abi`], which owns link-free ABI/toolchain metadata. This crate
-//! composes on top: a typed [`ToolchainFingerprint`], the workspace-only Lake [`LAKE_FIXTURE_DIGEST`], a layered
-//! [`LinkDiagnostics`] error type, [`LakeWorkspace`], which asks Lake for import roots and library
-//! paths, and build-script helpers ([`emit_lean_link_directives_checked`], [`build_lake_target`],
-//! [`CargoLeanCapability`]) that print consistent link and rerun directives.
+//! composes on top: a typed [`ToolchainFingerprint`], a layered [`LinkDiagnostics`] error type,
+//! [`LakeWorkspace`], which asks Lake for import roots and library paths, and build-script
+//! helpers ([`emit_lean_link_directives_checked`], [`build_lake_target`], [`CargoLeanCapability`])
+//! that print consistent link and rerun directives.
 //!
 //! ## Single typed entry point
 //!
@@ -46,8 +46,7 @@ pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBui
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{
-    HOST_TRIPLE, LAKE_FIXTURE_DIGEST, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION,
-    ToolchainFingerprint,
+    HOST_TRIPLE, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION, ToolchainFingerprint,
 };
 pub use lake::LakeWorkspace;
 pub use lean_rs_abi::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};

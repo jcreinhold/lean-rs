@@ -33,12 +33,8 @@ fn report(name: &str, elapsed_us: u128) {
 }
 
 fn main() {
+    // The fixture admission checks every built file before it returns the root.
     let lake_root = fixed_fixture::fixture_root();
-    assert!(
-        lake_root.join(".lake").join("build").exists(),
-        "fixture build not found at {} — run `cd fixtures/lean && lake build`",
-        lake_root.display(),
-    );
 
     // Runtime init is amortised across every prior invocation of this
     // binary (re-exec only); we still account for it so the binary is

@@ -124,37 +124,24 @@ fn shipped_template_launches_with_clean_loader_environment() {
     );
 }
 
-fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = package_dir
-        .iter()
-        .fold(workspace_root(), |path, part| path.join(part))
-        .join(".lake")
-        .join("build")
-        .join("lib");
-    let new_style = lib_dir.join(format!("{new_name}.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("{old_name}.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
+/// Ask Lake for a library the workspace already built; the test builds nothing.
+fn built_library(package_dir: &[&str], target: &str) -> PathBuf {
+    let root = package_dir.iter().fold(workspace_root(), |path, part| path.join(part));
+    lean_toolchain::LakeWorkspace::new(&root)
+        .built_shared_library(target)
+        .expect("Lake answers for the fixture library")
+        .unwrap_or_else(|| panic!("build `{target}` in {} first", root.display()))
 }
 
 fn interop_dylib_path() -> PathBuf {
-    dylib_path(
+    built_library(
         &["crates", "lean-rs", "shims", "lean-rs-interop-shims"],
-        "liblean__rs__interop__shims_LeanRsInterop",
-        "libLeanRsInterop",
+        "LeanRsInterop",
     )
 }
 
 fn consumer_dylib_path() -> PathBuf {
-    dylib_path(
-        &["fixtures", "interop-shims"],
-        "liblean__rs__interop__consumer_LeanRsInteropConsumer",
-        "libLeanRsInteropConsumer",
-    )
+    built_library(&["fixtures", "interop-shims"], "LeanRsInteropConsumer")
 }
 
 fn open_consumer_capability() -> LeanCapability<'static> {

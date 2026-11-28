@@ -2933,8 +2933,6 @@ fn module_query_cache_key(
     hasher.update(b"\0");
     hasher.update(toolchain.header_sha256.as_bytes());
     hasher.update(b"\0");
-    hasher.update(toolchain.fixture_sha256.as_bytes());
-    hasher.update(b"\0");
     hasher.update(toolchain.host_triple.as_bytes());
     hasher.update(b"\0options\0");
     hasher.update(lean_toolchain::lean_options_json(&options.lean_options).as_bytes());

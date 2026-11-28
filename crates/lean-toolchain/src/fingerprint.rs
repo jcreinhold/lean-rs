@@ -2,16 +2,14 @@
 //!
 //! Every field is a `&'static str` resolved at build time by this crate's
 //! `build.rs`: the toolchain identity (`LEAN_VERSION`, `LEAN_RESOLVED_VERSION`,
-//! `LEAN_HEADER_DIGEST`) from probing the active toolchain, and the workspace
-//! `LAKE_FIXTURE_DIGEST` / `HOST_TRIPLE`. Builds with no toolchain present
-//! record the latest supported version/digest; builds without the workspace
-//! fixture record a zero `LAKE_FIXTURE_DIGEST` (a workspace regression key, not
-//! a downstream compatibility promise). The fingerprint is therefore stable
-//! across runs for a given build and cheap to use as a cache key.
+//! `LEAN_HEADER_DIGEST`) from probing the active toolchain, and the Cargo
+//! target as `HOST_TRIPLE`. Builds with no toolchain present record the latest
+//! supported version/digest. The fingerprint is therefore stable across runs
+//! for a given build and cheap to use as a cache key.
 
 // `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`,
-// `LEAN_HEADER_DIGEST`, `LAKE_FIXTURE_DIGEST`, and `HOST_TRIPLE` are emitted as
-// `pub const` by `build.rs`.
+// `LEAN_HEADER_DIGEST`, and `HOST_TRIPLE` are emitted as `pub const` by
+// `build.rs`.
 include!(concat!(env!("OUT_DIR"), "/metadata.rs"));
 
 /// Typed identity of the Lean toolchain this crate was compiled against.
@@ -32,9 +30,6 @@ pub struct ToolchainFingerprint {
     pub resolved_version: &'static str,
     /// SHA-256 of the `lean.h` this build was resolved against.
     pub header_sha256: &'static str,
-    /// SHA-256 of the workspace Lake fixture artifacts, or zero when the
-    /// crate is built from a published tarball without workspace fixtures.
-    pub fixture_sha256: &'static str,
     /// Target triple this crate was built for.
     pub host_triple: &'static str,
 }
@@ -47,7 +42,6 @@ impl ToolchainFingerprint {
             lean_version: LEAN_VERSION,
             resolved_version: LEAN_RESOLVED_VERSION,
             header_sha256: LEAN_HEADER_DIGEST,
-            fixture_sha256: LAKE_FIXTURE_DIGEST,
             host_triple: HOST_TRIPLE,
         }
     }

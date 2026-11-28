@@ -16,10 +16,10 @@ fn fixture_lake_root() -> PathBuf {
 #[test]
 fn host_loads_with_no_consumer_shim_require() {
     let lake_root = fixture_lake_root();
-    let manifest = std::fs::read_to_string(lake_root.join("lake-manifest.json")).expect("fixture manifest is readable");
+    let lakefile = std::fs::read_to_string(lake_root.join("lakefile.lean")).expect("fixture lakefile is readable");
     assert!(
-        !manifest.contains("lean_rs_host_shims") && !manifest.contains("lean_rs_interop_shims"),
-        "fixture manifest should not require lean-rs shim packages: {manifest}",
+        !lakefile.contains("lean_rs_host_shims") && !lakefile.contains("lean_rs_interop_shims"),
+        "fixture lakefile should not require lean-rs shim packages: {lakefile}",
     );
 
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
