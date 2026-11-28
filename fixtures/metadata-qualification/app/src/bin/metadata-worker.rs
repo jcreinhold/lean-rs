@@ -19,7 +19,7 @@ use lean_rs_host::host::LeanPreparedHostArtifacts;
 use lean_rs_worker_child::{WorkerAuthority, WorkerManifestRead, WorkerSourceContext};
 use std::path::Path;
 
-use metadata_qualification::{EXPORT, Held, MODULE_SYNTAX_IMPORTS, Record, audit, module_syntax_case};
+use metadata_qualification::{Held, MODULE_SYNTAX_IMPORTS, Record, audit, module_syntax_case};
 use std::sync::{Arc, OnceLock};
 struct MetadataApp(OnceLock<Result<Arc<Held>, String>>);
 impl MetadataApp {
@@ -28,13 +28,11 @@ impl MetadataApp {
             .get_or_init(|| {
                 let record = Record::selected();
                 if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
-                    && (record.broken_import || !record.typed_session || record.verification)
+                    && (record.broken_import || !record.typed_session)
                 {
                     return Err("ordinary typed worker requires its fixed typed fixture profile".to_owned());
                 }
-                if record.broken_import != broken_import_profile()
-                    || (record.broken_import && (record.typed_session || record.verification))
-                {
+                if record.broken_import != broken_import_profile() || (record.broken_import && record.typed_session) {
                     return Err("worker and record select different fixture profiles".to_owned());
                 }
                 if record.host_builder_case.as_deref() != option_env!("LEAN_RS_TEST_HOST_BUILDER_CASE")
@@ -75,7 +73,6 @@ impl MetadataApp {
         if d.broken_import
             || !d.typed_session
             || d.interop
-            || d.verification
             || !session.imports.matches_request(
                 &d.import_roots
                     .iter()
@@ -488,8 +485,7 @@ impl WorkerAuthority for MetadataApp {
             audit(&format!("{event}-{requested}"));
             contracts
         } else {
-            audit("authorize-consumer-load");
-            vec![(EXPORT.into(), WorkerExportContract::StringIoString)]
+            return Err(denied());
         };
         // SAFETY: Held checks the exact sealed images, initializer and runtime.
         // Each named interop case selects only its exact genuine contracts.
@@ -621,7 +617,6 @@ impl WorkerAuthority for MetadataApp {
             || d.broken_import
             || !d.typed_session
             || d.interop
-            || d.verification
             || !(recovery || meta || adapter)
             || *session.imports.options() != HostImportOptions::default()
             || !options.namespace.is_empty()
@@ -735,7 +730,6 @@ impl WorkerAuthority for MetadataApp {
             || d.broken_import
             || !d.typed_session
             || d.interop
-            || d.verification
             || !(exact_request || module_syntax)
             || !session.imports.matches_request(
                 &d.import_roots
@@ -786,7 +780,6 @@ impl WorkerAuthority for MetadataApp {
             || d.broken_import
             || !d.typed_session
             || d.interop
-            || d.verification
             || !options.namespace.is_empty()
             || options.options_json != "{}"
             || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
@@ -855,7 +848,6 @@ impl WorkerAuthority for MetadataApp {
             || d.broken_import
             || !d.typed_session
             || d.interop
-            || d.verification
             || !session.imports.matches_request(
                 &d.import_roots
                     .iter()
@@ -897,7 +889,7 @@ impl WorkerAuthority for MetadataApp {
         if d.broken_import
             || !d.typed_session
             || d.interop
-            || (!d.verification && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1"))
+            || option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") != Some("1")
             || context.capability.library_path() != d.host_image
             || observed != Some(roots.as_slice())
             || context.imports.plugin().is_some()
@@ -916,49 +908,11 @@ impl WorkerAuthority for MetadataApp {
         if option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1") {
             return self.verify_ordinary(session, request, options);
         }
-        if broken_import_profile() || !self.deployment()?.record.verification {
-            return Err(denied());
+        // Only the ordinary typed profile verifies declarations.
+        if !broken_import_profile() {
+            self.deployment()?;
         }
-        if options.file != "/verify/theorem.lean"
-            || !options.namespace.is_empty()
-            || options.heartbeats != lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT
-            || options.diagnostic_bytes != lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
-            || options.options_json != "{}"
-        {
-            audit("refused-verification-options");
-            return Err(lean_rs::error::host_internal(
-                "verification fixture refused source options",
-            ));
-        }
-        let DeclarationVerificationTarget::Name { name } = &request.target else {
-            return Err(denied());
-        };
-        let defaults = ModuleQueryOutputBudgets::default();
-        if request.sorry_policy != SorryPolicy::Deny
-            || !request.report_axioms
-            || request.budgets.total_bytes != defaults.total_bytes
-        {
-            return Err(denied());
-        }
-        let ordinary = defaults.per_field_bytes;
-        let event = match (request.source.as_str(), name.as_str(), request.budgets.per_field_bytes) {
-            ("theorem t : True := by\n  trivial\n", "t", n) if n == ordinary => "authorize-verify-proved",
-            ("theorem t : True := by\n  sorry\n", "t", n) if n == ordinary => "authorize-verify-sorry",
-            ("theorem absent : Nat := 0\n", "absent", n) if n == ordinary => "authorize-verify-unavailable",
-            ("theorem t : True := by\n  sorry\n", "t", 1) => "authorize-verify-truncated",
-            _ => return Err(denied()),
-        };
-        let roots = self.deployment()?.record.verification_roots();
-        // SAFETY: grant_source validated this opened environment's exact import order immediately
-        // before calling verify. Held verified the sealed libraries, modules and release.
-        // Only the four reviewed in-memory declarations and their exact options reach the shim.
-        let grant = unsafe {
-            session
-                .capability
-                .verification_scope(session.environment, session.imports, roots, request, options)?
-        };
-        audit(event);
-        Ok(grant)
+        Err(denied())
     }
     fn verify_batch<'cap>(
         &self,

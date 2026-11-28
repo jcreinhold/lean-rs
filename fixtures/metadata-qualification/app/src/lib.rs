@@ -119,7 +119,6 @@ fn runtime_image_names() -> (&'static str, &'static str, &'static str) {
     return ("libleanshared.so", "libInit_shared.so", "libLake_shared.so");
 }
 
-pub const EXPORT: &str = "lean_rs_interop_consumer_worker_metadata";
 pub const MODULE: &str = "LeanRsInteropConsumer.Callback";
 
 pub const GENERATED_OUTPUT_KEY: &str = "lean-4.36.0";
@@ -143,7 +142,6 @@ pub struct Record {
     pub optional_whnf: bool,
     #[serde(default)]
     pub interop: bool,
-    pub verification: bool,
     pub generated_output_key: String,
     #[serde(default)]
     pub consumer_image: PathBuf,
@@ -285,7 +283,6 @@ impl Record {
         self.typed_session
             && !self.interop
             && !self.broken_import
-            && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
             && matches!(
                 std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref(),
@@ -300,14 +297,13 @@ impl Record {
         self.typed_session
             && !self.interop
             && !self.broken_import
-            && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
             && std::env::var("LEAN_RS_TEST_ADAPTER_CASE").as_deref()
                 == Ok("elaboration_and_kernel_adapter_match_status_shape")
     }
 
     fn interop_builder_imports(&self, names: &[String], options: &lean_rs::module::HostImportOptions) -> Option<R<()>> {
-        if !self.typed_session || !self.interop || self.broken_import || self.verification {
+        if !self.typed_session || !self.interop || self.broken_import {
             return None;
         }
         let default = lean_rs::module::HostImportOptions::default();
@@ -353,7 +349,6 @@ impl Record {
         let reuse_imports = self.typed_session
             && !self.interop
             && !self.broken_import
-            && !self.verification
             && option_env!("LEAN_RS_METADATA_ORDINARY_TYPED") == Some("1")
             && (wide_reuse
                 || staleness_probe
@@ -481,7 +476,7 @@ impl Held {
         let d = &self.record;
         let bookended = match option_env!("LEAN_RS_METADATA_BOOKENDED_RELEASE") {
             None => false,
-            Some("1") if !d.verification && (d.broken_import || d.typed_session || d.scalar_entry) => true,
+            Some("1") if d.broken_import || d.typed_session || d.scalar_entry => true,
             Some(_) => return Err(err("installed Lean bookends require an ordinary SDK fixture")),
         };
         let unexpected_loader_selection = if cfg!(target_os = "macos") {

@@ -178,8 +178,6 @@ def main():
     assert not (broken and typed)
     assert not scalar or (state == a / "target/scalar-entry" and not (broken or typed))
     assert not interop or typed
-    if typed:
-        assert rec.get("verification") is False
     host_builder_case = rec.get("host_builder_case")
     builder_profiles = {
         "a_host_handle_built_without_imports_opens_no_session": (
@@ -363,8 +361,6 @@ def main():
             e["symbol"] for e in json.loads(rec["consumer_json"])["exports"]
         ] == expected
         project_symbols.extend(expected)
-    elif not (broken or typed):
-        project_symbols.append("lean_rs_interop_consumer_worker_metadata")
     if interop:
         pin_content(project / "lakefile.lean")
         for source in (

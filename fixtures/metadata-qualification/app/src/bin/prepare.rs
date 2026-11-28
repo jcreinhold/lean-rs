@@ -100,7 +100,7 @@ fn prepare_scalar(app: &Path, state: &Path, sysroot: &Path, key: &str) -> Result
     }
     let shim = selected_host_artifacts()?;
     let record = serde_json::json!({
-        "scalar_entry": true, "typed_session": false, "verification": false,
+        "scalar_entry": true, "typed_session": false,
         "consumer_manifest": warm.manifest_path(), "consumer_json": fs::read_to_string(warm.manifest_path())?,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": warm.dylib_path(),
@@ -236,7 +236,7 @@ fn prepare_typed_session(
         return Err("typed state is not a private job directory".into());
     }
     let mut record = serde_json::json!({
-        "broken_import": false, "typed_session": true, "interop": interop, "verification": false,
+        "broken_import": false, "typed_session": true, "interop": interop,
         "optional_whnf": optional_whnf,
         "generated_output_key": key, "project": project, "sysroot": sysroot,
         "consumer_image": image,
@@ -512,7 +512,6 @@ fn seal_shims_only(
         "broken_import": true,
         "host_builder_case": case,
         "typed_session": false,
-        "verification": false,
         "generated_output_key": key,
         "project": project,
         "sysroot": sysroot,
