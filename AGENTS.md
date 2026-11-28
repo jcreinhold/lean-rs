@@ -87,8 +87,8 @@ uv run --no-project python scripts/qualify_metadata.py workspace-tests "$LEAN_RS
 ```
 
 The first command runs the broken-import control and the typed tests and prints `LEAN_RS_TEST_ORDINARY_HOST_SHIMS` and
-`LEAN_RS_TEST_REMAINING_FILTER`. With the first exported, `workspace-tests` runs the rest of the workspace under nextest
-on the same shims.
+`LEAN_RS_TEST_REMAINING_FILTER`. With `LEAN_RS_TEST_ORDINARY_HOST_SHIMS` exported, `workspace-tests` runs the rest of
+the workspace under nextest on the same shims.
 
 For a metadata, doctor or host-handle change, run the control, then the affected interop cases:
 
