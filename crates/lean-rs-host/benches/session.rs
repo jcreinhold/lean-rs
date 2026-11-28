@@ -34,11 +34,11 @@ fn fixture_host() -> LeanHost<'static> {
 // -- query_declarations_bulk --------------------------------------------
 //
 // Workload: `host::session::query_declarations_bulk/N`—
-// `LeanSession::query_declarations_bulk` (crates/lean-rs/src/host/session.rs:704)
-// over N pre-resolvable fixture declaration names. Measures the bulk
-// dispatch: one FFI call regardless of N, plus N internal
-// `name_from_string` conversions and N `Obj` decodes. The session is
-// re-used across iterations—only the bulk call is in the measurement.
+// `LeanSession::query_declarations_bulk` over N pre-resolvable fixture
+// declaration names. Measures the bulk dispatch: one FFI call regardless
+// of N, plus N internal `name_from_string` conversions and N `Obj`
+// decodes. The session is re-used across iterations—only the bulk call
+// is in the measurement.
 
 const HANDLES_NAMES: [&str; 16] = [
     "LeanRsFixture.Handles.nameAnonymous",
@@ -246,11 +246,11 @@ fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 // -- elaborate ----------------------------------------------------------
 //
 // Workload: `host::session::elaborate_small`—`LeanSession::elaborate`
-// (crates/lean-rs/src/host/session.rs:471) on `(1 + 1 : Nat)`. The
-// elaborator runs against the cached `Elaboration` environment; the
-// measurement reflects warm steady-state cost. `elaborate` accumulates
-// session state across calls, so the first call in a fresh session is
-// systematically slower than the steady-state number recorded here.
+// on `(1 + 1 : Nat)`. The elaborator runs against the cached
+// `Elaboration` environment; the measurement reflects warm steady-state
+// cost. `elaborate` accumulates session state across calls, so the first
+// call in a fresh session is systematically slower than the steady-state
+// number recorded here.
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
@@ -271,12 +271,10 @@ fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 
 // -- run_meta(whnf) -----------------------------------------------------
 //
-// Workload: `host::meta::run_meta_whnf`—`LeanSession::run_meta`
-// (crates/lean-rs/src/host/session.rs:640) with the `whnf` service
-// (crates/lean-rs/src/host/meta/service.rs:98) on the type of
-// `Nat.zero`. The expression is built once in setup so the per-iter
-// cost is `LeanExpr::clone` + meta dispatch + decode—not Expr
-// construction.
+// Workload: `host::meta::run_meta_whnf`—`LeanSession::run_meta` with
+// the `lean_rs_host::meta::whnf` service on the type of `Nat.zero`. The
+// expression is built once in setup so the per-iter cost is
+// `LeanExpr::clone` + meta dispatch + decode—not Expr construction.
 
 fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
