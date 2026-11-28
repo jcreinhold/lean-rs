@@ -135,9 +135,10 @@ pub trait WorkerAuthority: Send + Sync {
     /// Supply the project's import roots in Lean's search order, or `None` to ask Lake.
     ///
     /// With `None`, the worker runs `lake env` in `project` once and uses its
-    /// answer. An application that already ran
-    /// `lean_toolchain::LakeWorkspace::lean_path` for this project returns that
-    /// answer here, so the worker runs Lake no second time. The roots grant no
+    /// answer. An application that already asked Lake, for example by running
+    /// `lean_toolchain::LakeWorkspace::lean_path_command` under its own limits
+    /// and reading the output with `read_lean_path`, returns that answer here,
+    /// so the worker runs Lake no second time. The roots grant no
     /// import authority: [`Self::imports`] still approves the ordered roots.
     ///
     /// # Errors

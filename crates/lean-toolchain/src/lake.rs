@@ -1,9 +1,15 @@
 //! Questions lean-rs asks Lake about a workspace.
 //!
 //! Lake owns a workspace's layout: which packages it holds, where each one
-//! builds, and what a library's shared file is called. [`LakeWorkspace`] runs
-//! Lake and returns its answers, so lean-rs reads none of Lake's files and
+//! builds, and what a library's shared file is called. [`LakeWorkspace`] asks
+//! Lake and reads its answers, so lean-rs reads none of Lake's files and
 //! builds no output path itself.
+//!
+//! Each question comes as a pair: a method that builds the Lake command and a
+//! method that reads its output. A caller that runs processes under its own
+//! time limit, process group or turn runs the command itself and hands the
+//! output back. The methods named for the answer run the command directly,
+//! with no time limit.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -90,57 +96,135 @@ impl LakeWorkspace {
         &self.root
     }
 
-    /// The `.olean` directories Lake puts on `LEAN_PATH`, dependencies first and the root last.
+    /// The `lake env` command whose output [`Self::read_lean_path`] reads.
     ///
-    /// This runs `lake env` and builds nothing. Lake ends the list with its
-    /// own library directory, the one holding `Lake.olean`; this checks that
-    /// entry and drops it. A directory may not exist until Lake builds its
-    /// package.
+    /// The command builds nothing. It sets its program, arguments, working
+    /// directory and environment, and removes an inherited `LEAN_PATH`, which
+    /// Lake would add to its answer. The caller sets stdio and runs it.
     ///
     /// # Errors
     ///
-    /// Returns [`LinkDiagnostics::LakeConfigMissing`] without running Lake
-    /// when the root has no lakefile, [`LinkDiagnostics::LakeUnavailable`] or
-    /// [`LinkDiagnostics::LakeFailed`] when Lake does not run or fails, and
-    /// [`LinkDiagnostics::LakeAnswerInvalid`] when its output has no usable
+    /// Returns [`LinkDiagnostics::LakeConfigMissing`] when the root has no
+    /// lakefile.
+    pub fn lean_path_command(&self) -> Result<Command, LinkDiagnostics> {
+        self.command(LakeCall::Env)
+    }
+
+    /// Read the `.olean` directories, dependencies first and the root last,
+    /// from the output of [`Self::lean_path_command`].
+    ///
+    /// Lake ends its `LEAN_PATH` with its own library directory, the one
+    /// holding `Lake.olean`; this checks that entry and drops it. A directory
+    /// may not exist until Lake builds its package.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LinkDiagnostics::LakeFailed`] when the command failed, and
+    /// [`LinkDiagnostics::LakeAnswerInvalid`] when its stdout has no usable
     /// `LEAN_PATH` line.
+    pub fn read_lean_path(&self, output: &Output) -> Result<Vec<PathBuf>, LinkDiagnostics> {
+        let call = LakeCall::Env;
+        parse_lean_path(self.answer(call, output)?).map_err(|reason| self.answer_invalid(call, reason))
+    }
+
+    /// Run [`Self::lean_path_command`] with no time limit and read its output.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::lean_path_command`] and
+    /// [`Self::read_lean_path`], and [`LinkDiagnostics::LakeUnavailable`]
+    /// when Lake does not start.
     pub fn lean_path(&self) -> Result<Vec<PathBuf>, LinkDiagnostics> {
         self.lean_path_with(&mut RealLakeRunner)
     }
 
-    /// Build `target`'s shared library if Lake finds it out of date, and return its path.
+    /// The `lake query <target>:shared` command whose output
+    /// [`Self::read_shared_library`] reads.
     ///
-    /// This runs `lake query <target>:shared`, which builds the library and
-    /// the libraries it imports, then prints the file's path. Lake names the
-    /// file, from the library's `libName` when the lakefile sets one.
+    /// Lake builds the library and the libraries it imports when they are out
+    /// of date, then prints the file's path. Lake names the file, from the
+    /// library's `libName` when the lakefile sets one. The command is set up
+    /// as [`Self::lean_path_command`] describes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LinkDiagnostics::LakeConfigMissing`] when the root has no
+    /// lakefile.
+    pub fn shared_library_command(&self, target: &str) -> Result<Command, LinkDiagnostics> {
+        self.command(LakeCall::Query { target, build: true })
+    }
+
+    /// Read `target`'s shared library from the output of [`Self::shared_library_command`].
     ///
     /// # Errors
     ///
     /// Returns [`LinkDiagnostics::LakeTargetMissing`] when Lake reports no
-    /// library named `target`, the errors of [`Self::lean_path`] for a missing
-    /// lakefile or a failed run, and [`LinkDiagnostics::LakeAnswerInvalid`]
-    /// when Lake prints anything but one absolute path to a file.
+    /// library named `target`, [`LinkDiagnostics::LakeFailed`] when the
+    /// command failed otherwise, and [`LinkDiagnostics::LakeAnswerInvalid`]
+    /// when its stdout is anything but one absolute path to a file.
+    pub fn read_shared_library(&self, target: &str, output: &Output) -> Result<PathBuf, LinkDiagnostics> {
+        let call = LakeCall::Query { target, build: true };
+        parse_library(self.answer(call, output)?).map_err(|reason| self.answer_invalid(call, reason))
+    }
+
+    /// Run [`Self::shared_library_command`] with no time limit and read its output.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::shared_library_command`] and
+    /// [`Self::read_shared_library`], and [`LinkDiagnostics::LakeUnavailable`]
+    /// when Lake does not start.
     pub fn shared_library(&self, target: &str) -> Result<PathBuf, LinkDiagnostics> {
         self.shared_library_with(&mut RealLakeRunner, target)
     }
 
-    /// Return `target`'s shared library if Lake reports it up to date, without building it.
+    /// The `lake --no-build query <target>:shared` command whose output
+    /// [`Self::read_built_shared_library`] reads.
     ///
-    /// This runs `lake --no-build query <target>:shared`. Lake exits with code
-    /// 3 when the library, or anything it needs, would have to be built; that
-    /// is `Ok(None)`.
+    /// The command builds nothing. It is set up as
+    /// [`Self::lean_path_command`] describes.
     ///
     /// # Errors
     ///
-    /// Returns the same errors as [`Self::shared_library`].
+    /// Returns [`LinkDiagnostics::LakeConfigMissing`] when the root has no
+    /// lakefile.
+    pub fn built_shared_library_command(&self, target: &str) -> Result<Command, LinkDiagnostics> {
+        self.command(LakeCall::Query { target, build: false })
+    }
+
+    /// Read `target`'s shared library from the output of
+    /// [`Self::built_shared_library_command`], or `None` when Lake would have
+    /// to build it.
+    ///
+    /// Lake exits with code 3 when the library, or anything it needs, is out
+    /// of date.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::read_shared_library`].
+    pub fn read_built_shared_library(&self, target: &str, output: &Output) -> Result<Option<PathBuf>, LinkDiagnostics> {
+        if output.status.code() == Some(NO_BUILD_EXIT_CODE) {
+            return Ok(None);
+        }
+        let call = LakeCall::Query { target, build: false };
+        parse_library(self.answer(call, output)?)
+            .map(Some)
+            .map_err(|reason| self.answer_invalid(call, reason))
+    }
+
+    /// Run [`Self::built_shared_library_command`] with no time limit and read its output.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::built_shared_library_command`] and
+    /// [`Self::read_built_shared_library`], and
+    /// [`LinkDiagnostics::LakeUnavailable`] when Lake does not start.
     pub fn built_shared_library(&self, target: &str) -> Result<Option<PathBuf>, LinkDiagnostics> {
         self.built_shared_library_with(&mut RealLakeRunner, target)
     }
 
     pub(crate) fn lean_path_with(&self, runner: &mut impl LakeRunner) -> Result<Vec<PathBuf>, LinkDiagnostics> {
-        let (stdout, command) = self.run(runner, LakeCall::Env)?;
-        let stdout = stdout.ok_or_else(|| self.answer_invalid(&command, "Lake asked to build".to_owned()))?;
-        parse_lean_path(&stdout).map_err(|reason| self.answer_invalid(&command, reason))
+        self.read_lean_path(&self.run(runner, LakeCall::Env)?)
     }
 
     pub(crate) fn shared_library_with(
@@ -148,9 +232,7 @@ impl LakeWorkspace {
         runner: &mut impl LakeRunner,
         target: &str,
     ) -> Result<PathBuf, LinkDiagnostics> {
-        let (stdout, command) = self.run(runner, LakeCall::Query { target, build: true })?;
-        let stdout = stdout.ok_or_else(|| self.answer_invalid(&command, "Lake asked to build".to_owned()))?;
-        parse_library(&stdout).map_err(|reason| self.answer_invalid(&command, reason))
+        self.read_shared_library(target, &self.run(runner, LakeCall::Query { target, build: true })?)
     }
 
     pub(crate) fn built_shared_library_with(
@@ -158,19 +240,11 @@ impl LakeWorkspace {
         runner: &mut impl LakeRunner,
         target: &str,
     ) -> Result<Option<PathBuf>, LinkDiagnostics> {
-        let (stdout, command) = self.run(runner, LakeCall::Query { target, build: false })?;
-        stdout
-            .map(|stdout| parse_library(&stdout).map_err(|reason| self.answer_invalid(&command, reason)))
-            .transpose()
+        self.read_built_shared_library(target, &self.run(runner, LakeCall::Query { target, build: false })?)
     }
 
-    /// Run one Lake command. `Ok((None, _))` means a `--no-build` query found
-    /// something to build.
-    fn run(
-        &self,
-        runner: &mut impl LakeRunner,
-        call: LakeCall<'_>,
-    ) -> Result<(Option<Vec<u8>>, String), LinkDiagnostics> {
+    /// The Lake command for `call`, after checking that the root has a lakefile.
+    fn command(&self, call: LakeCall<'_>) -> Result<Command, LinkDiagnostics> {
         if !["lakefile.lean", "lakefile.toml"]
             .iter()
             .any(|name| self.root.join(name).is_file())
@@ -179,6 +253,26 @@ impl LakeWorkspace {
                 project_root: self.root.clone(),
             });
         }
+        let mut command = if let Some(sysroot) = &self.lean_sysroot {
+            let mut command = Command::new(sysroot.join("bin").join("lake"));
+            command.env("LEAN_SYSROOT", sysroot);
+            command
+        } else {
+            Command::new("lake")
+        };
+        if let Some(threads) = self.lean_num_threads {
+            command.env("LEAN_NUM_THREADS", threads.to_string());
+        }
+        // Lake appends an inherited `LEAN_PATH` to the one it reports and
+        // passes to `lean`; remove it so the answer is the workspace's alone.
+        command
+            .env_remove("LEAN_PATH")
+            .args(self.args(call))
+            .current_dir(&self.root);
+        Ok(command)
+    }
+
+    fn args(&self, call: LakeCall<'_>) -> Vec<String> {
         let mut args = Vec::new();
         if self.reconfigure {
             args.push("-R".to_owned());
@@ -196,56 +290,54 @@ impl LakeWorkspace {
                 args.push(format!("{target}:shared"));
             }
         }
-        let line = std::iter::once("lake")
-            .chain(args.iter().map(String::as_str))
+        args
+    }
+
+    /// The command for `call` as one line, for diagnostics.
+    fn line(&self, call: LakeCall<'_>) -> String {
+        std::iter::once("lake".to_owned())
+            .chain(self.args(call))
             .collect::<Vec<_>>()
-            .join(" ");
-        let mut command = if let Some(sysroot) = &self.lean_sysroot {
-            let mut command = Command::new(sysroot.join("bin").join("lake"));
-            command.env("LEAN_SYSROOT", sysroot);
-            command
-        } else {
-            Command::new("lake")
-        };
-        if let Some(threads) = self.lean_num_threads {
-            command.env("LEAN_NUM_THREADS", threads.to_string());
-        }
-        // Lake appends an inherited `LEAN_PATH` to the one it reports and
-        // passes to `lean`; remove it so the answer is the workspace's alone.
-        command.env_remove("LEAN_PATH").args(&args).current_dir(&self.root);
-        let output = runner
+            .join(" ")
+    }
+
+    /// Run the command for `call` through `runner`.
+    fn run(&self, runner: &mut impl LakeRunner, call: LakeCall<'_>) -> Result<Output, LinkDiagnostics> {
+        let mut command = self.command(call)?;
+        runner
             .output(&mut command)
             .map_err(|error| LinkDiagnostics::LakeUnavailable {
                 project_root: self.root.clone(),
-                command: line.clone(),
+                command: self.line(call),
                 detail: error.to_string(),
-            })?;
+            })
+    }
+
+    /// Lake's stdout when the command for `call` succeeded.
+    fn answer<'o>(&self, call: LakeCall<'_>, output: &'o Output) -> Result<&'o [u8], LinkDiagnostics> {
         if output.status.success() {
-            return Ok((Some(output.stdout), line));
+            return Ok(&output.stdout);
         }
-        if let LakeCall::Query { target, build } = call {
-            if !build && output.status.code() == Some(NO_BUILD_EXIT_CODE) {
-                return Ok((None, line));
-            }
-            if reports_missing_library(&output.stderr) {
-                return Err(LinkDiagnostics::LakeTargetMissing {
-                    project_root: self.root.clone(),
-                    target_name: target.to_owned(),
-                });
-            }
+        if let LakeCall::Query { target, .. } = call
+            && reports_missing_library(&output.stderr)
+        {
+            return Err(LinkDiagnostics::LakeTargetMissing {
+                project_root: self.root.clone(),
+                target_name: target.to_owned(),
+            });
         }
         Err(LinkDiagnostics::LakeFailed {
             project_root: self.root.clone(),
-            command: line,
+            command: self.line(call),
             status: output.status.to_string(),
             detail: command_detail(&output.stdout, &output.stderr),
         })
     }
 
-    fn answer_invalid(&self, command: &str, reason: String) -> LinkDiagnostics {
+    fn answer_invalid(&self, call: LakeCall<'_>, reason: String) -> LinkDiagnostics {
         LinkDiagnostics::LakeAnswerInvalid {
             project_root: self.root.clone(),
-            command: command.to_owned(),
+            command: self.line(call),
             reason,
         }
     }
@@ -371,6 +463,28 @@ pub(crate) mod tests {
         pub(crate) dir: Option<PathBuf>,
     }
 
+    impl LakeCallRecord {
+        fn of(command: &Command) -> Self {
+            Self {
+                program: PathBuf::from(command.get_program()),
+                args: command
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect(),
+                envs: command
+                    .get_envs()
+                    .map(|(name, value)| {
+                        (
+                            name.to_string_lossy().into_owned(),
+                            value.map(|value| value.to_string_lossy().into_owned()),
+                        )
+                    })
+                    .collect(),
+                dir: command.get_current_dir().map(Path::to_path_buf),
+            }
+        }
+    }
+
     /// A fake Lake that answers each command from a closure and records it.
     pub(crate) struct FakeLake<F> {
         pub(crate) calls: Vec<LakeCallRecord>,
@@ -388,25 +502,10 @@ pub(crate) mod tests {
 
     impl<F: FnMut(&[String]) -> Output> LakeRunner for FakeLake<F> {
         fn output(&mut self, command: &mut Command) -> std::io::Result<Output> {
-            let args = command
-                .get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
-            self.calls.push(LakeCallRecord {
-                program: PathBuf::from(command.get_program()),
-                args: args.clone(),
-                envs: command
-                    .get_envs()
-                    .map(|(name, value)| {
-                        (
-                            name.to_string_lossy().into_owned(),
-                            value.map(|value| value.to_string_lossy().into_owned()),
-                        )
-                    })
-                    .collect(),
-                dir: command.get_current_dir().map(Path::to_path_buf),
-            });
-            Ok((self.answer)(&args))
+            let record = LakeCallRecord::of(command);
+            let output = (self.answer)(&record.args);
+            self.calls.push(record);
+            Ok(output)
         }
     }
 
@@ -499,27 +598,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn options_come_before_the_command() -> Result<(), String> {
+    fn a_caller_runs_the_command_and_hands_back_its_output() -> Result<(), String> {
         let (root, _) = fake_project("options")?;
-        let mut fake = FakeLake::new(|_: &[String]| answer(3, "", ""));
         let sysroot = root.join("sysroot");
-        let found = LakeWorkspace::new(&root)
+        let workspace = LakeWorkspace::new(&root)
             .lean_sysroot(&sysroot)
             .lean_num_threads(2)
             .config_option("flag", "true")
-            .reconfigure()
-            .built_shared_library_with(&mut fake, "Demo")
+            .reconfigure();
+        let command = workspace
+            .built_shared_library_command("Demo")
             .map_err(|error| error.to_string())?;
-        assert_eq!(found, None);
-        let call = fake.calls.first().ok_or("no Lake call")?;
+        let call = LakeCallRecord::of(&command);
         assert_eq!(call.program, sysroot.join("bin/lake"));
         assert_eq!(call.args, ["-R", "-Kflag=true", "--no-build", "query", "Demo:shared"]);
+        assert_eq!(call.dir.as_deref(), Some(root.as_path()));
         for env in [
             ("LEAN_SYSROOT".to_owned(), Some(sysroot.display().to_string())),
             ("LEAN_NUM_THREADS".to_owned(), Some("2".to_owned())),
+            ("LEAN_PATH".to_owned(), None),
         ] {
             assert!(call.envs.contains(&env), "missing {env:?} in {:?}", call.envs);
         }
+        let found = workspace
+            .read_built_shared_library("Demo", &answer(3, "", ""))
+            .map_err(|error| error.to_string())?;
+        assert_eq!(found, None);
+        let Err(LinkDiagnostics::LakeFailed { command, .. }) =
+            workspace.read_built_shared_library("Demo", &answer(1, "", "error: Demo.lean:1:0: oops"))
+        else {
+            return Err("a failed query was not reported as failed".to_owned());
+        };
+        assert_eq!(command, "lake -R -Kflag=true --no-build query Demo:shared");
         Ok(())
     }
 

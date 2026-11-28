@@ -27,8 +27,8 @@ cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST=<manifest path>
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB=<built dylib path>
 ```
 
-It runs `lake query MyCapability:shared`, which builds the library when Lake finds it out of date and prints its path. It
-then writes a self-describing artifact manifest beside that library, or into `OUT_DIR` when a build script builds
+It runs `lake query MyCapability:shared`, which builds the library when Lake finds it out of date and prints its path.
+It then writes a self-describing artifact manifest beside that library, or into `OUT_DIR` when a build script builds
 without a generated-output key, and returns `BuiltLeanCapability` for build scripts that want to inspect the result. The
 manifest is the canonical runtime handoff for shipped crates; the direct dylib path remains a lower-level compatibility
 path.
@@ -65,9 +65,11 @@ Lower-level helpers remain available for custom build flows:
   failure.
 - `emit_lean_link_directives` preserves the warning-on-failure behavior.
 - `build_lake_target` builds one Lake shared-library target and emits Cargo rerun directives.
-- `LakeWorkspace` runs the same Lake commands without Cargo directives, for runtime code and tests: `lean_path` runs
-  `lake env`, `shared_library` runs `lake query`, and `built_shared_library` runs `lake --no-build query`. The host's
-  bundled shim path uses `CargoLeanCapability::build_quiet` so its manifest also carries trusted export signatures.
+- `LakeWorkspace` asks the same questions without Cargo directives, for runtime code and tests: `lean_path` runs
+  `lake env`, `shared_library` runs `lake query`, and `built_shared_library` runs `lake --no-build query`. Each also
+  comes as a pair, such as `lean_path_command` and `read_lean_path`: the first builds the Lake command and the second
+  reads its output, so a caller can run Lake under its own time limit, process group or turn. The host's bundled shim
+  path uses `CargoLeanCapability::build_quiet` so its manifest also carries trusted export signatures.
 
 `build_lake_target` emits `cargo:rerun-if-changed` for each regular file at the top of the project and each `.lean` file
 below it, skipping directories whose names start with `.`. It captures Lake stdout and stderr, so stdout stays limited
@@ -101,14 +103,15 @@ that has a second hard link.
 
 `CargoLeanCapability` runs Lake directly and takes no lock on the project, and Lake takes no build lock either. Cargo
 serializes builds that share a target directory, but nothing stops two processes from building one Lake project at once,
-or from rebuilding it while a worker reads its outputs. The process that owns the checkout orders its builds and reads, for example one server per
-checkout with an in-memory readers–writer turn.
+or from rebuilding it while a worker reads its outputs. The process that owns the checkout orders its builds and reads,
+for example one server per checkout with an in-memory readers–writer turn.
 
 `probe_ready()` runs `lake --no-build query` for the library, and for `LeanRsInterop` when the workspace has it, then
 checks the exact expected capability manifest, including ABI exports, selected fingerprint and dependencies. It builds
 nothing, though Lake may write its own files. A stale library, a missing dependency file or a different manifest returns
-`None`; each separately prepared dependency needs its own probe. `with_materialized_source_package` holds an exclusive lock on one source-cache entry
-while it installs the payload and runs the caller's build, because several build scripts can share one cache root.
+`None`; each separately prepared dependency needs its own probe. `with_materialized_source_package` holds an exclusive
+lock on one source-cache entry while it installs the payload and runs the caller's build, because several build scripts
+can share one cache root.
 
 ## Diagnostics
 
