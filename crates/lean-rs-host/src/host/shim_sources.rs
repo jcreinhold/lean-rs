@@ -2,8 +2,8 @@
 //!
 //! A worker built from a registry copy of this crate should not build in the
 //! Cargo source cache, and an installed worker should not depend on that cache
-//! staying put. [`write`] puts the exact sources this build links against into
-//! a fresh directory, so an installer can build them there.
+//! staying put. [`write`](fn@write) puts the exact sources this build links
+//! against into a fresh directory, so an installer can build them there.
 
 use std::fs;
 use std::io::{self, Write as _};
