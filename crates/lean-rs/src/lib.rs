@@ -179,7 +179,14 @@ mod scalar_fixture;
 #[allow(clippy::expect_used, reason = "failed fixture admission is a test setup failure")]
 fn fixed_test_library() -> module::LeanLibrary<'static> {
     static FIXTURE: std::sync::OnceLock<scalar_fixture::ScalarFixture> = std::sync::OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| scalar_fixture::ScalarFixture::admit().expect("admit reviewed fixture"));
+    // Admission needs the setup that `scripts/prerelease.sh` makes, so a failed solo run names it.
+    let fixture = FIXTURE.get_or_init(|| {
+        scalar_fixture::ScalarFixture::admit().expect(
+            "admit the reviewed fixture. Run these tests as scripts/prerelease.sh does: build fixtures/lean, set \
+             LEAN_SYSROOT to the Lean prefix of the build, leave LEAN_PATH unset, and build and run with the variables \
+             that scripts/select_test_fixtures.py prints",
+        )
+    });
     let library = fixture
         .open_owned(LeanRuntime::init().expect("paired runtime"))
         .expect("load retained fixture");
