@@ -1125,9 +1125,12 @@ impl From<LeanError> for WorkerCallError {
 /// cached snapshot pins the environment of the session that built it; and the
 /// eviction completes before the replacement is imported, so a full pool does
 /// not transiently exceed its capacity. The cost of that ordering is that a
-/// failed import leaves the child without a *current* session — which the parent
-/// already handles, retrying on `worker_session_missing` — but `parked` survives
-/// it, so the retry may still land on a pooled key.
+/// failed import leaves the child without a *current* session. The parent
+/// forgets every key it believed the child held when an open fails, so it opens
+/// a session again before its next session request; `parked` survives the
+/// failure, so that open may still reuse a pooled session. A session request
+/// that reaches the child anyway gets `session_missing`, and the parent then
+/// replaces the child, opens the session in the new one and resends once.
 fn open_or_reuse_host_session(
     anchor: &'static HostAnchor,
     plugin: &GenerationPlugin,

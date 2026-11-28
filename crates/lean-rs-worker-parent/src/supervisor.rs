@@ -595,13 +595,16 @@ impl LeanWorkerRestartPolicy {
         self
     }
 
-    /// Refuse replacement after this many restarts in one moving time window.
+    /// Refuse a replacement after this many abnormal restarts in one moving
+    /// time window. The default is 16 per minute.
     ///
-    /// The limit is enforced after the old child reaches a terminal state and
-    /// before a replacement is spawned. Exhaustion returns
-    /// [`LeanWorkerError::RestartLimitExceeded`] and leaves the supervisor
-    /// without an accepted child; create a new worker to apply a fresh restart
-    /// window.
+    /// Only abnormal restarts count (see [`LeanWorkerRestartReason::is_planned`]);
+    /// planned restarts are neither counted nor refused. The limit applies
+    /// after the old child stops and before a replacement starts. A refused
+    /// replacement returns [`LeanWorkerError::RestartLimitExceeded`] and leaves
+    /// the worker without a child until the oldest counted restart leaves the
+    /// window. Until then requests and [`LeanWorker::cycle`] fail with the same
+    /// error; after it, the next request starts a new child.
     #[must_use]
     pub fn max_restarts_per_window(mut self, max_restarts: u64, window: Duration) -> Self {
         self.restart_intensity = RestartIntensityLimit {
@@ -693,11 +696,19 @@ impl GenerationBudget {
     }
 }
 
-/// Reason recorded for the latest worker cycle.
+/// Why the supervisor replaced the worker child.
 ///
-/// Non-exhaustive: cycling policy is expected to grow, and a caller that matches
-/// on the cause it cares about should not break when it does. Use
-/// [`Self::stable_cause`] for the flat wire-facing name.
+/// Each reason is planned or abnormal, and [`Self::is_planned`] says which.
+/// A planned restart carries out the restart policy or a caller's request on a
+/// working child before the next request; the restart window neither counts
+/// nor refuses it. An abnormal restart replaces a child that failed: it timed
+/// out, was cancelled or crossed the hard RSS limit during a request, exited,
+/// lost its session, broke the protocol, or never started. Each abnormal
+/// restart counts against [`LeanWorkerRestartPolicy::max_restarts_per_window`].
+///
+/// Non-exhaustive, so a caller that matches the reasons it cares about does not
+/// break when one is added. [`Self::stable_cause`] gives a flat name and
+/// `Display` a one-line description.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum LeanWorkerRestartReason {
@@ -733,10 +744,9 @@ pub enum LeanWorkerRestartReason {
         operation: &'static str,
         duration: Duration,
     },
-    /// The child aborted (SIGABRT / fatal panic) during an in-flight request and
-    /// the supervisor respawned it. Used by the read-only verify/proof-state
-    /// guard that converts such an abort into a degraded verdict instead of a
-    /// hard error.
+    /// The child exited with a failure status or a signal, and the supervisor
+    /// replaced it. `operation` names the request that ran on the child or
+    /// found it dead.
     ///
     /// `status` and `diagnostics` are carried because they are otherwise
     /// **unrecoverable**: the child's bounded stderr tail is captured at exit by
@@ -751,9 +761,53 @@ pub enum LeanWorkerRestartReason {
         /// Child stderr at the abort, trimmed and truncated for display.
         diagnostics: String,
     },
+    /// The child exited with a success status that nobody asked for, and the
+    /// supervisor replaced it. `operation` names the request that ran on the
+    /// child or found it dead.
+    ChildExit {
+        operation: &'static str,
+        /// Platform-rendered exit status.
+        status: String,
+        /// Child stderr at the exit, trimmed and truncated for display.
+        diagnostics: String,
+    },
+    /// The child answered a session request without holding a session. The
+    /// supervisor replaced it, opened the session again and resent the request.
+    SessionMissing { operation: &'static str },
+    /// The request broke the worker protocol or a parent-side sink panicked, so
+    /// the supervisor killed and replaced the child.
+    RequestFailed {
+        operation: &'static str,
+        /// The request's error, truncated for display.
+        error: String,
+    },
+    /// An earlier replacement failed to start, and this restart tries again.
+    StartFailed {
+        /// The start error, truncated for display.
+        error: String,
+    },
 }
 
 impl LeanWorkerRestartReason {
+    /// Whether the restart policy or a caller asked for this restart.
+    ///
+    /// Planned restarts replace a working child between requests and never
+    /// count against the restart window. Every other reason replaces a child
+    /// that failed, and counts.
+    #[must_use]
+    pub const fn is_planned(&self) -> bool {
+        matches!(
+            self,
+            Self::Explicit
+                | Self::MaxRequests { .. }
+                | Self::MaxImports { .. }
+                | Self::ImportResidue { .. }
+                | Self::ImportAccountingUnknown
+                | Self::RssCeiling { .. }
+                | Self::Idle { .. }
+        )
+    }
+
     /// Stable wire/policy cause name for this restart reason.
     ///
     /// This is intentionally smaller than the full enum payload: callers can
@@ -773,6 +827,78 @@ impl LeanWorkerRestartReason {
             Self::Cancelled { .. } => "cancelled",
             Self::RequestTimeout { .. } => "timeout",
             Self::ChildAbort { .. } => "child_abort",
+            Self::ChildExit { .. } => "child_exit",
+            Self::SessionMissing { .. } => "session_missing",
+            Self::RequestFailed { .. } => "request_failed",
+            Self::StartFailed { .. } => "start_failed",
+        }
+    }
+}
+
+impl fmt::Display for LeanWorkerRestartReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const MIB: u64 = 1024 * 1024;
+        match self {
+            Self::Explicit => f.write_str("explicit"),
+            Self::MaxRequests { limit } => write!(f, "max_requests limit={limit}"),
+            Self::MaxImports { limit } => write!(f, "max_imports limit={limit}"),
+            Self::ImportResidue {
+                residue_bytes,
+                limit_bytes,
+            } => write!(
+                f,
+                "import_residue residue_mib={} limit_mib={}",
+                residue_bytes / MIB,
+                limit_bytes / MIB
+            ),
+            Self::ImportAccountingUnknown => {
+                f.write_str("import_accounting_unknown: retained memory could not be measured after an import error")
+            }
+            Self::RssCeiling {
+                current_kib, limit_kib, ..
+            } => write!(f, "rss_ceiling current_kib={current_kib} limit_kib={limit_kib}"),
+            Self::RssHardLimit {
+                operation,
+                current_kib,
+                limit_kib,
+                ..
+            } => write!(
+                f,
+                "rss_hard_limit operation={operation} current_kib={current_kib} limit_kib={limit_kib}"
+            ),
+            Self::Idle { idle_for, limit } => write!(
+                f,
+                "idle idle_for_millis={} limit_millis={}",
+                duration_ms(*idle_for),
+                duration_ms(*limit)
+            ),
+            Self::Cancelled { operation } => write!(f, "cancelled operation={operation}"),
+            Self::RequestTimeout { operation, duration } => write!(
+                f,
+                "timeout operation={operation} duration_millis={}",
+                duration_ms(*duration)
+            ),
+            Self::ChildAbort {
+                operation,
+                status,
+                diagnostics,
+            }
+            | Self::ChildExit {
+                operation,
+                status,
+                diagnostics,
+            } => {
+                write!(f, "{} operation={operation} status={status}", self.stable_cause())?;
+                let detail = diagnostics.trim();
+                if detail.is_empty() {
+                    Ok(())
+                } else {
+                    write!(f, ": {detail}")
+                }
+            }
+            Self::SessionMissing { operation } => write!(f, "session_missing operation={operation}"),
+            Self::RequestFailed { operation, error } => write!(f, "request_failed operation={operation}: {error}"),
+            Self::StartFailed { error } => write!(f, "start_failed: {error}"),
         }
     }
 }
@@ -806,8 +932,10 @@ pub struct LeanWorkerStats {
     pub last_import_like_rss_before_admission_kib: Option<u64>,
     /// Child exits observed by the supervisor, including policy cycles.
     pub exits: u64,
-    /// Policy or explicit restarts performed by the supervisor.
+    /// Restarts performed by the supervisor, planned and abnormal.
     pub restarts: u64,
+    /// Restarts whose reason is abnormal; see [`LeanWorkerRestartReason::is_planned`].
+    pub abnormal_restarts: u64,
     /// Explicit process cycles.
     pub explicit_cycles: u64,
     /// Restarts caused by `LeanWorkerRestartPolicy::max_requests`.
@@ -879,15 +1007,25 @@ pub struct LeanWorkerStats {
 /// `LeanWorkerStats` remains the detailed counter set. This snapshot is the
 /// stable, policy-facing view: a caller can compare two snapshots to observe
 /// every restart performed inside the supervisor, including restarts caused by
-/// timeout, cancellation, RSS limits, import/request cycling, or explicit
-/// cycles.
+/// timeout, cancellation, RSS limits, child failures, import/request cycling,
+/// or explicit cycles.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerLifecycleSnapshot {
     /// Monotone generation number for the current child. It equals the total
-    /// restart count observed by this supervisor.
+    /// restart count observed by this supervisor, and the generation that
+    /// [`LeanWorkerRequestStopReceipt::worker_generation`] reports.
     pub worker_generation: u64,
     /// Total restarts performed by the supervisor.
     pub restarts: u64,
+    /// Restarts whose reason is abnormal; see [`LeanWorkerRestartReason::is_planned`].
+    pub abnormal_restarts: u64,
+    /// Abnormal restarts inside the current restart window. When this reaches
+    /// the configured limit, the next abnormal restart is refused.
+    pub abnormal_restarts_in_window: u64,
+    /// How long the worker stays down because abnormal restarts used up the
+    /// window, or `None` when a restart is allowed now. Once it passes, the
+    /// next request starts a new child.
+    pub restart_retry_after: Option<Duration>,
     /// Child exits observed by the supervisor, including policy cycles.
     pub exits: u64,
     /// Most recent restart reason, if any.
@@ -915,10 +1053,15 @@ impl LeanWorkerLifecycleSnapshot {
         last_exit: Option<LeanWorkerExit>,
         import_residue_bytes: u64,
         import_residue_limit_bytes: Option<u64>,
+        abnormal_restarts_in_window: u64,
+        restart_retry_after: Option<Duration>,
     ) -> Self {
         Self {
             worker_generation: stats.restarts,
             restarts: stats.restarts,
+            abnormal_restarts: stats.abnormal_restarts,
+            abnormal_restarts_in_window,
+            restart_retry_after,
             exits: stats.exits,
             last_restart_reason: stats.last_restart_reason.clone(),
             last_exit,
@@ -933,6 +1076,9 @@ impl LeanWorkerLifecycleSnapshot {
 impl LeanWorkerStats {
     fn record_restart(&mut self, reason: LeanWorkerRestartReason) {
         self.restarts = self.restarts.saturating_add(1);
+        if !reason.is_planned() {
+            self.abnormal_restarts = self.abnormal_restarts.saturating_add(1);
+        }
         match &reason {
             LeanWorkerRestartReason::Explicit => {
                 self.explicit_cycles = self.explicit_cycles.saturating_add(1);
@@ -961,10 +1107,13 @@ impl LeanWorkerStats {
             LeanWorkerRestartReason::RequestTimeout { .. } => {
                 self.timeout_restarts = self.timeout_restarts.saturating_add(1);
             }
-            // The general `restarts` counter and `last_restart_reason` already
-            // capture child aborts; `stable_cause() == "child_abort"` keys the
-            // parent's relabel, so no dedicated counter is warranted.
-            LeanWorkerRestartReason::ChildAbort { .. } => {}
+            // `abnormal_restarts` and `last_restart_reason` already record
+            // these; no caller needs a counter per kind of failure.
+            LeanWorkerRestartReason::ChildAbort { .. }
+            | LeanWorkerRestartReason::ChildExit { .. }
+            | LeanWorkerRestartReason::SessionMissing { .. }
+            | LeanWorkerRestartReason::RequestFailed { .. }
+            | LeanWorkerRestartReason::StartFailed { .. } => {}
         }
         self.last_restart_reason = Some(reason);
     }
@@ -1148,9 +1297,11 @@ pub enum LeanWorkerError {
     Protocol { message: String },
     /// The child returned a typed worker error.
     Worker { code: String, message: String },
-    /// The child exited while a request was in flight.
+    /// The child exited while a request was in flight. The supervisor has
+    /// already replaced it, so the next request runs on a new child.
     ChildExited { exit: LeanWorkerExit },
-    /// The child exited fatally while a request was in flight.
+    /// The child exited fatally while a request was in flight, or before its
+    /// handshake. After a request, the supervisor has already replaced it.
     ChildPanicOrAbort { exit: LeanWorkerExit },
     /// A worker operation timed out.
     Timeout {
@@ -1180,8 +1331,15 @@ pub enum LeanWorkerError {
     CapabilityMetadataMalformed { message: String },
     /// A capability doctor export returned malformed JSON.
     CapabilityDoctorMalformed { message: String },
-    /// A supervising policy refused to restart the worker again in its current window.
-    RestartLimitExceeded { restarts: u64, window: Duration },
+    /// Abnormal restarts used up the restart window, so the supervisor refused
+    /// to replace the child. `restarts` counts the abnormal restarts inside
+    /// `window`. The worker stays down for `retry_after`; after that, the next
+    /// request starts a new child.
+    RestartLimitExceeded {
+        restarts: u64,
+        window: Duration,
+        retry_after: Duration,
+    },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -1193,7 +1351,9 @@ pub enum LeanWorkerError {
         operation: &'static str,
         duration: Duration,
     },
-    /// The worker has begun shutdown and no longer accepts new requests.
+    /// The worker is stopping its child or was shut down, so it refuses new
+    /// requests. After [`LeanWorker::try_shutdown`], [`LeanWorker::cycle`]
+    /// starts a new child.
     ShutdownInProgress { operation: &'static str },
 }
 
@@ -1256,10 +1416,14 @@ impl fmt::Display for LeanWorkerError {
             Self::CapabilityDoctorMalformed { message } => {
                 write!(f, "capability doctor export returned malformed JSON: {message}")
             }
-            Self::RestartLimitExceeded { restarts, window } => {
+            Self::RestartLimitExceeded {
+                restarts,
+                window,
+                retry_after,
+            } => {
                 write!(
                     f,
-                    "worker restart limit exceeded after {restarts} restarts in {window:?}"
+                    "worker restart limit exceeded after {restarts} abnormal restarts in {window:?}; next restart allowed in {retry_after:?}"
                 )
             }
             Self::UnsupportedRequest { operation } => {
@@ -1502,22 +1666,43 @@ struct InFlightRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum WorkerSupervisorState {
-    Idle { generation: WorkerGeneration },
-    Busy { request: InFlightRequest },
-    Streaming { request: InFlightRequest },
-    Stopping { generation: WorkerGeneration },
-    Killing { generation: WorkerGeneration },
-    Reaping { generation: WorkerGeneration },
-    Crashed { generation: WorkerGeneration },
-    RestartExhausted { generation: WorkerGeneration },
-    Exited { generation: WorkerGeneration },
+    Idle {
+        generation: WorkerGeneration,
+    },
+    Busy {
+        request: InFlightRequest,
+    },
+    Streaming {
+        request: InFlightRequest,
+    },
+    Stopping {
+        generation: WorkerGeneration,
+    },
+    Killing {
+        generation: WorkerGeneration,
+    },
+    Reaping {
+        generation: WorkerGeneration,
+    },
+    Crashed {
+        generation: WorkerGeneration,
+    },
+    /// Abnormal restarts used up the window. `until` is when the oldest counted
+    /// restart leaves it, or `None` when the window is too long to reach.
+    RestartExhausted {
+        generation: WorkerGeneration,
+        until: Option<Instant>,
+    },
+    Exited {
+        generation: WorkerGeneration,
+    },
 }
 
 impl WorkerSupervisorState {
     fn rejects_new_requests(&self) -> bool {
         matches!(
             self,
-            Self::Stopping { .. } | Self::Killing { .. } | Self::Reaping { .. } | Self::RestartExhausted { .. }
+            Self::Stopping { .. } | Self::Killing { .. } | Self::Reaping { .. }
         )
     }
 
@@ -1607,7 +1792,15 @@ pub struct LeanWorker {
     last_activity: Instant,
     generation: WorkerGeneration,
     next_request_id: WorkerRequestId,
+    /// When each abnormal restart inside the window was admitted, oldest first.
     restart_window: VecDeque<Instant>,
+    /// Why the child is gone when the request that lost it could not replace
+    /// it: an expired deadline, a refused restart, or a failed start. The next
+    /// request or [`Self::cycle`] replaces the child with this reason.
+    recovery: Option<LeanWorkerRestartReason>,
+    /// Set by [`Self::try_shutdown`]: requests are refused until
+    /// [`Self::cycle`] starts a new child.
+    stopped: bool,
     state: WorkerSupervisorState,
 }
 
@@ -1859,6 +2052,8 @@ impl LeanWorker {
             generation: WorkerGeneration::default(),
             next_request_id: WorkerRequestId::default(),
             restart_window: VecDeque::new(),
+            recovery: None,
+            stopped: false,
             state: WorkerSupervisorState::Idle {
                 generation: WorkerGeneration::default(),
             },
@@ -1938,6 +2133,10 @@ impl LeanWorker {
 
     /// Return the current worker lifecycle status.
     ///
+    /// `Exited` means no child runs now; it is not final. Unless
+    /// [`Self::try_shutdown`] stopped the worker, the next request or
+    /// [`Self::cycle`] starts a new child, once the restart window allows it.
+    ///
     /// # Errors
     ///
     /// Returns `LeanWorkerError` if checking the process status fails.
@@ -1945,16 +2144,12 @@ impl LeanWorker {
         if self.pending_startup.is_some() {
             return Err(self.dead_error());
         }
-        if let Some(exit) = &self.last_exit {
-            self.state = WorkerSupervisorState::Exited {
-                generation: self.generation,
-            };
-            return Ok(LeanWorkerStatus::Exited(exit.clone()));
+        if let Some(exit) = self.last_exit.clone() {
+            self.mark_exited();
+            return Ok(LeanWorkerStatus::Exited(exit));
         }
         let Some(child) = self.child.as_mut() else {
-            self.state = WorkerSupervisorState::Exited {
-                generation: self.generation,
-            };
+            self.mark_exited();
             return Ok(LeanWorkerStatus::Exited(LeanWorkerExit {
                 success: false,
                 code: None,
@@ -1968,6 +2163,15 @@ impl LeanWorker {
                 Ok(LeanWorkerStatus::Exited(exit))
             }
             None => Ok(LeanWorkerStatus::Running),
+        }
+    }
+
+    /// Record that no child runs, without hiding a used-up restart window.
+    fn mark_exited(&mut self) {
+        if !matches!(self.state, WorkerSupervisorState::RestartExhausted { .. }) {
+            self.state = WorkerSupervisorState::Exited {
+                generation: self.generation,
+            };
         }
     }
 
@@ -1995,12 +2199,32 @@ impl LeanWorker {
     /// Return policy-facing lifecycle facts for this supervisor.
     #[must_use]
     pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
+        let now = Instant::now();
+        let window = self.config.restart_policy.restart_intensity.window;
+        let in_window = self
+            .restart_window
+            .iter()
+            .filter(|admitted| now.saturating_duration_since(**admitted) < window)
+            .count();
         LeanWorkerLifecycleSnapshot::from_worker(
             &self.stats,
             self.last_exit.clone(),
             self.budget.import_residue_bytes,
             self.config.restart_policy.max_import_residue_bytes,
+            u64::try_from(in_window).unwrap_or(u64::MAX),
+            self.restart_retry_after(now),
         )
+    }
+
+    /// How long abnormal restarts keep the worker down, or `None` when a
+    /// restart is allowed at `now`.
+    fn restart_retry_after(&self, now: Instant) -> Option<Duration> {
+        let WorkerSupervisorState::RestartExhausted { until, .. } = self.state else {
+            return None;
+        };
+        until.map_or(Some(Duration::MAX), |until| {
+            Some(until.saturating_duration_since(now)).filter(|wait| !wait.is_zero())
+        })
     }
 
     /// Correlate a subsequent synchronous operation with confirmed child exit.
@@ -2102,28 +2326,36 @@ impl LeanWorker {
 
     /// Explicitly cycle the worker process.
     ///
-    /// This is the manual memory-reset operation. It terminates the current
-    /// child, starts a replacement with the original configuration, and records
-    /// `LeanWorkerRestartReason::Explicit`.
+    /// This is the manual memory-reset operation. It stops the current child,
+    /// starts a replacement with the original configuration, and records
+    /// `LeanWorkerRestartReason::Explicit`. After [`Self::try_shutdown`] it
+    /// starts the worker again. If the child had already failed, the
+    /// replacement records why and counts against the restart window, as the
+    /// next request's replacement would.
     ///
     /// # Errors
     ///
-    /// Returns `LeanWorkerError` if the existing child cannot be waited on or
-    /// the replacement child cannot be spawned and handshaken.
+    /// Returns [`LeanWorkerError::RestartLimitExceeded`] while abnormal
+    /// restarts keep the worker down, or another `LeanWorkerError` if the
+    /// existing child cannot be stopped or the replacement cannot be spawned
+    /// and handshaken.
     pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
-        self.restart_with_reason(LeanWorkerRestartReason::Explicit)
+        self.refuse_while_exhausted()?;
+        let reason = if std::mem::take(&mut self.stopped) {
+            LeanWorkerRestartReason::Explicit
+        } else {
+            self.lost_child_reason("cycle")?
+                .unwrap_or(LeanWorkerRestartReason::Explicit)
+        };
+        self.restart_with_reason(reason)
     }
 
-    /// Restart this worker using its original configuration.
-    ///
-    /// This is an explicit lifecycle operation. Prompt 58 adds policy-driven
-    /// restarts for memory cycling; this method only gives callers a direct
-    /// reset point.
+    /// Restart this worker using its original configuration; the same as
+    /// [`Self::cycle`].
     ///
     /// # Errors
     ///
-    /// Returns `LeanWorkerError` if the existing child cannot be waited on or
-    /// the replacement child cannot be spawned and handshaken.
+    /// Same as [`Self::cycle`].
     pub fn restart(&mut self) -> Result<(), LeanWorkerError> {
         self.cycle()
     }
@@ -2174,9 +2406,14 @@ impl LeanWorker {
 
     /// Stop the child without consuming this owner if cleanup fails.
     ///
+    /// The worker then refuses requests with
+    /// [`LeanWorkerError::ShutdownInProgress`] until [`Self::cycle`] starts a
+    /// new child.
+    ///
     /// # Errors
     /// Returns the cleanup error while retaining the child for another attempt.
     pub fn try_shutdown(&mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.stopped = true;
         self.shutdown_child(ShutdownIntent::Graceful)
     }
 
@@ -2225,6 +2462,12 @@ impl LeanWorker {
             .resolved_session_pool_capacity()
             .unwrap_or(DEFAULT_REUSE_HINT_CAPACITY)
             .max(1)
+    }
+
+    /// Whether the current child holds a session this parent opened. A
+    /// replacement that has not opened a session yet holds none.
+    pub(crate) fn holds_session(&self) -> bool {
+        !self.open_session_keys.is_empty()
     }
 
     /// Record that the child holds `config`, MRU at the back, evicting the
@@ -2299,6 +2542,9 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "open_worker_session";
         check_cancelled(OPERATION, cancellation)?;
+        // Replace a lost child first, so the restart below cannot record a
+        // planned reason for what was a failure.
+        self.ensure_child(OPERATION, cancellation)?;
         // An explicit switch needs only its requested profile in the new child.
         if self.budget.accounting_unknown {
             self.restart_for_request(
@@ -2784,17 +3030,16 @@ impl LeanWorker {
             Ok(result) => Ok(result),
             // A read-only verification must never surface a child abort as a hard
             // error: the worker's own (best-effort) screen could not prevent a
-            // residual metavariable panic, so the supervisor respawns and reports
-            // the honest degraded verdict. Verification is monotone, so relabeling
-            // a non-result to `BudgetExceeded` never downgrades an `Accepted`.
-            Err(err) => {
-                self.recover_child_abort(OPERATION, err)?;
-                Ok(LeanWorkerDeclarationVerificationResult::Ok {
-                    verification_status: LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
-                    facts: Box::new(LeanWorkerDeclarationVerificationFacts::unavailable()),
-                    imports: Vec::new(),
-                })
-            }
+            // residual metavariable panic. The read path has already replaced the
+            // child, so report the honest degraded verdict. Verification is
+            // monotone, so relabeling a non-result to `BudgetExceeded` never
+            // downgrades an `Accepted`.
+            Err(LeanWorkerError::ChildPanicOrAbort { .. }) => Ok(LeanWorkerDeclarationVerificationResult::Ok {
+                verification_status: LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
+                facts: Box::new(LeanWorkerDeclarationVerificationFacts::unavailable()),
+                imports: Vec::new(),
+            }),
+            Err(err) => Err(err),
         }
     }
 
@@ -2827,10 +3072,10 @@ impl LeanWorker {
         );
         match outcome {
             Ok(result) => Ok(result),
-            Err(err) => {
-                self.recover_child_abort(OPERATION, err)?;
+            Err(LeanWorkerError::ChildPanicOrAbort { .. }) => {
                 Ok(degraded_declaration_verification_batch_result(request))
             }
+            Err(err) => Err(err),
         }
     }
 
@@ -2967,21 +3212,19 @@ impl LeanWorker {
             Ok(outcome) => Ok(outcome),
             // As with verification: a child abort during a read-only proof-state
             // batch becomes a per-selector degraded item, not a hard error.
-            Err(err) => {
-                let resource = err.resource_exhausted_facts().cloned().unwrap_or_else(|| {
-                    worker_resource_facts(
-                        "worker_child_abort",
-                        true,
-                        Some(OPERATION),
-                        &self.stats,
-                        self.stats.last_rss_kib,
-                        None,
-                        None,
-                    )
-                });
-                self.recover_child_abort(OPERATION, err)?;
+            Err(LeanWorkerError::ChildPanicOrAbort { .. }) => {
+                let resource = worker_resource_facts(
+                    "worker_child_abort",
+                    true,
+                    Some(OPERATION),
+                    &self.stats,
+                    self.stats.last_rss_kib,
+                    None,
+                    None,
+                );
                 Ok(degraded_query_batch_outcome(selectors, resource))
             }
+            Err(err) => Err(err),
         }
     }
 
@@ -3133,6 +3376,10 @@ impl LeanWorker {
                 },
                 _ => {
                     self.finish_in_flight();
+                    // A failed pipe write kills and reaps the child.
+                    if self.child.is_none() && self.pending_startup.is_none() {
+                        return Err(self.replace_failed_child(operation, error));
+                    }
                     return Err(error);
                 }
             };
@@ -3208,7 +3455,14 @@ impl LeanWorker {
                     if deadline.is_some_and(|end| {
                         error.kind() == io::ErrorKind::TimedOut && (!cancelled || Instant::now() >= end)
                     }) {
-                        self.stop_for_scoped_expiry();
+                        self.stop_for_scoped_expiry(if cancelled {
+                            LeanWorkerRestartReason::Cancelled { operation }
+                        } else {
+                            LeanWorkerRestartReason::RequestTimeout {
+                                operation,
+                                duration: timeout,
+                            }
+                        });
                     } else {
                         self.shutdown_child(ShutdownIntent::KillOnly)?;
                     }
@@ -3265,7 +3519,7 @@ impl LeanWorker {
         if scoped_frame_deadline.is_some_and(|end| {
             matches!(reason, LeanWorkerRestartReason::RequestTimeout { .. }) || Instant::now() >= end
         }) {
-            self.stop_for_scoped_expiry();
+            self.stop_for_scoped_expiry(reason);
             release_reader();
             Ok(())
         } else {
@@ -3273,9 +3527,15 @@ impl LeanWorker {
         }
     }
 
-    fn stop_for_scoped_expiry(&mut self) {
+    /// Kill the child of a request whose deadline has passed, and leave its
+    /// replacement to the next request or cycle.
+    ///
+    /// A successor cannot start inside a deadline that has already passed.
+    /// `reason` waits in `recovery` so the replacement still records it.
+    fn stop_for_scoped_expiry(&mut self, reason: LeanWorkerRestartReason) {
         // The operation has timed out even if cleanup cannot confirm exit.
         // Keep that case fenced and observable via cleanup_pending and the request's stop receipt.
+        self.recovery = Some(reason);
         self.state = WorkerSupervisorState::Killing {
             generation: self.generation,
         };
@@ -3389,7 +3649,7 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<(), LeanWorkerError> {
         check_cancelled(operation, cancellation)?;
-        self.ensure_running()?;
+        self.ensure_child(operation, cancellation)?;
         if self.budget.accounting_unknown {
             self.restart_for_request(
                 LeanWorkerRestartReason::ImportAccountingUnknown,
@@ -3539,23 +3799,17 @@ impl LeanWorker {
         let config = self.config.clone();
         let replacement_started = Instant::now();
         self.stats.replacement_attempts = self.stats.replacement_attempts.saturating_add(1);
-        let stop_intent = if matches!(
-            &reason,
-            LeanWorkerRestartReason::Explicit
-                | LeanWorkerRestartReason::MaxRequests { .. }
-                | LeanWorkerRestartReason::MaxImports { .. }
-                | LeanWorkerRestartReason::ImportResidue { .. }
-                | LeanWorkerRestartReason::ImportAccountingUnknown
-                | LeanWorkerRestartReason::RssCeiling { .. }
-                | LeanWorkerRestartReason::Idle { .. }
-        ) {
+        let stop_intent = if reason.is_planned() {
             ShutdownIntent::Graceful
         } else {
             ShutdownIntent::KillOnly
         };
+        // Each refusal below keeps the reason, so the request or cycle that
+        // finally replaces the child records why the old one went.
         if let Err(err) = self.shutdown_child(stop_intent) {
             self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
             self.stats.last_replacement_skipped_reason = Some("stop_failed".to_owned());
+            self.recovery = Some(reason);
             return Err(err);
         }
         before_spawn();
@@ -3566,12 +3820,14 @@ impl LeanWorker {
         {
             self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
             self.stats.last_replacement_skipped_reason = Some("request_scope_expired".to_owned());
+            self.recovery = Some(reason);
             return Err(error);
         }
-        if let Err(err) = self.admit_restart(replacement_started) {
+        if let Err(err) = self.admit_restart(&reason, replacement_started) {
             self.stats.replacement_budget_skipped = self.stats.replacement_budget_skipped.saturating_add(1);
             self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
             self.stats.last_replacement_skipped_reason = Some("restart_limit_exceeded".to_owned());
+            self.recovery = Some(reason);
             return Err(err);
         }
         self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
@@ -3580,6 +3836,9 @@ impl LeanWorker {
         })?;
         self.stats.record_restart(reason);
         self.budget = GenerationBudget::default();
+        // The generation moves with every recorded restart, started or not, so
+        // it always equals `stats.restarts`.
+        self.generation = next_generation;
         let reason = self
             .stats
             .last_restart_reason
@@ -3595,6 +3854,9 @@ impl LeanWorker {
                     self.last_exit = Some(*exit);
                     self.stats.exits = self.stats.exits.saturating_add(1);
                 }
+                self.recovery = Some(LeanWorkerRestartReason::StartFailed {
+                    error: display_error(&failure.error),
+                });
                 return Err(failure.error);
             }
         };
@@ -3627,7 +3889,12 @@ impl LeanWorker {
         Ok(())
     }
 
-    fn admit_restart(&mut self, now: Instant) -> Result<(), LeanWorkerError> {
+    /// Count an abnormal restart against the window, or refuse it when the
+    /// window is full. Planned restarts pass without being counted.
+    fn admit_restart(&mut self, reason: &LeanWorkerRestartReason, now: Instant) -> Result<(), LeanWorkerError> {
+        if reason.is_planned() {
+            return Ok(());
+        }
         let limit = self.config.restart_policy.restart_intensity;
         while self
             .restart_window
@@ -3638,28 +3905,117 @@ impl LeanWorker {
         }
         let restarts = u64::try_from(self.restart_window.len()).unwrap_or(u64::MAX);
         if restarts >= limit.max_restarts {
+            let until = self
+                .restart_window
+                .front()
+                .and_then(|oldest| oldest.checked_add(limit.window));
             self.state = WorkerSupervisorState::RestartExhausted {
                 generation: self.generation,
+                until,
             };
             return Err(LeanWorkerError::RestartLimitExceeded {
                 restarts,
                 window: limit.window,
+                retry_after: until.map_or(Duration::MAX, |until| until.saturating_duration_since(now)),
             });
         }
         self.restart_window.push_back(now);
         Ok(())
     }
 
-    /// Absorb a child abort raised during a read-only request: respawn a fresh
-    /// child so subsequent requests succeed, then return `Ok(())` so the caller
-    /// can synthesise a degraded verdict. Any non-abort error (or a respawn
-    /// failure) propagates unchanged.
-    fn recover_child_abort(&mut self, operation: &'static str, err: LeanWorkerError) -> Result<(), LeanWorkerError> {
-        if let LeanWorkerError::ChildPanicOrAbort { exit } = &err {
-            self.restart_with_reason(child_abort_reason(operation, exit))
-        } else {
-            Err(err)
+    /// Refuse to replace the child while abnormal restarts keep the worker down.
+    fn refuse_while_exhausted(&self) -> Result<(), LeanWorkerError> {
+        self.restart_retry_after(Instant::now()).map_or(Ok(()), |retry_after| {
+            Err(LeanWorkerError::RestartLimitExceeded {
+                restarts: u64::try_from(self.restart_window.len()).unwrap_or(u64::MAX),
+                window: self.config.restart_policy.restart_intensity.window,
+                retry_after,
+            })
+        })
+    }
+
+    /// Why the child must be replaced before it can take a request, or `None`
+    /// while it runs.
+    ///
+    /// The reason is the one the request that lost the child left behind, or
+    /// else the child's own exit. `operation` names the request that found it.
+    fn lost_child_reason(
+        &mut self,
+        operation: &'static str,
+    ) -> Result<Option<LeanWorkerRestartReason>, LeanWorkerError> {
+        if self.pending_startup.is_some() {
+            let reason = self
+                .recovery
+                .take()
+                .unwrap_or_else(|| LeanWorkerRestartReason::StartFailed {
+                    error: "replacement child exit remains unconfirmed".to_owned(),
+                });
+            return Ok(Some(reason));
         }
+        Ok(match self.status()? {
+            LeanWorkerStatus::Running => None,
+            LeanWorkerStatus::Exited(exit) => {
+                Some(self.recovery.take().unwrap_or_else(|| exit_reason(operation, &exit)))
+            }
+        })
+    }
+
+    /// Make sure a child can take the next request, replacing a lost one.
+    ///
+    /// The replacement records why the old child went and, being abnormal,
+    /// counts against the restart window. With a deadline on `cancellation`,
+    /// it must also start inside that deadline.
+    fn ensure_child(
+        &mut self,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<(), LeanWorkerError> {
+        if self.stopped {
+            return Err(LeanWorkerError::ShutdownInProgress { operation });
+        }
+        self.refuse_while_exhausted()?;
+        if self.state.rejects_new_requests() {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: self.state.current_operation().unwrap_or("worker_request"),
+            });
+        }
+        match self.lost_child_reason(operation)? {
+            Some(reason) => self.restart_for_request(reason, operation, cancellation),
+            None if self.cleanup_pending() => Err(LeanWorkerError::ShutdownInProgress {
+                operation: self.state.current_operation().unwrap_or("worker_request"),
+            }),
+            None => Ok(()),
+        }
+    }
+
+    /// Replace a child that a request lost, and return the error that request
+    /// reports: its own if the replacement starts, else the replacement's.
+    fn replace_lost_child(&mut self, reason: LeanWorkerRestartReason, error: LeanWorkerError) -> LeanWorkerError {
+        match self.restart_with_reason(reason) {
+            Ok(()) => error,
+            Err(replacement) => replacement,
+        }
+    }
+
+    /// Replace a child that exited under a request, then return the error
+    /// that reports the exit. Errors that are not a child exit pass through.
+    fn replace_exited_child(&mut self, operation: &'static str, error: LeanWorkerError) -> LeanWorkerError {
+        if let LeanWorkerError::ChildExited { exit } | LeanWorkerError::ChildPanicOrAbort { exit } = &error {
+            let reason = exit_reason(operation, exit);
+            self.replace_lost_child(reason, error)
+        } else {
+            error
+        }
+    }
+
+    /// Kill and replace the child after a request failed in a way that leaves
+    /// its protocol state unknown, then return the request's error.
+    fn replace_failed_child(&mut self, operation: &'static str, error: LeanWorkerError) -> LeanWorkerError {
+        let reason = LeanWorkerRestartReason::RequestFailed {
+            operation,
+            error: display_error(&error),
+        };
+        self.replace_lost_child(reason, error)
     }
 
     fn hard_rss_limit_exceeded(&mut self) -> Option<(u64, u64)> {
@@ -3717,7 +4073,24 @@ impl LeanWorker {
         self.prepare_host_request(import_like, operation, cancellation, progress)?;
         self.send_request_cancellable(request.clone(), operation, cancellation)?;
         self.record_request(import_like);
-        let mut response = self.read_response_with_progress(operation, progress, cancellation)?;
+        let mut response = self.read_response_with_progress(operation, progress, cancellation);
+        if let (Err(error), Some(config)) = (&response, session_config.as_ref())
+            && worker_session_missing(error)
+        {
+            // The child lost the session this request needs. Replace it, open
+            // the session again and resend once; a second miss is returned.
+            self.restart_for_request(
+                LeanWorkerRestartReason::SessionMissing { operation },
+                operation,
+                cancellation,
+            )?;
+            self.open_worker_session(config, cancellation, progress)?;
+            check_cancelled(operation, cancellation)?;
+            self.send_request_cancellable(request.clone(), operation, cancellation)?;
+            self.record_request(import_like);
+            response = self.read_response_with_progress(operation, progress, cancellation);
+        }
+        let mut response = response?;
         if matches!(response, Response::HeaderImportRecycle) {
             let config = session_config.ok_or_else(|| LeanWorkerError::Protocol {
                 message: "header recycle requested without an active session".to_owned(),
@@ -3927,11 +4300,8 @@ impl LeanWorker {
                             });
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
-                            self.finish_in_flight();
                             drop(reader);
-                            return Err(LeanWorkerError::Protocol {
-                                message: "worker response reader exited without a terminal response".to_owned(),
-                            });
+                            return Err(self.reader_lost(operation));
                         }
                     }
                 }
@@ -3939,21 +4309,15 @@ impl LeanWorker {
                     Ok(event) => event,
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        self.finish_in_flight();
                         drop(reader);
-                        return Err(LeanWorkerError::Protocol {
-                            message: "worker response reader exited without a terminal response".to_owned(),
-                        });
+                        return Err(self.reader_lost(operation));
                     }
                 },
                 None => match receiver.recv() {
                     Ok(event) => event,
                     Err(_err) => {
-                        self.finish_in_flight();
                         drop(reader);
-                        return Err(LeanWorkerError::Protocol {
-                            message: "worker response reader exited without a terminal response".to_owned(),
-                        });
+                        return Err(self.reader_lost(operation));
                     }
                 },
             };
@@ -4029,12 +4393,12 @@ impl LeanWorker {
                 RequestReaderEvent::ReadError { message, eof, .. } => {
                     drop(reader);
                     self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                    return if eof {
-                        Err(self.record_exit_error())
+                    return Err(if eof {
+                        let error = self.record_exit_error();
+                        self.replace_exited_child(operation, error)
                     } else {
-                        self.shutdown_child(ShutdownIntent::KillOnly)?;
-                        Err(LeanWorkerError::Protocol { message })
-                    };
+                        self.replace_failed_child(operation, LeanWorkerError::Protocol { message })
+                    });
                 }
             };
 
@@ -4052,8 +4416,7 @@ impl LeanWorker {
                         report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))
                     {
                         self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                        self.shutdown_child(ShutdownIntent::KillOnly)?;
-                        return Err(err);
+                        return Err(self.replace_failed_child(operation, err));
                     }
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
                         if streaming {
@@ -4090,8 +4453,7 @@ impl LeanWorker {
                     let payload_bytes = row.payload.get().len() as u64;
                     if let Err(err) = report_parent_data_row(data, row) {
                         self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                        self.shutdown_child(ShutdownIntent::KillOnly)?;
-                        return Err(err);
+                        return Err(self.replace_failed_child(operation, err));
                     }
                     self.stats.data_rows_delivered = self.stats.data_rows_delivered.saturating_add(1);
                     self.stats.data_row_payload_bytes = self.stats.data_row_payload_bytes.saturating_add(payload_bytes);
@@ -4127,18 +4489,28 @@ impl LeanWorker {
                 }
                 Message::Response(response) => {
                     self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                    self.shutdown_child(ShutdownIntent::KillOnly)?;
-                    return Err(unexpected_response(operation, &response));
+                    let error = unexpected_response(operation, &response);
+                    return Err(self.replace_failed_child(operation, error));
                 }
                 other => {
                     self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                    self.shutdown_child(ShutdownIntent::KillOnly)?;
-                    return Err(LeanWorkerError::Protocol {
+                    let error = LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
-                    });
+                    };
+                    return Err(self.replace_failed_child(operation, error));
                 }
             }
         }
+    }
+
+    /// The response reader stopped without a terminal response, so the child's
+    /// output is lost: kill and replace the child.
+    fn reader_lost(&mut self, operation: &'static str) -> LeanWorkerError {
+        self.finish_in_flight();
+        let error = LeanWorkerError::Protocol {
+            message: "worker response reader exited without a terminal response".to_owned(),
+        };
+        self.replace_failed_child(operation, error)
     }
 
     fn ensure_running(&mut self) -> Result<(), LeanWorkerError> {
@@ -4766,12 +5138,32 @@ const DISPLAY_DIAGNOSTICS_MAX_BYTES: usize = 4 * 1024;
 /// difference between raising a limit and filing a bug. Truncated on the same
 /// budget as the `Display` rendering, since the reason is cloned onto every
 /// lifetime snapshot that follows it.
-fn child_abort_reason(operation: &'static str, exit: &LeanWorkerExit) -> LeanWorkerRestartReason {
-    LeanWorkerRestartReason::ChildAbort {
-        operation,
-        status: exit.status.clone(),
-        diagnostics: truncate_for_display(exit.diagnostics.trim(), DISPLAY_DIAGNOSTICS_MAX_BYTES),
+fn exit_reason(operation: &'static str, exit: &LeanWorkerExit) -> LeanWorkerRestartReason {
+    let status = exit.status.clone();
+    let diagnostics = truncate_for_display(exit.diagnostics.trim(), DISPLAY_DIAGNOSTICS_MAX_BYTES);
+    if exit.success {
+        LeanWorkerRestartReason::ChildExit {
+            operation,
+            status,
+            diagnostics,
+        }
+    } else {
+        LeanWorkerRestartReason::ChildAbort {
+            operation,
+            status,
+            diagnostics,
+        }
     }
+}
+
+/// An error's display text, cut to the length a restart reason carries.
+fn display_error(error: &LeanWorkerError) -> String {
+    truncate_for_display(&error.to_string(), DISPLAY_DIAGNOSTICS_MAX_BYTES)
+}
+
+/// Whether the child refused a session request because it holds no session.
+fn worker_session_missing(error: &LeanWorkerError) -> bool {
+    matches!(error, LeanWorkerError::Worker { code, .. } if code == "lean_rs.worker.session_missing")
 }
 
 fn write_exit(f: &mut fmt::Formatter<'_>, prefix: &str, exit: &LeanWorkerExit) -> fmt::Result {
@@ -5125,8 +5517,8 @@ mod tests {
         LeanWorkerDeclarationVerificationStatus, LeanWorkerError, LeanWorkerExit, LeanWorkerImportStats,
         LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
         LeanWorkerModuleQuerySelector, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
-        MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, WorkerRequestId,
-        child_abort_reason, stale_worker_output_error, stale_worker_request_output_error, truncate_for_display,
+        MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, WorkerRequestId, exit_reason,
+        stale_worker_output_error, stale_worker_request_output_error, truncate_for_display,
     };
     use lean_rs_worker_protocol::types::{
         LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
@@ -5725,6 +6117,8 @@ time.sleep(60)";
             generation: WorkerGeneration::default(),
             next_request_id: WorkerRequestId::default(),
             restart_window: std::collections::VecDeque::new(),
+            recovery: None,
+            stopped: false,
             state: super::WorkerSupervisorState::Idle {
                 generation: WorkerGeneration::default(),
             },
@@ -5790,10 +6184,6 @@ time.sleep(60)";
         assert!(child_exists(replacement_pid.get()));
         assert_eq!(worker.confirmed_request_stop_since(&checkpoint), Some(&receipt));
         assert!(worker.status().is_err(), "the old exit cannot prove replacement exit");
-        assert!(
-            worker.health().is_err(),
-            "no request may use an unconfirmed replacement"
-        );
         let failed_shutdown = worker.shutdown_child_with_cleanup(super::ShutdownIntent::Graceful, |_child| {
             Err(LeanWorkerError::Wait {
                 source: std::io::Error::other("injected persistent cleanup uncertainty"),
@@ -5804,10 +6194,10 @@ time.sleep(60)";
         assert!(worker.status().is_err());
         assert!(child_exists(replacement_pid.get()));
         assert_eq!(worker.confirmed_request_stop_since(&checkpoint), Some(&receipt));
-        let confirmed = worker
-            .shutdown_child(super::ShutdownIntent::Graceful)
-            .expect("retry cleanup and reap replacement");
-        assert_eq!(confirmed.outcome, super::LeanWorkerShutdownOutcome::KillOnly);
+        // No request uses an unconfirmed replacement. The next request first
+        // kills and reaps it, then starts a new child, which fails here because
+        // the test configuration names no real executable.
+        assert!(matches!(worker.health(), Err(LeanWorkerError::Spawn { .. })));
         assert!(!child_exists(replacement_pid.get()));
         assert!(worker.pending_startup.is_none());
         assert_eq!(
@@ -5816,6 +6206,11 @@ time.sleep(60)";
             "startup cleanup must not replace the original request's process identity"
         );
         assert_eq!(worker.stats.exits, 2);
+        assert_eq!(worker.stats.abnormal_restarts, 2);
+        assert!(matches!(
+            worker.stats.last_restart_reason,
+            Some(LeanWorkerRestartReason::StartFailed { .. })
+        ));
         let repeated = worker
             .shutdown_child(super::ShutdownIntent::Graceful)
             .expect("already confirmed exit");
@@ -6240,69 +6635,153 @@ time.sleep(60)";
                 operation: "test",
                 duration: std::time::Duration::from_secs(1),
             }),
+            abnormal_restarts: 3,
             last_rss_kib: Some(42),
             rss_samples_unavailable: 1,
             ..LeanWorkerStats::default()
         };
         let exit = exit_with("bye", false);
-        let snapshot = LeanWorkerLifecycleSnapshot::from_worker(&stats, Some(exit.clone()), 0, None);
+        let wait = Duration::from_secs(30);
+        let snapshot = LeanWorkerLifecycleSnapshot::from_worker(&stats, Some(exit.clone()), 0, None, 2, Some(wait));
         assert_eq!(snapshot.worker_generation, 3);
         assert_eq!(snapshot.restarts, 3);
+        assert_eq!(snapshot.abnormal_restarts, 3);
+        assert_eq!(snapshot.abnormal_restarts_in_window, 2);
+        assert_eq!(snapshot.restart_retry_after, Some(wait));
         assert_eq!(snapshot.exits, 2);
         assert_eq!(snapshot.last_exit, Some(exit));
         assert_eq!(snapshot.last_rss_kib, Some(42));
         assert_eq!(snapshot.rss_samples_unavailable, 1);
     }
 
+    /// Every reason names its cause, says whether the policy planned it, and
+    /// renders on one line. Only the planned ones may skip the restart window.
     #[test]
-    fn restart_reason_exposes_stable_policy_cause() {
-        assert_eq!(LeanWorkerRestartReason::Explicit.stable_cause(), "explicit");
-        assert_eq!(
-            LeanWorkerRestartReason::MaxRequests { limit: 1 }.stable_cause(),
-            "max_requests"
-        );
-        assert_eq!(
-            LeanWorkerRestartReason::MaxImports { limit: 1 }.stable_cause(),
-            "max_imports"
-        );
-        assert_eq!(
-            LeanWorkerRestartReason::RssCeiling {
-                current_kib: 2,
-                limit_kib: 1,
-                last_import_stats: None,
-            }
-            .stable_cause(),
-            "rss_ceiling"
-        );
-        assert_eq!(
-            LeanWorkerRestartReason::RssHardLimit {
-                operation: "test",
-                current_kib: 2,
-                limit_kib: 1,
-                last_import_stats: None,
-            }
-            .stable_cause(),
-            "rss_hard_limit"
-        );
-        assert_eq!(
-            LeanWorkerRestartReason::RequestTimeout {
-                operation: "test",
-                duration: Duration::from_millis(1),
-            }
-            .stable_cause(),
-            "timeout"
-        );
-        // The verify/proof-state abort guard surfaces the same `child_abort`
-        // cause the parent's relabel heuristic already keys on.
-        assert_eq!(
-            LeanWorkerRestartReason::ChildAbort {
-                operation: "test",
-                status: String::from("signal: 6 (SIGABRT)"),
-                diagnostics: String::new(),
-            }
-            .stable_cause(),
-            "child_abort"
-        );
+    fn restart_reasons_name_their_cause_and_kind() {
+        let import_stats = None;
+        let cases = [
+            (LeanWorkerRestartReason::Explicit, "explicit", true, "explicit"),
+            (
+                LeanWorkerRestartReason::MaxRequests { limit: 1 },
+                "max_requests",
+                true,
+                "max_requests limit=1",
+            ),
+            (
+                LeanWorkerRestartReason::MaxImports { limit: 2 },
+                "max_imports",
+                true,
+                "max_imports limit=2",
+            ),
+            (
+                LeanWorkerRestartReason::ImportResidue {
+                    residue_bytes: 3 * 1024 * 1024,
+                    limit_bytes: 2 * 1024 * 1024,
+                },
+                "import_residue",
+                true,
+                "import_residue residue_mib=3 limit_mib=2",
+            ),
+            (
+                LeanWorkerRestartReason::ImportAccountingUnknown,
+                "import_accounting_unknown",
+                true,
+                "import_accounting_unknown: retained memory could not be measured after an import error",
+            ),
+            (
+                LeanWorkerRestartReason::RssCeiling {
+                    current_kib: 2,
+                    limit_kib: 1,
+                    last_import_stats: import_stats.clone(),
+                },
+                "rss_ceiling",
+                true,
+                "rss_ceiling current_kib=2 limit_kib=1",
+            ),
+            (
+                LeanWorkerRestartReason::Idle {
+                    idle_for: Duration::from_millis(5),
+                    limit: Duration::from_millis(4),
+                },
+                "idle",
+                true,
+                "idle idle_for_millis=5 limit_millis=4",
+            ),
+            (
+                LeanWorkerRestartReason::RssHardLimit {
+                    operation: "test",
+                    current_kib: 2,
+                    limit_kib: 1,
+                    last_import_stats: import_stats,
+                },
+                "rss_hard_limit",
+                false,
+                "rss_hard_limit operation=test current_kib=2 limit_kib=1",
+            ),
+            (
+                LeanWorkerRestartReason::Cancelled { operation: "test" },
+                "cancelled",
+                false,
+                "cancelled operation=test",
+            ),
+            (
+                LeanWorkerRestartReason::RequestTimeout {
+                    operation: "test",
+                    duration: Duration::from_millis(7),
+                },
+                "timeout",
+                false,
+                "timeout operation=test duration_millis=7",
+            ),
+            (
+                LeanWorkerRestartReason::ChildAbort {
+                    operation: "test",
+                    status: String::from("signal: 6 (SIGABRT)"),
+                    diagnostics: String::from(" out of memory \n"),
+                },
+                "child_abort",
+                false,
+                "child_abort operation=test status=signal: 6 (SIGABRT): out of memory",
+            ),
+            (
+                LeanWorkerRestartReason::ChildExit {
+                    operation: "test",
+                    status: String::from("exit status: 0"),
+                    diagnostics: String::new(),
+                },
+                "child_exit",
+                false,
+                "child_exit operation=test status=exit status: 0",
+            ),
+            (
+                LeanWorkerRestartReason::SessionMissing { operation: "test" },
+                "session_missing",
+                false,
+                "session_missing operation=test",
+            ),
+            (
+                LeanWorkerRestartReason::RequestFailed {
+                    operation: "test",
+                    error: String::from("bad frame"),
+                },
+                "request_failed",
+                false,
+                "request_failed operation=test: bad frame",
+            ),
+            (
+                LeanWorkerRestartReason::StartFailed {
+                    error: String::from("no handshake"),
+                },
+                "start_failed",
+                false,
+                "start_failed: no handshake",
+            ),
+        ];
+        for (reason, cause, planned, display) in cases {
+            assert_eq!(reason.stable_cause(), cause);
+            assert_eq!(reason.is_planned(), planned, "{cause}");
+            assert_eq!(reason.to_string(), display);
+        }
     }
 
     /// A child abort is unattributable unless the exit carries forward: the
@@ -6325,9 +6804,9 @@ time.sleep(60)";
             operation,
             status,
             diagnostics,
-        } = child_abort_reason("verify_declaration", &exit)
+        } = exit_reason("verify_declaration", &exit)
         else {
-            panic!("child_abort_reason must produce ChildAbort");
+            panic!("a failed exit must produce ChildAbort");
         };
         assert_eq!(operation, "verify_declaration");
         assert_eq!(status, "exit status: 134");
@@ -6346,8 +6825,8 @@ time.sleep(60)";
             status: String::from("signal: 6 (SIGABRT)"),
             diagnostics: "x".repeat(DISPLAY_DIAGNOSTICS_MAX_BYTES * 4),
         };
-        let LeanWorkerRestartReason::ChildAbort { diagnostics, .. } = child_abort_reason("health", &exit) else {
-            panic!("child_abort_reason must produce ChildAbort");
+        let LeanWorkerRestartReason::ChildAbort { diagnostics, .. } = exit_reason("health", &exit) else {
+            panic!("a failed exit must produce ChildAbort");
         };
         assert!(diagnostics.contains("bytes truncated"), "{diagnostics}");
     }

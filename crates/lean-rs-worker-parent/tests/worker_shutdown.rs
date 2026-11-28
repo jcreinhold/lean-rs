@@ -11,7 +11,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 use std::process::Command;
@@ -231,6 +231,30 @@ fn main() {
             conformance_restart_limit_exhaustion_is_typed_terminal_outcome,
         ),
         (
+            "planned_restarts_do_not_use_the_restart_window",
+            planned_restarts_do_not_use_the_restart_window,
+        ),
+        (
+            "crashed_child_is_replaced_and_counted",
+            crashed_child_is_replaced_and_counted,
+        ),
+        (
+            "exhausted_worker_starts_again_after_the_window",
+            exhausted_worker_starts_again_after_the_window,
+        ),
+        (
+            "expired_deadline_leaves_the_replacement_to_the_next_request",
+            expired_deadline_leaves_the_replacement_to_the_next_request,
+        ),
+        (
+            "stopped_worker_refuses_requests_until_cycle",
+            stopped_worker_refuses_requests_until_cycle,
+        ),
+        (
+            "missing_session_is_opened_again_in_a_new_child",
+            missing_session_is_opened_again_in_a_new_child,
+        ),
+        (
             "import_residue_accumulates_over_a_generation_and_resets_on_the_cycle",
             import_residue_accumulates_over_a_generation_and_resets_on_the_cycle,
         ),
@@ -342,6 +366,7 @@ fn run_fake_child(mode: &str) {
     let mut last_session: Option<Vec<String>> = None;
     let mut reused_session = false;
     let mut host_open_count = 0_u64;
+    let mut saw_health = false;
     loop {
         let frame = {
             let mut stdin = io::stdin().lock();
@@ -357,6 +382,7 @@ fn run_fake_child(mode: &str) {
             Request::Health if mode == "request_hang" => sleep_forever(),
             Request::Health if mode == "crash_on_health" => std::process::exit(42),
             Request::Health => {
+                saw_health = true;
                 write_frame(&mut stdout, Message::Response(Response::HealthOk), MAX_FRAME_BYTES)
                     .expect("fake child writes health response");
             }
@@ -445,6 +471,21 @@ fn run_fake_child(mode: &str) {
                 }
             }
             Request::ProcessModuleQueryBatch { .. } if mode == "query_hang" => sleep_forever(),
+            // `lose_session_after_health` loses its session only in a child
+            // that has answered a health request, so its replacement does not.
+            Request::ProcessModuleQueryBatch { .. }
+                if mode == "lose_session" || (mode == "lose_session_after_health" && saw_health) =>
+            {
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::Error {
+                        code: "lean_rs.worker.session_missing".to_owned(),
+                        message: "fake child holds no session".to_owned(),
+                    }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake session-missing response");
+            }
             Request::ProcessModuleQueryBatch { .. } if mode == "progress_then_hang" => {
                 write_progress(&mut stdout, 1);
                 sleep_forever();
@@ -799,7 +840,6 @@ enum RuntimeTerminalOutcome {
     Timeout,
     ChildPanicOrAbort,
     RestartLimitExceeded,
-    ShutdownInProgress,
 }
 
 fn request_trace(generation: u64, request: &'static str) -> Vec<RuntimeTraceEvent> {
@@ -1360,13 +1400,22 @@ fn conformance_restart_limit_exhaustion_is_typed_terminal_outcome() -> Result<()
     let err = worker
         .health()
         .expect_err("second wedged health request should exhaust restart limit");
-    match err {
-        LeanWorkerError::RestartLimitExceeded { restarts, window } => {
+    let first_wait = match err {
+        LeanWorkerError::RestartLimitExceeded {
+            restarts,
+            window,
+            retry_after,
+        } => {
             assert_eq!(restarts, 1);
             assert_eq!(window, Duration::from_mins(1));
+            assert!(
+                !retry_after.is_zero() && retry_after <= window,
+                "the worker stays down until the counted restart leaves the window: {retry_after:?}"
+            );
+            retry_after
         }
         other => return Err(format!("expected restart-limit error, got {other:?}")),
-    }
+    };
     replacement_trace.extend([
         RuntimeTraceEvent::TimeoutObserved {
             generation: replacement_generation,
@@ -1387,19 +1436,29 @@ fn conformance_restart_limit_exhaustion_is_typed_terminal_outcome() -> Result<()
     assert_single_terminal(&replacement_trace, replacement_generation, "health")?;
     assert_reaped(second_pid)?;
 
-    let err = worker
-        .health()
-        .expect_err("restart-exhausted worker should stop accepting work");
-    match err {
-        LeanWorkerError::ShutdownInProgress { operation } => assert_eq!(operation, "worker_request"),
-        other => return Err(format!("expected shutdown-in-progress after exhaustion, got {other:?}")),
+    // The worker stays down while the window is full: requests and `cycle`
+    // get the same typed refusal, with a wait that only shrinks.
+    for attempt in ["health", "cycle"] {
+        let err = if attempt == "health" {
+            worker.health()
+        } else {
+            worker.cycle()
+        }
+        .expect_err("restart-exhausted worker should refuse work until the window passes");
+        match err {
+            LeanWorkerError::RestartLimitExceeded {
+                restarts, retry_after, ..
+            } => {
+                assert_eq!(restarts, 1, "{attempt}");
+                assert!(retry_after <= first_wait, "{attempt}: {retry_after:?} > {first_wait:?}");
+            }
+            other => return Err(format!("{attempt}: expected restart-limit error, got {other:?}")),
+        }
     }
-    let refused_trace = [RuntimeTraceEvent::TerminalOutcomeObserved {
-        generation: replacement_generation,
-        request: "health",
-        outcome: RuntimeTerminalOutcome::ShutdownInProgress,
-    }];
-    assert_eq!(refused_trace.len(), 1);
+    let snapshot = worker.lifecycle_snapshot();
+    assert_eq!(snapshot.abnormal_restarts, 1);
+    assert_eq!(snapshot.abnormal_restarts_in_window, 1);
+    assert!(snapshot.restart_retry_after.is_some_and(|wait| wait <= first_wait));
 
     let stats = worker.stats();
     assert_eq!(
@@ -1422,6 +1481,225 @@ fn conformance_restart_limit_exhaustion_is_typed_terminal_outcome() -> Result<()
         stats.last_replacement_skipped_reason.as_deref(),
         Some("restart_limit_exceeded")
     );
+    assert_eq!(stats.abnormal_restarts, 1);
+    Ok(())
+}
+
+/// Policy restarts replace a working child and never use the restart window,
+/// so a window that admits one abnormal restart survives any number of them.
+fn planned_restarts_do_not_use_the_restart_window() -> Result<(), String> {
+    let mut worker = fake_worker_with_config("normal", |config| {
+        config.restart_policy(
+            LeanWorkerRestartPolicy::default()
+                .max_requests(1)
+                .max_restarts_per_window(1, Duration::from_mins(1)),
+        )
+    })
+    .map_err(|err| err.to_string())?;
+    for _ in 0..4 {
+        worker.health().map_err(|err| err.to_string())?;
+    }
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 3);
+    assert_eq!(stats.abnormal_restarts, 0);
+    assert_eq!(
+        stats.last_restart_reason,
+        Some(LeanWorkerRestartReason::MaxRequests { limit: 1 })
+    );
+    let snapshot = worker.lifecycle_snapshot();
+    assert_eq!(snapshot.worker_generation, 3);
+    assert_eq!(snapshot.abnormal_restarts_in_window, 0);
+    assert_eq!(snapshot.restart_retry_after, None);
+    worker.shutdown().map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// The request that finds its child dead fails, and the supervisor replaces
+/// the child before returning. The replacement counts as abnormal and names
+/// the request and the exit.
+fn crashed_child_is_replaced_and_counted() -> Result<(), String> {
+    let mut worker = fake_worker_observing_child_death("crash_on_health").map_err(|err| err.to_string())?;
+    let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
+    let error = worker.health().expect_err("the crashing child fails its request");
+    assert!(matches!(error, LeanWorkerError::ChildPanicOrAbort { .. }), "{error:?}");
+    assert_reaped(old_pid)?;
+    let new_pid = worker.__child_pid_for_test().ok_or("no replacement child")?;
+    assert_ne!(new_pid, old_pid);
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.abnormal_restarts, 1);
+    match &stats.last_restart_reason {
+        Some(LeanWorkerRestartReason::ChildAbort { operation, status, .. }) => {
+            assert_eq!(*operation, "health");
+            assert!(status.contains("42"), "{status}");
+        }
+        other => return Err(format!("expected a child_abort restart, got {other:?}")),
+    }
+    // The replacement serves the requests that do not crash it.
+    {
+        let _session = worker
+            .open_session(&shims_config(), None, None)
+            .map_err(|err| err.to_string())?;
+    }
+    worker.shutdown().map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// A worker that uses up its restart window stays down only until the oldest
+/// counted restart leaves the window. The next request then starts a child
+/// and records why the last one went.
+fn exhausted_worker_starts_again_after_the_window() -> Result<(), String> {
+    let window = Duration::from_secs(2);
+    let mut worker = fake_worker_with_config("crash_on_health", |config| {
+        config
+            .request_timeout(Duration::from_secs(5))
+            .restart_policy(LeanWorkerRestartPolicy::default().max_restarts_per_window(1, window))
+    })
+    .map_err(|err| err.to_string())?;
+    let first = worker.health().expect_err("the first crash is replaced");
+    assert!(matches!(first, LeanWorkerError::ChildPanicOrAbort { .. }), "{first:?}");
+    let refused = worker.health().expect_err("the second crash uses up the window");
+    let LeanWorkerError::RestartLimitExceeded { retry_after, .. } = refused else {
+        return Err(format!("expected a restart-limit error, got {refused:?}"));
+    };
+    assert!(retry_after <= window, "{retry_after:?}");
+    assert!(
+        worker.__child_pid_for_test().is_none(),
+        "no child runs while the window is full"
+    );
+    thread::sleep(retry_after.saturating_add(Duration::from_millis(20)));
+    assert_eq!(worker.lifecycle_snapshot().restart_retry_after, None);
+    {
+        let _session = worker
+            .open_session(&shims_config(), None, None)
+            .map_err(|err| format!("a request after the window must start a child: {err}"))?;
+    }
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 2);
+    assert_eq!(stats.abnormal_restarts, 2);
+    assert!(
+        matches!(
+            stats.last_restart_reason,
+            Some(LeanWorkerRestartReason::ChildAbort {
+                operation: "health",
+                ..
+            })
+        ),
+        "{:?}",
+        stats.last_restart_reason
+    );
+    worker.shutdown().map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// A replacement cannot start inside a deadline that has passed, so the
+/// request that hit its own deadline only stops its child. The next request,
+/// or `cycle`, starts the replacement, records the timeout and counts it.
+fn expired_deadline_leaves_the_replacement_to_the_next_request() -> Result<(), String> {
+    for next in ["health", "cycle"] {
+        let mut worker = fake_worker("query_hang").map_err(|err| err.to_string())?;
+        let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
+        let error = {
+            let mut session = worker
+                .open_session(&shims_config(), None, None)
+                .map_err(|err| err.to_string())?;
+            let deadline = Instant::now()
+                .checked_add(Duration::from_millis(40))
+                .ok_or("deadline past the end of time")?;
+            let token = LeanWorkerCancellationToken::new().with_deadline(deadline);
+            query_batch(&mut session, "", Some(&token), None).expect_err("the deadline must stop the silent child")
+        };
+        assert!(matches!(error, LeanWorkerError::Timeout { .. }), "{next}: {error:?}");
+        assert_reaped(old_pid)?;
+        let stopped = worker.lifecycle_snapshot();
+        assert_eq!(stopped.worker_generation, 0, "{next}: no replacement yet");
+        assert_eq!(stopped.abnormal_restarts, 0, "{next}");
+        if next == "health" {
+            worker.health()
+        } else {
+            worker.cycle()
+        }
+        .map_err(|err| format!("{next}: {err}"))?;
+        let stats = worker.stats();
+        assert_eq!(stats.restarts, 1, "{next}");
+        assert_eq!(stats.abnormal_restarts, 1, "{next}");
+        assert!(
+            matches!(
+                stats.last_restart_reason,
+                Some(LeanWorkerRestartReason::RequestTimeout {
+                    operation: "worker_process_module_query_batch",
+                    ..
+                })
+            ),
+            "{next}: {:?}",
+            stats.last_restart_reason
+        );
+        worker.shutdown().map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+/// A worker stopped on purpose stays stopped: requests get
+/// `ShutdownInProgress` until `cycle` starts a new child, which is planned.
+fn stopped_worker_refuses_requests_until_cycle() -> Result<(), String> {
+    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    worker.try_shutdown().map_err(|err| err.to_string())?;
+    match worker.health() {
+        Err(LeanWorkerError::ShutdownInProgress { operation }) => assert_eq!(operation, "health"),
+        other => return Err(format!("expected shutdown-in-progress, got {other:?}")),
+    }
+    assert_eq!(
+        worker.stats().restarts,
+        0,
+        "a request must not restart a stopped worker"
+    );
+    worker.cycle().map_err(|err| err.to_string())?;
+    worker.health().map_err(|err| err.to_string())?;
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.abnormal_restarts, 0);
+    assert_eq!(stats.last_restart_reason, Some(LeanWorkerRestartReason::Explicit));
+    worker.shutdown().map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// A child that answers a session request without its session is replaced.
+/// The supervisor opens the session in the new child and sends the request
+/// once more; a second miss reaches the caller.
+fn missing_session_is_opened_again_in_a_new_child() -> Result<(), String> {
+    for (mode, recovers) in [("lose_session_after_health", true), ("lose_session", false)] {
+        let mut worker = fake_worker(mode).map_err(|err| err.to_string())?;
+        worker.health().map_err(|err| err.to_string())?;
+        let result = {
+            let mut session = worker
+                .open_session(&shims_config(), None, None)
+                .map_err(|err| err.to_string())?;
+            query_batch(&mut session, "", None, None)
+        };
+        if recovers {
+            let outcome = result.map_err(|err| format!("{mode}: {err}"))?;
+            assert!(
+                matches!(outcome, LeanWorkerModuleQueryBatchOutcome::Ok { .. }),
+                "{mode}: {outcome:?}"
+            );
+        } else {
+            match result {
+                Err(LeanWorkerError::Worker { code, .. }) => assert_eq!(code, "lean_rs.worker.session_missing"),
+                other => return Err(format!("{mode}: expected the second miss, got {other:?}")),
+            }
+        }
+        let stats = worker.stats();
+        assert_eq!(stats.restarts, 1, "{mode}: one replacement, never a loop");
+        assert_eq!(stats.abnormal_restarts, 1, "{mode}");
+        assert_eq!(
+            stats.last_restart_reason,
+            Some(LeanWorkerRestartReason::SessionMissing {
+                operation: "worker_process_module_query_batch",
+            }),
+            "{mode}"
+        );
+        worker.shutdown().map_err(|err| err.to_string())?;
+    }
     Ok(())
 }
 

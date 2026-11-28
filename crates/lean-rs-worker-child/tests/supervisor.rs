@@ -266,17 +266,20 @@ fn kill_and_observe_exit(worker: &mut LeanWorker) {
     }
 }
 
+/// The next request replaces a child that died between requests, and the
+/// replacement records the exit that it found.
 #[test]
-fn dead_worker_use_is_typed() {
+fn next_request_replaces_a_dead_child() {
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     worker.health().expect("health check succeeds");
     kill_and_observe_exit(&mut worker);
-    let err = worker.health().expect_err("dead worker use should fail");
-    match err {
-        LeanWorkerError::ChildPanicOrAbort { exit } => {
-            assert!(!exit.success, "killed child should be a fatal worker exit");
-        }
-        other => panic!("expected child panic/abort error, got {other:?}"),
+    worker.health().expect("the next request replaces the killed child");
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.abnormal_restarts, 1);
+    match stats.last_restart_reason {
+        Some(LeanWorkerRestartReason::ChildAbort { operation, .. }) => assert_eq!(operation, "health"),
+        other => panic!("expected a child_abort restart, got {other:?}"),
     }
 }
 
@@ -303,18 +306,30 @@ fn child_crash_and_policy_restart_are_distinguishable() {
     let mut worker = LeanWorker::spawn(&config).expect("worker starts");
     worker.health().expect("first request succeeds");
     worker.health().expect("policy restart happens before second request");
-    assert_eq!(worker.stats().max_request_restarts, 1);
+    let stats = worker.stats();
+    assert_eq!(stats.max_request_restarts, 1);
+    assert_eq!(stats.abnormal_restarts, 0);
+    assert!(
+        stats
+            .last_restart_reason
+            .as_ref()
+            .is_some_and(LeanWorkerRestartReason::is_planned)
+    );
     let exit = worker.shutdown().expect("policy worker terminates").exit;
     assert!(exit.success, "policy worker should exit cleanly");
 
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     kill_and_observe_exit(&mut worker);
-    let err = worker.health().expect_err("dead worker use should fail");
-    match err {
-        LeanWorkerError::ChildPanicOrAbort { .. } => {}
-        other => panic!("expected child panic/abort error, got {other:?}"),
-    }
-    assert_eq!(worker.stats().restarts, 0);
+    worker.health().expect("the next request replaces the killed child");
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.abnormal_restarts, 1);
+    assert!(
+        stats
+            .last_restart_reason
+            .as_ref()
+            .is_some_and(|reason| !reason.is_planned())
+    );
 }
 
 #[test]

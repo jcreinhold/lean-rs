@@ -571,31 +571,22 @@ impl LeanWorkerHostHandle {
         imports: Vec<String>,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-        command: impl Fn(&mut LeanWorkerSession<'_>) -> Result<T, LeanWorkerError>,
+        command: impl FnOnce(&mut LeanWorkerSession<'_>) -> Result<T, LeanWorkerError>,
     ) -> Result<T, LeanWorkerError> {
-        let result = {
-            let mut session = self.open_session_with_imports(imports.clone(), cancellation, progress)?;
-            command(&mut session)
-        };
-        match result {
-            Ok(value) => Ok(value),
-            Err(err) if worker_session_missing(&err) => {
-                let mut session = self.open_session_with_imports(imports, cancellation, progress)?;
-                command(&mut session)
-            }
-            Err(err) => Err(err),
-        }
+        let mut session = self.open_session_with_imports(imports, cancellation, progress)?;
+        command(&mut session)
     }
 
-    /// Open a session with `imports`, process one module query, and retry once
-    /// if an automatic worker lifecycle cycle invalidated the just-opened
-    /// session before the command frame was sent.
+    /// Open a session with `imports` and process one module query.
+    ///
+    /// If the child has lost the session by the time the query arrives, the
+    /// supervisor replaces the child, opens the session again and resends the
+    /// query once.
     ///
     /// # Errors
     ///
     /// Returns `LeanWorkerError` for worker, protocol, cancellation, or
-    /// progress-sink failures other than the internally retried
-    /// `session_missing` race.
+    /// progress-sink failures.
     pub fn process_module_query_with_imports(
         &mut self,
         imports: Vec<String>,
@@ -610,8 +601,7 @@ impl LeanWorkerHostHandle {
         })
     }
 
-    /// Open a session with `imports`, process one module-query batch, and
-    /// retry once on the `session_missing` lifecycle race.
+    /// Open a session with `imports` and process one module-query batch.
     ///
     /// # Errors
     ///
@@ -799,6 +789,8 @@ impl LeanWorkerHostHandle {
 
     /// Return the current worker lifecycle status.
     ///
+    /// `Exited` is not final; see [`LeanWorker::status`].
+    ///
     /// # Errors
     ///
     /// Returns `LeanWorkerError` if checking the process status fails.
@@ -832,11 +824,14 @@ impl LeanWorkerHostHandle {
         self.worker.cumulative_cpu_millis()
     }
 
-    /// Explicitly cycle the worker process.
+    /// Explicitly cycle the worker process, as [`LeanWorker::cycle`] does. This
+    /// also starts the worker again after [`Self::try_shutdown`].
     ///
     /// # Errors
     ///
-    /// Returns `LeanWorkerError` if the worker cannot be replaced.
+    /// Returns [`LeanWorkerError::RestartLimitExceeded`] while abnormal
+    /// restarts keep the worker down, or another `LeanWorkerError` if the
+    /// worker cannot be replaced.
     pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
         self.worker.cycle()
     }
@@ -872,15 +867,15 @@ impl LeanWorkerHostHandle {
 
     /// Stop the worker while retaining its owner if cleanup fails.
     ///
+    /// The worker then refuses requests with
+    /// [`LeanWorkerError::ShutdownInProgress`] until [`Self::cycle`] starts a
+    /// new child.
+    ///
     /// # Errors
     /// Returns a shutdown error without discarding the child process handle.
     pub fn try_shutdown(&mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         self.worker.try_shutdown()
     }
-}
-
-fn worker_session_missing(err: &LeanWorkerError) -> bool {
-    matches!(err, LeanWorkerError::Worker { code, .. } if code == "lean_rs.worker.session_missing")
 }
 
 fn worker_child_static_checks(worker_child: Option<&LeanWorkerChild>) -> Vec<LeanWorkerBootstrapCheck> {

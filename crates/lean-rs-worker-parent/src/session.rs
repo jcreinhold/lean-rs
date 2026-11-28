@@ -245,9 +245,12 @@ pub(crate) trait LeanWorkerRawDataSink: Send + Sync {
 
 /// Narrow host-session adapter over a live `LeanWorker`.
 ///
-/// Dropping this value does not stop the worker. If a request is cancelled
-/// while in flight, the supervisor cycles the child process and this session is
-/// invalidated; open a fresh session before issuing more host requests.
+/// Dropping this value does not stop the worker. If a request times out, is
+/// cancelled, or loses its child, the supervisor replaces the child process and
+/// this session is invalidated, even when the request returned a degraded
+/// verdict; open a fresh session before issuing more host requests. A planned
+/// restart before a request opens the session again in the new child, and so
+/// does the recovery from a child that lost its session.
 pub struct LeanWorkerSession<'worker> {
     worker: &'worker mut LeanWorker,
     open: bool,
@@ -284,8 +287,9 @@ impl LeanWorkerSession<'_> {
 
     /// Change the timeout for subsequent requests on this session.
     ///
-    /// A timeout is parent-enforced. If it fires, the supervisor kills and
-    /// replaces the child process and invalidates this session.
+    /// A timeout is parent-enforced. If it fires, the supervisor kills the
+    /// child process and invalidates this session. The child is replaced at
+    /// once, or by the next request when the call's own deadline has passed.
     pub fn set_request_timeout(&mut self, timeout: Duration) {
         self.worker.set_request_timeout(timeout);
     }
@@ -739,20 +743,27 @@ impl LeanWorkerSession<'_> {
     /// Run an operation against the underlying worker, applying the session
     /// invalidation policy uniformly.
     ///
-    /// Centralizes the rule "Cancelled or Timeout from the worker invalidates
-    /// this session" so every typed method delegates here instead of repeating
-    /// the same `match` discriminator. Adding a new terminal-failure variant
-    /// to the invalidation set is now a one-line edit.
+    /// Centralizes the rule that this session ends with the child that held
+    /// it, so every typed method delegates here. An error that stopped that
+    /// child invalidates the session, and so does a replacement that did not
+    /// open the session again.
     fn with_session<T>(
         &mut self,
         f: impl FnOnce(&mut LeanWorker) -> Result<T, LeanWorkerError>,
     ) -> Result<T, LeanWorkerError> {
         self.ensure_open()?;
         let result = f(self.worker);
-        if matches!(
-            result,
-            Err(LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })
-        ) {
+        if !self.worker.holds_session()
+            || matches!(
+                result,
+                Err(LeanWorkerError::Cancelled { .. }
+                    | LeanWorkerError::Timeout { .. }
+                    | LeanWorkerError::ChildExited { .. }
+                    | LeanWorkerError::ChildPanicOrAbort { .. }
+                    | LeanWorkerError::RssHardLimitExceeded { .. }
+                    | LeanWorkerError::RestartLimitExceeded { .. })
+            )
+        {
             self.open = false;
         }
         result

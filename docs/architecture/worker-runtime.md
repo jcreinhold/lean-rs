@@ -111,22 +111,25 @@ passthrough. Real Lean import behavior remains covered by worker-child and isola
 Preserve or extend these named conformance tests when refactoring their behavior:
 
 - `conformance_terminal_success_has_one_terminal_outcome`;
-- `conformance_stream_rows_are_tentative_until_terminal_success`;
-- `conformance_stream_child_exit_after_rows_discards_tentative_rows`;
-- `conformance_stream_child_crash_after_rows_discards_tentative_rows`;
-- `conformance_stream_timeout_after_rows_discards_tentative_rows`;
-- `conformance_stream_cancellation_after_rows_discards_tentative_rows`;
-- `conformance_stream_backpressure_is_bounded_and_observable`;
+- `conformance_name_rows_complete_with_one_terminal_outcome`;
+- `conformance_name_rows_then_child_exit_fail_the_request`;
+- `conformance_name_rows_then_child_abort_fail_the_request`;
+- `conformance_name_rows_then_silence_time_out`;
+- `conformance_silent_worker_cancellation_reaps_only_owned_child`;
+- `conformance_silent_worker_deadline_is_not_renewed_by_polling`;
+- `conformance_slow_progress_sink_backpressure_is_bounded_and_observable`;
 - `conformance_explicit_shutdown_gracefully_reaps_child`;
 - `conformance_dropped_idle_worker_reaps_child`;
 - `conformance_dropped_worker_escalates_kill_and_reaps_child`;
 - `conformance_timeout_kill_reap_restarts_next_generation`;
 - `conformance_child_crash_terminalizes_in_flight_request`;
 - `conformance_restart_limit_exhaustion_is_typed_terminal_outcome`;
-- `conformance_pool_lease_drop_releases_capacity_once`;
-- `conformance_pool_explicit_release_decrements_capacity_once`;
-- `conformance_pool_idle_replacement_preserves_capacity_accounting`;
-- `conformance_pool_admission_refusal_is_explicit`;
+- `planned_restarts_do_not_use_the_restart_window`;
+- `crashed_child_is_replaced_and_counted`;
+- `exhausted_worker_starts_again_after_the_window`;
+- `expired_deadline_leaves_the_replacement_to_the_next_request`;
+- `stopped_worker_refuses_requests_until_cycle`;
+- `missing_session_is_opened_again_in_a_new_child`;
 - `conformance_stale_generation_output_is_protocol_failure`.
 
 The stale-generation test is a unit test in `supervisor.rs`; the other names above belong to the worker-shutdown
@@ -146,11 +149,13 @@ Stopping(g)
 Killing(g)
 Reaping(g)
 Crashed(g, c)
-RestartExhausted
+Exited(g)
+RestartExhausted(g, t)
 ```
 
 `g in G`, `r in Req`, `b` is the finite sequence of rows and progress/diagnostic events already delivered for the
-current request, and `c` is an observed child exit or fatal condition. The current implementation keeps process handles,
+current request, `c` is an observed child exit or fatal condition, and `t` is the time the oldest counted restart
+leaves the restart window. The current implementation keeps process handles,
 stdio pipes, and stats as separate fields, but its private `WorkerSupervisorState` records the model-facing phases:
 idle, busy, streaming, stopping, killing, reaping, crashed, restart-exhausted, and exited. Spawn-time `Starting` remains
 inside `LeanWorker::spawn` rather than as a stored state on a constructed supervisor. An armed startup guard owns the
@@ -171,8 +176,16 @@ The core transitions are:
   cycle, idle cycle, or RSS-ceiling cycle.
 - Any state with a live child may move to `Crashed(g, c) -> Reaping(g)` when the child exits or the protocol stream ends
   unexpectedly.
-- `Reaping(g) -> Starting -> Idle(g + 1)` only when restart admission succeeds.
-- `Reaping(g) -> RestartExhausted` when restart intensity refuses a replacement.
+- `Reaping(g) -> Starting -> Idle(g + 1)` when the supervisor admits the replacement, at once after a crash, timeout,
+  cancellation, hard RSS kill, protocol failure, or policy cycle.
+- `Starting -> Exited(g + 1)` when an admitted replacement fails to start.
+- `Reaping(g) -> Exited(g)` on explicit shutdown, or when a request's own deadline has passed, since no replacement can
+  start inside it.
+- `Exited(g) -> Starting -> Idle(g + 1)` on the next request or `cycle`, which records why the old child went. After
+  explicit shutdown only `cycle` takes this step; requests are refused.
+- `Reaping(g)` or `Exited(g) -> RestartExhausted(g, t)` when the restart window refuses an abnormal replacement, and
+  `RestartExhausted(g, t) -> Starting -> Idle(g + 1)` on the first request or `cycle` after `t`. Before `t` both are
+  refused with `RestartLimitExceeded`.
 
 ## Pool Transition System
 
@@ -227,11 +240,15 @@ record a structured result.
 fatal exit, and `Drop` all drive the child toward a terminal reaped state as far as the parent process is alive and
 Rust cleanup can run. For requests carrying a cancellation token, the IPC wait checks that token at intervals of
 at most 50 ms even when the worker emits no events. This does not renew the request deadline, and excludes caller sink
-execution and OS scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement.
+execution and OS scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement; when
+the request's own deadline has passed, the next request or `cycle` starts the replacement instead.
 
-**Restart intensity.** Replacement attempts are bounded by a moving window. The default policy admits at most 16
-restarts per 60 seconds; exhaustion returns `RestartLimitExceeded`, leaves the supervisor not accepting more work, and
-requires service-level policy to create a fresh worker or pool entry.
+**Restart intensity.** Each restart reason is planned or abnormal, as `LeanWorkerRestartReason::is_planned` reports. A
+planned restart carries out the restart policy or an explicit cycle on a working child; the window neither counts nor
+refuses it. An abnormal restart replaces a child that failed, and a moving window bounds those: the default admits 16
+per 60 seconds. A refused replacement returns `RestartLimitExceeded` with the time until the oldest counted restart
+leaves the window. Until then the worker has no child, requests and `cycle` fail with the same error, and
+`lifecycle_snapshot().restart_retry_after` reports the wait. After it, the next request starts a child.
 
 **Streaming commit.** Rows are visible to the sink immediately. Rows delivered before terminal success are tentative.
 Cancellation, timeout, fatal exit, stale request or generation, row-decode failure, sink panic, or shutdown failure
@@ -255,9 +272,10 @@ compatibility wrapper over this structured path.
 
 **Failed replacement startup.** A reaped generation's exit does not prove that a subsequently spawned replacement has
 exited. Every replacement path uses the same tracked startup: if setup fails and bounded cleanup cannot confirm exit,
-the supervisor retains that replacement's process handle. Status and new requests fail rather than treating the old exit
-as current proof. Structured shutdown retries bounded cleanup of the retained process and reports success only after it
-is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed child and can
+the supervisor retains that replacement's process handle. Status fails rather than treating the old exit as current
+proof, and no request runs on the retained process. The next request or `cycle` retries bounded cleanup and starts a new
+child only after the retained one is reaped. Structured shutdown retries the same cleanup and reports success only after
+the process is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed child and can
 still report an already-exited service. This applies to explicit, idle, memory-policy, cancellation, timeout, and
 crash-triggered replacement; it is independent of the host's capacity policy.
 
@@ -284,8 +302,9 @@ dies, even while a request is inside Lean. [Parent death and inherited descripto
 states the mechanism and its limits.
 
 **Restart semantics.** Crash, timeout, cancellation after dispatch, shutdown, explicit cycle, memory cycling, and
-restart-limit exhaustion all end the current generation. Only a successfully admitted replacement can create generation
-`g + 1`, and future work must be explicitly admitted in that generation.
+restart-limit exhaustion all end the current generation. Each admitted restart creates generation `g + 1`, even when its
+child then fails to start, so the generation always equals the restart count; a refused restart creates none. Future
+work must be admitted in the new generation.
 
 ## Controls Are Not Containment
 
@@ -362,13 +381,13 @@ The table maps the control and cleanup contracts above to their implementation o
 | Restricted `loadExts := false` import/free-region behavior | `LeanRsHostShims.Environment.bracketedImportQuery`; Lean `withImportModules`; `Environment.freeRegions` | The bracketed lightweight query imports with `loadExts := false`, serializes Rust-owned data, then frees compacted regions | Not safe for normal `LeanSession` or capability workflows with loaded environment extensions | `lean-rs-host` | Use bracketed results only for the restricted read-only query shape |
 | Normal shutdown | `Request::Terminate`; `LeanWorker::shutdown`; child stdio loop returns after `Response::Terminating` | Explicit shutdown stops admission, asks the child to exit, escalates to kill after a bounded timeout, and waits/reaps | Does not define application/server shutdown order above the worker | `lean-rs-worker-parent`, `lean-rs-worker-child` | Stop accepting service work before dropping handles, and decide service shutdown policy |
 | Dropped worker handles | `Drop for LeanWorker`; `Drop for LeanWorkerSessionLease` | Dropping a live worker runs best-effort bounded shutdown/kill/wait; dropping a lease decrements the active-lease count | `Drop` cannot report wait/kill failure to callers | `lean-rs-worker-parent` | Prefer explicit `shutdown`/cycle paths when exit status matters |
-| Timeout kill and wait/reap | `read_response_with_events`; `restart_with_reason`; shared shutdown helpers | Request timeout records failure, kills the current child, waits for it, joins the reader, respawns, and reports typed timeout facts | Cannot prove child-side side effects did not happen before the timeout | `lean-rs-worker-parent` | Retry only idempotent or deduplicated operations |
-| Child crash | EOF/read error classification; `wait_for_exit`; `record_exit_error`; child SIGABRT immediate-exit handler | Fatal child exit becomes typed `ChildPanicOrAbort`/`ChildExited` with captured diagnostics; selected read-only calls can restart and return degraded results | No recovery of the crashed child session; no guarantee that child-side side effects are absent | `lean-rs-worker-parent`, `lean-rs-worker-child` | Treat affected in-flight work as failed or tentative |
+| Timeout kill and wait/reap | `read_response_with_events`; `restart_with_reason`; shared shutdown helpers | Request timeout records failure, kills the current child, waits for it, joins the reader, and reports typed timeout facts; the child is replaced at once, or by the next request or `cycle` when the request's own deadline has passed | Cannot prove child-side side effects did not happen before the timeout | `lean-rs-worker-parent` | Retry only idempotent or deduplicated operations |
+| Child crash | EOF/read error classification; `wait_for_exit`; `record_exit_error`; child SIGABRT immediate-exit handler | Fatal child exit fails the request with typed `ChildPanicOrAbort`/`ChildExited` and captured diagnostics, and the supervisor replaces the child, recording `ChildAbort` or `ChildExit`; a child found dead between requests is replaced by the next request; selected read-only calls return degraded results instead of the error | No recovery of the crashed child session; no guarantee that child-side side effects are absent | `lean-rs-worker-parent`, `lean-rs-worker-child` | Treat affected in-flight work as failed or tentative |
 | Wedged child | Parent request timeout and optional in-flight RSS hard limit | A child that stops producing frames is killed and replaced when the parent deadline or hard RSS guard fires | No same-process recovery if Lean is embedded without the worker boundary | `lean-rs-worker-parent` | Use worker boundary for workloads that can wedge |
 | In-flight request terminalization | Per-request stdout reader; terminal `Response`; EOF/read error; timeout/cancel/RSS restart paths | One parent request ends with a terminal response, EOF/exit error, timeout, cancellation-triggered cycle, or RSS hard-limit cycle | Terminal success is the only success acknowledgement; partial rows remain tentative | `lean-rs-worker-parent` | Commit rows and downstream effects only after terminal success |
-| Restart generation | `LeanWorkerLifecycleSnapshot::worker_generation`; private `WorkerGeneration`; in-flight request and reader-task generation tags | Generation bumps on accepted replacement before future work is admitted; parent-side frame consumers know which generation produced each event | No generation field on the wire protocol; snapshots and request-bound stop evidence remain parent-side observations | `lean-rs-worker-parent` | Compare snapshots around operations when supervising higher-level sessions |
+| Restart generation | `LeanWorkerLifecycleSnapshot::worker_generation`; private `WorkerGeneration`; in-flight request and reader-task generation tags | Generation bumps on every admitted restart before future work is admitted, so it equals the restart count; parent-side frame consumers know which generation produced each event | No generation field on the wire protocol; snapshots and request-bound stop evidence remain parent-side observations | `lean-rs-worker-parent` | Compare snapshots around operations when supervising higher-level sessions |
 | Stale output rejection | Serial request model; parent owns stdout during one request; reader events carry parent-side generation; replacement drops old pipes | Normal serial operation cannot interleave two live requests on one child; any stale-generation reader event is rejected as protocol output before request completion | No cross-process request id for future overlapping protocol modes | `lean-rs-worker-parent`, `lean-rs-worker-protocol` | Avoid assuming cross-request output identity beyond the current serial contract |
-| Restart intensity limits | `LeanWorkerRestartPolicy::max_restarts_per_window`; default 16 restarts per 60 seconds; `LeanWorkerError::RestartLimitExceeded` | Replacement attempts are bounded by a moving window; exhaustion terminalizes the old child, refuses the replacement, and stops accepting more work on that supervisor | No backoff scheduler or automatic recovery after exhaustion | `lean-rs-worker-parent` | Create a new worker/pool entry only after deciding the service-level policy permits another restart window |
+| Restart intensity limits | `LeanWorkerRestartPolicy::max_restarts_per_window`; default 16 abnormal restarts per 60 seconds; `LeanWorkerError::RestartLimitExceeded`; `LeanWorkerLifecycleSnapshot::restart_retry_after` | Abnormal replacements are bounded by a moving window and planned ones are not counted; a refused replacement leaves no child until the oldest counted restart leaves the window, and then the next request starts one | No backoff beyond the window | `lean-rs-worker-parent` | Report the wait, and decide whether a call waits for it or fails |
 | Parent/control-channel death | Unix lifeline pipe watched by a child thread that calls `_exit(125)` at end of file; child stdio loop exits on stdin EOF or a failed stdout write | A child exits promptly when its parent dies, even while a request is inside Lean | The lifeline ends only the worker child, not processes the child starts; see the limits below | `lean-rs-worker-parent`, `lean-rs-worker-child` | Use an external supervisor/process manager for service-level parent death policy |
 | Orphan and zombie prevention | Parent `Drop`, `shutdown`, timeout, cancellation, RSS, and restart paths kill/wait or request terminate/wait; the lifeline covers abrupt parent death | Parent-owned children are reaped on explicit lifecycle paths and best-effort `Drop`; a child whose parent died exits and is reaped by its new parent | Ordinary Drop may be skipped on abrupt parent death | `lean-rs-worker-parent`, `lean-rs-worker-child` | Stop processes the worker starts through their own process group or supervisor |
 

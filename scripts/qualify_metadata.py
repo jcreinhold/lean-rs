@@ -1519,11 +1519,13 @@ def qualify_optional_whnf(release, profile, run, env):
     return (name,)
 
 
+# (test binary, case, started workers, manifest grants). The supervisor
+# replaces the child the panic killed, so its crash case starts two workers.
 SCALAR_ENTRY_TESTS = (
-    ("protocol", "fixture_capability_loads_and_exported_call_succeeds", 2),
-    ("supervisor", "public_fixture_export_call_succeeds", 2),
-    ("protocol", "lean_internal_panic_kills_only_child", 1),
-    ("supervisor", "child_crash_is_typed_and_parent_survives", 1),
+    ("protocol", "fixture_capability_loads_and_exported_call_succeeds", 1, 2),
+    ("supervisor", "public_fixture_export_call_succeeds", 1, 2),
+    ("protocol", "lean_internal_panic_kills_only_child", 1, 1),
+    ("supervisor", "child_crash_is_typed_and_parent_survives", 2, 1),
 )
 
 
@@ -1595,7 +1597,7 @@ def qualify_scalar_entry(release, profile, run, env, cargo, descriptor):
     select_nextest_runner(
         env, {**profile, "nextest_runner": profile["nextest_runner"] + " -u OUT_DIR"}
     )
-    for target, case, grants in SCALAR_ENTRY_TESTS:
+    for target, case, started, grants in SCALAR_ENTRY_TESTS:
         run(
             [
                 "cargo",
@@ -1620,7 +1622,7 @@ def qualify_scalar_entry(release, profile, run, env, cargo, descriptor):
         check_typed_children_closed(
             typed_audit(events),
             case=case,
-            expected_counts=((1, grants),),
+            expected_counts=((started, grants),),
             grant_event=b"authorize-scalar-fixture",
         )
         events.unlink()
@@ -1789,7 +1791,7 @@ def qualify_broken_import(
                 typed,
                 *(
                     scoped_tests(target, (name,))
-                    for target, name, _ in SCALAR_ENTRY_TESTS
+                    for target, name, _, _ in SCALAR_ENTRY_TESTS
                 ),
             ]
             if run_stream:
